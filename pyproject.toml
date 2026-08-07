@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qssc"
+version = "2.0.0"
+description = "Quantum Solid State Chip (room temperature) — Qiskit backend, simulator, FPGA control stack & fabrication protocol."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+authors = [{ name = "AncientEncoder" }]
+dependencies = [
+    "qiskit>=1.2",
+    "qiskit-aer>=0.14",
+    "numpy>=1.24",
+    "click>=8.1",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+api = ["fastapi>=0.110", "uvicorn>=0.27", "pydantic>=2.0",
+       "redis>=5.0", "rq>=2.0", "pymongo>=4.6"]
+plot = ["matplotlib>=3.7"]
+cv = ["opencv-python>=4.8"]
+hw = ["pyserial>=3.5"]
+dev = ["pytest>=8.0", "pytest-cov>=4.0", "matplotlib>=3.7"]
+
+[project.scripts]
+qssc = "qssc.cli:cli"
+
+[tool.setuptools.packages.find]
+include = ["qssc*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

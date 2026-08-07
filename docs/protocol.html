@@ -1,0 +1,851 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>QSSC — Fabrication Protocol</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+:root{--bg:#0b1020;--bg2:#121931;--panel:#141c38;--panel2:#1a2444;--border:#263056;--text:#e6ecff;--muted:#94a3c4;--dim:#6b78a0;--brand:#22d3ee;--brand2:#6366f1;--accent:#f472b6;--ok:#34d399;--warn:#fbbf24;--grad:linear-gradient(135deg,#67e8f9,#a5b4fc 52%,#f472b6);--head:"Space Grotesk",system-ui,sans-serif;--body:"Inter",system-ui,sans-serif;--mono:"JetBrains Mono",ui-monospace,monospace}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:radial-gradient(1200px 600px at 80% -10%,rgba(99,102,241,.16),transparent 60%),radial-gradient(900px 500px at 0% 100%,rgba(34,211,238,.10),transparent 55%),var(--bg);color:var(--text);font-family:var(--body);font-size:15.5px;line-height:1.7;-webkit-font-smoothing:antialiased}
+.wrap{max-width:880px;margin:0 auto;padding:0 44px 90px}
+header.brand{display:flex;align-items:center;gap:16px;padding:34px 0 18px;border-bottom:1px solid #16203f;margin-bottom:8px}
+header.brand .t h1{font-family:var(--head);font-weight:600;font-size:25px;margin:0;letter-spacing:-.01em}
+header.brand .t h1 .grad{color:#67e8f9;text-decoration:none}
+header.brand .t .sub{color:var(--muted);font-size:13px;margin-top:3px}
+header.brand .meta{margin-left:auto;text-align:right;font-family:var(--mono);font-size:11.5px;color:var(--dim);line-height:1.6}
+h1,h2,h3,h4{font-family:var(--head);font-weight:600;letter-spacing:-.01em;scroll-margin-top:20px}
+h2{font-size:23px;margin:42px 0 14px;padding-bottom:8px;border-bottom:1px solid #1a2444}
+h3{font-size:17px;margin:26px 0 10px;color:#cfe0ff}
+h4{font-size:14.5px;margin:18px 0 8px;color:var(--brand)}
+p{margin:10px 0}
+a{color:var(--brand)}
+strong{color:#fff}
+code{font-family:var(--mono);font-size:13px;background:#0a1128;border:1px solid var(--border);border-radius:5px;padding:1px 6px;color:#9be7ff}
+pre{background:#0a1128;border:1px solid var(--border);border-radius:11px;padding:14px 16px;overflow-x:auto;font-size:12.5px;line-height:1.55}
+pre code{background:none;border:none;padding:0;color:#cfe0ff;font-size:12.5px}
+blockquote{margin:16px 0;padding:12px 16px;border-left:3px solid var(--accent);background:rgba(244,114,182,.07);border-radius:0 9px 9px 0;color:#f3c9dc}
+blockquote strong{color:#fff}
+ul,ol{padding-left:1.3em}
+li{margin:5px 0}
+hr{border:none;border-top:1px solid #1a2444;margin:30px 0}
+table{width:100%;border-collapse:collapse;font-size:13.5px;margin:14px 0}
+th,td{padding:9px 12px;text-align:left;border-bottom:1px solid #1a2444;vertical-align:top}
+th{color:var(--muted);font-weight:500;font-size:12px;text-transform:uppercase;letter-spacing:.05em;background:var(--panel)}
+td code{font-size:12px}
+.toc{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--border);border-radius:14px;padding:18px 22px;margin:18px 0 8px}
+.toc h2{border:none;margin:0 0 10px;font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.toc ul{list-style:none;padding-left:0;margin:0}
+.toc li{margin:5px 0}
+.toc a{font-size:14px}
+.toc ul ul{padding-left:18px;margin-top:4px}
+.toc ul ul a{font-size:13px;color:var(--dim)}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #16203f;color:var(--dim);font-size:12px;text-align:center}
+/* print / PDF — keep the dark theme (match the presentation PDF), no white frame */
+@media print{
+  @page{margin:0}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  html,body{background:var(--bg);color:var(--text);font-size:11pt}
+  .wrap{max-width:none;padding:0 56px}
+  header.brand{break-after:avoid}
+  h2,h3,h4{break-after:avoid}
+  pre,blockquote,table,.toc,code,header.brand{break-inside:avoid}
+  .toc{break-before:avoid}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="brand">
+    <svg viewBox="0 0 64 64" width="56" height="56" xmlns="http://www.w3.org/2000/svg">
+  <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#6366f1"/></linearGradient></defs>
+  <rect width="64" height="64" rx="14" fill="#0b1020"/>
+  <g stroke="url(#lg)" stroke-width="2.4" fill="none" stroke-linejoin="round"><polygon points="32,8 52,20 52,44 32,56 12,44 12,20"/></g>
+  <g fill="url(#lg)"><circle cx="32" cy="8" r="3.2"/><circle cx="52" cy="20" r="3.2"/><circle cx="52" cy="44" r="3.2"/><circle cx="32" cy="56" r="3.2"/><circle cx="12" cy="44" r="3.2"/><circle cx="12" cy="20" r="3.2"/></g>
+  <circle cx="32" cy="32" r="9" fill="none" stroke="#e0e7ff" stroke-width="1.4" opacity="0.7"/><circle cx="32" cy="32" r="4" fill="#f472b6"/>
+</svg>
+    <div class="t">
+      <h1><span class="grad">Quantum Solid State Chip</span> — Fabrication Protocol</h1>
+      <div class="sub">Room-temperature hBN spin-defect (V_B⁻) quantum photonic chip · laboratory build, validated against published studies</div>
+    </div>
+    <div class="meta">QSSC v2.0.0<br/>Document v1.0<br/>Markdown source: FABRICATION_PROTOCOL.md</div>
+  </header>
+  <h2 id="1-abstract">1. Abstract</h2>
+<h2 id="2-introduction-scientific-basis">2. Introduction &amp; Scientific Basis</h2>
+<h3 id="21-why-a-room-temperature-quantum-chip-demonstrator">2.1 Why a room-temperature quantum chip demonstrator</h3>
+<h3 id="22-why-carbon-quantum-dots-as-the-on-chip-source">2.2 Why carbon quantum dots as the on-chip source</h3>
+<h3 id="23-why-polymer-waveguides-and-2d-material-photodetectors">2.3 Why polymer waveguides and 2D-material photodetectors</h3>
+<h3 id="24-architecture-overview">2.4 Architecture overview</h3>
+<h2 id="3-materials-bill-of-materials-bom">3. Materials &amp; Bill of Materials (BOM)</h2>
+<h3 id="31-chemicals-and-reagents">3.1 Chemicals and reagents</h3>
+<h3 id="32-equipment-capital-one-time">3.2 Equipment (capital, one-time)</h3>
+<h2 id="section-1-cqd-emitter-array">Section 1 — CQD Emitter Array</h2>
+<h3 id="11-hydrothermal-synthesis-of-n-doped-cqds">1.1 Hydrothermal synthesis of N-doped CQDs</h3>
+<h3 id="12-cqdpolymer-electroluminescent-ink">1.2 CQD–polymer electroluminescent ink</h3>
+<h3 id="13-substrate-preparation-ito-glass">1.3 Substrate preparation (ITO glass)</h3>
+<h3 id="14-pedotpss-hole-injection-layer">1.4 PEDOT:PSS hole-injection layer</h3>
+<h3 id="15-cqdpva-emissive-layer">1.5 CQD–PVA emissive layer</h3>
+<h3 id="16-top-cathode">1.6 Top cathode</h3>
+<h3 id="17-electrical-drive-and-el-check">1.7 Electrical drive and EL check</h3>
+<h2 id="section-2-hbn-exfoliation-defect-engineering-pmma-coating">Section 2 — hBN Exfoliation, Defect Engineering, PMMA Coating</h2>
+<h3 id="21-liquid-phase-exfoliation-of-hbn">2.1 Liquid-phase exfoliation of hBN</h3>
+<h3 id="22-film-deposition">2.2 Film deposition</h3>
+<h3 id="23-vb-defect-engineering">2.3 VB− defect engineering</h3>
+<h3 id="24-pmma-encapsulation">2.4 PMMA encapsulation</h3>
+<h2 id="section-3-on-chip-fluorescence-photodetector-array-graphene-mos2">Section 3 — On-Chip Fluorescence Photodetector Array (Graphene / MoS₂)</h2>
+<h3 id="31-cvd-graphene-transfer">3.1 CVD graphene transfer</h3>
+<h3 id="32-mos2-transfer-optional-for-higher-responsivity-channel">3.2 MoS₂ transfer (optional, for higher-responsivity channel)</h3>
+<h3 id="33-electrodes-and-channel-definition">3.3 Electrodes and channel definition</h3>
+<h3 id="34-operation">3.4 Operation</h3>
+<h2 id="section-4-waveguides-layer-stacking-bonding-thermal-management-contacts">Section 4 — Waveguides, Layer Stacking, Bonding, Thermal Management, Contacts</h2>
+<h3 id="41-su-8-waveguide-fabrication">4.1 SU-8 waveguide fabrication</h3>
+<h3 id="42-coupling-the-cqd-emitter-to-the-waveguide">4.2 Coupling the CQD emitter to the waveguide</h3>
+<h3 id="43-layer-stacking-and-bonding">4.3 Layer stacking and bonding</h3>
+<h3 id="44-peltier-thermal-management">4.4 Peltier thermal management</h3>
+<h3 id="45-contacts-and-encapsulation">4.5 Contacts and encapsulation</h3>
+<h3 id="46-coplanar-waveguide-mw-for-odmr">4.6 Coplanar waveguide (MW) for ODMR</h3>
+<h2 id="section-5-characterization-testing">Section 5 — Characterization &amp; Testing</h2>
+<h3 id="51-electroluminescence-cqd-array">5.1 Electroluminescence (CQD array)</h3>
+<h3 id="52-odmr-of-vb-in-hbn">5.2 ODMR of VB− in hBN</h3>
+<h3 id="53-spin-coherence-t2">5.3 Spin coherence (T₂)</h3>
+<h3 id="54-coupling-efficiency-waveguide-detector">5.4 Coupling efficiency (waveguide → detector)</h3>
+<h3 id="55-end-to-end-functional-test">5.5 End-to-end functional test</h3>
+<h2 id="section-6-safety">Section 6 — Safety</h2>
+<h2 id="7-expected-performance-table">7. Expected Performance Table</h2>
+<h2 id="8-validation-against-known-studies">8. Validation Against Known Studies</h2>
+<h3 id="111-cqd-hydrothermal-synthesis-yield-wavelength-qy">11.1 CQD hydrothermal synthesis — yield, wavelength, QY</h3>
+<h3 id="112-cqd-electroluminescence-and-ase">11.2 CQD electroluminescence and ASE</h3>
+<h3 id="113-liquid-exfoliation-of-hbn">11.3 Liquid exfoliation of hBN</h3>
+<h3 id="114-vb-defect-d-346-ghz-room-temperature-spin">11.4 VB− defect, D ≈ 3.46 GHz, room-temperature spin</h3>
+<h3 id="115-waveguide-coupling-2060">11.5 Waveguide coupling (20–60 %)</h3>
+<h3 id="116-on-chip-2d-material-photodetector-responsivity">11.6 On-chip 2D-material photodetector responsivity</h3>
+<h3 id="117-peltier-tec-cooling-for-stable-room-temperature-operation">11.7 Peltier / TEC cooling for stable room-temperature operation</h3>
+<h3 id="118-related-defect-platforms-nv-diamond-sic-v_si-and-decoupling">11.8 Related defect platforms (NV-diamond, SiC V_Si) and decoupling</h3>
+<h2 id="references">References</h2>
+  <h1 id="quantum-solid-state-chip-room-temperature-fabrication-protocol">Quantum Solid State Chip (Room Temperature) — Fabrication Protocol</h1>
+<p><strong>Project:</strong> QSSC (Quantum Solid State Chip, room-temperature demonstrator)
+<strong>Document type:</strong> Laboratory fabrication protocol (standalone)
+<strong>Version:</strong> 1.0
+<strong>Scope:</strong> Home / maker-lab demonstrator integrating (1) an electrically-pumped carbon-quantum-dot (CQD) ASE/LED emitter array, (2) SU-8/PDMS polymer waveguides, and (3) a PMMA-coated hexagonal boron nitride (hBN) layer hosting optically-addressable spin defects (negatively-charged boron vacancy, VB−, zero-field splitting D ≈ 3.46 GHz, plus carbon-related centers), with on-chip 2D-material (graphene/MoS₂) photodetector readout and Peltier thermal management, operating at room temperature.</p>
+<blockquote>
+<p><strong>Honesty note on the emitter claim.</strong> True <em>electrically-pumped lasing</em> from carbon quantum dots is <strong>not</strong> claimed in this protocol, and the reader should not infer it from the literature cited. What is targeted and demonstrated here is <strong>electroluminescence (EL) and amplified spontaneous emission (ASE) / high-brightness edge emission</strong> from a CQD–polymer composite diode stack, used as a compact optical pump and on-chip source. ASE is a necessary but not sufficient condition for lasing; achieving a coherent laser cavity with CQDs requires a resonator with sufficient gain and mode confinement that is outside the scope of this demonstrator. See the Validation section for the precise boundary of what is supported by the literature.</p>
+</blockquote>
+<hr />
+<h2 id="1-abstract">1. Abstract</h2>
+<p>This document specifies a complete, equipment-minimal fabrication protocol for a room-temperature solid-state quantum photonic chip (QSSC). The chip combines three functional layers on a single 25 × 25 mm² carrier: (i) a hydrothermally-synthesized carbon quantum dot (CQD) emitter array embedded in a polymeric LED/ASE stack that provides electrically-pumped broadband visible electroluminescence centered near 450–620 nm; (ii) a liquid-phase-exfoliated and chemically-engineered hexagonal boron nitride (hBN) thin film, spin-coated with PMMA, hosting optically-addressable spin defects including the negatively-charged boron vacancy (VB−) with a zero-field splitting D ≈ 3.46 GHz and carbon-related color centers; and (iii) SU-8/PDMS polymer waveguides that route pump and defect fluorescence to an on-chip 2D-material (graphene / MoS₂) photodetector array. A two-stage Peltier module holds the hBN layer at 288–300 K for stable room-temperature operation and ODMR. All processing steps use only benchtop chemistry, a spin coater, a hotplate, a low-cost mask-aligner or contact-mask UV exposure, a thermal evaporator (or commercial sputter coater), a CNC/3D-printed alignment jig, and a ~USD 3,500 total equipment footprint beyond an optical microscope. The protocol gives times, temperatures, concentrations, spin speeds, layer thicknesses, and RF frequencies at every step, and validates each major claim against peer-reviewed literature.</p>
+<hr />
+<h2 id="2-introduction-scientific-basis">2. Introduction &amp; Scientific Basis</h2>
+<h3 id="21-why-a-room-temperature-quantum-chip-demonstrator">2.1 Why a room-temperature quantum chip demonstrator</h3>
+<p>Most solid-state spin-qubit platforms (NV centers in diamond, GaAs quantum dots, superconducting qubits) require cryogenic operation (&lt; 10 K) or specialized microwave hardware. Optically-addressable spin defects in hexagonal boron nitride are a recent and notable exception: the negatively-charged boron vacancy, VB−, exhibits a spin-1 triplet with zero-field splitting <strong>D ≈ 3.46 GHz</strong>, optical initialization and readout, and measurable spin coherence at room temperature. This makes hBN a credible substrate for a maker-lab quantum sensor demonstrator.</p>
+<h3 id="22-why-carbon-quantum-dots-as-the-on-chip-source">2.2 Why carbon quantum dots as the on-chip source</h3>
+<p>Carbon quantum dots (CQDs, also called carbon nanodots, C-dots) are fluorescent carbon nanoparticles (2–10 nm) synthesized by bottom-up hydrothermal carbonization of citric acid + nitrogen dopants (e.g., urea, ethylenediamine). They are aqueous, low-toxicity, cheap, and emit across the visible spectrum with quantum yields of 40–80 % in solution. When embedded in a thin electroluminescent polymer host and driven by a modest DC bias (~5–12 V), they produce broadband EL suitable as a compact pump for nearby defect centers. We do <strong>not</strong> claim a CQD laser; we claim an electrically-pumped CQD LED/ASE source.</p>
+<h3 id="23-why-polymer-waveguides-and-2d-material-photodetectors">2.3 Why polymer waveguides and 2D-material photodetectors</h3>
+<p>SU-8 and PDMS are standard photo-patternable / soft-lithography polymers with optical losses of 0.1–1 dB/cm in the visible, compatible with benchtop processing. Graphene and MoS₂ photodetectors offer broadband absorption, gate-tunable responsivity, and integration directly on the waveguide facet — eliminating discrete photodiodes and enabling on-chip readout of ODMR fluorescence.</p>
+<h3 id="24-architecture-overview">2.4 Architecture overview</h3>
+<pre><code>                ┌─────────────────────────────────────────────┐
+   top ITO/gold cathode  ───────────────────────────────────── │
+                │  CQD–PVA electroluminescent layer (≈80 nm)  │  ← Section 1
+                │  PEDOT:PSS hole-injection (≈40 nm)          │
+                │  bottom ITO anode on glass/PET             │
+   ─────────────┴─────────────────────────────────────────────┘
+                       ↓ optical pumping / EL
+   ┌─────────────────────────────────────────────────────┐
+   │  PMMA cap (≈50 nm)                                 │  ← Section 2
+   │  hBN thin film (≈3–8 layers, 2–4 nm) w/ VB−        │
+   │  SiO₂/Si or glass substrate                        │
+   ──────────────────────────────────────────────────────┘
+        ↘ waveguide coupling ↙
+   ┌─────────── SU-8/PDMS waveguides ───────────┐       ← Section 3/4
+   │  → graphene / MoS₂ photodetector array     │
+   └─────────────────────────────────────────────┘
+   Peltier (2-stage TEC) clamped under Si carrier  ← Section 4
+</code></pre>
+<hr />
+<h2 id="3-materials-bill-of-materials-bom">3. Materials &amp; Bill of Materials (BOM)</h2>
+<p>All costs are approximate, in USD, retail/small-lab quantities (2025–2026 pricing).</p>
+<h3 id="31-chemicals-and-reagents">3.1 Chemicals and reagents</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Spec / source</th>
+<th>Qty</th>
+<th>Approx. cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Citric acid (anhydrous, ≥99.5 %)</td>
+<td>Sigma-Aldrich 251275</td>
+<td>100 g</td>
+<td>$20</td>
+</tr>
+<tr>
+<td>Urea (≥99 %)</td>
+<td>Sigma 51456</td>
+<td>100 g</td>
+<td>$20</td>
+</tr>
+<tr>
+<td>Ethylenediamine (≥99 %)</td>
+<td>Sigma 03550</td>
+<td>25 mL</td>
+<td>$25</td>
+</tr>
+<tr>
+<td>Deionized water (≥18 MΩ·cm)</td>
+<td>in-house Milli-Q or distilled</td>
+<td>5 L</td>
+<td>$10</td>
+</tr>
+<tr>
+<td>0.22 µm syringe filters (PVDF)</td>
+<td>Millipore GV</td>
+<td>50 pk</td>
+<td>$30</td>
+</tr>
+<tr>
+<td>Dialysis membrane (MWCO 1000 Da)</td>
+<td>Spectra/Por 6</td>
+<td>1 roll</td>
+<td>$45</td>
+</tr>
+<tr>
+<td>hBN powder (crystalline, ~1–10 µm platelets, 99.5 %)</td>
+<td>Sigma 254059 or Graphene Supermarket</td>
+<td>1 g</td>
+<td>$60–120</td>
+</tr>
+<tr>
+<td>NMP (1-methyl-2-pyrrolidone)</td>
+<td>Sigma 328634</td>
+<td>500 mL</td>
+<td>$45</td>
+</tr>
+<tr>
+<td>Isopropanol (IPA, ≥99.9 %)</td>
+<td>500 mL</td>
+<td>$20</td>
+<td></td>
+</tr>
+<tr>
+<td>SU-8 2002 photoresist</td>
+<td>Microchem / Kayaku</td>
+<td>100 mL</td>
+<td>$120</td>
+</tr>
+<tr>
+<td>SU-8 developer (PGA)</td>
+<td>Kayaku</td>
+<td>500 mL</td>
+<td>$50</td>
+</tr>
+<tr>
+<td>PDMS (Sylgard 184 kit, base + curing agent)</td>
+<td>Dow</td>
+<td>1 kg</td>
+<td>$90</td>
+</tr>
+<tr>
+<td>PMMA (950 K, 2 % in anisole)</td>
+<td>Microchem</td>
+<td>100 mL</td>
+<td>$40</td>
+</tr>
+<tr>
+<td>PEDOT:PSS (CLEVIOS P VP AI 4083)</td>
+<td>Heraeus</td>
+<td>100 mL</td>
+<td>$60</td>
+</tr>
+<tr>
+<td>Polyvinyl alcohol (PVA, 87–89 % hydrolyzed, Mw 31–50 k)</td>
+<td>Sigma 363170</td>
+<td>100 g</td>
+<td>$25</td>
+</tr>
+<tr>
+<td>ITO-coated glass (15 Ω/sq, 25×25 mm)</td>
+<td>Delta Technologies or Mitsufuji</td>
+<td>10 pk</td>
+<td>$50</td>
+</tr>
+<tr>
+<td>Graphene (CVD, on Cu foil, 1 cm²)</td>
+<td>Graphenea or 2D Semiconductors</td>
+<td>2 cm²</td>
+<td>$90</td>
+</tr>
+<tr>
+<td>MoS₂ (CVD, on SiO₂/Si, monolayer)</td>
+<td>2D Semiconductors</td>
+<td>1 cm²</td>
+<td>$120</td>
+</tr>
+<tr>
+<td>Au wire (99.99 %, 0.25 mm)</td>
+<td>Kurt J. Lesker</td>
+<td>1 m</td>
+<td>$40</td>
+</tr>
+<tr>
+<td>Cr pellet (99.95 %)</td>
+<td>Kurt J. Lesker</td>
+<td>10 g</td>
+<td>$35</td>
+</tr>
+<tr>
+<td>Cu tape / Ni foam (current collectors)</td>
+<td>—</td>
+<td>assorted</td>
+<td>$20</td>
+</tr>
+<tr>
+<td>Acetone, methanol, IPA (cleaning)</td>
+<td>—</td>
+<td>1 L each</td>
+<td>$40</td>
+</tr>
+<tr>
+<td>Nitric acid (HNO₃, 65 %)</td>
+<td>—</td>
+<td>100 mL</td>
+<td>$15</td>
+</tr>
+<tr>
+<td>NaOH pellets</td>
+<td>—</td>
+<td>100 g</td>
+<td>$10</td>
+</tr>
+</tbody>
+</table>
+<h3 id="32-equipment-capital-one-time">3.2 Equipment (capital, one-time)</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Function</th>
+<th>Approx. cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Hotplate with digital temp control (to 350 °C)</td>
+<td>synthesis, baking</td>
+<td>$150</td>
+</tr>
+<tr>
+<td>Benchtop tube furnace (to 1100 °C, quartz tube, Ar/N₂ flow)</td>
+<td>VB− activation anneal (800–900 °C) — <em>not reachable on the hotplate</em></td>
+<td>$400–$700</td>
+</tr>
+<tr>
+<td>PTFE-lined stainless hydrothermal autoclave (50 mL)</td>
+<td>CQD synthesis</td>
+<td>$40</td>
+</tr>
+<tr>
+<td>Ultrasonic bath (40 kHz, 200 W)</td>
+<td>exfoliation, cleaning</td>
+<td>$120</td>
+</tr>
+<tr>
+<td>Spin coater (vacuum chuck, 100–8000 rpm)</td>
+<td>thin films</td>
+<td>$600 (used)</td>
+</tr>
+<tr>
+<td>UV exposure unit (365 nm, contact mask) or LED lamp (365 nm, 10 W)</td>
+<td>SU-8 patterning</td>
+<td>$200–$400</td>
+</tr>
+<tr>
+<td>Thermal evaporator / sputter coater (used/refurb) or e-beam</td>
+<td>metal contacts</td>
+<td>$1,200–$2,000</td>
+</tr>
+<tr>
+<td>Optical microscope (10×–100×, reflected)</td>
+<td>inspection</td>
+<td>$300 (used)</td>
+</tr>
+<tr>
+<td>Peltier TEC module (2-stage, e.g., TE Technology 9500/127/060 B) + PID controller + NTC thermistor</td>
+<td>thermal management</td>
+<td>$60</td>
+</tr>
+<tr>
+<td>DC bench supply (0–30 V, 0–3 A) + Keithley-style sourcemeter (used 2400)</td>
+<td>electrical drive &amp; characterization</td>
+<td>$300 (used)</td>
+</tr>
+<tr>
+<td>Lock-in amplifier (used SR830 or Moku:Lab) + function generator (0–6 GHz)</td>
+<td>ODMR</td>
+<td>$700 used / $1,500 Moku</td>
+</tr>
+<tr>
+<td>532 nm DPSS laser (50 mW, CW) + 594 nm notch/long-pass filters</td>
+<td>optical characterization</td>
+<td>$250</td>
+</tr>
+<tr>
+<td>Coplanar waveguide PCB (hand-etched) + SMA launcher</td>
+<td>microwave delivery</td>
+<td>$30</td>
+</tr>
+<tr>
+<td>3D-printed alignment jig (SLA/PLA)</td>
+<td>layer stacking</td>
+<td>$30</td>
+</tr>
+<tr>
+<td>Micromanipulator / probe station (used)</td>
+<td>contacts</td>
+<td>$200</td>
+</tr>
+<tr>
+<td>Vacuum desiccator</td>
+<td>storage, PDMS degassing</td>
+<td>$80</td>
+</tr>
+<tr>
+<td>Fume hood (essential) or dedicated ventilated bench</td>
+<td>safety</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Estimated total capital (beyond glassware): ≈ USD 3,600–4,500.</strong></p>
+<hr />
+<h2 id="section-1-cqd-emitter-array">Section 1 — CQD Emitter Array</h2>
+<p><strong>Goal:</strong> Synthesize water-soluble, nitrogen-doped CQDs and integrate them into a patterned ITO/PEDOT:PSS/CQD–PVA/Ag electroluminescent diode array (8 × 8 pixels, 1 mm² each) on a 25 × 25 mm² ITO-glass substrate. Target: EL peak 450–620 nm, turn-on 4–8 V, radiance ≥ 10 cd/m², ASE threshold detectable under electrical overdrive.</p>
+<h3 id="11-hydrothermal-synthesis-of-n-doped-cqds">1.1 Hydrothermal synthesis of N-doped CQDs</h3>
+<p>This follows the citric-acid + urea hydrothermal route, a well-established "bottom-up" CQD synthesis.</p>
+<ol>
+<li><strong>Charge.</strong> In a 50 mL PTFE-lined autoclave, dissolve <strong>1.0 g citric acid</strong> + <strong>1.0 g urea</strong> in <strong>10 mL DI water</strong>. Stir 5 min until clear. (Optional: replace half the urea with <strong>0.3 mL ethylenediamine</strong> for red-shifted emission toward 550–620 nm.)</li>
+<li><strong>Hydrothermal.</strong> Seal autoclave, place in hotplate oven preheated to <strong>200 °C</strong>, hold <strong>6 h</strong>. (Internal pressure ~10–15 bar autogenous.) Cooling: remove from hotplate, allow to cool to &lt; 60 °C naturally (~2 h) before opening.</li>
+<li><strong>Resulting product:</strong> dark-brown solution containing CQDs (2–6 nm), unreacted precursor, larger carbonaceous particles.</li>
+<li><strong>Purification.</strong>
+   - Centrifuge at <strong>10,000 rpm (≈ 9,000 × g)</strong> for <strong>15 min</strong>; discard the large-particle pellet.
+   - Filter supernatant through <strong>0.22 µm PVDF syringe filter</strong>.
+   - Dialyze against DI water (MWCO 1000 Da) for <strong>48 h</strong>, changing water every 8 h, to remove small molecules.
+   - Yield: typically <strong>20–40 mg</strong> of purified CQDs per batch (depends on dialysis losses), consistent with typical citric-acid/urea yields reported in the literature.</li>
+<li><strong>Characterization (benchtop).</strong> Dilute 1:1000 in water; record PL under 365 nm UV lamp — bright blue-green emission. Approximate quantum yield by comparing against quinine sulfate standard in 0.1 M H₂SO₄ (QY ≈ 54 % typical). Optional TEM drop-cast for size.</li>
+<li><strong>Wavelength tuning.</strong> Emission can be tuned 450 (CA:urea 1:1) → 540 nm (CA:ethylenediamine) by varying the nitrogen dopant ratio and hydrothermal temperature (180–220 °C). Larger CQDs and more graphitic core → red shift.</li>
+</ol>
+<h3 id="12-cqdpolymer-electroluminescent-ink">1.2 CQD–polymer electroluminescent ink</h3>
+<ol start="7">
+<li><strong>Composite.</strong> Dissolve <strong>200 mg PVA</strong> in <strong>4 mL DI water</strong> at 90 °C, stir 1 h, cool. Add <strong>20 mg CQD powder</strong> (or 2 mL of concentrated CQD solution), sonicate <strong>15 min</strong>, stir 1 h. Final CQD loading ≈ 10 wt% in 5 wt% PVA. Filter 0.45 µm.</li>
+<li><strong>Optional ASE-lean grade:</strong> For higher film uniformity, add <strong>5 wt% urea</strong> (relative to PVA) as plasticizer; this reduces cracking and raises the effective optical gain length.</li>
+</ol>
+<h3 id="13-substrate-preparation-ito-glass">1.3 Substrate preparation (ITO glass)</h3>
+<ol start="9">
+<li>Cut ITO glass to 25 × 25 mm² (or use pre-cut). Pattern ITO anode by masking with tape / photoresist and etching in <strong>HCl (37 %):HNO₃ (65 %):H₂O = 1:1:5</strong>, 50 °C, 5 min. Stop in DI rinse.</li>
+<li>Clean: sonicate 10 min each in detergent, DI water, acetone, IPA. UV-ozone 15 min (or piranha if available).</li>
+<li>Define <strong>8 × 8 pixel array</strong> (1 mm² pads, 0.5 mm gap) using a laser-printed transparency mask on the ITO side.</li>
+</ol>
+<h3 id="14-pedotpss-hole-injection-layer">1.4 PEDOT:PSS hole-injection layer</h3>
+<ol start="12">
+<li>Filter PEDOT:PSS (AI 4083) through 0.45 µm PVDF. Spin-coat on ITO at <strong>3000 rpm, 30 s</strong> → ~40 nm. Bake <strong>120 °C, 15 min</strong> on hotplate.</li>
+</ol>
+<h3 id="15-cqdpva-emissive-layer">1.5 CQD–PVA emissive layer</h3>
+<ol start="13">
+<li>Spin-coat CQD–PVA ink at <strong>2000 rpm, 40 s</strong> → ~80 nm. (Thicker films for ASE: <strong>1500 rpm, 60 s</strong> → ~120–150 nm.) Bake <strong>80 °C, 20 min</strong> under vacuum desiccator to remove residual water (water kills EL).</li>
+<li><strong>ASE waveguide geometry:</strong> to favor in-plane ASE, deposit a second, thicker (~250 nm) neat-CQD strip on the pixel edge by drop-casting through a shadow mask (0.5 mm wide) and slow drying at 60 °C. This forms the gain strip into which the diode EL is edge-coupled.</li>
+</ol>
+<h3 id="16-top-cathode">1.6 Top cathode</h3>
+<ol start="15">
+<li>Thermal evaporate <strong>Ag</strong> (or Al) through a shadow mask, <strong>100 nm</strong>, rate <strong>0.5–1 Å/s</strong>, base pressure &lt; 5 × 10⁻⁶ mbar. Pattern 8 × 8 matching pads. (A home sputter coater at ~10⁻³ mbar with a mask gives adequate but higher-resistivity cathodes.)</li>
+<li><strong>Encapsulate:</strong> spin 200 nm PMMA on top as moisture barrier; cure 120 °C, 10 min.</li>
+</ol>
+<h3 id="17-electrical-drive-and-el-check">1.7 Electrical drive and EL check</h3>
+<ol start="17">
+<li>Contact ITO anode with Cu tape, cathode with probe needle. Drive with DC bias; increase from 0 V. <strong>Turn-on expected 4–8 V</strong>; visible EL under dim room light by ~10 V. Drive current 2–20 mA per pixel.</li>
+<li><strong>ASE probe:</strong> drive a pixel at 2× threshold current; collect edge emission through a 600 µm fiber into a compact USB spectrometer (Ocean Optics-style). Look for <strong>spectral narrowing</strong> (FWHM drop from ~80 nm to &lt; 25 nm) above threshold — signature of ASE, not lasing.</li>
+</ol>
+<p><strong>Timing summary, Section 1:</strong> synthesis 8 h + purification 48 h dialysis (mostly unattended) + film stack 1 day + metal deposition half day. <strong>Total: ≈ 3 working days.</strong></p>
+<hr />
+<h2 id="section-2-hbn-exfoliation-defect-engineering-pmma-coating">Section 2 — hBN Exfoliation, Defect Engineering, PMMA Coating</h2>
+<p><strong>Goal:</strong> Produce a thin (~2–4 nm, 3–8 layer) hBN film on SiO₂/Si or glass, generate VB− defects (D ≈ 3.46 GHz) at controllable density (~0.1–0.3 /µm²), and cap with a 50 nm PMMA passivation/protection layer.</p>
+<h3 id="21-liquid-phase-exfoliation-of-hbn">2.1 Liquid-phase exfoliation of hBN</h3>
+<ol>
+<li><strong>Disperse.</strong> Add <strong>100 mg hBN powder</strong> to <strong>20 mL NMP</strong> in a 20 mL vial. NMP is a known good solvent for BN because its surface tension (~40 mN/m) matches the exfoliation energy of layered materials.</li>
+<li><strong>Sonication.</strong> Bath sonicate <strong>12 h</strong> at 40 kHz, 200 W, water bath maintained &lt; 35 °C (ice replacement every 2 h). Tip sonication (60 % amplitude, 2 h, on/off 3 s/1 s) gives higher yield if available.</li>
+<li><strong>Size selection.</strong> Centrifuge at <strong>1500 rpm (~200 × g), 20 min</strong>; collect top 70 % supernatant (thin flakes). Re-centrifuge supernatant at <strong>4000 rpm (~1500 × g), 20 min</strong>; collect top 50 % — this is the few-layer fraction (typical lateral size 50–300 nm, thickness 2–6 nm by AFM).</li>
+<li><strong>Wash.</strong> Dilute 1:3 with IPA, centrifuge 8000 rpm 10 min, redisperse in IPA. Repeat 2× to remove NMP.</li>
+<li><strong>Concentrate.</strong> Redisperse in IPA at <strong>1 mg/mL</strong>. Characterize by drop-casting on SiO₂/Si and AFM (target 3–8 layers).</li>
+<li><strong>Yield:</strong> ~5–15 % of starting mass as few-layer flakes; consistent with literature yields for bath sonication of BN in NMP.</li>
+</ol>
+<h3 id="22-film-deposition">2.2 Film deposition</h3>
+<ol start="7">
+<li><strong>Substrate:</strong> 5 × 5 mm² Si (300 nm SiO₂) or glass, cleaned (Sec. 1.10), UV-ozone 15 min.</li>
+<li><strong>Drop-cast / spin.</strong> For a continuous thin film: spin 200 µL of 1 mg/mL hBN/IPA at <strong>2000 rpm, 60 s</strong>, repeat 3× to build coverage. Anneal <strong>200 °C, 30 min</strong> in air to burn off organics and improve flake adhesion.
+   - For <strong>isolated single flakes</strong> (preferred for single-defect addressing): dilute to 0.01 mg/mL, drop-cast 20 µL, air dry; flakes will be sparse, separable by &gt; 5 µm.</li>
+</ol>
+<h3 id="23-vb-defect-engineering">2.3 VB− defect engineering</h3>
+<p>The negatively-charged boron vacancy, VB−, is a spin-1 (S=1) defect with zero-field splitting <strong>D ≈ 3.46 GHz</strong> and a characteristic <strong>7-line ¹⁴N hyperfine fingerprint</strong> (coupling to 3 equivalent ¹⁴N nuclei, A/h ≈ 47 MHz), photoluminescence centred near <strong>850 nm</strong> under 532 nm excitation [3][4][5]. Two creation routes:</p>
+<p><strong>Route A — Energetic irradiation (gold standard, recommended).</strong> VB− is reliably created by neutron irradiation [3] or focused-ion-beam (Xe/Ar/N) [5], followed by a vacuum activation anneal. This is the established, reproducible route; it requires access to an irradiation facility.</p>
+<ol start="9">
+<li><strong>Irradiation + activation anneal.</strong> Irradiate the hBN film (neutron fluence ~10¹⁴ cm⁻², or FIB at ~suitable energy/dose), then anneal in <strong>Ar or N₂</strong> at <strong>800–900 °C, 1–2 h</strong> in the tube furnace to mobilise and activate the vacancies. This step <em>requires the tube furnace</em> — the 350 °C hotplate cannot reach activation temperature.</li>
+</ol>
+<p><strong>Route B — Chemical / thermal (maker-lab approximation, <em>unverified</em>).</strong> Wet-chemical creation of boron vacancies is <em>not an established route</em> — hBN is chemically inert to dilute HNO₃ and the mechanism below is speculative. It is offered only as a low-cost approximation and should not be relied on to produce measurable VB− without validation against Route A.</p>
+<ol start="10">
+<li><strong>Wet-chemical attempt (unverified).</strong> Soak hBN film in <strong>0.1 M HNO₃</strong> for <strong>10 min</strong>, rinse DI (intended to etch surface B atoms), then anneal in <strong>Ar or N₂</strong> at <strong>500 °C, 1 h</strong> in the tube furnace. Treat any ODMR signal as needing confirmation; do not assume B-vacancy formation.</li>
+<li><strong>Carbon-related co-center creation.</strong> Drop-cast <strong>0.05 M citric acid in water</strong> on the hBN, dry at 80 °C, anneal <strong>600 °C, 30 min in Ar</strong> (tube furnace). Carbon diffusion into B-vacancy sites creates carbon-related luminescent centres (broad emission ~580 nm) frequently reported alongside VB−.</li>
+<li><strong>Charging to VB−.</strong> Anneal under <strong>N₂</strong> (or forming gas 5 % H₂/N₂) at <strong>400 °C, 30 min</strong>, then quench to room temperature in &lt; 30 s (lift off hotplate onto metal block). The negative charge state is stabilised by the Fermi level / local electrostatics and the rapid quench; hBN is stoichiometric BN, so do not assume "nitrogen donor" reservoirs analogous to P in Si.</li>
+<li><strong>Defect density target:</strong> ~0.1–0.3 /µm² (≈ 100–300 / 1000 µm²) — high enough to address ensembles for ODMR but low enough that single defects are resolvable in a confocal spot.</li>
+</ol>
+<h3 id="24-pmma-encapsulation">2.4 PMMA encapsulation</h3>
+<ol start="14">
+<li>Spin <strong>2 % PMMA 950K in anisole</strong> at <strong>4000 rpm, 45 s</strong> → ~50 nm. Bake <strong>180 °C, 2 min</strong> on hotplate. PMMA serves as (a) oxygen/moisture barrier stabilizing VB− charge state, (b) index-matching layer (n ≈ 1.49) between hBN (n ≈ 2.1 out-of-plane effective ~1.7) and SU-8 (n ≈ 1.58), and (c) planarization for the subsequent waveguide.</li>
+</ol>
+<p><strong>Timing, Section 2:</strong> exfoliation 12 h + centrifugation/wash 3 h + film 1 h + defect engineering 4 h (anneal-dominated) + PMMA 1 h. <strong>Total: ≈ 2 working days.</strong></p>
+<hr />
+<h2 id="section-3-on-chip-fluorescence-photodetector-array-graphene-mos2">Section 3 — On-Chip Fluorescence Photodetector Array (Graphene / MoS₂)</h2>
+<p><strong>Goal:</strong> Place a 1 × 4 graphene/MoS₂ photodetector array on the waveguide output facet to read defect fluorescence and pump EL, replacing discrete photodiodes.</p>
+<h3 id="31-cvd-graphene-transfer">3.1 CVD graphene transfer</h3>
+<ol>
+<li><strong>Source.</strong> Commercial CVD graphene on Cu foil (Graphenea). Coat graphene face with <strong>PMMA A4</strong> (spin 2000 rpm, 60 s, ~200 nm), bake 180 °C, 2 min.</li>
+<li><strong>Etch Cu.</strong> Float on <strong>0.5 M FeCl₃</strong> (or ammonium persulfate 0.1 M) for 12 h; PMMA/graphene membrane releases. Rinse in 3 × DI water baths, 10 min each.</li>
+<li><strong>Transfer.</strong> Scoop onto target substrate (waveguide facet or pre-patterned Au electrode pair, 100 µm gap) using a bent Si wafer as a "fishing" scoop. Dry 24 h in air, then <strong>180 °C, 1 h</strong> to improve adhesion.</li>
+<li><strong>Remove PMMA.</strong> Soak in acetone 2 h, IPA rinse, N₂ blow dry. Some PMMA residue is acceptable.</li>
+</ol>
+<h3 id="32-mos2-transfer-optional-for-higher-responsivity-channel">3.2 MoS₂ transfer (optional, for higher-responsivity channel)</h3>
+<ol start="5">
+<li>CVD monolayer MoS₂ on SiO₂/Si (commercial). Pattern Au contact pads first (Sec. 4.6), then transfer MoS₂ by <strong>water-assisted delamination</strong>: coat with PMMA, etch SiO₂ in <strong>1 % HF</strong> (50 s), scoop membrane onto target.</li>
+<li>Anneal <strong>200 °C, 2 h in Ar</strong> to remove bubbles and residue.</li>
+</ol>
+<h3 id="33-electrodes-and-channel-definition">3.3 Electrodes and channel definition</h3>
+<ol start="7">
+<li>Photolithograph or shadow-mask Au/Cr (10/80 nm) source-drain electrodes with <strong>100 µm channel</strong> on the graphene/MoS₂.</li>
+<li>Define channel by O₂ plasma (100 W, 30 s, 50 mTorr) through a photoresist window to isolate the graphene sheet into 4 detectors.</li>
+</ol>
+<h3 id="34-operation">3.4 Operation</h3>
+<ol start="9">
+<li>Bias drain–source <strong>0.1–1 V</strong>; responsivity typically <strong>0.01–0.1 A/W (graphene, bare)</strong>, <strong>10–10² A/W (MoS₂ photogating with trap states)</strong>; detectable down to nW optical powers with a lock-in. Use the same lock-in used for ODMR.</li>
+</ol>
+<hr />
+<h2 id="section-4-waveguides-layer-stacking-bonding-thermal-management-contacts">Section 4 — Waveguides, Layer Stacking, Bonding, Thermal Management, Contacts</h2>
+<h3 id="41-su-8-waveguide-fabrication">4.1 SU-8 waveguide fabrication</h3>
+<ol>
+<li>On the PMMA-capped hBN substrate, spin <strong>SU-8 2002</strong> at <strong>2000 rpm, 30 s</strong> → ~2 µm core layer. Soft-bake <strong>65 °C 1 min / 95 °C 2 min</strong>.</li>
+<li>Expose through a Cr-on-glass or transparency mask defining waveguides <strong>5–10 µm wide, 2 µm tall, 5–20 mm long, 1 cm radius bends</strong>. Dose <strong>80 mJ/cm²</strong> at 365 nm.</li>
+<li>Post-exposure bake <strong>65 °C 1 min / 95 °C 2 min</strong>. Develop in SU-8 developer (PGA) <strong>60 s</strong>, IPA rinse, N₂ dry. Hard-bake <strong>150 °C, 30 min</strong> — this also reflows edges, lowering sidewall roughness.</li>
+<li><strong>Cladding:</strong> spin <strong>PDMS (10:1 base:curing)</strong> at 1000 rpm, 30 s → ~30 µm; degas 30 min in vacuum desiccator; cure <strong>80 °C, 2 h</strong>. PDMS cladding (n ≈ 1.41) gives Δn ≈ 0.17 with SU-8 core (n ≈ 1.58) — single or few-mode at visible.</li>
+</ol>
+<h3 id="42-coupling-the-cqd-emitter-to-the-waveguide">4.2 Coupling the CQD emitter to the waveguide</h3>
+<ol start="5">
+<li>Dice / cleave the CQD stack (Sec. 1) so the ASE gain-strip edge faces the SU-8 input facet. Mount the CQD chip and hBN+waveguide chip in the 3D-printed alignment jig. Use a 3-axis micrometer to bring the gain strip within &lt; 5 µm of the SU-8 input facet.</li>
+<li>UV-cure a small drop of NOA 61 optical adhesive (or cured PDMS as a "tack" layer) to lock the alignment. Butt-coupling efficiencies of <strong>20–60 %</strong> are realistic for end-fire coupling from an edge emitter into a 5–10 µm SU-8 core when the gaps are &lt; 2 µm and the NA is matched.</li>
+</ol>
+<h3 id="43-layer-stacking-and-bonding">4.3 Layer stacking and bonding</h3>
+<ol start="7">
+<li><strong>Stack order (bottom→top):</strong> Si/SiO₂ carrier → Peltier TEC top plate → 5 × 5 mm hBN-on-SiO₂ chip → PMMA → SU-8 waveguides → PDMS cladding → CQD emitter chip (edge-coupled) → 2D-material photodetector at waveguide output.</li>
+<li>Bond each layer with thin PDMS or cyanoacrylate at the corners only (avoid active area). Cure 80 °C, 1 h. Wire-bond or silver-paste the CQD anode/cathode and the photodetector source/drain to a PCB fan-out.</li>
+</ol>
+<h3 id="44-peltier-thermal-management">4.4 Peltier thermal management</h3>
+<ol start="9">
+<li><strong>Module:</strong> 2-stage TEC, e.g., TE Technology 9500/127/060 B (or generic TEC1-12706 single-stage for budget). Mount TEC cold side up, thermal-paste (Arctic Silver) to the Si carrier underside; TEC hot side to a finned aluminum heat sink with a small 40 mm fan.</li>
+<li><strong>Control:</strong> NTC 10 kΩ thermistor epoxied to the Si carrier next to the hBN chip. PID controller (e.g., Arduino + MAX6675/MCP9600 + MOSFET PWM) set to <strong>295 K (22 °C)</strong>, ±0.1 K stability. Operating range 288–300 K acceptable for room-temperature ODMR.</li>
+<li><strong>Power:</strong> TEC draws 1–3 A at 3–6 V from the bench supply; total chip dissipation &lt; 5 W — compatible with a maker-lab power budget.</li>
+</ol>
+<h3 id="45-contacts-and-encapsulation">4.5 Contacts and encapsulation</h3>
+<ol start="12">
+<li>Au wire bonds or silver-paste tracks to a 0.1" header for: ITO anode (×8 rows), Ag cathode (×8 cols), photodetector drains (×4), gate (×1, optional electrolyte gate), thermistor (×2), TEC + and − (×2).</li>
+<li>Encapsulate active area under a <strong>1 mm PDMS slab</strong> (oxygen/moisture barrier, optical clear). Leave waveguide output facet exposed for optional off-chip fiber coupling.</li>
+</ol>
+<h3 id="46-coplanar-waveguide-mw-for-odmr">4.6 Coplanar waveguide (MW) for ODMR</h3>
+<ol start="14">
+<li>Hand-etch a 50 Ω coplanar waveguide (G-S-G, signal 200 µm / gap 100 µm) on a single-sided FR4 or Rogers PCB. Mount the hBN chip face-down over the signal line (≤ 50 µm gap from chip backside to line) or flip-chip with anisotropic conductive paste. Microwave feedthrough to the on-board SMA launcher.</li>
+</ol>
+<hr />
+<h2 id="section-5-characterization-testing">Section 5 — Characterization &amp; Testing</h2>
+<h3 id="51-electroluminescence-cqd-array">5.1 Electroluminescence (CQD array)</h3>
+<ol>
+<li>Drive each pixel 0–15 V, log I–V and L–V. Confirm <strong>turn-on 4–8 V</strong> and broadband visible EL.</li>
+<li>Spectra: couple edge emission to fiber + USB spectrometer. Expect broad Gaussian-like EL centered at the CQD PL peak (450–620 nm depending on synthesis).</li>
+<li><strong>ASE check:</strong> drive a single pixel with short pulses (1 ms, 10 % duty) while stepping current; watch for FWHM narrowing from ~80 nm to &lt; 25 nm and a super-linear L–I knee. <strong>Do not</strong> interpret this as lasing — it is ASE.</li>
+</ol>
+<h3 id="52-odmr-of-vb-in-hbn">5.2 ODMR of VB− in hBN</h3>
+<ol start="4">
+<li><strong>Optical:</strong> 532 nm CW laser, ~1 mW at the sample, focused through a 20×/0.45 objective. Collect PL &gt; 590 nm (long-pass filter) into a Si APD or the on-chip graphene detector.</li>
+<li><strong>Microwave:</strong> sweep 3.30–3.60 GHz from the function generator through the CPW. Modulate MW at 1 kHz for lock-in detection of the ODMR dip.</li>
+<li><strong>Expected resonance:</strong> the characteristic <strong>7-line ¹⁴N hyperfine pattern</strong> centred at <strong>D ≈ 3.46 GHz</strong> (coupling to 3 equivalent ¹⁴N, A/h ≈ 47 MHz, intensity ratios ≈ 1:3:6:7:6:3:1) [5]. ODMR contrast <strong>0.5–3 %</strong> (ensemble), linewidth <strong>5–20 MHz</strong> (broadened by strain and the ¹⁰B/¹¹B nuclear bath). At low resolution the seven lines merge into a single dip near 3.46 GHz.</li>
+<li><strong>Magnetic field sweep:</strong> apply a static B₀ along the c-axis (a small permanent magnet on a linear stage); observe D shift following D(B) = D₀ ± γ_e·B₀ with γ_e/2π ≈ 28 GHz/T. The doublet splits symmetrically — confirms the spin-1 (S=1) triplet of VB−.</li>
+</ol>
+<h3 id="53-spin-coherence-t2">5.3 Spin coherence (T₂)</h3>
+<ol start="8">
+<li><strong>Pulsed ODMR</strong> (requires pulse-capable source or fast PIN switch): run Hahn echo (π/2 – τ – π – τ – echo) at the resonance. Vary τ from 0.1–20 µs. Fit echo amplitude vs τ to exp[−(2τ/T₂)^n] with n ≈ 1–2.</li>
+<li><strong>Expected T₂:</strong> <strong>0.5–5 µs at room temperature</strong> for ensembles in exfoliated hBN, limited by ¹⁰B/¹¹B nuclear spins and paramagnetic impurities. T₁ typically 10–100 µs.</li>
+</ol>
+<h3 id="54-coupling-efficiency-waveguide-detector">5.4 Coupling efficiency (waveguide → detector)</h3>
+<ol start="10">
+<li>Inject calibrated light (e.g., 532 nm, 1 µW) into the SU-8 input facet with a tapered fiber; measure power at the output facet with a power meter and the on-chip graphene detector photocurrent.</li>
+<li><strong>Coupling efficiency target: 20–60 %</strong> (input) and propagation loss &lt; 1 dB/cm; on-chip detector responsivity measured from the known input power.</li>
+</ol>
+<h3 id="55-end-to-end-functional-test">5.5 End-to-end functional test</h3>
+<ol start="12">
+<li>Drive CQD pixel electrically → EL pumps hBN VB− ensemble → collect defect PL through waveguide → on-chip graphene/MoS₂ detector photocurrent modulated by MW at D ≈ 3.46 GHz → lock-in reads ODMR. A successful end-to-end ODMR with the CQD pump (no external laser) is the chip's defining demonstration.</li>
+</ol>
+<hr />
+<h2 id="section-6-safety">Section 6 — Safety</h2>
+<table>
+<thead>
+<tr>
+<th>Hazard</th>
+<th>Control</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>HNO₃, HCl, HF (1 %)</td>
+<td>Fume hood, nitrile + butyl gloves, face shield; HF → calcium gluconate gel on hand</td>
+</tr>
+<tr>
+<td>NMP, anisole, acetone</td>
+<td>Flammable; fume hood; no ignition sources</td>
+</tr>
+<tr>
+<td>Hydrothermal autoclave 200 °C, pressurized</td>
+<td>Never open hot; let cool &lt; 60 °C; rated PTFE liner; eye protection</td>
+</tr>
+<tr>
+<td>UV 365 nm exposure</td>
+<td>UV-blocking glasses; skin cover</td>
+</tr>
+<tr>
+<td>Thermal evaporator</td>
+<td>Interlock; cool before opening; Au/Cr evaporation produces vapor</td>
+</tr>
+<tr>
+<td>532 nm laser 50 mW</td>
+<td>Class 3B; laser goggles OD &gt; 4 at 532 nm; beam stops</td>
+</tr>
+<tr>
+<td>MW up to 6 GHz, &lt; +20 dBm</td>
+<td>Low risk; avoid direct contact with antenna; keep &gt; 30 cm</td>
+</tr>
+<tr>
+<td>Peltier / hot surfaces</td>
+<td>Heat-resistant gloves; allow hotplate cool-down</td>
+</tr>
+<tr>
+<td>Nanomaterials (CQDs, hBN flakes)</td>
+<td>Treat as nuisance dust; N95; wet-clean surfaces; dispose as solid nano-waste</td>
+</tr>
+<tr>
+<td>Cu etchant FeCl₃</td>
+<td>Corrosive; gloves; stain hazard</td>
+</tr>
+</tbody>
+</table>
+<p><strong>General:</strong> Maintain an SDS binder for every chemical. Eye wash station and emergency shower accessible. No food/drink. Solvent and acid waste in separate labeled carboys.</p>
+<hr />
+<h2 id="7-expected-performance-table">7. Expected Performance Table</h2>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Target / expected</th>
+<th>Basis</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CQD PL peak (solution)</td>
+<td>450–620 nm (tunable)</td>
+<td>Sec. 1.1, lit.</td>
+</tr>
+<tr>
+<td>CQD quantum yield (solution)</td>
+<td>40–80 %</td>
+<td>Sec. 1.1</td>
+</tr>
+<tr>
+<td>CQD EL turn-on voltage</td>
+<td>4–8 V</td>
+<td>Sec. 1.7, 5.1</td>
+</tr>
+<tr>
+<td>CQD EL radiance</td>
+<td>≥ 10 cd/m²</td>
+<td>Sec. 5.1</td>
+</tr>
+<tr>
+<td>ASE threshold (edge)</td>
+<td>detectable, FWHM &lt; 25 nm above threshold</td>
+<td>Sec. 5.1</td>
+</tr>
+<tr>
+<td>CQD lasing</td>
+<td><strong>NOT claimed</strong></td>
+<td>honesty note</td>
+</tr>
+<tr>
+<td>hBN flake thickness</td>
+<td>2–4 nm (3–8 layers)</td>
+<td>Sec. 2.1</td>
+</tr>
+<tr>
+<td>VB− zero-field splitting D</td>
+<td>3.46 GHz</td>
+<td>Sec. 2.3, 5.2</td>
+</tr>
+<tr>
+<td>Defect density (VB−)</td>
+<td>0.1–0.3 /µm²</td>
+<td>Sec. 2.3</td>
+</tr>
+<tr>
+<td>ODMR contrast (ensemble)</td>
+<td>0.5–3 %</td>
+<td>Sec. 5.2</td>
+</tr>
+<tr>
+<td>ODMR linewidth</td>
+<td>5–20 MHz</td>
+<td>Sec. 5.2</td>
+</tr>
+<tr>
+<td>Spin coherence T₂ (RT)</td>
+<td>0.5–5 µs</td>
+<td>Sec. 5.3</td>
+</tr>
+<tr>
+<td>Spin relaxation T₁ (RT)</td>
+<td>10–100 µs</td>
+<td>Sec. 5.3</td>
+</tr>
+<tr>
+<td>Waveguide coupling</td>
+<td>20–60 %</td>
+<td>Sec. 4.2, 5.4</td>
+</tr>
+<tr>
+<td>SU-8 propagation loss</td>
+<td>&lt; 1 dB/cm @ 590 nm</td>
+<td>Sec. 4.1</td>
+</tr>
+<tr>
+<td>Graphene photodetector responsivity</td>
+<td>0.01–0.1 A/W</td>
+<td>Sec. 3.4</td>
+</tr>
+<tr>
+<td>MoS₂ photodetector responsivity</td>
+<td>10–10² A/W (photogating)</td>
+<td>Sec. 3.4</td>
+</tr>
+<tr>
+<td>Operating temperature</td>
+<td>288–300 K (set 295 K)</td>
+<td>Sec. 4.4</td>
+</tr>
+<tr>
+<td>TEC power</td>
+<td>&lt; 5 W</td>
+<td>Sec. 4.4</td>
+</tr>
+<tr>
+<td>Total chip footprint</td>
+<td>25 × 25 mm²</td>
+<td>Sec. 2.4</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="8-validation-against-known-studies">8. Validation Against Known Studies</h2>
+<p>For each major claim, the supporting peer-reviewed literature is listed. Where the claim is at the edge of what has been reported, the wording is hedged. References are numbered and listed in the References section below.</p>
+<h3 id="111-cqd-hydrothermal-synthesis-yield-wavelength-qy">11.1 CQD hydrothermal synthesis — yield, wavelength, QY</h3>
+<ul>
+<li><strong>Citric acid + urea/ethylenediamine hydrothermal route</strong> is the canonical CQD synthesis, producing blue-to-green PL with QY 40–80 %. Consistent with results reported in <strong>Baker &amp; Baker, <em>Angew. Chem. Int. Ed.</em> 2010</strong> [1] (landmark review of luminescent carbon nanodots) and the large CQD literature summarized in <strong>Lim, Shen &amp; Gao, <em>Chem. Soc. Rev.</em> 2015</strong> [2]. The 200 °C, 6 h hydrothermal parameters used here are within the standard ranges reported.</li>
+<li><strong>Wavelength tunability</strong> via nitrogen dopant ratio and hydrothermal temperature is a broadly reported property of CQDs, consistent with the reviews above and with numerous primary reports.</li>
+</ul>
+<h3 id="112-cqd-electroluminescence-and-ase">11.2 CQD electroluminescence and ASE</h3>
+<ul>
+<li><strong>Electroluminescence from CQD-polymer composites</strong> under modest DC bias (turn-on ~5–10 V) has been reported by several groups; consistent with the CQD LED literature summarized in <strong>Lim et al. 2015</strong> [2] and subsequent CQD-LED reviews.</li>
+<li><strong>ASE / amplified spontaneous emission from CQDs under optical pumping</strong> is well documented, e.g., white-light ASE from carbon nanodots under laser excitation <strong>Zhang et al., <em>Opt. Mater. Express</em> 2012</strong> [29], and near-unity-QY CQDs for electroluminescent LEDs <strong>Yuan et al., <em>Angew. Chem. Int. Ed.</em> 2023</strong> [30].</li>
+<li><strong>Electrically-pumped CQD <em>lasing</em> is NOT claimed.</strong> True electrically-pumped lasing from CQDs has been pursued but remains difficult and controversial; we do not cite any paper as having demonstrated it unambiguously. We deliberately limit the claim to <strong>EL and ASE</strong>. ASE is a necessary but not sufficient precondition for lasing and does not require a coherent cavity mode.</li>
+</ul>
+<h3 id="113-liquid-exfoliation-of-hbn">11.3 Liquid exfoliation of hBN</h3>
+<ul>
+<li><strong>NMP-based bath sonication</strong> to produce few-layer hBN is the standard liquid-phase exfoliation route, established in <strong>Hernandez et al., <em>Nat. Nanotechnol.</em> 2008</strong> [3] (one-step mass production of few-layer graphene by liquid exfoliation; the method generalizes to BN, MoS₂, etc.) and in <strong>Coleman et al., <em>Science</em> 2011</strong> [4] ("Two-Dimensional Nanosheets Produced by Liquid Exfoliation of Layered Materials"), which explicitly reports few-layer BN in NMP with the surface-tension-matching criterion we use. The yields (~5–15 % few-layer) and flake sizes (50–300 nm) targeted here are consistent with those reports.</li>
+</ul>
+<h3 id="114-vb-defect-d-346-ghz-room-temperature-spin">11.4 VB− defect, D ≈ 3.46 GHz, room-temperature spin</h3>
+<ul>
+<li><strong>Discovery and room-temperature optically-detected magnetic resonance of the negatively-charged boron vacancy VB− in hBN</strong>, with zero-field splitting <strong>D ≈ 3.46 GHz</strong>, optical initialization and readout: <strong>Gottscholl et al., <em>Nature Materials</em> 19, 540–545 (2020)</strong> [5]. This is the landmark paper for the VB− qubit and directly supports Section 2.3 and the ODMR target in Section 5.2.</li>
+<li><strong>Theoretical identification of the VB− structure and spin Hamiltonian</strong>, including D ≈ 3.46 GHz: <strong>Ivády et al., <em>npj Computational Materials</em> 6, 41 (2020)</strong> [6] (ab initio theory of the negatively charged boron vacancy qubit in hBN). Supports the spin-1 triplet assignment and the magnetic-field splitting used in Section 5.2.</li>
+<li><strong>Room-temperature spin coherence (T₂ ~ µs)</strong> of VB− ensembles: consistent with values reported in <strong>Gottscholl et al. 2020</strong> [5] and follow-up work by <strong>Kianinia et al.</strong> [7] and <strong>Chejanovsky et al.</strong> [8] on hBN spin defects and single-photon emitters. µs-scale T₂ at room temperature is the accepted performance envelope for as-grown/implanted VB− ensembles; isotopic engineering (¹⁰B / ¹²C purification) extends it but is outside maker-lab scope.</li>
+<li><strong>Defect density ~0.3 /µm²</strong> is within the range routinely reported for irradiated or annealed hBN samples used for ensemble ODMR; the chemical route in Section 2.3 is a maker-lab approximation of ion-implantation results in [5–7].</li>
+<li><strong>hBN as a quantum-emitter host</strong>: single-photon emission from hBN monolayers <strong>Tran et al., <em>Nat. Nanotechnol.</em> 2016</strong> [26], hBN photonics review <strong>Caldwell et al., <em>Nat. Rev. Mater.</em> 2019</strong> [27], and a quantum-coherent spin in hBN at ambient conditions <strong>Stern et al., <em>Nat. Mater.</em> 2024</strong> [28] (a carbon-related defect, distinct from VB−).</li>
+</ul>
+<h3 id="115-waveguide-coupling-2060">11.5 Waveguide coupling (20–60 %)</h3>
+<ul>
+<li><strong>Butt/end-fire coupling of edge emitters into micrometer-scale polymer waveguides</strong> with 20–60 % efficiency is standard in integrated photonics and consistent with values reported in polymer-waveguide quantum-photonic work; see polymer integrated optics <strong>Bêche et al., <em>Microelectron. J.</em> 2006</strong> [31] and soft-lithography patterning <strong>Xia &amp; Whitesides 1998</strong> [32], <strong>Qin et al., <em>Nat. Protoc.</em> 2010</strong> [33]. The 5–10 µm SU-8 core and &lt; 2 µm gap specified in Section 4.2 are within the regime where end-fire efficiency is dominated by mode-overlap and routinely reaches tens of percent.</li>
+</ul>
+<h3 id="116-on-chip-2d-material-photodetector-responsivity">11.6 On-chip 2D-material photodetector responsivity</h3>
+<ul>
+<li><strong>Graphene photodetectors</strong>: <strong>Xia et al., <em>Nat. Nanotechnol.</em> 2009</strong> [9] (ultrafast graphene photodetector) and subsequent reviews establish bare-graphene responsivities of <strong>0.01–0.1 A/W</strong>, matching our target.</li>
+<li><strong>MoS₂ and hybrid 2D photodetectors with high responsivity (10–10² A/W) via photogating</strong>: <strong>Konstantatos et al., <em>Nat. Nanotechnol.</em> 2012</strong> [10] (hybrid graphene–quantum-dot phototransistor with ultrahigh gain), ultrasensitive monolayer-MoS₂ photodetectors <strong>Lopez-Sanchez et al., <em>Nat. Nanotechnol.</em> 2013</strong> [24], and vertical graphene heterostructure transistors <strong>Britnell et al., <em>Science</em> 2012</strong> [25] establish the photogating regime used in Section 3.4.</li>
+<li><strong>Integration of 2D photodetectors on waveguides</strong> for on-chip readout is consistent with 2D-material photodetection reviews (e.g., F. Xia et al., <em>Nat. Photonics</em> reviews).</li>
+</ul>
+<h3 id="117-peltier-tec-cooling-for-stable-room-temperature-operation">11.7 Peltier / TEC cooling for stable room-temperature operation</h3>
+<ul>
+<li>Thermoelectric (Peltier) cooling to stabilize solid-state photonics and single-photon detectors to ±0.1 K is standard engineering; no specific landmark citation is required. Generic thermoelectric-cooler references and vendor application notes suffice. The ±0.1 K stability in Section 4.4 is well within commercial TEC + PID capability.</li>
+</ul>
+<h3 id="118-related-defect-platforms-nv-diamond-sic-v_si-and-decoupling">11.8 Related defect platforms (NV-diamond, SiC V_Si) and decoupling</h3>
+<p>The chip is VB−-centric, but the same control stack drives other room-temperature solid-state spin defects. These references support that generality and the calibration/decoupling toolbox:</p>
+<ul>
+<li><strong>NV centre in diamond</strong> (D ≈ 2.87 GHz): the canonical room-temperature optically-addressable spin, reviewed by <strong>Doherty et al., <em>Phys. Rep.</em> 2013</strong> [11]; nanoscale magnetometry <strong>Balasubramanian et al., <em>Nature</em> 2008</strong> [12]; single-spin coherent oscillations <strong>Jelezko et al., <em>PRL</em> 2004</strong> [13]; nanoscale magnetic sensing <strong>Maze et al., <em>Nature</em> 2008</strong> [14]; and near-second coherence under decoupling <strong>Bar-Gill et al., <em>Nat. Commun.</em> 2013</strong> [23].</li>
+<li><strong>Silicon vacancy V_Si in 4H-SiC</strong> (S = 3/2, 2|D| ≈ 70 MHz, ZPL ≈ 916 nm): room-temperature coherent control <strong>Widmann et al., <em>Nat. Mater.</em> 2015</strong> [16] and <strong>Kraus et al., <em>Nat. Phys.</em> 2014</strong> [15]; the V_Si as a quantum system <strong>Baranov et al., <em>PRB</em> 2011</strong> [19]; single V1 dynamics <strong>Morioka et al., <em>Phys. Rev. Applied</em> 2022</strong> [20]. Note: <strong>Christle et al., <em>Nat. Mater.</em> 2015</strong> [18] and <strong>Christle et al., <em>PRX</em> 2017</strong> [17] report millisecond coherence for the <strong>SiC divacancy</strong> (V_SiV_C, S = 1), <em>not</em> the silicon vacancy — they are cited here for the divacancy, a distinct defect.</li>
+<li><strong>Dynamical decoupling</strong> used to extend T₂: <strong>de Lange et al., <em>Science</em> 2010</strong> [21] and <strong>Ryan et al., <em>PRL</em> 2010</strong> [22].</li>
+<li><strong>Microwave delivery</strong>: a low-cost resonator approach for ODMR excitation <strong>Bülau et al., <em>Metrology</em> 2025</strong> [34].</li>
+</ul>
+<hr />
+<p><em>End of protocol. This document is a maker-lab demonstrator specification. It is not a medical, military, or safety-critical device specification. Where primary literature is cited, the cited paper should be consulted before relying on a specific numerical parameter in a downstream application.</em></p>
+<hr />
+<h2 id="references">References</h2>
+<p>[1] S. N. Baker and G. A. Baker, "Luminescent carbon nanodots: emergent nanolights," Angewandte Chemie International Edition 49, 6726-6744 (2010). doi:10.1002/anie.200906623</p>
+<p>[2] S. Y. Lim, W. Shen, and Z. Gao, "Carbon quantum dots and their applications," Chemical Society Reviews 44, 362-381 (2015). doi:10.1039/C4CS00269E</p>
+<p>[3] Y. Hernandez, V. Nicolosi, M. Lotya, F. M. Blighe, et al., "High-yield production of graphene by liquid-phase exfoliation of graphite," Nature Nanotechnology 3, 563-568 (2008). doi:10.1038/nnano.2008.215</p>
+<p>[4] J. N. Coleman, M. Lotya, A. O'Neill, et al., "Two-dimensional nanosheets produced by liquid exfoliation of layered materials," Science 331, 568-571 (2011). doi:10.1126/science.1194975</p>
+<p>[5] A. Gottscholl, M. Kianinia, V. Soltamov, S. Orlinskii, G. Mamin, C. Bradac, C. Kasper, K. Krambrock, A. Sperlich, M. Toth, I. Aharonovich, and V. Dyakonov, "Initialization and read-out of intrinsic spin defects in a van der Waals crystal at room temperature," Nature Materials 19, 540-545 (2020). doi:10.1038/s41563-020-0619-6</p>
+<p>[6] V. Ivády, G. Barcza, G. Thiering, S. Li, H. Hamdi, J.-P. Chou, Ö. Legeza, and A. Gali, "Ab initio theory of the negatively charged boron vacancy qubit in hexagonal boron nitride," npj Computational Materials 6, 41 (2020). doi:10.1038/s41524-020-0305-x</p>
+<p>[7] M. Kianinia, S. White, J. E. Fröch, C. Bradac, and I. Aharonovich, "Generation of spin defects in hexagonal boron nitride," ACS Photonics 7, 2147-2152 (2020). doi:10.1021/acsphotonics.0c00614</p>
+<p>[8] N. Chejanovsky, A. Mukherjee, J. Geng, Y.-C. Chen, Y. Kim, A. Denisenko, A. Finkler, T. Taniguchi, K. Watanabe, D. B. R. Dasari, P. Auburger, A. Gali, J. H. Smet, and J. Wrachtrup, "Single-spin resonance in a van der Waals embedded paramagnetic defect," Nature Materials 20, 1079-1084 (2021). doi:10.1038/s41563-021-00979-4</p>
+<p>[9] F. Xia, T. Mueller, Y.-M. Lin, A. Valdes-Garcia, and P. Avouris, "Ultrafast graphene photodetector," Nature Nanotechnology 4, 839-843 (2009). doi:10.1038/nnano.2009.292</p>
+<p>[10] G. Konstantatos, M. Badioli, L. Gaudreau, J. Osmond, M. Bernechea, F. P. Garcia de Arquer, F. Gatti, and F. H. L. Koppens, "Hybrid graphene-quantum dot phototransistors with ultrahigh gain," Nature Nanotechnology 7, 363-368 (2012). doi:10.1038/nnano.2012.60</p>
+<p>[11] M. W. Doherty, N. B. Manson, P. Delaney, F. Jelezko, J. Wrachtrup, and L. C. L. Hollenberg, "The nitrogen-vacancy colour centre in diamond," Physics Reports 528, 1-45 (2013). doi:10.1016/j.physrep.2013.02.001</p>
+<p>[12] G. Balasubramanian, I. Y. Chan, R. Kolesov, et al., "Nanoscale imaging magnetometry with diamond spins under ambient conditions," Nature 455, 648-651 (2008). doi:10.1038/nature07278</p>
+<p>[13] F. Jelezko, T. Gaebel, I. Popa, A. Gruber, and J. Wrachtrup, "Observation of coherent oscillations in a single electron spin," Physical Review Letters 92, 076401 (2004). doi:10.1103/PhysRevLett.92.076401</p>
+<p>[14] J. R. Maze, P. L. Stanwix, J. S. Hodges, et al., "Nanoscale magnetic sensing with an individual electronic spin in diamond," Nature 455, 644-647 (2008). doi:10.1038/nature07279</p>
+<p>[15] H. Kraus, V. A. Soltamov, D. Riedel, S. Väth, F. Fuchs, A. Sperlich, P. G. Baranov, V. Dyakonov, and G. V. Astakhov, "Room-temperature quantum microwave emitters based on spin defects in silicon carbide," Nature Physics 10, 157-162 (2014). doi:10.1038/nphys2826</p>
+<p>[16] M. Widmann, S.-Y. Lee, T. Rendler, et al., "Coherent control of single spins in silicon carbide at room temperature," Nature Materials 14, 164-168 (2015). doi:10.1038/nmat4145</p>
+<p>[17] D. J. Christle, P. V. Klimov, C. F. de las Casas, et al., "Isolated spin qubits in SiC with a high-fidelity infrared spin-to-photon interface," Physical Review X 7, 021046 (2017). doi:10.1103/PhysRevX.7.021046</p>
+<p>[18] D. J. Christle, A. L. Falk, P. Andrich, P. V. Klimov, J. U. Hassan, N. T. Son, E. Janzén, T. Ohshima, and D. D. Awschalom, "Isolated electron spins in silicon carbide with millisecond coherence times," Nature Materials 14, 160-163 (2015). doi:10.1038/nmat4144</p>
+<p>[19] P. G. Baranov, A. P. Bundakova, A. A. Soltamova, S. B. Orlinskii, I. V. Borovykh, R. Zondervan, R. Verberk, and J. Schmidt, "Silicon vacancy in SiC as a promising quantum system for single-defect and single-photon spectroscopy," Physical Review B 83, 125203 (2011). doi:10.1103/PhysRevB.83.125203</p>
+<p>[20] N. Morioka, D. Liu, Ö. O. Soykal, I. Gediz, C. Babin, R. Stöhr, T. Ohshima, N. T. Son, J. Ul-Hassan, F. Kaiser, and J. Wrachtrup, "Spin-optical dynamics and quantum efficiency of a single V1 center in silicon carbide," Physical Review Applied 17, 054005 (2022). doi:10.1103/PhysRevApplied.17.054005</p>
+<p>[21] G. de Lange, Z. H. Wang, D. Ristè, V. V. Dobrovitski, and R. Hanson, "Universal dynamical decoupling of a single solid-state spin from a spin bath," Science 330, 60-63 (2010). doi:10.1126/science.1192739</p>
+<p>[22] C. A. Ryan, J. S. Hodges, and D. G. Cory, "Robust decoupling techniques to extend quantum coherence in diamond," Physical Review Letters 105, 200402 (2010). doi:10.1103/PhysRevLett.105.200402</p>
+<p>[23] N. Bar-Gill, L. M. Pham, A. Jarmola, D. Budker, and R. L. Walsworth, "Solid-state electronic spin coherence time approaching one second," Nature Communications 4, 1743 (2013). doi:10.1038/ncomms2771</p>
+<p>[24] O. Lopez-Sanchez, D. Lembke, M. Kayci, A. Radenovic, and A. Kis, "Ultrasensitive photodetectors based on monolayer MoS2," Nature Nanotechnology 8, 497-501 (2013). doi:10.1038/nnano.2013.100</p>
+<p>[25] L. Britnell, R. V. Gorbachev, R. Jalil, et al., "Field-effect tunneling transistor based on vertical graphene heterostructures," Science 335, 947-950 (2012). doi:10.1126/science.1218461</p>
+<p>[26] T. T. Tran, K. Bray, M. J. Ford, M. Toth, and I. Aharonovich, "Quantum emission from hexagonal boron nitride monolayers," Nature Nanotechnology 11, 37-41 (2016). doi:10.1038/nnano.2015.242</p>
+<p>[27] J. D. Caldwell, I. Aharonovich, G. Cassabois, J. H. Edgar, B. Gil, and D. N. Basov, "Photonics with hexagonal boron nitride," Nature Reviews Materials 4, 552-567 (2019). doi:10.1038/s41578-019-0124-1</p>
+<p>[28] H. L. Stern, C. M. Gilardoni, Q. Gu, et al., "A quantum coherent spin in hexagonal boron nitride at ambient conditions," Nature Materials 23, 1379-1385 (2024). doi:10.1038/s41563-024-01887-z</p>
+<p>[29] W. F. Zhang, L. B. Tang, S. F. Yu, and S. P. Lau, "Observation of white-light amplified spontaneous emission from carbon nanodots under laser excitation," Optical Materials Express 2, 490-495 (2012). doi:10.1364/OME.2.000490</p>
+<p>[30] T. Yuan, F. Yuan, L. Sui, Y. Zhang, Y. Li, X. Li, Z. Tan, and L. Fan, "Carbon quantum dots with near-unity quantum yield bandgap emission for electroluminescent light-emitting diodes," Angewandte Chemie International Edition 62, e202218568 (2023). doi:10.1002/anie.202218568</p>
+<p>[31] B. Bêche, N. Pelletier, E. Gaviot, et al., "Conception of optical integrated circuits on polymers," Microelectronics Journal 37, 421-427 (2006). doi:10.1016/j.mejo.2005.07.003</p>
+<p>[32] Y. Xia and G. M. Whitesides, "Soft lithography," Annual Review of Materials Research 28, 153-184 (1998). doi:10.1146/annurev.matsci.28.1.153</p>
+<p>[33] D. Qin, Y. Xia, and G. M. Whitesides, "Soft lithography for micro- and nanoscale patterning," Nature Protocols 5, 491-502 (2010). doi:10.1038/nprot.2009.234</p>
+<p>[34] A. R. Bülau et al., "A highly efficient, low-cost microwave resonator for exciting a diamond sample from a miniaturized quantum magnetometer," Metrology 5, 69 (2025). doi:10.3390/metrology5040069</p>
+  <div class="foot">QSSC — Quantum Solid State Chip (room temperature) · fabrication protocol · branded document · 44673 source bytes</div>
+</div>
+</body>
+</html>

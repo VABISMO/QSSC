@@ -1,0 +1,303 @@
+# tests/test_core.py
+"""Unit tests for the QSSC core: defects, simulator, circuits and backend."""
+import numpy as np
+import pytest
+
+from qssc import (
+    HBN_VB, NV_DIAMOND, get_profile, coherence_at_temperature,
+    auto_align, simulate_odmr, simulate_laser_pulse, simulate_galvo_scan,
+    make_camera_frame, detect_defects, xy8_decoupling, estimate_coherence_xy8,
+    QSSCBackend, SimulatedFPGA, is_prime, select_coprime, mod_mult_gate,
+    create_period_finding_circuit, create_shor_circuit, postprocess_period,
+    create_qft_nos_circuit, postprocess_period_swapless,
+    create_math_circuit,
+)
+from qssc.protocol import protocol_as_dict, protocol_summary
+
+
+# -- defects ----------------------------------------------------------------
+
+def test_hbn_profile_defaults():
+    p = get_profile("hBN-VB")
+    assert p.zero_field_splitting == pytest.approx(3.46e9)
+    assert p.t2_room > 0 and p.t1_room > 0
+    assert get_profile("NV").zero_field_splitting == pytest.approx(2.87e9)
+
+
+def test_coherence_scaling():
+    t1_hot, t2_hot = coherence_at_temperature(HBN_VB, 300.0)
+    t1_cold, t2_cold = coherence_at_temperature(HBN_VB, 77.0)
+    # cooling should improve both T1 and T2
+    assert t1_cold > t1_hot
+    assert t2_cold > t2_hot
+    # T2 bounded by 2*T1
+    assert t2_hot <= 2 * t1_hot
+
+
+# -- simulator ---------------------------------------------------------------
+
+def test_laser_pulse_and_galvo():
+    pulse = simulate_laser_pulse(intensity=1.0)
+    assert 0 <= pulse["adc"] <= 4095 * 2
+    coords = simulate_galvo_scan((5, 5), step=1)
+    assert len(coords) == 25
+
+
+def test_camera_frame_and_detect():
+    centres = [{"x": 40, "y": 24, "intensity": 200}]
+    frame = make_camera_frame(centres, shape=(96, 128))
+    assert frame.shape == (96, 128) and frame.dtype == np.uint8
+    found = detect_defects(frame, threshold=50)
+    assert len(found) >= 1
+
+
+def test_auto_align_grid():
+    sites = auto_align("hBN-VB", grid=8, rng=np.random.default_rng(0))
+    assert len(sites) == 64
+    assert all(s.qubit_id == i for i, s in enumerate(sites))
+
+
+def test_odmr_hbn_resonance():
+    f, c = simulate_odmr("hBN-VB")
+    assert len(f) == len(c)
+    # the deepest dip should sit within the Zeeman-split pair around D
+    dip = f[np.argmin(c)]
+    assert abs(dip - HBN_VB.d_ghz) < 0.06
+
+
+def test_odmr_field_splitting():
+    f0, c0 = simulate_odmr("hBN-VB", b_field_t=0.0)
+    # zero field: dips collapse towards D (single pair at +/-A)
+    dip0 = f0[np.argmin(c0)]
+    assert abs(dip0 - HBN_VB.d_ghz) < 0.06
+
+
+def test_xy8():
+    seq = xy8_decoupling(1)
+    assert len(seq) == 8
+    assert estimate_coherence_xy8(1e-6, n_blocks=2) > 1e-6
+
+
+def test_simulated_fpga_protocol():
+    fpga = SimulatedFPGA("hBN-VB", seed=1)
+    assert fpga.send_command("FIRE_LASER 0 0 50") == "OK"
+    assert fpga.send_command("CAPTURE_FRAME") == "OK"
+    img = fpga.receive_image()
+    assert img.shape == (480, 640)
+    assert fpga.send_command("CAPTURE_DARK") == "OK"
+
+
+# -- circuits ----------------------------------------------------------------
+
+def test_is_prime():
+    assert is_prime(2) and is_prime(17) and is_prime(1000003)
+    assert not is_prime(1) and not is_prime(15) and not is_prime(1000004)
+
+
+def test_mod_mult_gate():
+    g = mod_mult_gate(7, 15)
+    assert "7" in g.label and "15" in g.label
+    with pytest.raises(ValueError):
+        mod_mult_gate(5, 15)  # gcd != 1
+
+
+def test_period_circuit_and_postprocess():
+    qc = create_period_finding_circuit(15, 7)
+    assert qc.num_clbits > 0
+    # synthetic ideal counts for r=4, a=7, N=15 -> factors 3,5 (4 control bits)
+    counts = {"0000": 256, "0100": 256, "1000": 256, "1100": 256}
+    r, factors = postprocess_period(counts, 4, 7, 15)
+    assert r == 4
+    assert factors == (3, 5)
+
+
+def test_shor_circuit_builds():
+    qc, a = create_shor_circuit(15, a=7)
+    assert a == 7 and qc.num_qubits > 0
+
+
+def test_qft_nos_fewer_qubits_than_shor():
+    # QFT-NOS uses a reduced counting register t=l+1 vs Shor's 2l+1
+    nos_qc, a = create_qft_nos_circuit(15, a=7)
+    shor_qc, _ = create_shor_circuit(15, a=7)
+    assert a == 7
+    assert nos_qc.num_qubits < shor_qc.num_qubits
+    # swapless readout: the hardware measures bit-reversed QPE strings, and
+    # postprocess_period_swapless reverses them back. For r=4 the standard QPE
+    # phases k/4 (k=1,2,3) land at decimals 8,16,24 -> 5-bit "01000","10000",
+    # "11000"; the swapless hardware emits the reversed strings, which we feed
+    # here to confirm the function recovers r=4 and factors 3,5.
+    counts = {"00010": 256, "00001": 256, "00011": 256}
+    r, factors = postprocess_period_swapless(counts, nos_qc.num_clbits, 7, 15)
+    assert r == 4
+    assert factors == (3, 5)
+
+
+def test_qft_nos_factors_15_cold():
+    # Like Shor: decoheres at 300 K, recovers 3x5 when cooled.
+    b_cold = QSSCBackend("hBN-VB", sites=_quick_sites(20), seed=1,
+                         temperature_k=1e-3, noise_mode="real")
+    qc, a = create_qft_nos_circuit(15, a=7)
+    res = b_cold.run(qc, shots=4096).result()
+    _, factors = postprocess_period_swapless(res.get_counts(), qc.num_clbits, a, 15)
+    assert factors == (3, 5)
+
+
+# -- crypto (quantum RNG -> Ed25519 + X.509) ---------------------------------
+
+def test_von_neumann_and_keypair():
+    from qssc.crypto import von_neumann_extract, bits_to_bytes, derive_keypair
+    raw = [0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1] * 4
+    bits, stats = von_neumann_extract(raw, need=16)
+    assert stats["sufficient"] is True
+    assert len(bits) >= 16
+    raw_bytes = bits_to_bytes(bits[:16])
+    assert len(raw_bytes) == 2
+    entropy = bytes(range(64))  # deterministic 64-byte block
+    key = derive_keypair(entropy, common_name="QSSC-test-node")
+    assert key["algorithm"] == "Ed25519"
+    assert "BEGIN CERTIFICATE" in key["certificate_pem"]
+    assert "BEGIN PRIVATE KEY" in key["private_key_pem"]
+    assert key["common_name"] == "QSSC-test-node"
+    # the serial is a <=159-bit integer inside the X.509 cert, but the returned
+    # dict must carry it as a *string* so the async-job result is BSON/Mongo
+    # serialisable (BSON int is capped at 8 bytes / 2^63). Regression for the
+    # bug where the finished qrand job never persisted -> blank result block.
+    assert isinstance(key["serial"], str)
+    assert int(key["serial"], 16) > 0
+    # the full arbitrary-precision serial is still embedded in the cert itself
+    assert "BEGIN CERTIFICATE" in key["certificate_pem"]
+
+
+def test_qrand_result_bson_serialisable():
+    """The async qrand job persists the runner result to MongoDB; the
+    ``serial`` field used to be a ~159-bit int that overflows BSON
+    (``OverflowError: MongoDB can only handle up to 8-byte ints``), so the
+    finished record never persisted and the frontend showed a blank result.
+    Encode the runner result with BSON to lock the fix in."""
+    from api.runner import run_circuit
+    r = run_circuit({"algorithm": "qrand", "profile": "hBN-VB",
+                     "temperature_k": 300.0, "seed": 42, "noise_mode": "real",
+                     "shots": 8192, "num_qubits": 8, "num_bytes": 16,
+                     "common_name": "QSSC-bson-regression"})
+    assert "error" not in r
+    assert isinstance(r["serial"], str)
+    try:
+        import bson
+        bson.BSON.encode(r)  # must not raise OverflowError
+    except ImportError:
+        pass
+
+
+# -- QKD (BB84) --------------------------------------------------------------
+
+def test_bb84_secure_without_eve_detected_with_eve():
+    from qssc.qkd import simulate_bb84, BB84_QBER_THRESHOLD
+    b = QSSCBackend("hBN-VB", sites=_quick_sites(16), seed=2,
+                    temperature_k=1e-3, noise_mode="real")
+    clean = simulate_bb84(b, num_bits=256, eavesdrop=False, shots=512, seed=7)
+    assert clean["qber"] < BB84_QBER_THRESHOLD
+    assert clean["secure"] is True
+    assert clean["eve_detected"] is False
+    # intercept-resend Eve raises QBER towards ~25% -> detected, insecure
+    eve = simulate_bb84(b, num_bits=256, eavesdrop=True, shots=512, seed=7)
+    assert eve["qber"] > BB84_QBER_THRESHOLD
+    assert eve["secure"] is False
+    assert eve["eve_detected"] is True
+
+
+def test_math_circuits_build():
+    for op, args in [("add", (2, 3)), ("mul", (3, 4)), ("sqrt", (16, None))]:
+        qc = create_math_circuit(op, args[0], args[1])
+        assert qc.num_clbits > 0
+
+
+def test_user_circuit_python_and_qasm():
+    from qssc import build_user_circuit, UserCircuitError
+    py = ("from qiskit import QuantumCircuit\n"
+          "qc = QuantumCircuit(2, 2)\n"
+          "qc.h(0); qc.cx(0, 1); qc.measure(range(2), range(2))\n")
+    qc = build_user_circuit(py)
+    assert qc.num_qubits == 2 and qc.num_clbits == 2
+    qasm = ("OPENQASM 2.0;\nqreg q[2];\ncreg c[2];\n"
+            "h q[0];\ncx q[0],q[1];\nmeasure q->c;\n")
+    qc2 = build_user_circuit(qasm)
+    assert qc2.num_qubits == 2
+    # auto-measure when no classical bits
+    qc3 = build_user_circuit("from qiskit import QuantumCircuit\n"
+                             "qc = QuantumCircuit(2)\nqc.h(0); qc.cx(0,1)")
+    assert qc3.num_clbits >= 2
+    # blocked import + qubit cap
+    with pytest.raises(UserCircuitError):
+        build_user_circuit("import os\nqc = QuantumCircuit(2)")
+    with pytest.raises(UserCircuitError):
+        build_user_circuit("from qiskit import QuantumCircuit\n"
+                           "qc = QuantumCircuit(99)", max_qubits=64)
+
+
+# -- backend -----------------------------------------------------------------
+
+def _quick_sites(n=16):
+    from qssc.simulator import QubitSite
+    p = HBN_VB
+    t1, t2 = coherence_at_temperature(p, 300.0)
+    return [QubitSite(qubit_id=i, row=i // 8, col=i % 8, x_um=0, y_um=0,
+                      intensity=150.0, t1=t1, t2=t2, readout_err=0.12)
+            for i in range(n)]
+
+
+def test_backend_describe():
+    b = QSSCBackend("hBN-VB", sites=_quick_sites(), seed=0)
+    d = b.describe()
+    assert d["defect"].startswith("hBN")
+    assert d["num_qubits"] == 16
+    assert d["d_ghz"] == pytest.approx(3.46, abs=0.01)
+
+
+def test_backend_runs_bell():
+    from qiskit import QuantumCircuit
+    b = QSSCBackend("hBN-VB", sites=_quick_sites(), seed=0)
+    qc = QuantumCircuit(2, 2)
+    qc.h(0); qc.cx(0, 1); qc.measure([0, 1], [0, 1])
+    res = b.run(qc, shots=512).result()
+    counts = res.get_counts()
+    assert sum(counts.values()) == 512
+    # Bell state -> only 00 and 11 should dominate
+    top = max(counts, key=counts.get)
+    assert top in ("00", "11")
+
+
+def test_backend_shor_15():
+    # Honest physics: Shor's compiled modular-exponentiation decomposes to
+    # hundreds of 2q gates whose ~hundreds-of-us duration far exceeds the
+    # hBN V_B- room-temperature T2 (~2 us). At 300 K the circuit decoheres to a
+    # near-uniform distribution and no factors are recovered; the assessment
+    # must report it as NOT within the coherence window.
+    b = QSSCBackend("hBN-VB", sites=_quick_sites(20), seed=1,
+                    temperature_k=300.0, noise_mode="real")
+    qc, a = create_shor_circuit(15, a=7)
+    res = b.run(qc, shots=2048).result()
+    r, factors = postprocess_period(res.get_counts(), qc.num_clbits, a, 15)
+    assert res.assessment["within_coherence"] is False
+    assert factors[0] is None  # decohered at room temperature -> no factors
+
+    # Cooled to millikelvin the coherence window opens up and Shor recovers
+    # 3 x 5 (a=7 -> period 4). This is the whole point of the cooling knob.
+    b_cold = QSSCBackend("hBN-VB", sites=_quick_sites(20), seed=1,
+                         temperature_k=1e-3, noise_mode="real")
+    res_cold = b_cold.run(qc, shots=2048).result()
+    _, factors_cold = postprocess_period(res_cold.get_counts(), qc.num_clbits,
+                                         a, 15)
+    assert res_cold.assessment["within_coherence"] is True
+    assert factors_cold == (3, 5)
+
+
+# -- protocol ----------------------------------------------------------------
+
+def test_protocol_data():
+    sections = protocol_as_dict()
+    assert len(sections) >= 5
+    assert all(s["steps"] for s in sections)
+    s = protocol_summary()
+    assert "room temperature" in s["operating_temp"].lower()
+    assert s["d_GHz"] == pytest.approx(3.46)
