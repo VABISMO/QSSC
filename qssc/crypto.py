@@ -20,7 +20,6 @@ in is expected to be close to uniform.
 from __future__ import annotations
 
 import datetime
-from typing import Optional
 
 
 def _crypto_available() -> bool:

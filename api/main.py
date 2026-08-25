@@ -308,8 +308,6 @@ def signal(profile: str = "NV", temperature_k: float = 300.0,
         # total sweep window a few T2 long
         span_ns = max(8 * t2 * 1e9, 4000)
         t = np.linspace(0, span_ns, points)
-        d_ghz = prof.d_ghz
-        on_res = d_ghz + detuning_mhz / 1e3
         # contrast dips while mw is near resonance, recovers off-resonance
         lor = 1.0 / (1.0 + ((detuning_mhz) / 3.0) ** 2)
         sig = 1.0 - 0.35 * lor * np.exp(-t / (t2 * 1e9))

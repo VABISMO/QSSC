@@ -12,12 +12,10 @@ import math
 import time
 from fractions import Fraction
 from math import gcd
-from typing import Optional
 
 import numpy as np
 
 from qssc import (
-    PROFILES, get_profile, coherence_at_temperature,
     auto_align, QSSCBackend,
     create_period_finding_circuit, create_shor_circuit, create_qft_nos_circuit,
     create_math_circuit, grover_search, postprocess_period,

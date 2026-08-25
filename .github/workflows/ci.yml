@@ -70,9 +70,11 @@ jobs:
           python-version: "3.12"
       - run: pip install ruff
       # E9 = syntax errors, F = pyflakes (undefined names, unused imports, redefs).
-      # Fatal-error set only: gates CI on real bugs.
+      # F401 = unused imports, F841 = unused local variables. Broadened from the
+      # fatal-only set (E9,F63,F7,F82) so CI also catches dead imports/locals
+      # that accumulate during refactors; all flagged items are auto-fixable.
       - name: ruff check
-        run: ruff check --select=E9,F63,F7,F82 .
+        run: ruff check --select=E9,F63,F7,F82,F401,F841 .
 
   # ──────────────────────────────────────────────────────────────────────
   # FPGA RTL — parse-verify (pyverilog) + functional simulate (iverilog)
@@ -94,6 +96,8 @@ jobs:
             python -c "from pyverilog.vparser.parser import VerilogParser as P; p=P(); p.parse(open('$f').read(),'')" || { echo "PARSE FAIL: $f"; exit 1; }
             echo "OK  $f"
           done
+      - name: XDC <-> top_level.v port consistency
+        run: python3 tools/check_xdc_ports.py
       - name: iverilog functional simulation (self-checking testbench)
         run: |
           cd fpga

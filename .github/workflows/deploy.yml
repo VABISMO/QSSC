@@ -19,8 +19,9 @@ on:
   # Auto: fires after the CI workflow completes successfully on main (test-gated).
   # Note: GitHub does NOT always re-emit `workflow_run` when a run is manually
   # re-run, so for a one-off manual publish use the "Run workflow" button below
-  # (workflow_dispatch) — it deploys the current main regardless of CI state, so
-  # only use it after you have confirmed CI is green.
+  # (workflow_dispatch). The require-green-ci job below re-checks that CI is
+  # green on main before anything deploys, so a manual dispatch can no longer
+  # ship a red-CI commit.
   workflow_run:
     workflows: ["CI"]
     types: [completed]
@@ -35,14 +36,64 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
   pages: write
   id-token: write
 
 jobs:
+  # Gate every deploy on a green CI run on main. The workflow_run path is
+  # already gated by its `if` (conclusion == success); this job covers the
+  # workflow_dispatch path, which used to deploy regardless of CI state.
+  require-green-ci:
+    name: Require green CI on main
+    runs-on: ubuntu-latest
+    outputs:
+      ok: ${{ steps.check.outputs.ok }}
+    steps:
+      - id: check
+        name: Verify latest CI run on main is green
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            CONC="${{ github.event.workflow_run.conclusion }}"
+            echo "workflow_run conclusion: $CONC"
+            if [ "$CONC" != "success" ]; then
+              echo "::error::CI run that triggered this deploy was not success ($CONC)"
+              echo "ok=false" >> "$GITHUB_OUTPUT"
+              exit 1
+            fi
+          else
+            # workflow_dispatch: query the latest CI workflow run on main.
+            REPO="${{ github.repository }}"
+            # find the CI workflow id (file ci.yml)
+            WF_ID=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" \
+                    -H "Accept: application/vnd.github+json" \
+                    "https://api.github.com/repos/$REPO/actions/workflows" \
+                    | jq -r '.workflows[] | select(.path | endswith("ci.yml")) | .id' | head -n1)
+            if [ -z "$WF_ID" ]; then
+              echo "::error::could not find the ci.yml workflow"
+              echo "ok=false" >> "$GITHUB_OUTPUT"; exit 1
+            fi
+            RUN=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" \
+                       -H "Accept: application/vnd.github+json" \
+                       "https://api.github.com/repos/$REPO/actions/workflows/$WF_ID/runs?branch=main&per_page=1")
+            STATUS=$(echo "$RUN" | jq -r '.workflow_runs[0].status')
+            CONC=$(echo "$RUN" | jq -r '.workflow_runs[0].conclusion')
+            SHA=$(echo "$RUN" | jq -r '.workflow_runs[0].head_sha')
+            echo "latest CI run on main: status=$STATUS conclusion=$CONC sha=$SHA"
+            if [ "$STATUS" != "completed" ] || [ "$CONC" != "success" ]; then
+              echo "::error::latest CI on main is not green (status=$STATUS conclusion=$CONC). Re-run CI before deploying."
+              echo "ok=false" >> "$GITHUB_OUTPUT"; exit 1
+            fi
+          fi
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+
   deploy-frontend:
     name: Frontend → GitHub Pages
-    # Run on a manual dispatch, or automatically only when CI succeeded.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    needs: require-green-ci
+    if: ${{ needs.require-green-ci.outputs.ok == 'true' }}
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -70,7 +121,8 @@ jobs:
 
   deploy-api:
     name: API → Render (deploy hook)
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    needs: require-green-ci
+    if: ${{ needs.require-green-ci.outputs.ok == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Render deploy hook (test-gated)

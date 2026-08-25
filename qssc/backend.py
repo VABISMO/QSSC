@@ -20,8 +20,7 @@ from __future__ import annotations
 import logging
 import math
 import time
-from dataclasses import asdict
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 

@@ -1,9 +1,11 @@
 # Render Blueprint for the QSSC API (free web service, Docker runtime).
-# Render auto-deploys on push to main; for a test-gated deploy instead, use the
-# GitHub Actions `deploy.yml` workflow (which fires Render's deploy hook only
-# after CI is green). Either way, no Redis/Mongo is required: api/jobs.py falls
-# back to an in-process executor when those services are absent.
-# Docs: https://render.com/docs/blueprint-spec
+# autoDeploy is OFF: pushes do NOT trigger a Render deploy. Deploys are gated on
+# CI green by the GitHub Actions `deploy.yml` workflow, which fires Render's
+# deploy hook only after the ci.yml workflow succeeds (or on a manual
+# workflow_dispatch that first re-checks CI). This avoids the auto-deploy / CI
+# race where a broken push ships before tests finish. No Redis/Mongo required:
+# api/jobs.py falls back to an in-process executor when those services are
+# absent. Docs: https://render.com/docs/blueprint-spec
 services:
   - type: web
     name: qssc-api
@@ -12,7 +14,7 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /api/health
-    autoDeploy: true
+    autoDeploy: false
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"

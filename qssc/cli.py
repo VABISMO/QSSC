@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import math
 from fractions import Fraction
-from math import gcd
 
 import click
 import numpy as np
@@ -19,13 +18,13 @@ from rich.table import Table
 
 from . import __version__
 from .defects import PROFILES, get_profile
-from .simulator import auto_align, simulate_odmr, SimulatedFPGA
+from .simulator import auto_align, simulate_odmr
 from .backend import (
     QSSCBackend, EmitterController, DetectorInterface, MicrowaveController,
     CalibrationManager, make_connection,
 )
 from .circuits import (
-    create_period_finding_circuit, create_shor_circuit, create_math_circuit,
+    create_period_finding_circuit, create_math_circuit,
     is_prime, select_coprime,
 )
 from .protocol import protocol_summary

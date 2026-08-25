@@ -4,10 +4,10 @@ import numpy as np
 import pytest
 
 from qssc import (
-    HBN_VB, NV_DIAMOND, get_profile, coherence_at_temperature,
+    HBN_VB, get_profile, coherence_at_temperature,
     auto_align, simulate_odmr, simulate_cqd_pulse, make_detector_response,
     xy8_decoupling, estimate_coherence_xy8,
-    QSSCBackend, SimulatedFPGA, is_prime, select_coprime, mod_mult_gate,
+    QSSCBackend, SimulatedFPGA, is_prime, mod_mult_gate,
     create_period_finding_circuit, create_shor_circuit, postprocess_period,
     create_qft_nos_circuit, postprocess_period_swapless,
     create_math_circuit,

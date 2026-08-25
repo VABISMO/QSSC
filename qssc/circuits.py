@@ -17,7 +17,7 @@ from typing import Optional
 import numpy as np
 from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister
 from qiskit.circuit.library import (
-    QFT, DraperQFTAdder, CDKMRippleCarryAdder, RGQFTMultiplier,
+    QFT, DraperQFTAdder, RGQFTMultiplier,
     PhaseEstimation, GroverOperator,
 )
 from qiskit.circuit.library.standard_gates import RYGate
