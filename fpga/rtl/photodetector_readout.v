@@ -17,6 +17,11 @@
 // The microwave drive is modulated at 1 kHz (LOCKIN_MOD_HZ) so the host can
 // lock-in demodulate the photocurrent and reject background light; `mod_sync`
 // is a 1 kHz square wave the host / MW chain uses as the modulation reference.
+// NOTE: this module only *generates* the 1 kHz reference; the actual lock-in
+// demodulation (multiply the photocurrent stream by mod_sync and low-pass) is
+// done on the host side from the streamed ADC codes + this reference, not in
+// the FPGA. The mod_sync square wave is a timing reference, not a synchronous
+// gate on the XADC samples.
 //
 // The XADC primitive itself is instantiated in top_level (XADC wizard); this
 // module drives the start/busy/data handshake so the analog front-end is
@@ -24,7 +29,13 @@
 //============================================================================
 module photodetector_readout #(
     parameter N_DET = 64,                 // electrodes (8x8 grid)
-    parameter CLK_HZ = 100_000_000
+    parameter CLK_HZ = 100_000_000,
+    // MUX + TIA settle time in clock cycles before an XADC conversion starts.
+    // The analog MUX select changes in S_NEXT/S_IDLE; if the XADC starts the
+    // very next cycle the TIA output has not settled and the first (and after
+    // every index advance) code is wrong. ~50 cycles = 500 ns at 100 MHz, a
+    // conservative settle for a CMOS analog MUX + TIA front-end.
+    parameter MUX_SETTLE = 50
 ) (
     input             clk,
     input             reset,
@@ -58,17 +69,19 @@ module photodetector_readout #(
 
     // FSM
     localparam [2:0] S_IDLE     = 3'd0;
-    localparam [2:0] S_START    = 3'd1;   // assert xadc_start
-    localparam [2:0] S_WAIT     = 3'd2;   // wait for XADC busy to rise then fall
-    localparam [2:0] S_CAPTURE  = 3'd3;   // capture xadc_data, raise code_valid
-    localparam [2:0] S_WAIT_ACK = 3'd4;   // hold code_valid until consumer acks
-    localparam [2:0] S_NEXT     = 3'd5;   // advance sweep index
+    localparam [2:0] S_SETTLE   = 3'd1;   // let MUX + TIA settle after mux_sel change
+    localparam [2:0] S_START    = 3'd2;   // assert xadc_start
+    localparam [2:0] S_WAIT     = 3'd3;   // wait for XADC busy to rise then fall
+    localparam [2:0] S_CAPTURE  = 3'd4;   // capture xadc_data, raise code_valid
+    localparam [2:0] S_WAIT_ACK = 3'd5;   // hold code_valid until consumer acks
+    localparam [2:0] S_NEXT     = 3'd6;   // advance sweep index
 
     reg [2:0]  state;
     reg [5:0]  idx;            // sweep index (read_all)
     reg        sweep;           // 1 = read_all sweep, 0 = read_one
     reg        busy_seen;       // XADC busy asserted this conversion (race fix)
     reg [31:0] mod_cnt;
+    reg [9:0]  settle_cnt;      // MUX/TIA settle countdown (MUX_SETTLE cycles)
 
     initial begin
         state      = S_IDLE;
@@ -84,6 +97,7 @@ module photodetector_readout #(
         xadc_start = 1'b0;
         mod_sync   = 1'b0;
         mod_cnt    = 32'd0;
+        settle_cnt = 10'd0;
     end
 
     // 1 kHz lock-in modulation reference
@@ -121,17 +135,30 @@ module photodetector_readout #(
             case (state)
                 S_IDLE: begin
                     if (read_one) begin
-                        sweep    <= 1'b0;
-                        idx      <= site;
-                        mux_sel  <= site;
-                        busy     <= 1'b1;
-                        state    <= S_START;
+                        sweep      <= 1'b0;
+                        idx        <= site;
+                        mux_sel    <= site;
+                        busy       <= 1'b1;
+                        settle_cnt <= MUX_SETTLE;
+                        state      <= S_SETTLE;
                     end else if (read_all) begin
-                        sweep    <= 1'b1;
-                        idx      <= 6'd0;
-                        mux_sel  <= 6'd0;
-                        busy     <= 1'b1;
-                        state    <= S_START;
+                        sweep      <= 1'b1;
+                        idx        <= 6'd0;
+                        mux_sel    <= 6'd0;
+                        busy       <= 1'b1;
+                        settle_cnt <= MUX_SETTLE;
+                        state      <= S_SETTLE;
+                    end
+                end
+
+                S_SETTLE: begin
+                    // MUX select changed this cycle (or last); let the analog
+                    // MUX + TIA output settle before starting the XADC, otherwise
+                    // the conversion samples a still-moving voltage.
+                    if (settle_cnt >= MUX_SETTLE) begin
+                        state <= S_START;
+                    end else begin
+                        settle_cnt <= settle_cnt + 10'd1;
                     end
                 end
 
@@ -174,9 +201,10 @@ module photodetector_readout #(
                         busy       <= 1'b0;
                         state      <= S_IDLE;
                     end else begin
-                        idx     <= idx + 6'd1;
-                        mux_sel <= idx + 6'd1;
-                        state   <= S_START;
+                        idx        <= idx + 6'd1;
+                        mux_sel    <= idx + 6'd1;
+                        settle_cnt <= 10'd0;
+                        state      <= S_SETTLE;   // settle before next conversion
                     end
                 end
 

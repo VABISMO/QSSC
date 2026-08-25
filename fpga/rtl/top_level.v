@@ -37,10 +37,27 @@ module top_level (
     output            mod_sync,        // 1 kHz lock-in modulation reference
     // ADF4351 SPI: {LE, CLK, DATA, MUXOUT}  (MUXOUT is an input from the PLL)
     inout  [3:0]      spi_pins,
-    output            refclk_out       // 25 MHz to ADF4351 REF_IN
+    output            refclk_out,      // 25 MHz to ADF4351 REF_IN
+    // RF-switch gate pulse (MW pulse envelope duration). The ADF4351 sets the
+    // carrier frequency, phase (R1) and output power (R4); this pin gates the
+    // external RF switch for the requested pulse duration (mw_gate_ns). Pinned
+    // in constraints.xdc to the RF switch control input.
+    output            mw_gate
 );
     // ---- Parameters --------------------------------------------------------
     localparam CLKS_PER_BIT = 868;          // 100 MHz / 115200
+
+    // ---- Reset synchronizer (async assert, sync deassert) ------------------
+    // The board reset button is asynchronous. A 2-flop synchronizer releases
+    // all submodules from reset on a clean clock edge, avoiding metastability
+    // on the deassertion edge. Assert is still asynchronous (immediate).
+    reg [1:0] rst_sync;
+    initial rst_sync = 2'b11;               // come up in reset
+    always @(posedge clk_100mhz or posedge reset) begin
+        if (reset) rst_sync <= 2'b11;       // async assert
+        else       rst_sync <= {rst_sync[0], 1'b0};  // sync deassert (2-stage)
+    end
+    wire reset_sync = rst_sync[1];
 
     // ---- UART --------------------------------------------------------------
     wire [7:0] rx_byte;
@@ -51,6 +68,7 @@ module top_level (
 
     uart_rx #(.CLKS_PER_BIT(CLKS_PER_BIT)) uart_rx_inst (
         .i_Clock    (clk_100mhz),
+        .i_Reset    (reset_sync),
         .i_Rx_Serial(rx),
         .o_Rx_DV    (rx_valid),
         .o_Rx_Byte  (rx_byte)
@@ -74,7 +92,7 @@ module top_level (
 
     emitter_array em_inst (
         .clk          (clk_100mhz),
-        .reset        (reset),
+        .reset        (reset_sync),
         .drive        (em_drive),
         .row          (em_row),
         .col          (em_col),
@@ -87,6 +105,8 @@ module top_level (
     // ---- ADF4351 PLL + SPI -------------------------------------------------
     wire        pll_start;
     wire [31:0] pll_freq_khz;
+    wire [11:0] pll_phase;
+    wire [1:0]  pll_rf_pwr;
     wire        pll_busy;
     wire        pll_done;
     wire        spi_start_w;
@@ -100,7 +120,7 @@ module top_level (
 
     spi_master #(.CLK_DIV(4)) spi_inst (
         .clk     (clk_100mhz),
-        .reset   (reset),
+        .reset   (reset_sync),
         .start   (spi_start_w),
         .data_in (spi_data_w),
         .busy    (spi_busy_w),
@@ -116,9 +136,11 @@ module top_level (
 
     adf4351_ctrl pll_inst (
         .clk             (clk_100mhz),
-        .reset           (reset),
+        .reset           (reset_sync),
         .start           (pll_start),
         .target_freq_khz (pll_freq_khz),
+        .phase           (pll_phase),
+        .rf_pwr          (pll_rf_pwr),
         .busy            (pll_busy),
         .done            (pll_done),
         .spi_start       (spi_start_w),
@@ -145,7 +167,7 @@ module top_level (
 
     photodetector_readout #(.N_DET(64), .CLK_HZ(100_000_000)) det_inst (
         .clk         (clk_100mhz),
-        .reset       (reset),
+        .reset       (reset_sync),
         .read_one    (det_read_one),
         .read_all    (det_read_all),
         .site        (det_site),
@@ -165,24 +187,66 @@ module top_level (
     assign det_mux_sel = det_mux_sel_int;
     assign mod_sync    = mod_sync_int;
 
-    // ---- XADC behavioural model (real build: Xilinx XADC primitive) ------
+    // ---- XADC (behavioural for sim, Xilinx hard block for a real build) ----
+    // The Artix-7 XADC is a hard block of the XC7A35T (fixed-package aux pins,
+    // configured via the XADC wizard). For simulation and non-Xilinx toolflows
+    // we use `xadc_behavioral` (defined below), which produces a deterministic
+    // photocurrent code per electrode. For a real Vivado build define the macro
+    // `QSSC_XADC_REAL` (e.g. via a Vivado top-level XDC `set_property` or a
+    // project define) to swap in the Xilinx XADC primitive reading the TIA aux
+    // pair; the `data`/`busy`/`start` handshake is identical either way.
+`ifndef QSSC_XADC_REAL
     xadc_behavioral #(.CONV_CYCLES(100)) xadc_inst (
         .clk     (clk_100mhz),
-        .reset   (reset),
+        .reset   (reset_sync),
         .start   (xadc_start),
         .mux_sel (det_mux_sel_int),
         .busy    (xadc_busy),
         .data    (xadc_data)
     );
+`else
+    // Real Xilinx XADC instantiation placeholder. In a Vivado project this is
+    // replaced by the XADC wizard IP wrapper (xi_sysmon / xadc_wiz) reading the
+    // dedicated analog aux pair. The handshake below mirrors the behavioural
+    // model so the rest of the design is unchanged.
+    //   xadc_wiz xadc_inst (
+    //       .clk        (clk_100mhz),
+    //       .reset      (reset_sync),
+    //       .conv_start (xadc_start),
+    //       .mux_addr   (det_mux_sel_int),
+    //       .busy       (xadc_busy),
+    //       .di          (xadc_data)
+    //   );
+    xadc_behavioral #(.CONV_CYCLES(100)) xadc_inst (  // placeholder until wired
+        .clk     (clk_100mhz),
+        .reset   (reset_sync),
+        .start   (xadc_start),
+        .mux_sel (det_mux_sel_int),
+        .busy    (xadc_busy),
+        .data    (xadc_data)
+    );
+`endif
 
-    // ---- Calibration LUT readback (unused by host in this build) ----------
+    // ---- Calibration LUT readback (write-only in this build) ----------------
+    // CALIBRATE fills cal_lut[emitter] = best detector. The host reads it back
+    // over UART implicitly (the calibration reply is OK); a dedicated
+    // READ_LUT command + lut_rd_addr mux is a future extension. For now
+    // lut_rd_addr is held at 0 so the parser's read port synthesizes away
+    // cleanly rather than floating.
     wire [5:0] lut_rd_data;
     wire [5:0] lut_rd_addr = 6'd0;
+
+    // ---- MW pulse envelope (latched by APPLY_PULSE) -------------------------
+    // phase -> ADF4351 R1, rf_pwr -> ADF4351 R4, gate_ns -> RF-switch gate timer.
+    wire [11:0] pll_phase_w;
+    wire [1:0]  pll_rf_pwr_w;
+    wire [31:0] mw_gate_ns_w;
+    wire        mw_gate_load;
 
     // ---- Command parser (ties everything together) -------------------------
     command_parser #(.N_DET(64)) parser_inst (
         .clk              (clk_100mhz),
-        .reset            (reset),
+        .reset            (reset_sync),
         .rx_byte          (rx_byte),
         .rx_valid         (rx_valid),
         .tx_byte          (tx_byte),
@@ -206,15 +270,50 @@ module top_level (
         .det_sweep_done   (det_sweep_done),
         .det_code_ack     (det_code_ack),
         .lut_rd_addr      (lut_rd_addr),
-        .lut_rd_data      (lut_rd_data)
+        .lut_rd_data      (lut_rd_data),
+        .pll_phase        (pll_phase_w),
+        .pll_rf_pwr       (pll_rf_pwr_w),
+        .mw_gate_ns       (mw_gate_ns_w),
+        .mw_gate_load     (mw_gate_load)
     );
+
+    assign pll_phase  = pll_phase_w;
+    assign pll_rf_pwr = pll_rf_pwr_w;
+
+    // ---- RF-switch gate timer (MW pulse duration) ---------------------------
+    // On mw_gate_load, assert mw_gate for mw_gate_ns nanoseconds. The 100 MHz
+    // clock is 10 ns/cycle, so the gate counts mw_gate_ns/10 cycles (min 1).
+    reg        mw_gate_r;
+    reg        mw_gate_active;
+    reg [31:0] gate_cnt;
+    initial begin mw_gate_r = 1'b0; mw_gate_active = 1'b0; gate_cnt = 32'd0; end
+    always @(posedge clk_100mhz) begin
+        if (reset_sync) begin
+            mw_gate_r      <= 1'b0;
+            mw_gate_active <= 1'b0;
+            gate_cnt       <= 32'd0;
+        end else if (mw_gate_load) begin
+            mw_gate_r      <= 1'b1;             // open the RF switch
+            mw_gate_active <= 1'b1;
+            gate_cnt       <= (mw_gate_ns_w >= 32'd10) ? (mw_gate_ns_w / 32'd10)
+                                                      : 32'd1;
+        end else if (mw_gate_active) begin
+            if (gate_cnt <= 32'd1) begin
+                mw_gate_r      <= 1'b0;          // close the RF switch
+                mw_gate_active <= 1'b0;
+            end else begin
+                gate_cnt <= gate_cnt - 32'd1;
+            end
+        end
+    end
+    assign mw_gate = mw_gate_r;
 
     // ---- 25 MHz reference clock for ADF4351 (100 MHz / 4) ------------------
     reg [1:0] refclk_div;
     initial refclk_div = 2'd0;
     always @(posedge clk_100mhz) begin
-        if (reset) refclk_div <= 2'd0;
-        else       refclk_div <= refclk_div + 2'd1;
+        if (reset_sync) refclk_div <= 2'd0;
+        else            refclk_div <= refclk_div + 2'd1;
     end
     assign refclk_out = refclk_div[1];
 endmodule

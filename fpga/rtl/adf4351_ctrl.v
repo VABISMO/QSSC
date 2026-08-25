@@ -32,6 +32,8 @@ module adf4351_ctrl (
     input             reset,
     input             start,          // pulse to (re)program the PLL
     input      [31:0] target_freq_khz,// desired RF output in kHz
+    input      [11:0] phase,          // R1 PHASE value (carrier phase adjust)
+    input      [1:0]  rf_pwr,         // R4 RF_PWR (4 output-power levels)
     output            busy,
     output            done,
     // SPI master interface
@@ -58,6 +60,8 @@ module adf4351_ctrl (
     reg [2:0]  rf_div_sel;       // 0=/1 ... 6=/64
     reg [15:0] int_n;            // integer divider
     reg [15:0] frac_n;           // fractional numerator (0..MOD-1)
+    reg [11:0] phase_r;          // registered R1 PHASE (sampled on start)
+    reg [1:0]  rf_pwr_r;         // registered R4 RF_PWR (sampled on start)
 
     // ---- Sequencer ----------------------------------------------------------
     localparam [3:0] ST_IDLE  = 4'd0;
@@ -81,6 +85,7 @@ module adf4351_ctrl (
         r0=0; r1=0; r2=0; r3=0; r4=0; r5=0;
         r0_r=0; r1_r=0; r2_r=0; r3_r=0; r4_r=0; r5_r=0;
         tgt_reg=0; vco_khz=0; rf_div_sel=0; int_n=0; frac_n=0;
+        phase_r=0; rf_pwr_r=2'd3;
     end
 
     assign busy = (state != ST_IDLE);
@@ -118,8 +123,15 @@ module adf4351_ctrl (
 
         // R0: INT(30:15) | FRAC(14:3) | addr 000
         r0 = {1'b0, int_n[15:0], frac_calc[11:0], 3'b000};
-        // R1: PHASE_ADJ=0, PRESCALER=0 (4/5), PHASE=1, MOD=125, addr 001
-        r1 = {3'b000, 1'b0, 1'b0, 12'd1, MOD[11:0], 3'b001};
+        // R1: PHASE_ADJ=0, PRESCALER=1 (8/9), PHASE=phase_r, MOD=125, addr 001.
+        //   PHASE comes from the APPLY_PULSE phase arg (the PLL's phase-adjust
+        //   register is the FPGA's mechanism for setting pulse phase). The 4/5
+        //   prescaler (PR1=0) is only valid to RF 3.6 GHz, but this design targets
+        //   the full VCO range 2.2-4.4 GHz; 8/9 (PR1=1) covers all of it. With
+        //   fPFD=25 MHz, INT = VCO/25 >= 2200/25 = 88 >= N_MIN(75) for 8/9, so the
+        //   8/9 prescaler is valid for every frequency this block produces.
+        //   (4/5 would silently misprogram any target in the 3.6-4.4 GHz band.)
+        r1 = {3'b000, 1'b0, 1'b1, phase_r, MOD[11:0], 3'b001};
         // R2: noise=00(low), MUXOUT=001(digital lock detect), doubler=0,
         //     rdiv2=0, R=1, dbl_buf=0, CP=7(~2.19mA), LDF=1(int-N),
         //     LDP=0, PD_POL=1, PD=0, CP3ST=0, CNT_RST=0, addr 010
@@ -128,9 +140,10 @@ module adf4351_ctrl (
         // R3: BSC=0, ABP=0, CC=0, CSR=0, CLKDIV_MODE=00, CLKDIV=0, DB3=0, addr 011
         r3 = {8'd0, 1'b0, 1'b0, 1'b0, 2'b00, 1'b0, 2'b00, 12'd0, 1'b0, 3'b011};
         // R4: FBK=0(divided), RF_DIV=divsel, BAND_SEL=200, VCO_PD=0,
-        //     MTLD=1, AUX_SEL=0, AUX_EN=0, AUX_PWR=0, RF_EN=1, RF_PWR=3(+5dBm)
+        //     MTLD=1, AUX_SEL=0, AUX_EN=0, AUX_PWR=0, RF_EN=1, RF_PWR=rf_pwr_r
+        //     (4 levels, set by the APPLY_PULSE amplitude arg)
         r4 = {8'd0, 1'b0, divsel, 8'd200, 1'b0, 1'b1, 1'b0, 1'b0,
-              2'b00, 1'b1, 2'b11, 3'b100};
+              2'b00, 1'b1, rf_pwr_r, 3'b100};
         // R5: LD_PIN=01(digital lock detect), reserved bits 0, addr 101
         r5 = {8'd0, 2'b01, 19'd0, 3'b101};
     end
@@ -144,13 +157,17 @@ module adf4351_ctrl (
             gap_cnt   <= 16'd0;
             done_reg  <= 1'b0;
             tgt_reg   <= 32'd0;
+            phase_r  <= 12'd0;
+            rf_pwr_r <= 2'd3;
         end else begin
             done_reg  <= 1'b0;
             spi_start <= 1'b0;     // default pulse
             case (state)
                 ST_IDLE : begin
                     if (start) begin
-                        tgt_reg <= target_freq_khz;  // sample input once
+                        tgt_reg  <= target_freq_khz;  // sample input once
+                        phase_r <= phase;            // sample R1 PHASE
+                        rf_pwr_r <= rf_pwr;           // sample R4 RF_PWR
                         reg_idx <= 3'd5;             // program R5 first
                         state  <= ST_CALC;
                     end

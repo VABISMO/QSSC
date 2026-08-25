@@ -11,6 +11,7 @@ module uart_rx #(
     parameter CLKS_PER_BIT = 868      // 100 MHz / 115200 ~= 868
 ) (
     input        i_Clock,
+    input        i_Reset,        // active-high synchronous reset (from top_level)
     input        i_Rx_Serial,
     output       o_Rx_DV,
     output [7:0] o_Rx_Byte
@@ -41,13 +42,24 @@ module uart_rx #(
 
     // Two-stage input synchronizer / edge filter.
     always @(posedge i_Clock) begin
-        r_Rx_Data_R <= i_Rx_Serial;
-        r_Rx_Data   <= r_Rx_Data_R;
+        if (i_Reset) begin
+            r_Rx_Data_R <= 1'b1;
+            r_Rx_Data   <= 1'b1;
+        end else begin
+            r_Rx_Data_R <= i_Rx_Serial;
+            r_Rx_Data   <= r_Rx_Data_R;
+        end
     end
 
     // Receive state machine.
     always @(posedge i_Clock) begin
-        case (r_SM_Main)
+        if (i_Reset) begin
+            r_SM_Main     <= s_IDLE;
+            r_Clock_Count <= 16'd0;
+            r_Bit_Index   <= 3'd0;
+            r_Rx_Byte     <= 8'd0;
+            r_Rx_DV       <= 1'b0;
+        end else case (r_SM_Main)
             s_IDLE : begin
                 r_Rx_DV       <= 1'b0;
                 r_Clock_Count <= 16'd0;

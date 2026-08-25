@@ -91,6 +91,16 @@ set_property IOSTANDARD LVCMOS33 [get_ports mod_sync]
 set_property SLEW SLOW [get_ports mod_sync]
 set_property DRIVE 8   [get_ports mod_sync]
 
+# ---- MW RF-switch gate pulse (APPLY_PULSE duration) ------------------------
+# Gates the external RF switch between the ADF4351 output and the antenna for
+# the requested pulse duration (mw_gate_ns). The ADF4351 sets carrier phase
+# (R1) + output power (R4); this pin times the pulse. Reuses a freed OV7670
+# pixel-data pin. Verify the pin on the schematic before routing.
+set_property PACKAGE_PIN E16  [get_ports mw_gate]
+set_property IOSTANDARD LVCMOS33 [get_ports mw_gate]
+set_property SLEW FAST [get_ports mw_gate]
+set_property DRIVE 8   [get_ports mw_gate]
+
 # ---- Artix-7 XADC (12-bit, up to 1 MSPS) ------------------------------------
 # The XADC is a hard block of the XC7A35T-1CPG236C. Its analog aux input pair
 # (VauxP0 / VauxN0 on the CPG236 package) and the analog supply pins

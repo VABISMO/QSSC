@@ -58,7 +58,16 @@ module command_parser #(
     output reg        det_code_ack,   // latched the code; advance the sweep
     // Calibration LUT readback (emitter pixel -> detector electrode)
     input      [5:0]  lut_rd_addr,
-    output     [5:0]  lut_rd_data
+    output     [5:0]  lut_rd_data,
+    // MW pulse envelope. The FPGA does NOT shape an analog amplitude/phase
+    // envelope (a real AWG/modulator does that); it sets the ADF4351 carrier
+    // phase (R1 PHASE) and output power (R4 RF_PWR, 4 levels), and gates an
+    // RF switch for the requested duration (mw_gate_ns -> mw_gate_load). This
+    // is the minimal honest FPGA MW path. Latched on APPLY_PULSE.
+    output reg [11:0] pll_phase,     // -> ADF4351 R1 PHASE
+    output reg [1:0]  pll_rf_pwr,    // -> ADF4351 R4 RF_PWR (4 levels)
+    output reg [31:0] mw_gate_ns,    // -> RF-switch gate timer (duration, ns)
+    output reg        mw_gate_load   // 1-cycle pulse: arm the RF-switch gate
 );
     // ---- Command IDs -------------------------------------------------------
     localparam [2:0] CMD_DRIVE     = 3'd0;   // DRIVE_EMITTER (3 args)
@@ -84,6 +93,7 @@ module command_parser #(
     localparam [3:0] S_CAL_READ      = 4'd12;  // calibrate: trigger read_all
     localparam [3:0] S_CAL_WAIT_CODE = 4'd13;  // calibrate: capture max code
     localparam [3:0] S_CAL_STORE     = 4'd14;  // calibrate: store LUT, next pixel
+    localparam [3:0] S_PULSE_WAIT     = 4'd15;  // APPLY_PULSE: wait PLL done, arm gate
 
     // ---- Line buffer ------------------------------------------------------
     reg [7:0] cmd_buffer [0:63];
@@ -116,6 +126,9 @@ module command_parser #(
 
     // ---- Read-one / read-all mode flag ------------------------------------
     reg        read_all_mode;
+
+    // ---- APPLY_PULSE: wait for the PLL to finish programming --------------
+    reg        pll_busy_seen;
 
     // ---- Calibration helpers ----------------------------------------------
     reg [11:0] cal_max_code;
@@ -201,6 +214,11 @@ module command_parser #(
         txst           = 2'd0;
         tx_byte        = 8'd0;
         tx_start       = 1'b0;
+        pll_phase      = 12'd0;
+        pll_rf_pwr     = 2'd0;
+        mw_gate_ns     = 32'd0;
+        mw_gate_load   = 1'b0;
+        pll_busy_seen  = 1'b0;
         for (k = 0; k < 64; k = k + 1) cal_lut[k] = 6'd0;
     end
 
@@ -263,6 +281,11 @@ module command_parser #(
             det_site       <= 6'd0;
             det_code_ack   <= 1'b0;
             code_latch     <= 12'd0;
+            pll_phase      <= 12'd0;
+            pll_rf_pwr     <= 2'd0;
+            mw_gate_ns     <= 32'd0;
+            mw_gate_load   <= 1'b0;
+            pll_busy_seen  <= 1'b0;
             tx_load        <= 1'b0;
             tx_din         <= 8'd0;
         end else begin
@@ -273,6 +296,7 @@ module command_parser #(
             det_read_one   <= 1'b0;
             det_read_all   <= 1'b0;
             det_code_ack   <= 1'b0;
+            mw_gate_load   <= 1'b0;
 
             // Line accumulation only while idle and no line pending.
             if (fsm == S_IDLE && !line_ready && rx_valid) begin
@@ -419,24 +443,59 @@ module command_parser #(
                     buf_idx    <= 7'd0;
                     case (cmd_id)
                         CMD_DRIVE : begin
-                            em_row         <= arg_vals[0][2:0];
-                            em_col         <= arg_vals[1][2:0];
-                            em_duration_ms <= arg_vals[2];
-                            em_drive       <= 1'b1;
-                            reply_ok       <= 1'b1;
-                            fsm            <= S_REPLY_LOAD;
+                            // row/col must be 0..7; duration_ms must be >= 0.
+                            // Out-of-range args used to silently wrap ([2:0]),
+                            // driving an unintended pixel; now reply ERR.
+                            if ($signed(arg_vals[0]) < 0 || $signed(arg_vals[0]) > 7 ||
+                                $signed(arg_vals[1]) < 0 || $signed(arg_vals[1]) > 7 ||
+                                $signed(arg_vals[2]) < 0) begin
+                                reply_ok <= 1'b0;            // ERR
+                                fsm      <= S_REPLY_LOAD;
+                            end else begin
+                                em_row         <= arg_vals[0][2:0];
+                                em_col         <= arg_vals[1][2:0];
+                                em_duration_ms <= arg_vals[2];
+                                em_drive       <= 1'b1;
+                                reply_ok       <= 1'b1;
+                                fsm            <= S_REPLY_LOAD;
+                            end
                         end
                         CMD_PULSE : begin
-                            pll_freq_khz <= arg_vals[1];
-                            pll_start    <= 1'b1;
-                            reply_ok     <= 1'b1;
-                            fsm          <= S_REPLY_LOAD;
+                            // qubit 0..N_DET-1, freq_khz > 0, amp/duration >= 0.
+                            // The ADF4351 takes the carrier frequency (arg 1),
+                            // the pulse phase (arg 4 -> R1 PHASE) and a coarse
+                            // output power (arg 2 -> R4 RF_PWR, 4 levels). The
+                            // pulse duration (arg 3, ns) gates an RF switch via
+                            // the mw_gate timer in top_level, armed once the PLL
+                            // has finished programming the carrier. Reject
+                            // negative / out-of-range args with ERR.
+                            if ($signed(arg_vals[0]) < 0 || $signed(arg_vals[0]) >= N_DET ||
+                                $signed(arg_vals[1]) <= 0 ||
+                                $signed(arg_vals[2]) < 0 ||
+                                $signed(arg_vals[3]) < 0) begin
+                                reply_ok <= 1'b0;            // ERR
+                                fsm      <= S_REPLY_LOAD;
+                            end else begin
+                                pll_freq_khz <= arg_vals[1];
+                                pll_phase    <= arg_vals[4][11:0];  // -> R1 PHASE
+                                pll_rf_pwr   <= arg_vals[2][1:0];   // -> R4 RF_PWR
+                                mw_gate_ns   <= arg_vals[3];       // -> gate timer
+                                pll_start    <= 1'b1;
+                                pll_busy_seen <= 1'b0;
+                                fsm          <= S_PULSE_WAIT;     // wait PLL, then gate
+                            end
                         end
                         CMD_READ_ONE : begin
-                            det_site      <= arg_vals[0][5:0];
-                            det_read_one  <= 1'b1;
-                            read_all_mode <= 1'b0;
-                            fsm           <= S_RONE_WAIT;
+                            // site must be 0..N_DET-1; used to wrap via [5:0].
+                            if ($signed(arg_vals[0]) < 0 || $signed(arg_vals[0]) >= N_DET) begin
+                                reply_ok <= 1'b0;            // ERR
+                                fsm      <= S_REPLY_LOAD;
+                            end else begin
+                                det_site      <= arg_vals[0][5:0];
+                                det_read_one  <= 1'b1;
+                                read_all_mode <= 1'b0;
+                                fsm           <= S_RONE_WAIT;
+                            end
                         end
                         CMD_READ_ALL : begin
                             det_read_all  <= 1'b1;
@@ -546,12 +605,16 @@ module command_parser #(
                 end
 
                 S_CAL_READ : begin
-                    // read_all pulse already issued; watch the code stream
+                    // read_all stream is in flight; capture the brightest
+                    // electrode for this emitter pixel and ACK each code so the
+                    // photodetector advances the sweep. Without the ack the
+                    // controller stalls in S_WAIT_ACK and CALIBRATE hangs forever.
                     if (det_code_valid) begin
                         if (det_code > cal_max_code) begin
                             cal_max_code <= det_code;
                             cal_max_det  <= det_code_idx;
                         end
+                        det_code_ack <= 1'b1;   // release this code, next electrode
                     end
                     if (det_sweep_done) begin
                         fsm <= S_CAL_STORE;
@@ -566,6 +629,19 @@ module command_parser #(
                     end else begin
                         cal_em <= cal_em + 6'd1;
                         fsm    <= S_CAL_DRIVE;
+                    end
+                end
+
+                // ---- APPLY_PULSE: wait for the PLL to finish programming the
+                // carrier, then arm the RF-switch gate for the requested
+                // duration and reply OK. Gating only after the PLL is idle means
+                // the RF switch does not open onto a still-unlocked carrier.
+                S_PULSE_WAIT : begin
+                    if (pll_busy)        pll_busy_seen <= 1'b1;
+                    if (pll_busy_seen && !pll_busy) begin
+                        mw_gate_load <= 1'b1;
+                        reply_ok     <= 1'b1;
+                        fsm          <= S_REPLY_LOAD;
                     end
                 end
 
