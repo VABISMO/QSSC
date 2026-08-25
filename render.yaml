@@ -16,3 +16,13 @@ services:
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
+      # Narrow CORS to the dashboard origin (the GitHub Pages site). Comma-list
+      # if you serve the dashboard from more than one origin. Leave as "*" only
+      # for local dev. Override at deploy time if the Pages URL changes.
+      - key: QSSC_CORS_ORIGINS
+        value: https://vabismo.github.io
+      # Keep the custom-circuit endpoint functional (capped at 12 qubits /
+      # 4096 shots by the request models). Set to "0" to hard-disable it on a
+      # hardened public deploy; set QSSC_CUSTOM_API_KEY to require an X-API-Key.
+      - key: QSSC_ENABLE_CUSTOM_CIRCUIT
+        value: "1"

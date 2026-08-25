@@ -8,12 +8,15 @@ protocol as a small REST API consumed by the React frontend.  Run with:
 """
 from __future__ import annotations
 
+import os
+import time
+from collections import defaultdict, deque
 from typing import Optional
 
 import numpy as np
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from qssc import (
     get_profile, coherence_at_temperature,
@@ -25,6 +28,33 @@ from qssc.protocol import (
 )
 from api import jobs
 
+# ---------------------------------------------------------------------------
+# Deploy configuration (env-driven). Defaults keep the API functional for a
+# local lab / demo; a public deploy should narrow these (see render.yaml).
+# ---------------------------------------------------------------------------
+# The custom-circuit endpoint execs user-supplied Qiskit code behind an AST
+# sandbox that is intentionally documented as non-absolute. Keep it enabled
+# locally; disable on hardened public deploys with QSSC_ENABLE_CUSTOM_CIRCUIT=0.
+CUSTOM_CIRCUIT_ENABLED = os.getenv("QSSC_ENABLE_CUSTOM_CIRCUIT", "1").lower() in (
+    "1", "true", "yes",
+)
+# Optional shared secret gating the custom-circuit endpoint. If set, clients
+# must send `X-API-Key: <key>`; if unset the endpoint is open (subject to the
+# flag above and the resource caps in the request models).
+CUSTOM_CIRCUIT_API_KEY = os.getenv("QSSC_CUSTOM_API_KEY", "").strip()
+# Allow ?sync=true from non-localhost (it runs the circuit in the request
+# thread and blocks the single uvicorn worker on a free-tier host). Off by
+# default: sync stays available to localhost / tests only.
+ALLOW_SYNC_REMOTE = os.getenv("QSSC_ALLOW_SYNC", "").lower() in ("1", "true", "yes")
+# CORS origins, comma-separated. "*" by default for local dev; a public deploy
+# sets QSSC_CORS_ORIGINS to the dashboard origin (e.g. https://vabismo.github.io).
+_cors_env = os.getenv("QSSC_CORS_ORIGINS", "*").strip()
+CORS_ORIGINS = [o.strip() for o in _cors_env.split(",") if o.strip()] or ["*"]
+# Simple per-IP rate limit on the expensive circuit endpoints. In-memory, so
+# per-worker (Render free runs a single worker). Caps flooding, not a guarantee.
+RATE_LIMIT_PER_MIN = int(os.getenv("QSSC_RATE_LIMIT_PER_MIN", "20"))
+_rate_buckets: dict[str, deque[float]] = defaultdict(deque)
+
 app = FastAPI(
     title="QSSC — Quantum Solid State Chip (room temperature)",
     version="2.0.0",
@@ -33,7 +63,7 @@ app = FastAPI(
                 "CQD emitter + graphene detector readout, no camera).",
 )
 app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
+    CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -45,40 +75,43 @@ app.add_middleware(
 class RunRequest(BaseModel):
     algorithm: str = "shor"          # shor | period | bell | grover | math
     profile: str = "NV"
-    temperature_k: float = 300.0
-    shots: int = 2048
-    seed: int = 42
+    temperature_k: float = Field(300.0, ge=0.001, le=600)
+    shots: int = Field(2048, ge=1, le=8192)
+    seed: int = Field(42, ge=0, le=2_147_483_647)
     noise_mode: str = "real"   # real (default, full physics) | phenomenological | none
     # algorithm-specific
-    n: int = 15                      # shor / period
+    n: int = Field(15, ge=2, le=100_000)            # shor / period
     a: Optional[int] = None          # base (auto if None)
     b: Optional[int] = None          # math operand b (mapped to num2)
     bits: Optional[int] = None       # math word size (accepted, derived if None)
     op: str = "add"                  # math op
     num1: float = 2.0
     num2: Optional[float] = None
-    num_qubits: int = 2              # bell / qft / qrand
+    num_qubits: int = Field(2, ge=1, le=12)         # bell / qft / qrand
     n_items: Optional[int] = None    # grover: search space = 2^n_items
     marked: Optional[int] = None     # grover: marked index
-    iterations: int = 1              # grover
+    iterations: int = Field(1, ge=1, le=100)        # grover
     # qft
     x: int = 1                       # qft: input computational-basis state |x>
     # qrand (quantum RNG -> cryptographic key + self-signed cert)
-    num_bytes: int = 32              # qrand: key size in bytes (16..64)
+    num_bytes: int = Field(32, ge=1, le=64)        # qrand: key size in bytes
     common_name: str = "QSSC-quantum-device"  # qrand: certificate CN
     # bb84 quantum key distribution
-    num_bits: int = 128             # bb84: number of qubits/rounds to exchange
+    num_bits: int = Field(128, ge=1, le=2048)      # bb84: qubits/rounds to exchange
     eavesdrop: bool = False         # bb84: simulate intercept-resend Eve
 
 
 class CustomCircuitRequest(BaseModel):
     code: str                        # OpenQASM 2 or Python snippet (defines `qc`)
     profile: str = "NV"
-    temperature_k: float = 300.0
-    shots: int = 2048
-    seed: int = 42
+    temperature_k: float = Field(300.0, ge=0.001, le=600)
+    shots: int = Field(2048, ge=1, le=4096)
+    seed: int = Field(42, ge=0, le=2_147_483_647)
     noise_mode: str = "real"   # real (default, full physics) | phenomenological | none
-    max_qubits: int = 64
+    # Cap at 12 qubits: the "real" mode runs a 4^n density matrix (12 qubits
+    # ~ 67 MB; 64 qubits would be ~2^66 bytes = instant OOM on a 512 MB free
+    # tier). Larger user circuits fall back to the analytic decoherence limit.
+    max_qubits: int = Field(12, ge=1, le=12)
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +130,71 @@ def _req_dict(model) -> dict:
     """Pydantic model -> plain dict (dropping unset None noise fields)."""
     d = model.model_dump()
     return {k: v for k, v in d.items() if v is not None}
+
+
+# --- request guards (rate limit, sync, custom-circuit gate) ----------------
+
+def _client_ip(request: Request) -> str:
+    # trust the first hop only when a proxy (Render) sets the header
+    fwd = request.headers.get("x-forwarded-for", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _rate_limited(request: Request) -> bool:
+    """True if the caller exceeded RATE_LIMIT_PER_MIN requests in the last 60s."""
+    now = time.monotonic()
+    bucket = _rate_buckets[_client_ip(request)]
+    bucket.append(now)
+    while bucket and now - bucket[0] > 60.0:
+        bucket.popleft()
+    return len(bucket) > RATE_LIMIT_PER_MIN
+
+
+def _is_local(request: Request) -> bool:
+    # "testclient" is the Starlette TestClient connection host (tests); it is
+    # the connection peer, not a spoofable header, so it is safe to treat as
+    # local. Behind Render's proxy request.client.host is the proxy, so real
+    # public callers are never local here — sync stays blocked for them.
+    return (request.client.host if request.client else "") in (
+        "127.0.0.1", "::1", "localhost", "testclient",
+    )
+
+
+def _check_sync(request: Request, sync: bool) -> None:
+    """Block ?sync=true from non-localhost: it runs in the request thread and
+    blocks the single uvicorn worker on a free-tier host (DoS vector)."""
+    if request is None:
+        return  # programmatic call (no HTTP context) — caller takes responsibility
+    if sync and not _is_local(request) and not ALLOW_SYNC_REMOTE:
+        raise HTTPException(
+            403, "?sync=true is only allowed from localhost on a public deploy "
+                 "(it blocks the single API worker).",
+        )
+
+
+def _check_custom_circuit(request: Request) -> None:
+    """Gate the custom-circuit endpoint: disabled flag + optional API key."""
+    if not CUSTOM_CIRCUIT_ENABLED:
+        raise HTTPException(
+            503, "The custom-circuit endpoint is disabled on this deployment "
+                 "(QSSC_ENABLE_CUSTOM_CIRCUIT=0).",
+        )
+    if CUSTOM_CIRCUIT_API_KEY and request.headers.get("x-api-key", "") != CUSTOM_CIRCUIT_API_KEY:
+        raise HTTPException(
+            401, "A valid X-API-Key header is required for the custom-circuit endpoint.",
+        )
+
+
+def _clamp_points(points: int, lo: int = 1, hi: int = 2000) -> int:
+    """Clamp a resolution/points query param to a safe range (bounds the array
+    allocations behind /api/odmr, /api/signal, /api/calibration/run)."""
+    try:
+        n = int(points)
+    except (TypeError, ValueError):
+        n = lo
+    return max(lo, min(n, hi))
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +239,8 @@ def odmr(profile: str = "NV", b_field: float = 1e-3,
     # adaptive span: wide enough to show the full hyperfine fingerprint
     # (e.g. V_B- 7-line spans +/-3*A), but never narrower than the Zeeman doublet
     span = max(0.08, abs(prof.hyperfine_coupling) / 1e9 * prof.n_equivalent_nuclei * 1.15 + 0.03)
-    freqs = np.linspace(f0 - span, f0 + span, int(points))
+    points = _clamp_points(points)
+    freqs = np.linspace(f0 - span, f0 + span, points)
     f, c = simulate_odmr(prof, freqs, b_field_t=b_field, linewidth_mhz=linewidth)
     dip = float(f[np.argmin(c)])
     return {
@@ -204,10 +303,11 @@ def signal(profile: str = "NV", temperature_k: float = 300.0,
     rng = np.random.default_rng(seed)
     seq = sequence.lower()
     readout_ns = prof.readout_ns
+    points = _clamp_points(points)
     if seq == "odmr":
         # total sweep window a few T2 long
         span_ns = max(8 * t2 * 1e9, 4000)
-        t = np.linspace(0, span_ns, int(points))
+        t = np.linspace(0, span_ns, points)
         d_ghz = prof.d_ghz
         on_res = d_ghz + detuning_mhz / 1e3
         # contrast dips while mw is near resonance, recovers off-resonance
@@ -249,6 +349,8 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
     """
     prof = get_profile(profile)
     rng = np.random.default_rng(seed)
+    grid = max(1, min(int(grid), 16))
+    points = _clamp_points(points)
 
     # Stage 1 — scan the on-chip graphene/MoS2 detector array. Drive every
     # emitter pixel and read the detector response; a site above the lock-in
@@ -315,13 +417,16 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
 
 
 @app.post("/api/circuit/run")
-def run_circuit(req: RunRequest, sync: bool = False):
+def run_circuit(req: RunRequest, sync: bool = False, request: Request = None):
     """Enqueue a demo-algorithm circuit run as an async job (Redis + RQ).
 
     Returns ``{job_id, status}``; poll ``GET /api/jobs/{job_id}`` for the
-    result. Pass ``?sync=true`` to run synchronously in-process (handy for
-    tests / quick CLI use).
+    result. Pass ``?sync=true`` to run synchronously in-process (localhost /
+    tests only on a public deploy).
     """
+    if request is not None and _rate_limited(request):
+        raise HTTPException(429, "Rate limit exceeded — too many circuit requests, slow down.")
+    _check_sync(request, sync)
     payload = _req_dict(req)
     payload.setdefault("noise_mode", "real")
     payload.setdefault("temperature_k", 300.0)
@@ -333,12 +438,20 @@ def run_circuit(req: RunRequest, sync: bool = False):
 
 
 @app.post("/api/circuit/custom")
-def run_custom_circuit(req: CustomCircuitRequest, sync: bool = False):
+def run_custom_circuit(req: CustomCircuitRequest, sync: bool = False,
+                       request: Request = None):
     """Enqueue a user-supplied Qiskit circuit (OpenQASM 2 or Python snippet)
     as an async job. The snippet must build a ``QuantumCircuit`` named ``qc``
     (or ``circuit``) with the restricted primitives in
-    :func:`build_user_circuit`. Local lab / demo tool only.
+    :func:`build_user_circuit`. Local lab / demo tool only — the endpoint is
+    gated by ``QSSC_ENABLE_CUSTOM_CIRCUIT`` and an optional ``X-API-Key``
+    (see the deploy config block at the top of this module).
     """
+    if request is not None:
+        _check_custom_circuit(request)
+        if _rate_limited(request):
+            raise HTTPException(429, "Rate limit exceeded — too many circuit requests, slow down.")
+    _check_sync(request, sync)
     payload = _req_dict(req)
     payload.setdefault("noise_mode", "real")
     payload.setdefault("temperature_k", 300.0)

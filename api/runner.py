@@ -328,7 +328,7 @@ def run_custom(req: dict) -> dict:
     t0 = time.perf_counter()
     try:
         qc = build_user_circuit(req.get("code", ""),
-                                max_qubits=int(req.get("max_qubits", 64)))
+                                max_qubits=int(req.get("max_qubits", 12)))
     except UserCircuitError as exc:
         return {"error": str(exc)}
     profile = req.get("profile", "NV")

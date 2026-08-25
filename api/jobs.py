@@ -20,6 +20,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 
 logger = logging.getLogger("qssc.jobs")
 
@@ -27,6 +28,12 @@ REDIS_URL = "redis://localhost:6379/0"
 MONGO_URL = "mongodb://127.0.0.1:27017/"
 MONGO_DB = "qssc"
 MONGO_COLL = "jobs"
+
+# Hard cap on an in-process job (seconds). Mirrors the rq `job_timeout=300`.
+# A watchdog marks the job failed if it exceeds this, so one runaway job can
+# not hold a fallback worker indefinitely. (Python cannot hard-kill the worker
+# thread, but the request-layer resource caps bound the normal case.)
+JOB_TIMEOUT_S = 300
 
 _redis = None
 _queue = None
@@ -135,7 +142,25 @@ def worker_run_custom(job_id: str, payload: dict) -> dict:
 
 def _run_in_fallback(kind: str, job_id: str, payload: dict):
     fn = worker_run_custom if kind == "custom" else worker_run_circuit
-    _fallback_exec.submit(fn, job_id, payload)
+    future = _fallback_exec.submit(fn, job_id, payload)
+
+    # Watchdog: enforce JOB_TIMEOUT_S so a runaway job cannot hold a fallback
+    # worker forever. The worker thread itself cannot be hard-killed in Python,
+    # but we mark the job failed and unblock the bookkeeping; the request-layer
+    # resource caps (qubits/shots/points) bound the normal-case runtime.
+    def _watch():
+        try:
+            future.result(timeout=JOB_TIMEOUT_S)
+        except FuturesTimeoutError:
+            logger.warning("job %s exceeded %ss in-process timeout", job_id, JOB_TIMEOUT_S)
+            _record(job_id, status="failed", finished_at=_now_ms(),
+                    result={"error": f"job exceeded the {JOB_TIMEOUT_S}s in-process timeout"},
+                    success=False)
+        except Exception:  # noqa: BLE001
+            # the worker already recorded its own failure
+            pass
+
+    threading.Thread(target=_watch, daemon=True).start()
 
 
 # --- public API used by the FastAPI endpoints --------------------------------
