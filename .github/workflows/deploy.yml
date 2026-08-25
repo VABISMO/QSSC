@@ -16,10 +16,18 @@
 name: Deploy
 
 on:
+  # Auto: fires after the CI workflow completes successfully on main (test-gated).
+  # Note: GitHub does NOT always re-emit `workflow_run` when a run is manually
+  # re-run, so for a one-off manual publish use the "Run workflow" button below
+  # (workflow_dispatch) — it deploys the current main regardless of CI state, so
+  # only use it after you have confirmed CI is green.
   workflow_run:
     workflows: ["CI"]
     types: [completed]
     branches: [main]
+  # Manual: Actions tab → "Deploy" → "Run workflow". Use this to (re)publish the
+  # dashboard on demand (e.g. right after switching Pages Source to GitHub Actions).
+  workflow_dispatch:
 
 concurrency:
   group: deploy-${{ github.ref }}
@@ -33,7 +41,8 @@ permissions:
 jobs:
   deploy-frontend:
     name: Frontend → GitHub Pages
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # Run on a manual dispatch, or automatically only when CI succeeded.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -61,7 +70,7 @@ jobs:
 
   deploy-api:
     name: API → Render (deploy hook)
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Render deploy hook (test-gated)
