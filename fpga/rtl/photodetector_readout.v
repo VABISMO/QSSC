@@ -37,9 +37,11 @@ module photodetector_readout #(
 
     // code stream out (one code at a time)
     output reg [11:0] code,           // 12-bit XADC code
-    output reg        code_valid,     // 1-cycle pulse: `code` is valid
+    output reg        code_valid,     // held high until code_ack: `code` is valid
     output reg [5:0]  code_idx,        // which electrode this code belongs to
     output reg        sweep_done,     // 1-cycle pulse: read_all sweep complete
+    // consumer handshake: command_parser latched `code`, advance to the next
+    input             code_ack,
 
     // external analog front-end
     output reg [5:0]  mux_sel,        // analog MUX select (which electrode)
@@ -55,21 +57,24 @@ module photodetector_readout #(
     localparam [31:0] MOD_HALF = (CLK_HZ / 2000);
 
     // FSM
-    localparam [2:0] S_IDLE    = 3'd0;
-    localparam [2:0] S_START   = 3'd1;   // assert xadc_start
-    localparam [2:0] S_WAIT    = 3'd2;   // wait for xadc_busy to deassert
-    localparam [2:0] S_CAPTURE = 3'd3;  // capture xadc_data, emit code_valid
-    localparam [2:0] S_NEXT    = 3'd4;   // advance sweep index
+    localparam [2:0] S_IDLE     = 3'd0;
+    localparam [2:0] S_START    = 3'd1;   // assert xadc_start
+    localparam [2:0] S_WAIT     = 3'd2;   // wait for XADC busy to rise then fall
+    localparam [2:0] S_CAPTURE  = 3'd3;   // capture xadc_data, raise code_valid
+    localparam [2:0] S_WAIT_ACK = 3'd4;   // hold code_valid until consumer acks
+    localparam [2:0] S_NEXT     = 3'd5;   // advance sweep index
 
     reg [2:0]  state;
     reg [5:0]  idx;            // sweep index (read_all)
     reg        sweep;           // 1 = read_all sweep, 0 = read_one
+    reg        busy_seen;       // XADC busy asserted this conversion (race fix)
     reg [31:0] mod_cnt;
 
     initial begin
         state      = S_IDLE;
         idx        = 6'd0;
         sweep      = 1'b0;
+        busy_seen  = 1'b0;
         busy       = 1'b0;
         code       = 12'd0;
         code_valid = 1'b0;
@@ -101,50 +106,66 @@ module photodetector_readout #(
             state      <= S_IDLE;
             idx        <= 6'd0;
             sweep      <= 1'b0;
+            busy_seen  <= 1'b0;
             busy       <= 1'b0;
             code_valid <= 1'b0;
             sweep_done <= 1'b0;
             xadc_start <= 1'b0;
         end else begin
             // default one-cycle pulses
-            code_valid <= 1'b0;
             sweep_done <= 1'b0;
             xadc_start <= 1'b0;
+            // code_valid is HELD (cleared only on ack in S_WAIT_ACK) so the
+            // slow UART consumer can take many cycles to drain each code.
 
             case (state)
                 S_IDLE: begin
                     if (read_one) begin
-                        sweep <= 1'b0;
-                        idx   <= site;
-                        mux_sel <= site;
-                        busy   <= 1'b1;
-                        state  <= S_START;
+                        sweep    <= 1'b0;
+                        idx      <= site;
+                        mux_sel  <= site;
+                        busy     <= 1'b1;
+                        state    <= S_START;
                     end else if (read_all) begin
-                        sweep <= 1'b1;
-                        idx   <= 6'd0;
-                        mux_sel <= 6'd0;
-                        busy   <= 1'b1;
-                        state  <= S_START;
+                        sweep    <= 1'b1;
+                        idx      <= 6'd0;
+                        mux_sel  <= 6'd0;
+                        busy     <= 1'b1;
+                        state    <= S_START;
                     end
                 end
 
                 S_START: begin
-                    xadc_start <= 1'b1;
+                    xadc_start <= 1'b1;          // 1-cycle pulse to the XADC
+                    busy_seen  <= 1'b0;
                     state      <= S_WAIT;
                 end
 
                 S_WAIT: begin
-                    if (!xadc_busy) begin
-                        state <= S_CAPTURE;
-                    end
+                    // Race fix: the XADC asserts `busy` one cycle after `start`.
+                    // Wait until busy has actually risen, THEN until it falls,
+                    // before capturing -- otherwise we read data=0.
+                    if (xadc_busy)        busy_seen <= 1'b1;
+                    if (busy_seen && !xadc_busy) state <= S_CAPTURE;
                 end
 
                 S_CAPTURE: begin
                     code       <= xadc_data;
                     code_idx   <= idx;
-                    code_valid <= 1'b1;
-                    if (sweep) state <= S_NEXT;
-                    else       state <= S_IDLE;   // read_one done
+                    code_valid <= 1'b1;         // held until code_ack
+                    state      <= S_WAIT_ACK;
+                end
+
+                S_WAIT_ACK: begin
+                    // hold the code stable until the consumer latches it
+                    if (code_ack) begin
+                        code_valid <= 1'b0;
+                        if (sweep)  state <= S_NEXT;
+                        else begin
+                            busy  <= 1'b0;      // read_one done
+                            state <= S_IDLE;
+                        end
+                    end
                 end
 
                 S_NEXT: begin
@@ -161,10 +182,6 @@ module photodetector_readout #(
 
                 default: state <= S_IDLE;
             endcase
-
-            // read_one path returns to idle: clear busy
-            if (state == S_IDLE && !read_one && !read_all)
-                busy <= 1'b0;
         end
     end
 endmodule

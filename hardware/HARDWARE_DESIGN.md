@@ -84,6 +84,88 @@ flowchart TD
     Sub -->|"PL 637-800nm + 650nm LP filter"| U6
 ```
 
+### 1A. Supported FPGA boards & programming cable
+
+The RTL in `fpga/rtl/` is **vendor-neutral Verilog** with one Xilinx-specific
+exception: the **XADC** (the hard 12-bit ADC used for detector readout) is a
+Xilinx 7-series hard block. In simulation `xadc_behavioral` stands in for it
+(`top_level.v`); in a real build that module is replaced by the Xilinx XADC
+primitive. Everything else — UART, SPI/ADF4351, emitter crossbar, command
+parser, lock-in — is plain Verilog and ports cleanly. The only other
+board-specific file is **`constraints.xdc`** (pin + IOSTANDARD assignments),
+which is written for the **CPG236** package of the target FPGA.
+
+Consequence: **the same firmware (RTL + software) runs unchanged on any
+Xilinx 7-series FPGA that has an XADC block** — only the `.xdc` pin map is
+re-done per board. Three concrete options, from the design target outward:
+
+| Board | FPGA (package) | XADC | Programming cable | I/O fit | Notes |
+|---|---|---|---|---|---|
+| **Custom QSSC PCB** (this design) | XC7A35T-1**CPG236**C | yes | 6-pin JTAG header then **Xilinx Platform Cable USB II (DLC10)** or **Digilent JTAG-HS3** (FTDI FT2232H); UART via FT232RL USB | full (target pinout) | Use `constraints.xdc` as-is. Vivado Hardware Manager. |
+| **Digilent Arty A7-35T** | XC7A35T-1**CSG324**C | yes | **on-board FT2232H USB-JTAG** (a standard USB cable to the board, no separate JTAG cable; Vivado lists "Digilent USB JTAG Cable"); UART = FT2232H channel B | 4 Pmods (32) + Arduino header (24) — enough for 16 emitter + 6 det_mux + mod_sync + 4 SPI + UART | **Remap `constraints.xdc`** (CSG324 differs from CPG236). Best prototyping board. |
+| **Digilent Cmod A7-35T** | XC7A35T-1**CPG236**C (same package) | yes | on-board FT2232H USB-JTAG (same as Arty) | 2 Pmods (32) + 4 LEDs + 2 buttons — tight; fits the ~31 signal pins but no headroom | Pinout closest to the target (same package), but exposed I/O is limited — fine for bring-up of the UART/MW/digital path and a subset of the 64-site readout. |
+
+**Toolchain:** Xilinx **Vivado** (the free WebPACK/Lite licence covers the
+XC7A35T) for synthesis, place-and-route, bitstream generation and flash
+programming via the JTAG cable above. No paid licence is required.
+
+**Non-Xilinx FPGAs** (e.g. Lattice iCE40, Intel Cyclone, Gowin) do **not** have
+an XADC, so they need an **external ADC** (e.g. an ADS8866 / MCP33131 on SPI)
+plus a small wrapper replacing `xadc_behavioral`; the rest of the RTL ports
+as-is. This is the one place the design is not literally board-agnostic.
+
+**Host cable (always):** a USB cable from the PC to the board's USB-UART
+bridge (FT232RL on the custom PCB, FT2232H on the Arty/Cmod). The host
+speaks the ASCII UART protocol in section 5 at 115200-8-N-1; any serial
+terminal (`picocom`, `minicom`, `screen`) or the Python `qssc` backend connects.
+
+### 1B. Physical assembly (montaje)
+
+How the control PCB and the chip stack mount together. The PCB sits below the
+chip; the emitter driver (J4) and detector front-end (J5) connectors reach up
+into the chip stack, and the microwave antenna sits over the host substrate.
+The diagram reads top → bottom (chip side down to the cooled PCB).
+
+```mermaid
+flowchart TB
+  classDef pcb fill:#16203f,stroke:#263056,color:#cfe
+  classDef chip fill:#0c1430,stroke:#1d2748,color:#9fb
+  classDef mw fill:#2a1530,stroke:#4a2a55,color:#f9a
+
+  ANT["**MW loop / CPW antenna** (over the host)"]:::mw
+  ENC["Encapsulation (PMMA / epoxy)"]:::chip
+  DET["Graphene/MoS2 detector array (64 electrodes)"]:::chip
+  FILT["650 nm long-pass filter"]:::chip
+  HOST["CVD diamond NV- host (8x8 sites)"]:::chip
+  WG["SU-8 / PDMS waveguides"]:::chip
+  EM["8x8 CQD ASE/LED emitter array"]:::chip
+  SUB["ITO glass substrate + Cu contacts"]:::chip
+  J5["J5 detector front-end connector\n(det_mux_sel, mod_sync, TIA out, bias)"]:::pcb
+  J4["J4 emitter-driver connector\n(8+8 crossbar + driver enables + 4-8V)"]:::pcb
+  DRV["External CQD emitter driver stage (4-8V)"]:::pcb
+  TEC["Peltier (TEC1-12706) + liquid cold plate"]:::pcb
+  PCB["**QSSC control PCB** — Artix-7 + ADF4351 + HMC441 + FT232 + LDOs"]:::pcb
+  USB["USB-UART to host PC (FT232RL, 115200)"]:::pcb
+  SMA["J3 SMA → MW antenna feed"]:::pcb
+
+  ANT -. "2.87 GHz MW field" .-> HOST
+  ENC --- DET --- FILT --- HOST --- WG --- EM --- SUB
+  SUB --> J5
+  SUB --> J4
+  J4 --> DRV --> EM
+  J5 --> DET
+  SUB --> TEC --> PCB
+  PCB --> USB
+  PCB --> SMA --> ANT
+```
+
+The chip stack (encapsulation → detector → filter → diamond host → waveguides
+→ emitter → ITO substrate) is the optical/electrode assembly from the
+fabrication protocol; the PCB drives the emitter (J4 → driver → CQD pixels),
+reads the detectors (J5 → TIA/MUX → XADC), delivers the microwave (SMA →
+antenna), and sinks the heat (Peltier/cold plate under the substrate). No
+camera, no alignment jig — every readout signal is an electrical connection.
+
 ---
 
 ## 2. Bill of Materials (BOM)
@@ -444,7 +526,7 @@ the emitter and waveguide structures over the 8×8 site array.
 |----------------------------|-------------|-------------|
 | `square_chip_cnc.gcode`    | 2 mm flat   | Pockets a 30×30×3 mm acrylic sheet to leave an 8×8 array of 2 mm-diameter cylinders (64 sites) on a 1 mm base. Basic square-pillar chip carrier. |
 | `cylinder_chip.gcode`      | 2 mm flat   | Pockets a larger acrylic sheet to leave **four** identical 30×30 mm arrays (2×2 grid, 5 mm separation), each an 8×8 array of 2 mm cylinders — a multi-chip production run. |
-| `microlens-chip.gcode`     | 1 mm 90° V  | Pockets a 30×30×3 mm acrylic sheet to leave an 8×8 array of 2 mm-diameter **domes** with Fresnel-approximation inner V-grooves (−0.25 mm and −0.50 mm depths) acting as crude micro-lenses over each site. |
+| `microlens-chip.gcode`     | 1 mm 90° V  | Pockets a 30×30×3 mm acrylic sheet to leave an 8×8 array of 2 mm-diameter **domes** with Fresnel-approximation inner V-grooves (−0.25 mm and −0.50 mm depths) acting as crude micro-lenses over each site. **⚠ Obsolete for this architecture** — the on-chip readout stack (CQD emitter → waveguide → diamond → filter → graphene detector) has *no microlens layer*; this toolpath is a carried-over leftover from the camera-era free-space-optics design. Retained only as a reference toolpath; safe to delete. |
 | `flourescense-sensro.gcode`| 1 mm 90° V  | Routes 8 vertical columns and 8 horizontal rows with 250 µm gaps at the 8×8 pixel locations (3.75 mm pitch, −0.15 mm groove depth) — the sensor-grid / waveguide channels on the substrate. |
 
 These toolpaths assume mm units (`G21`), absolute positioning (`G90`),
@@ -452,17 +534,29 @@ feed-per-minute (`G94`), XY-plane (`G17`), and a spindle start (`M03 S8000`).
 
 ---
 
-## 15. Existing KiCad Project
+## 15. Existing KiCad Project (starting skeleton — NOT a finished board)
 
-The carried-over KiCad project is available at
-[`hardware/pcb/`](pcb/) (`qnos.kicad_pro`, `qnos.kicad_pcb`, `qnos.kicad_prl`).
-It is the starting point for laying out the QSSC board: import it into KiCad,
-**remove the OV7670 camera schematic block and the VCSEL daughter-board
-connector**, add the CQD emitter driver, TIA, analog MUX, and detector-bias
-blocks, update the symbol/footprint assignments to match the BOM above, and
-re-annotate references. The schematic must be reworked to match the `top_level.v`
-port list (no `scl`/`sda`/`xclk`/`pclk`/`vsync`/`href`/`d[*]`; add `det_mux_sel`,
-`mod_sync`) and the pin assignments in `fpga/constraints.xdc` before routing.
+The KiCad project lives at [`hardware/pcb/`](pcb/) (`qssc.kicad_pro`,
+`qssc.kicad_pcb`, `qssc.kicad_prl`).
+
+> **Honest status:** this is a **starting skeleton, not a routed/verified
+> board.** `qssc.kicad_pcb` currently places only a handful of footprints
+> (the XC7A35T CPG236 package, two pin headers, a USB-C receptacle, and a
+> carried-over Toshiba TORX fiber-optic connector that is **not** part of the
+> on-chip readout design) and defines essentially **no nets**. There is no
+> schematic-to-PCB netlist, no routing, and no DRC-clean layout. It is a
+> placeholder to start from, **not** a buildable QSSC PCB — consistent with the
+> README honesty note that the FPGA/PCB are design artefacts.
+
+To turn it into the real QSSC board: import it into KiCad, **remove the OV7670
+camera schematic block and the VCSEL daughter-board connector** (and the
+leftover TORX fiber-optic footprint), add the CQD emitter driver, TIA, analog
+MUX, and detector-bias blocks, update the symbol/footprint assignments to match
+the BOM in section 2, and re-annotate references. The schematic must be reworked
+to match the `top_level.v` port list (no `scl`/`sda`/`xclk`/`pclk`/`vsync`/
+`href`/`d[*]`; add `det_mux_sel`, `mod_sync`) and the pin assignments in
+`fpga/constraints.xdc` before routing. The BOM (section 2) is the authoritative
+component list for that rework.
 
 ---
 

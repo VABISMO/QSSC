@@ -1,0 +1,23 @@
+# keep the API build context small
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.coverage
+coverage.xml
+htmlcov
+node_modules
+frontend/dist
+frontend/node_modules
+.git
+.github
+docs
+presentation
+hardware
+fpga
+tests
+*.md
+!README.md
+parser.out
+parsetab.py

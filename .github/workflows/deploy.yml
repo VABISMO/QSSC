@@ -1,0 +1,78 @@
+# Deploy — fires ONLY after the CI workflow has completed successfully on main.
+# (Gated on tests: a red CI run never reaches this workflow.)
+#
+# Frontend (static React dashboard) -> GitHub Pages (free, <user>.github.io/QSSC).
+# API (FastAPI + qiskit/aer, Docker) -> Render free web service, triggered via
+#   Render's deploy hook so the deploy happens after CI is green, not on every
+#   push.
+#
+# Required repo configuration (Settings → Environments/Secrets/Variables):
+#   * Pages: Source = "GitHub Actions" (Settings → Pages).
+#   * Repository variable VITE_API_BASE = the public API URL, e.g.
+#     https://qssc-api.onrender.com  (the dashboard calls this for /api/*).
+#   * Repository secret RENDER_DEPLOY_HOOK_URL = Render's deploy-hook URL
+#     (Render dashboard → the qssc-api service → Settings → Deploy Hook).
+#     If unset, the API deploy step is skipped (the frontend still deploys).
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy-frontend:
+    name: Frontend → GitHub Pages
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build dashboard (API base = VITE_API_BASE)
+        working-directory: frontend
+        env:
+          VITE_API_BASE: ${{ vars.VITE_API_BASE }}
+        run: |
+          npm ci
+          npm run build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/dist
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+  deploy-api:
+    name: API → Render (deploy hook)
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy hook (test-gated)
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "RENDER_DEPLOY_HOOK_URL not set — skipping API deploy."
+            echo "Set it (Settings → Secrets) to enable the Render deploy."
+            exit 0
+          fi
+          echo "Triggering Render deploy hook..."
+          curl -fsS -X POST "$HOOK"
+          echo "Render deploy triggered for commit of the latest green main."

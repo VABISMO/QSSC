@@ -136,6 +136,7 @@ module top_level (
     wire        det_code_valid;
     wire [5:0]  det_code_idx;
     wire        det_sweep_done;
+    wire        det_code_ack;
     wire [5:0]  det_mux_sel_int;
     wire        xadc_start;
     wire        xadc_busy;
@@ -153,6 +154,7 @@ module top_level (
         .code_valid  (det_code_valid),
         .code_idx    (det_code_idx),
         .sweep_done  (det_sweep_done),
+        .code_ack    (det_code_ack),
         .mux_sel     (det_mux_sel_int),
         .xadc_start  (xadc_start),
         .xadc_busy   (xadc_busy),
@@ -202,6 +204,7 @@ module top_level (
         .det_code_valid   (det_code_valid),
         .det_code_idx     (det_code_idx),
         .det_sweep_done   (det_sweep_done),
+        .det_code_ack     (det_code_ack),
         .lut_rd_addr      (lut_rd_addr),
         .lut_rd_data      (lut_rd_data)
     );

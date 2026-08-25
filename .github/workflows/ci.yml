@@ -75,6 +75,33 @@ jobs:
         run: ruff check --select=E9,F63,F7,F82 .
 
   # ──────────────────────────────────────────────────────────────────────
+  # FPGA RTL — parse-verify (pyverilog) + functional simulate (iverilog)
+  # ──────────────────────────────────────────────────────────────────────
+  fpga:
+    name: FPGA RTL (parse + simulate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install iverilog + pyverilog
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog
+          pip install pyverilog
+      - name: pyverilog parse all RTL modules
+        run: |
+          set -e
+          for f in fpga/rtl/*.v; do
+            python -c "from pyverilog.vparser.parser import VerilogParser as P; p=P(); p.parse(open('$f').read(),'')" || { echo "PARSE FAIL: $f"; exit 1; }
+            echo "OK  $f"
+          done
+      - name: iverilog functional simulation (self-checking testbench)
+        run: |
+          cd fpga
+          iverilog -g2012 -o /tmp/qssc_tb.vvp -s tb_top_level rtl/*.v sim/tb_top_level.v
+          vvp /tmp/qssc_tb.vvp | tee /tmp/sim.log
+          grep -q "ALL CHECKS PASSED" /tmp/sim.log
+
+  # ──────────────────────────────────────────────────────────────────────
   # Frontend dashboard build
   # ──────────────────────────────────────────────────────────────────────
   frontend:

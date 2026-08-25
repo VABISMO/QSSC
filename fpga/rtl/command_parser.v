@@ -55,6 +55,7 @@ module command_parser #(
     input             det_code_valid,
     input      [5:0]  det_code_idx,
     input             det_sweep_done,
+    output reg        det_code_ack,   // latched the code; advance the sweep
     // Calibration LUT readback (emitter pixel -> detector electrode)
     input      [5:0]  lut_rd_addr,
     output     [5:0]  lut_rd_data
@@ -109,6 +110,9 @@ module command_parser #(
     reg [7:0]  reply_mem [0:7];
     reg        rall_loop;       // after this read_all code, loop for the next
     reg        code_is_last;    // read_all code was the final electrode
+    reg [11:0] code_latch;      // snapshot of det_code on code_valid (held stable
+                                // while the UART drains; the live det_code may
+                                // change once we ack the photodetector sweep)
 
     // ---- Read-one / read-all mode flag ------------------------------------
     reg        read_all_mode;
@@ -150,8 +154,10 @@ module command_parser #(
         end
     endfunction
 
-    // combinational decimal encoding of the live detector code
-    wire [39:0] enc = enc_dec(det_code);
+    // combinational decimal encoding of the latched detector code (the live
+    // det_code may change once we ack the photodetector, so S_ENC must use
+    // the snapshot taken in S_RONE_WAIT / S_RALL_WAIT).
+    wire [39:0] enc = enc_dec(code_latch);
     wire [2:0]  dlen = enc[39:32];
 
     // separator after a code: newline for read_one / last read_all code, else space
@@ -255,6 +261,8 @@ module command_parser #(
             det_read_one   <= 1'b0;
             det_read_all   <= 1'b0;
             det_site       <= 6'd0;
+            det_code_ack   <= 1'b0;
+            code_latch     <= 12'd0;
             tx_load        <= 1'b0;
             tx_din         <= 8'd0;
         end else begin
@@ -264,6 +272,7 @@ module command_parser #(
             pll_start      <= 1'b0;
             det_read_one   <= 1'b0;
             det_read_all   <= 1'b0;
+            det_code_ack   <= 1'b0;
 
             // Line accumulation only while idle and no line pending.
             if (fsm == S_IDLE && !line_ready && rx_valid) begin
@@ -451,7 +460,9 @@ module command_parser #(
                 // ---- wait for the single-electrode code --------------------
                 S_RONE_WAIT : begin
                     if (det_code_valid) begin
-                        fsm <= S_ENC;
+                        code_latch   <= det_code;  // snapshot before ack
+                        det_code_ack <= 1'b1;     // release the photodetector
+                        fsm          <= S_ENC;
                     end
                 end
 
@@ -471,7 +482,9 @@ module command_parser #(
                 // ---- wait for the next electrode code (read_all) ----------
                 S_RALL_WAIT : begin
                     if (det_code_valid) begin
+                        code_latch   <= det_code;  // snapshot before ack
                         code_is_last <= (det_code_idx == (N_DET - 1));
+                        det_code_ack <= 1'b1;     // release the sweep for the next
                         fsm          <= S_ENC;
                     end
                 end
