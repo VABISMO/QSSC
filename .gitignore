@@ -99,3 +99,6 @@ gerber/
 *~
 .DS_Store
 Thumbs.db
+# pyverilog parser artifacts
+parsetab.py
+parser.out

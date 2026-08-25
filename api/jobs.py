@@ -149,7 +149,7 @@ def enqueue(kind: str, payload: dict) -> str:
     summary = {
         "kind": kind,
         "algorithm": payload.get("algorithm", "custom"),
-        "profile": payload.get("profile", "hBN-VB"),
+        "profile": payload.get("profile", "NV"),
         "temperature_k": payload.get("temperature_k", 300.0),
         "shots": payload.get("shots", 2048),
         "noise_mode": payload.get("noise_mode", "real"),

@@ -45,7 +45,7 @@ def _circuit_meta(qc) -> dict:
 
 def run_circuit(req: dict) -> dict:
     """Execute a demo algorithm. ``req`` mirrors :class:`RunRequest`."""
-    profile = req.get("profile", "hBN-VB")
+    profile = req.get("profile", "NV")
     temperature_k = float(req.get("temperature_k", 300.0))
     seed = int(req.get("seed", 42))
     shots = int(req.get("shots", 2048))
@@ -331,7 +331,7 @@ def run_custom(req: dict) -> dict:
                                 max_qubits=int(req.get("max_qubits", 64)))
     except UserCircuitError as exc:
         return {"error": str(exc)}
-    profile = req.get("profile", "hBN-VB")
+    profile = req.get("profile", "NV")
     b = _backend(profile, float(req.get("temperature_k", 300.0)),
                  int(req.get("seed", 42)), req.get("noise_mode", "real"))
     try:

@@ -2,22 +2,34 @@
 """Physics + hardware simulator for the Quantum Solid State Chip (QSSC).
 
 This module is the room-temperature software twin of the physical chip.  It
-models the optical readout path (laser pump, galvo / VCSEL array, camera /
-on-chip photodetector array), the spin-defect Hamiltonian (ODMR with hyperfine
-structure) and the dynamical-decoupling toolbox, all parametrised by a
-:class:`~qssc.defects.DefectProfile`.
+models the *on-chip* readout path the fabrication protocol actually describes:
 
-The simulator is deliberately dependency-light: NumPy is the only hard
-requirement.  OpenCV is used for image-based readout when available and falls
-back to a pure-NumPy detector otherwise, so the package runs in a minimal
-environment (and inside CI).
+* an **8x8 electrically-pumped CQD ASE/LED emitter array** (green ~520-540 nm)
+  that optically pumps each qubit site,
+* an **N-electrode graphene/MoS2 photodetector array** (one electrode per site)
+  whose photocurrent the FPGA reads back through a **lock-in** (MW modulated at
+* ~1 kHz), and
+* the spin-defect Hamiltonian (ODMR with hyperfine structure) + the
+  dynamical-decoupling toolbox.
+
+There is **no camera and no VCSEL/galvo microscopy rig** -- the chip reads out
+directly on-chip.  A software pulse-capture sweep (drive each emitter pixel,
+sample every detector electrode, find the modulated one) builds the
+emitter-pixel -> qubit-site -> detector-electrode lookup table; that is the
+calibration flow, not image-based defect detection.
+
+Everything is parametrised by a :class:`~qssc.defects.DefectProfile`.  The
+default profile is **NV-diamond** (the only defect family here that is
+compute-capable at 300 K).
+
+NumPy is the only hard requirement; the readout model is pure NumPy (the old
+OpenCV image-based path has been removed).
 """
 from __future__ import annotations
 
 import logging
 import math
-import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -26,12 +38,18 @@ from .defects import DefectProfile, get_profile, coherence_at_temperature
 
 logger = logging.getLogger(__name__)
 
-try:  # optional, used only for contour-based readout
-    import cv2  # type: ignore
-    _HAS_CV2 = True
-except Exception:  # pragma: no cover - exercised only when cv2 absent
-    cv2 = None
-    _HAS_CV2 = False
+# ---------------------------------------------------------------------------
+# On-chip readout constants (CQD ASE emitter + graphene/MoS2 detector + lock-in)
+# ---------------------------------------------------------------------------
+ADC_BITS = 12
+ADC_MAX = (1 << ADC_BITS) - 1            # 4095
+BRIGHT_CODE = 3200                        # pumped + spin ms=0 (bright) -> high photocurrent
+DARK_CODE = 800                           # pumped + spin ms=+-1 (dark) / ODMR dip
+BG_CODE = 100                             # unpumped electrode -> detector background floor
+READOUT_NOISE = 40                        # std dev of lock-in photocurrent noise (ADC counts)
+ASE_GAIN = 1.15                            # ASE concentrates the CQD emission into the waveguide
+LOCKIN_MOD_HZ = 1000.0                    # MW modulation frequency for the lock-in readout
+DETECT_THRESHOLD = 1000                   # lock-in amplitude above which a site counts as coupled
 
 
 # ---------------------------------------------------------------------------
@@ -41,34 +59,43 @@ except Exception:  # pragma: no cover - exercised only when cv2 absent
 class SimulatedFPGA:
     """In-process stand-in for the Artix-7 control board.
 
-    Understands the same text commands as ``fpga/rtl/command_parser.v``:
+    Understands the same text commands as ``fpga/rtl/command_parser.v`` -- the
+    on-chip readout protocol (no camera):
 
-    * ``FIRE_LASER <row> <col> <duration_ms>``
-    * ``APPLY_PULSE <qubit> <freq_khz> <amp> <duration_ns> <phase>``
-    * ``CAPTURE_FRAME`` and ``CAPTURE_DARK``
+    * ``DRIVE_EMITTER <row> <col> <duration_ms>``  -- drive a CQD emitter pixel
+    * ``APPLY_PULSE <qubit> <freq_khz> <amp> <duration_ns> <phase>``  -- program the ADF4351
+    * ``READ_DETECTOR <site>``  -- read one graphene detector electrode's photocurrent code
+    * ``READ_DETECTORS``       -- stream all N detector electrodes' photocurrent codes
+    * ``CALIBRATE``            -- run the emitter->site->detector sweep, build the LUT
 
     The ``APPLY_PULSE`` fields are **decimal integers** matching the firmware
     parser and ``hardware/HARDWARE_DESIGN.md`` §5: ``freq_khz`` in kHz,
     ``amp`` 0..3, ``phase`` in milliradians. Keeping the wire format identical
     means the same Python control code drives the simulator and the real
-    hardware — :class:`~qssc.backend.MicrowaveController` emits exactly this
+    hardware -- :class:`~qssc.backend.MicrowaveController` emits exactly this
     integer form.
+
+    Readout physics: a pumped site in the bright ms=0 spin state (state 0)
+    reports a high detector photocurrent; a resonant microwave pulse (X gate,
+    phase ~= pi) flips it to the dark ms=+-1 state (state 1) and the
+    photocurrent drops -- that dip *is* the ODMR signal the lock-in recovers.
     """
 
     GRID = 8
 
-    def __init__(self, profile: DefectProfile | str = "hBN-VB",
+    def __init__(self, profile: DefectProfile | str = "NV",
                  temperature_k: float = 300.0, noise: float = 0.1,
-                 image_size: Tuple[int, int] = (480, 640), seed: Optional[int] = None):
+                 seed: Optional[int] = None):
         self.profile = get_profile(profile) if isinstance(profile, str) else profile
         self.temperature_k = temperature_k
         self.noise = noise
-        self.image_size = image_size
         self.rng = np.random.default_rng(seed)
-        self.active_lasers: set[Tuple[int, int]] = set()
+        self.active_emitters: set[Tuple[int, int]] = set()
         self.sim_states: Dict[int, int] = {}
         self.sim_freq = self.profile.zero_field_splitting
-        self.frame_counter = 0
+        self.last_mw_freq_khz: Optional[int] = None
+        # emitter-pixel (row,col) -> detector electrode index, discovered by CALIBRATE
+        self.lut: Dict[Tuple[int, int], int] = {}
         t1, t2 = coherence_at_temperature(self.profile, temperature_k)
         self.t1, self.t2 = t1, t2
 
@@ -77,10 +104,17 @@ class SimulatedFPGA:
         parts = command.split()
         head = parts[0]
         try:
-            if head == "FIRE_LASER":
+            if head == "DRIVE_EMITTER":
                 row, col = int(parts[1]), int(parts[2])
-                self.active_lasers.add((row, col))
-                self.sim_states[row * self.GRID + col] = 1
+                if not (0 <= row < self.GRID and 0 <= col < self.GRID):
+                    return "ERR"
+                # The 8x8 crossbar asserts ONE anode row + ONE cathode col at a
+                # time, so only the addressed pixel is lit -- the previous pixel
+                # turns off. Model that as single-pixel addressing (replace, not
+                # accumulate), matching real hardware and the CALIBRATE sweep.
+                self.active_emitters = {(row, col)}
+                # optical pump polarises the NV spin into the bright ms=0 state (0)
+                self.sim_states[row * self.GRID + col] = 0
                 return "OK"
             if head == "APPLY_PULSE":
                 # Canonical wire format (matches command_parser.v and
@@ -95,12 +129,18 @@ class SimulatedFPGA:
                 phase_mrad = int(parts[5])
                 freq_ghz = freq_khz / 1e6
                 phase_rad = phase_mrad / 1000.0
+                self.last_mw_freq_khz = freq_khz
                 return self._apply_pulse(qubit, freq_ghz, amp, dur, phase_rad)
-            if head == "CAPTURE_DARK":
-                self.active_lasers.clear()
-                self.sim_states.clear()
-                return "OK"
-            if head == "CAPTURE_FRAME":
+            if head == "READ_DETECTOR":
+                site = int(parts[1])
+                if not (0 <= site < self.GRID * self.GRID):
+                    return "ERR"
+                return str(self._photocurrent_code(site))
+            if head == "READ_DETECTORS":
+                codes = [self._photocurrent_code(q) for q in range(self.GRID * self.GRID)]
+                return " ".join(str(c) for c in codes)
+            if head == "CALIBRATE":
+                self._calibrate()
                 return "OK"
             return "ERR"
         except Exception as exc:  # pragma: no cover - defensive
@@ -116,91 +156,97 @@ class SimulatedFPGA:
         self.sim_states.setdefault(q, 0)
         # phase arrives in radians (converted from integer milliradians on the
         # wire). Tolerance ~1 mrad matches the integer-mrad quantisation.
-        if abs(phase_rad - math.pi) < 1e-3:          # X gate (phase ≈ π)
+        if abs(phase_rad - math.pi) < 1e-3:          # X gate (phase ~= pi) flips the spin
             self.sim_states[q] = 1 - self.sim_states[q]
         elif abs(phase_rad) > 1e-3:                  # RZ/RY: stochastic error
             if self.rng.random() < self.noise:
                 self.sim_states[q] = 1 - self.sim_states[q]
         return "OK"
 
-    # -- image generation --------------------------------------------------
-    def receive_image(self, size: Optional[Tuple[int, int]] = None) -> np.ndarray:
-        size = size or self.image_size
-        image = np.zeros(size, dtype=np.uint8)
-        cell_w = size[1] / self.GRID
-        cell_h = size[0] / self.GRID
-        yy, xx = np.mgrid[0:size[0], 0:size[1]]
-        for row, col in list(self.active_lasers):
-            cx = int(col * cell_w + cell_w / 2)
-            cy = int(row * cell_h + cell_h / 2)
-            r = max(8, int(min(cell_w, cell_h) / 4))
-            image += (255 * np.exp(-((xx - cx) ** 2 + (yy - cy) ** 2) / (2 * r ** 2))).astype(np.uint8)
-        # shot + read noise, capped to 8 bit
-        image = np.clip(image, 0, 255).astype(np.uint8)
-        noise = self.rng.normal(0, 6, size).astype(np.int16)
-        image = np.clip(image.astype(np.int16) + noise, 0, 255).astype(np.uint8)
-        self.active_lasers.clear()
-        self.frame_counter += 1
-        return image
+    def _photocurrent_code(self, site: int) -> int:
+        """12-bit ADC code for one detector electrode's lock-in photocurrent."""
+        r, c = divmod(site, self.GRID)
+        if (r, c) not in self.active_emitters:
+            level = BG_CODE                       # no pump -> no PL, background floor
+        else:
+            state = self.sim_states.get(site, 0)
+            # bright ms=0 (state 0) -> high PL; dark ms=+-1 (state 1) -> ODMR dip
+            level = BRIGHT_CODE if state == 0 else DARK_CODE
+        code = level + int(self.rng.normal(0, READOUT_NOISE))
+        return int(min(max(code, 0), ADC_MAX))
+
+    def _calibrate(self) -> None:
+        """Emitter->detector sweep: drive each pixel, read all electrodes, pick
+        the modulated one. On this 1:1-laid-out sim the mapping is the identity,
+        but the sweep is the *method* by which the software discovers it without
+        an alignment jig (protocol §5.6)."""
+        self.lut = {}
+        saved_emitters = set(self.active_emitters)
+        try:
+            for r in range(self.GRID):
+                for c in range(self.GRID):
+                    self.active_emitters = {(r, c)}
+                    self.sim_states[r * self.GRID + c] = 0
+                    codes = [self._photocurrent_code(q) for q in range(self.GRID * self.GRID)]
+                    best = int(np.argmax(codes))
+                    if codes[best] > DETECT_THRESHOLD:
+                        self.lut[(r, c)] = best
+        finally:
+            self.active_emitters = saved_emitters
 
     def close(self):  # pragma: no cover
         pass
 
 
 # ---------------------------------------------------------------------------
-# Optical readout primitives
+# On-chip readout primitives
 # ---------------------------------------------------------------------------
 
-def simulate_laser_pulse(intensity: float = 1.0, duration: float = 1e-6) -> dict:
-    """Return a noisy laser-pulse record (intensity, duration, ADC value)."""
-    inten = float(np.clip(np.random.normal(intensity, 0.05 * intensity), 0, 2))
-    dur = float(max(duration + np.random.normal(0, 0.1e-6), 1e-9))
-    return {"intensity": inten, "duration_s": dur, "adc": int(inten * 4095)}
+def simulate_cqd_pulse(intensity: float = 1.0, duration: float = 1e-6,
+                      ase_gain: float = ASE_GAIN, rng: Optional[np.random.Generator] = None) -> dict:
+    """Return a noisy CQD emitter pump record (intensity, duration, ADC value).
+
+    Models an electrically-pumped CQD ASE/LED pixel: even a green LED-level pump
+    polarises the NV spin, and the ``ase_gain`` factor represents the
+    amplified-spontaneous-emission edge coupling that concentrates the emission
+    spectrally/into the waveguide (the protocol is honest that this is ASE, not
+    a laser).
+    """
+    rng = rng or np.random.default_rng()
+    inten = float(np.clip(rng.normal(intensity, 0.05 * intensity), 0, 2)) * ase_gain
+    dur = float(max(duration + rng.normal(0, 0.1e-6), 1e-9))
+    return {"intensity": inten, "duration_s": dur, "adc": int(min(inten * 4095, ADC_MAX)),
+            "ase_gain": ase_gain}
 
 
-def simulate_galvo_scan(area: Tuple[float, float] = (10.0, 10.0),
-                        step: float = 0.5) -> List[Tuple[float, float]]:
-    """List of (x, y) coordinates visited by a raster scan (µm)."""
-    xs = int(area[0] / step); ys = int(area[1] / step)
-    return [(x * step, y * step) for x in range(xs) for y in range(ys)]
+def make_detector_response(active_emitters: set, profile: DefectProfile | str = "NV",
+                           mw_freq_khz: Optional[int] = None, grid: int = 8,
+                           rng: Optional[np.random.Generator] = None) -> np.ndarray:
+    """Per-electrode graphene/MoS2 detector photocurrent (12-bit ADC codes).
 
-
-def make_camera_frame(centres: Sequence[dict], shape: Tuple[int, int] = (480, 640),
-                      sigma: float = 5.0, background: float = 20.0,
-                      fluorescence_factor: float = 1.0) -> np.ndarray:
-    """Render a fluorescence frame with Poisson shot noise."""
-    frame = np.random.normal(background, 5.0, shape)
-    yy, xx = np.mgrid[0:shape[0], 0:shape[1]]
-    for c in centres:
-        x, y, inten = c["x"], c["y"], c["intensity"] * fluorescence_factor
-        frame += inten * np.exp(-((xx - x) ** 2 + (yy - y) ** 2) / (2 * sigma ** 2))
-    frame = np.random.poisson(np.clip(frame, 0, None))
-    return np.clip(frame, 0, 255).astype(np.uint8)
-
-
-def detect_defects(frame: np.ndarray, threshold: int = 50) -> List[dict]:
-    """Locate bright defects in a frame (OpenCV contours or NumPy fallback)."""
-    if _HAS_CV2:
-        _, th = cv2.threshold(frame, threshold, 255, cv2.THRESH_BINARY)
-        contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        out = []
-        for cnt in contours:
-            m = cv2.moments(cnt)
-            if m["m00"] > 0:
-                cx = int(m["m10"] / m["m00"]); cy = int(m["m01"] / m["m00"])
-                out.append({"x": cx, "y": cy, "intensity": float(frame[cy, cx])})
-        return out
-    # pure-NumPy fallback: local maxima above threshold
-    out = []
-    ys, xs = np.where(frame > threshold)
-    seen = set()
-    for y, x in zip(ys, xs):
-        key = (y // 10, x // 10)
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append({"x": int(x), "y": int(y), "intensity": float(frame[y, x])})
-    return out
+    Models the on-chip lock-in readout: an electrode under a pumped emitter
+    reports high photocurrent when the defect spin is in the bright ms=0 state
+    (state 0) and a reduced photocurrent (the ODMR dip) when a resonant
+    microwave drive (``mw_freq_khz`` within the linewidth of D) flips it to the
+    dark ms=+-1 state. Electrodes with no active emitter report only the
+    detector background floor. Returns an ``int32`` array of ``grid**2`` codes.
+    """
+    prof = get_profile(profile) if isinstance(profile, str) else profile
+    rng = rng or np.random.default_rng()
+    n = grid * grid
+    on_resonance = False
+    if mw_freq_khz is not None:
+        on_resonance = abs(mw_freq_khz * 1e3 - prof.zero_field_splitting) < prof.zero_field_splitting * 0.02
+    codes = np.empty(n, dtype=np.int32)
+    for q in range(n):
+        r, c = divmod(q, grid)
+        if (r, c) not in active_emitters:
+            level = BG_CODE
+        else:
+            level = BRIGHT_CODE if not on_resonance else DARK_CODE
+        code = level + int(rng.normal(0, READOUT_NOISE))
+        codes[q] = min(max(code, 0), ADC_MAX)
+    return codes
 
 
 @dataclass
@@ -223,79 +269,63 @@ class QubitSite:
         return d
 
 
-def auto_align(profile: DefectProfile | str = "hBN-VB",
+def auto_align(profile: DefectProfile | str = "NV",
                 grid: int = 8, galvo_area: Tuple[float, float] = (20.0, 20.0),
                 temperature_k: float = 300.0, max_retries: int = 5,
                 rng: Optional[np.random.Generator] = None,
                 progress=None) -> List[QubitSite]:
-    """Detect and register qubit sites on the chip, returning ``grid**2`` sites.
+    """Calibrate the chip and register ``grid**2`` qubit sites.
 
-    Mirrors the calibration flow of the real hardware (fire lasers, capture a
-    frame, locate defects, map to a grid) but here driven purely by the
-    simulator physics so it is deterministic and fast.
+    Mirrors the on-chip calibration flow of the real hardware (protocol §5.6):
+    drive each CQD emitter pixel, sample every graphene detector electrode, and
+    register the electrode that responds above the lock-in threshold -- the
+    emitter-pixel -> qubit-site -> detector-electrode LUT. No camera, no
+    micron-alignment jig: the software discovers the mapping purely from the
+    lock-in photocurrent response, driven by the simulator physics so it is
+    deterministic and fast.
+
+    Returns ``grid**2`` :class:`QubitSite` in index order; sites whose emitter
+    does not couple to a detector electrode above threshold are kept as
+    ``usable=False`` placeholders so the grid is always complete.
     """
     prof = get_profile(profile) if isinstance(profile, str) else profile
     rng = rng or np.random.default_rng()
     t1, t2 = coherence_at_temperature(prof, temperature_k)
-    shape = (96, 128)  # small frame keeps calibration fast; grid cell ~12x16 px
     n_needed = grid * grid
-    sites: List[QubitSite] = []
+    # Fraction of emitter pixels that couple to a defect + detector electrode
+    # above the lock-in threshold (a per-site Bernoulli draw weighted by the
+    # defect density over the scanned area).
+    p_usable = float(np.clip(prof.defect_density_per_um2 * galvo_area[0] * galvo_area[1], 0.0, 1.0))
     task = None
     if progress is not None:
-        task = progress.add_task("Aligning spin defects...", total=max_retries)
-    for attempt in range(max_retries):
-        area = galvo_area
-        density = prof.defect_density_per_um2
-        n_emitters = int(rng.uniform(5, max(6, density * area[0] * area[1] * 4)))
-        margin_x = max(8, shape[1] // 8)
-        margin_y = max(8, shape[0] // 8)
-        centres = [{
-            "x": rng.uniform(margin_x, shape[1] - margin_x),
-            "y": rng.uniform(margin_y, shape[0] - margin_y),
-            "intensity": rng.uniform(60, 220),
-        } for _ in range(n_emitters)]
-        frame = make_camera_frame(centres, shape, fluorescence_factor=prof.fluorescence_factor)
-        detected = detect_defects(frame, threshold=50)
-        # de-duplicate and map to grid cells
-        cells: Dict[Tuple[int, int], dict] = {}
-        for d in detected:
-            cr = int(d["y"] / shape[0] * grid)
-            cc = int(d["x"] / shape[1] * grid)
-            cr = min(max(cr, 0), grid - 1); cc = min(max(cc, 0), grid - 1)
-            key = (cr, cc)
-            if key not in cells or d["intensity"] > cells[key]["intensity"]:
-                cells[key] = d
-        # build the full grid in index order; pad empty cells with dark sites
-        sites = []
-        for idx in range(n_needed):
-            r, c = divmod(idx, grid)
-            d = cells.get((r, c))
-            if d:
-                x_um = d["x"] * area[0] / shape[1]
-                y_um = d["y"] * area[1] / shape[0]
-                # Optical readout error anchored to the defect profile's nominal
-                # value, mildly modulated by site brightness (brighter emitters
-                # read out a little more reliably). Bounded 0.7x..1.3x nominal so
-                # a dim site can never collapse the error far below the physical
-                # readout floor -- the old unbounded sigmoid shrank it ~10x
-                # (detected intensities cluster near the detection threshold).
-                bright = 1.0 / (1.0 + math.exp((100.0 - d["intensity"]) / 20.0))
-                err = prof.readout_error * (1.3 - 0.6 * bright)
-                sites.append(QubitSite(
-                    qubit_id=idx, row=r, col=c,
-                    x_um=x_um, y_um=y_um, intensity=d["intensity"],
-                    t1=t1, t2=t2, readout_err=err,
-                    usable=d["intensity"] > 100 and t2 > 1e-6,
-                ))
-            else:
-                sites.append(QubitSite(qubit_id=idx, row=r, col=c,
-                                       x_um=0.0, y_um=0.0, intensity=0.0,
-                                       t1=t1, t2=t2, readout_err=prof.readout_error,
-                                       usable=False))
-        if progress is not None and task is not None:
-            progress.update(task, advance=1)
-        if sum(s.usable for s in sites) >= max(8, n_needed // 2):
-            break
+        task = progress.add_task("Scanning on-chip detector array...", total=max_retries)
+    sites: List[QubitSite] = []
+    for idx in range(n_needed):
+        r, c = divmod(idx, grid)
+        coupled = rng.random() < p_usable
+        if coupled:
+            code = int(make_detector_response({(r, c)}, prof, rng=rng, grid=grid)[idx])
+            # readout error anchored to the profile nominal value, mildly modulated
+            # by site brightness (brighter emitters read out a little more
+            # reliably). Bounded 0.7x..1.3x nominal so a dim site can never
+            # collapse the error far below the physical readout floor.
+            bright = float(np.clip((code - BG_CODE) / max(BRIGHT_CODE - BG_CODE, 1), 0.0, 1.0))
+            err = prof.readout_error * (1.3 - 0.6 * bright)
+            x_um = (c + 0.5) * galvo_area[0] / grid
+            y_um = (r + 0.5) * galvo_area[1] / grid
+            sites.append(QubitSite(
+                qubit_id=idx, row=r, col=c,
+                x_um=x_um, y_um=y_um, intensity=float(code),
+                t1=t1, t2=t2, readout_err=err,
+                usable=code > DETECT_THRESHOLD and t2 > 1e-6,
+            ))
+        else:
+            sites.append(QubitSite(qubit_id=idx, row=r, col=c,
+                                   x_um=0.0, y_um=0.0, intensity=0.0,
+                                   t1=t1, t2=t2, readout_err=prof.readout_error,
+                                   usable=False))
+    if progress is not None and task is not None:
+        progress.update(task, completed=max_retries)
     return sites[:n_needed]
 
 
@@ -303,7 +333,7 @@ def auto_align(profile: DefectProfile | str = "hBN-VB",
 # ODMR and coherence
 # ---------------------------------------------------------------------------
 
-def simulate_odmr(profile: DefectProfile | str = "hBN-VB",
+def simulate_odmr(profile: DefectProfile | str = "NV",
                   freqs_ghz: Optional[np.ndarray] = None,
                   b_field_t: float = 1e-3, linewidth_mhz: float = 5.0,
                   contrast_depth: float = 0.03) -> Tuple[np.ndarray, np.ndarray]:

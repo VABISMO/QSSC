@@ -1,8 +1,9 @@
 import React from 'react'
 
 // ---------------------------------------------------------------------------
-// QubitGrid — 8x8 VCSEL / photodetector grid; cells light up for the measured
-// bitstring of the most recent run.
+// QubitGrid — 8x8 on-chip graphene/MoS₂ photodetector / CQD-emitter site grid;
+// cells light up for the measured bitstring of the most recent run (lock-in
+// readout, no camera).
 // ---------------------------------------------------------------------------
 export function QubitGrid({ sites, bitstring, numClbits }) {
   const cells = Array.from({ length: 64 }, (_, idx) => {
@@ -115,7 +116,7 @@ export function ChipStack() {
   const layers = [
     { name: 'Encapsulation (PMMA / epoxy)', nm: '~1 µm', c: '#1f2a52' },
     { name: 'On-chip 2D photodetector array (graphene / MoS₂)', nm: '36×36', c: '#2a3a6e' },
-    { name: 'PMMA / hBN spin-defect layer (VB⁻, D≈3.46 GHz)', nm: '~0.3 µm', c: '#34407d' },
+    { name: 'CVD diamond spin-defect host (NV⁻, D≈2.87 GHz, T₂≈1.8 ms)', nm: '~0.5 mm', c: '#34407d' },
     { name: 'Polymer waveguides (SU-8 / PDMS, n≈1.5)', nm: '2–5 µm', c: '#3b4a8f' },
     { name: 'CQD emitter array (PEDOT:PSS / CQD / ZnO p-i-n)', nm: '~0.2 µm', c: '#43549f' },
     { name: 'ITO-coated glass substrate + Cu contacts', nm: '1–5 cm²', c: '#1b2348' },
@@ -185,8 +186,9 @@ export function CalibrationPanel({ profile, temperature, seed, run, running, res
   return (
     <div>
       <div className="hint" style={{ marginBottom: 10 }}>
-        Full VABISMO-style calibration: (1) detect defects on a camera frame, (2) auto-align the qubit grid,
-        (3) sweep the microwave frequency and fit the zero-field splitting D + linewidth.
+        Full calibration: (1) scan the on-chip detector array for defect photocurrent (lock-in),
+        (2) auto-align the qubit grid, (3) sweep the microwave frequency and fit the zero-field
+        splitting D + linewidth.
       </div>
       <button onClick={run} disabled={running} className="ghost" type="button">
         {running ? <><span className="spinner" /> Calibrating…</> : 'Run calibration'}
@@ -200,9 +202,9 @@ export function CalibrationPanel({ profile, temperature, seed, run, running, res
                 <div className="calstage-h">{st.name}</div>
                 {i === 0 && (
                   <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
-                    frame {st.frame_shape.join('×')} · defects detected:{' '}
+                    detector array {st.frame_shape.join('×')} · sites detected:{' '}
                     <span className="mono" style={{ color: 'var(--ok)' }}>{st.defects_detected}</span>
-                    {' · '}mean {st.frame_mean} · max {st.frame_max}
+                    {' · '}photocurrent mean {st.frame_mean} · max {st.frame_max}
                   </div>
                 )}
                 {i === 1 && (

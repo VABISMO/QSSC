@@ -5,8 +5,8 @@ import pytest
 
 from qssc import (
     HBN_VB, NV_DIAMOND, get_profile, coherence_at_temperature,
-    auto_align, simulate_odmr, simulate_laser_pulse, simulate_galvo_scan,
-    make_camera_frame, detect_defects, xy8_decoupling, estimate_coherence_xy8,
+    auto_align, simulate_odmr, simulate_cqd_pulse, make_detector_response,
+    xy8_decoupling, estimate_coherence_xy8,
     QSSCBackend, SimulatedFPGA, is_prime, select_coprime, mod_mult_gate,
     create_period_finding_circuit, create_shor_circuit, postprocess_period,
     create_qft_nos_circuit, postprocess_period_swapless,
@@ -36,19 +36,24 @@ def test_coherence_scaling():
 
 # -- simulator ---------------------------------------------------------------
 
-def test_laser_pulse_and_galvo():
-    pulse = simulate_laser_pulse(intensity=1.0)
-    assert 0 <= pulse["adc"] <= 4095 * 2
-    coords = simulate_galvo_scan((5, 5), step=1)
-    assert len(coords) == 25
+def test_cqd_pulse():
+    # CQD ASE/LED pump pulse -> a noisy pump-power record in the ADC range,
+    # scaled by the ASE gain factor. No galvo scan on this chip (fixed array).
+    pulse = simulate_cqd_pulse(intensity=1.0, rng=np.random.default_rng(0))
+    assert set(pulse.keys()) >= {"intensity", "duration_s", "adc", "ase_gain"}
+    assert 0 <= pulse["adc"] <= 4095
+    assert pulse["ase_gain"] >= 1.0
 
 
-def test_camera_frame_and_detect():
-    centres = [{"x": 40, "y": 24, "intensity": 200}]
-    frame = make_camera_frame(centres, shape=(96, 128))
-    assert frame.shape == (96, 128) and frame.dtype == np.uint8
-    found = detect_defects(frame, threshold=50)
-    assert len(found) >= 1
+def test_detector_response():
+    # On-chip graphene/MoS2 detector array: N electrodes of int32 ADC codes,
+    # bright (high code) under a pumped emitter with no resonant MW.
+    rng = np.random.default_rng(0)
+    codes = make_detector_response({(0, 0), (3, 4)}, profile="NV", grid=8, rng=rng)
+    assert codes.shape == (64,) and codes.dtype == np.int32
+    assert 0 <= codes.min() and codes.max() <= 4095
+    # pumped electrodes are bright; un-pumped are at the background floor
+    assert codes[0] > codes[1]  # (0,0) bright vs (0,1) background
 
 
 def test_auto_align_grid():
@@ -79,12 +84,60 @@ def test_xy8():
 
 
 def test_simulated_fpga_protocol():
-    fpga = SimulatedFPGA("hBN-VB", seed=1)
-    assert fpga.send_command("FIRE_LASER 0 0 50") == "OK"
-    assert fpga.send_command("CAPTURE_FRAME") == "OK"
-    img = fpga.receive_image()
-    assert img.shape == (480, 640)
-    assert fpga.send_command("CAPTURE_DARK") == "OK"
+    # On-chip readout command set: DRIVE_EMITTER / READ_DETECTOR / APPLY_PULSE /
+    # READ_DETECTORS / CALIBRATE. No CAPTURE_FRAME / receive_image.
+    fpga = SimulatedFPGA("NV", seed=1)
+    assert fpga.send_command("DRIVE_EMITTER 0 0 50") == "OK"
+    # with no resonant MW yet, a pumped site reads bright (high ADC code)
+    code = int(fpga.send_command("READ_DETECTOR 0"))
+    assert 0 <= code <= 4095 and code > 100
+    assert fpga.send_command("APPLY_PULSE 0 2870000 2 200 0") == "OK"
+    # READ_DETECTORS streams 64 space-separated codes
+    stream = fpga.send_command("READ_DETECTORS")
+    toks = stream.split()
+    assert len(toks) == 64
+    assert all(t.lstrip("-").isdigit() for t in toks)
+    assert fpga.send_command("CALIBRATE") == "OK"
+    # unknown / malformed -> ERR
+    assert fpga.send_command("FIRE_LASER 0 0 50") == "ERR"
+    assert fpga.send_command("CAPTURE_FRAME") == "ERR"
+
+
+def test_readout_odmr_dip():
+    # CQD pump -> graphene detector photocurrent -> ODMR dip at resonance.
+    # A pumped site with no resonant MW reads bright (ms=0, high code); a
+    # resonant X-gate (phase ~= pi) flips the spin to dark (ms=+-1, low code),
+    # and an off-resonance drive is rejected by the PLL-lock proxy (ERR).
+    fpga = SimulatedFPGA("NV", seed=3)
+    assert fpga.send_command("DRIVE_EMITTER 5 5 50") == "OK"
+    bright = int(fpga.send_command("READ_DETECTOR 45"))
+    # resonant X-gate at D_NV = 2.87 GHz (phase 3142 mrad ~= pi) -> spin flip
+    assert fpga.send_command("APPLY_PULSE 45 2870000 2 200 3142") == "OK"
+    dark = int(fpga.send_command("READ_DETECTOR 45"))
+    # the ODMR dip is a large, unambiguous drop in photocurrent
+    assert bright > dark + 1000
+    # off-resonance drive (4 GHz vs 2.87 GHz) -> ERR, no flip applied
+    assert fpga.send_command("APPLY_PULSE 45 4000000 2 200 3142") == "ERR"
+
+
+def test_calibration_detector_lut():
+    # The external CalibrationManager sweep drives each emitter pixel in turn,
+    # reads all 64 detector electrodes, and registers the modulated one. With
+    # single-pixel crossbar addressing this must recover the identity LUT
+    # (emitter pixel (r,c) -> detector electrode r*8+c), not a degenerate
+    # always-picks-zero mapping.
+    from qssc.backend import (EmitterController, DetectorInterface,
+                              CalibrationManager)
+    fpga = SimulatedFPGA("NV", seed=4)
+    em = EmitterController(fpga)
+    det = DetectorInterface(fpga)
+    cal = CalibrationManager(em, det, threshold=1000)
+    mapping = cal.perform_calibration()
+    assert len(mapping) == 64
+    for (r, c), electrode in mapping.items():
+        assert electrode == r * 8 + c  # 1:1 emitter-pixel -> detector-electrode
+    # the default identity LUT must agree with the swept one
+    assert mapping == CalibrationManager.default_detector_lut()
 
 
 # -- circuits ----------------------------------------------------------------

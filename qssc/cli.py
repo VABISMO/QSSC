@@ -21,7 +21,7 @@ from . import __version__
 from .defects import PROFILES, get_profile
 from .simulator import auto_align, simulate_odmr, SimulatedFPGA
 from .backend import (
-    QSSCBackend, LaserArrayController, CameraInterface, MicrowaveController,
+    QSSCBackend, EmitterController, DetectorInterface, MicrowaveController,
     CalibrationManager, make_connection,
 )
 from .circuits import (
@@ -37,19 +37,19 @@ def _build_backend(profile: str, port, temperature: float, shots: int, seed: int
     hw = make_connection(port, profile=profile, temperature_k=temperature, seed=seed)
     sites = auto_align(profile=profile, grid=8, temperature_k=temperature,
                        rng=np.random.default_rng(seed))
-    laser = LaserArrayController(hw)
-    camera = CameraInterface(hw)
+    emitter = EmitterController(hw)
+    detector = DetectorInterface(hw)
     mw = MicrowaveController(hw)
-    # drive the optical readout only when we have a (simulated) camera
+    # drive the on-chip readout (CQD emitter + graphene detector + lock-in)
     backend = QSSCBackend(profile=profile, sites=sites, hardware=hw,
                           shots=shots, seed=seed, temperature_k=temperature)
-    return backend, hw, (laser, camera, mw)
+    return backend, hw, (emitter, detector, mw)
 
 
-def _ensure_mapping(hw, mock, laser, camera):
+def _ensure_mapping(hw, mock, emitter, detector):
     if mock:
-        return CalibrationManager.default_grid_mapping()
-    cal = CalibrationManager(laser, camera)
+        return CalibrationManager.default_detector_lut()
+    cal = CalibrationManager(emitter, detector)
     cal.perform_calibration()
     return cal.mapping
 
@@ -61,7 +61,7 @@ def cli():
 
 
 @cli.command()
-@click.option("--profile", default="hBN-VB", type=click.Choice(list(PROFILES)))
+@click.option("--profile", default="NV", type=click.Choice(list(PROFILES)))
 @click.option("--temperature", default=300.0, help="Chip temperature (K).")
 def info(profile, temperature):
     """Show backend / chip description."""
@@ -79,34 +79,36 @@ def info(profile, temperature):
 
 
 @cli.command()
-@click.option("--profile", default="hBN-VB", type=click.Choice(list(PROFILES)))
+@click.option("--profile", default="NV", type=click.Choice(list(PROFILES)))
 @click.option("--port", default=None, help="FPGA serial port (omit for simulator).")
 @click.option("--mock/--no-mock", default=True, help="Use the in-process simulator.")
 @click.option("--temperature", default=300.0)
 @click.option("--shots", default=1024)
 @click.option("--seed", default=42)
 def calibrate(profile, port, mock, temperature, shots, seed):
-    """Calibrate the laser-to-camera / grid mapping."""
+    """Calibrate the emitter->detector lookup table (on-chip readout)."""
     hw = make_connection(None if mock else port, profile=profile,
                          temperature_k=temperature, seed=seed)
-    laser = LaserArrayController(hw); camera = CameraInterface(hw)
-    cal = CalibrationManager(laser, camera)
+    emitter = EmitterController(hw)
+    detector = DetectorInterface(hw)
+    cal = CalibrationManager(emitter, detector)
     if mock:
-        cal.mapping = CalibrationManager.default_grid_mapping()
+        cal.mapping = CalibrationManager.default_detector_lut()
     else:
         cal.perform_calibration()
-    t = Table(title="Calibration mapping", show_lines=False)
-    t.add_column("Site (r,c)", style="cyan")
-    t.add_column("Pixel (x,y)", style="green")
-    for (r, c), (x, y) in sorted(cal.mapping.items()):
-        t.add_row(f"({r},{c})", f"({x},{y})")
+    t = Table(title="Calibration LUT (emitter pixel -> detector electrode)",
+              show_lines=False)
+    t.add_column("Emitter (r,c)", style="cyan")
+    t.add_column("Detector electrode", style="green")
+    for (r, c), det in sorted(cal.mapping.items()):
+        t.add_row(f"({r},{c})", str(det))
     console.print(t)
 
 
 @cli.command()
 @click.argument("n", type=int)
 @click.option("--a", default=None, type=int, help="Base (auto if omitted).")
-@click.option("--profile", default="hBN-VB", type=click.Choice(list(PROFILES)))
+@click.option("--profile", default="NV", type=click.Choice(list(PROFILES)))
 @click.option("--mock/--no-mock", default=True)
 @click.option("--port", default=None)
 @click.option("--temperature", default=300.0)
@@ -137,7 +139,7 @@ def period(n, a, profile, mock, port, temperature, shots, seed):
 
 @cli.command()
 @click.argument("n", type=int)
-@click.option("--profile", default="hBN-VB", type=click.Choice(list(PROFILES)))
+@click.option("--profile", default="NV", type=click.Choice(list(PROFILES)))
 @click.option("--mock/--no-mock", default=True)
 @click.option("--port", default=None)
 @click.option("--temperature", default=300.0)
@@ -177,7 +179,7 @@ def shor(n, profile, mock, port, temperature, shots, seed, retries):
 @click.argument("op", type=click.Choice(["add", "sub", "mul", "sqrt", "log"]))
 @click.argument("num1", type=float)
 @click.argument("num2", type=float, required=False)
-@click.option("--profile", default="hBN-VB", type=click.Choice(list(PROFILES)))
+@click.option("--profile", default="NV", type=click.Choice(list(PROFILES)))
 @click.option("--mock/--no-mock", default=True)
 @click.option("--temperature", default=300.0)
 @click.option("--shots", default=2048)
@@ -200,7 +202,7 @@ def math(op, num1, num2, profile, mock, temperature, shots, seed):
 
 
 @cli.command()
-@click.option("--profile", default="hBN-VB", type=click.Choice(list(PROFILES)))
+@click.option("--profile", default="NV", type=click.Choice(list(PROFILES)))
 @click.option("--b-field", default=1e-3, help="Magnetic field (T).")
 @click.option("--points", default=400)
 @click.option("--save", default=None, help="Save ODMR plot to this PNG path.")

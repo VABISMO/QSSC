@@ -5,12 +5,15 @@
 circuit through ``qiskit-aer`` using a noise model derived from the chosen
 :class:`~qssc.defects.DefectProfile` (T1, T2 and optical readout error).  The
 backend is honest about what it does: the *quantum* result is produced by a
-statevector/noise simulation, and the FPGA + optical stack is responsible for
-the *physical readout visualisation* on the 8x8 VCSEL/photodetector grid.
+statevector/noise simulation, and the FPGA + on-chip readout stack is
+responsible for the *physical readout visualisation* on the 8x8 CQD-emitter /
+graphene-detector grid.
 
 When ``hardware`` is provided (a real or simulated FPGA connection) the backend
-also drives the optical path so the physical readout matches the simulated
-bitstring -- exactly the educational behaviour of the original QNOS firmware.
+also drives the on-chip readout path -- firing the CQD emitter pixel for each
+measured-1 qubit and reading back the graphene detector electrode's lock-in
+photocurrent -- so the physical readout matches the simulated bitstring. There
+is no camera: the chip reads out directly on-chip (protocol §3).
 """
 from __future__ import annotations
 
@@ -36,18 +39,9 @@ from qiskit_aer.noise import (
 )
 
 from .defects import DefectProfile, get_profile, coherence_at_temperature
-from .simulator import (
-    QubitSite, SimulatedFPGA, detect_defects, make_camera_frame, auto_align,
-)
+from .simulator import QubitSite, SimulatedFPGA, auto_align
 
 logger = logging.getLogger(__name__)
-
-try:
-    import cv2  # type: ignore
-    _HAS_CV2 = True
-except Exception:  # pragma: no cover
-    cv2 = None
-    _HAS_CV2 = False
 
 
 # ---------------------------------------------------------------------------
@@ -69,44 +63,57 @@ class FPGAConnection:
         self.ser.write((command + "\n").encode())
         return self.ser.readline().decode().strip()
 
-    def receive_image(self, size: Tuple[int, int]) -> np.ndarray:
-        expected = size[0] * size[1]
-        data = b""
-        while len(data) < expected:
-            chunk = self.ser.read(min(1024, expected - len(data)))
-            if not chunk:
-                raise TimeoutError("image receive timeout")
-            data += chunk
-        return np.frombuffer(data, dtype=np.uint8).reshape(size)
-
     def close(self):
         self.ser.close()
 
 
-class LaserArrayController:
+class EmitterController:
+    """Drive the 8x8 on-chip CQD ASE/LED emitter array over the FPGA UART link.
+
+    The FPGA enables an external higher-voltage CQD emitter driver for the
+    addressed pixel (row anode-enable x col cathode-enable crossbar). The wire
+    command is ``DRIVE_EMITTER <row> <col> <duration_ms>``.
+    """
+
     GRID = 8
 
     def __init__(self, fpga):
         self.fpga = fpga
 
-    def fire(self, row: int, col: int, duration_ms: int = 50):
+    def drive(self, row: int, col: int, duration_ms: int = 50):
         if not (0 <= row < self.GRID and 0 <= col < self.GRID):
-            raise ValueError("laser position out of range")
-        return self.fpga.send_command(f"FIRE_LASER {row} {col} {duration_ms}")
+            raise ValueError("emitter position out of range")
+        return self.fpga.send_command(f"DRIVE_EMITTER {row} {col} {duration_ms}")
+
+    # back-compat for the old VCSEL-era name
+    fire = drive
 
 
-class CameraInterface:
-    def __init__(self, fpga, image_size: Tuple[int, int] = (480, 640)):
+class DetectorInterface:
+    """Read the on-chip graphene/MoS2 photodetector array over the FPGA UART link.
+
+    Each electrode's lock-in photocurrent is returned as a 12-bit ADC code
+    (0..4095). ``READ_DETECTOR <site>`` returns one code; ``READ_DETECTORS``
+    streams all 64 codes (space-separated) in a single reply.
+    """
+
+    GRID = 8
+
+    def __init__(self, fpga):
         self.fpga = fpga
-        self.image_size = image_size
 
-    def capture(self) -> np.ndarray:
-        self.fpga.send_command("CAPTURE_FRAME")
-        return self.fpga.receive_image(self.image_size)
+    def read(self, site: int) -> int:
+        reply = self.fpga.send_command(f"READ_DETECTOR {int(site)}")
+        return int(reply)
 
-    def dark(self) -> np.ndarray:
-        self.fpga.send_command("CAPTURE_DARK")
-        return self.fpga.receive_image(self.image_size)
+    def read_all(self) -> np.ndarray:
+        reply = self.fpga.send_command("READ_DETECTORS")
+        codes = [int(tok) for tok in reply.split()]
+        return np.array(codes, dtype=np.int32)
+
+    def read_odmr(self, site: int) -> int:
+        """Convenience: single-site photocurrent (alias of ``read``)."""
+        return self.read(site)
 
 
 class MicrowaveController:
@@ -155,7 +162,7 @@ class MicrowaveController:
         )
 
 
-def make_connection(port: Optional[str] = None, *, profile="hBN-VB",
+def make_connection(port: Optional[str] = None, *, profile="NV",
                     temperature_k: float = 300.0, seed: Optional[int] = None):
     """Return a real or simulated FPGA connection.
 
@@ -168,76 +175,88 @@ def make_connection(port: Optional[str] = None, *, profile="hBN-VB",
 
 
 # ---------------------------------------------------------------------------
-# Calibration + optical readout
+# Calibration + on-chip readout
 # ---------------------------------------------------------------------------
 
 class CalibrationManager:
-    """Map each (row, col) VCSEL site to a camera pixel."""
+    """Build the emitter-pixel -> qubit-site -> detector-electrode LUT.
+
+    On-chip calibration (protocol §5.6): drive each CQD emitter pixel in turn,
+    read every graphene detector electrode, and register the electrode whose
+    lock-in photocurrent responds above threshold. No camera, no alignment
+    jig -- the software discovers the coupling purely from the detector
+    response. On the 1:1-laid-out chip the mapping is the identity, but the
+    sweep is the method that establishes it.
+    """
 
     GRID = 8
 
-    def __init__(self, laser: LaserArrayController, camera: CameraInterface):
-        self.laser = laser
-        self.camera = camera
-        self.mapping: Dict[Tuple[int, int], Tuple[int, int]] = {}
+    def __init__(self, emitter: EmitterController, detector: DetectorInterface,
+                 threshold: int = 1000):
+        self.emitter = emitter
+        self.detector = detector
+        self.threshold = threshold
+        # emitter-pixel (row,col) -> detector-electrode index
+        self.mapping: Dict[Tuple[int, int], int] = {}
 
-    def perform_calibration(self, min_area: int = 100, threshold: int = 50):
+    def perform_calibration(self):
         for row in range(self.GRID):
             for col in range(self.GRID):
-                self.laser.fire(row, col, 50)
-                time.sleep(0.05)
-                img = self.camera.capture()
-                gray = img if img.ndim == 2 else cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if _HAS_CV2 else img.mean(-1)
-                if _HAS_CV2:
-                    _, th = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
-                    contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                    for cnt in contours:
-                        if cv2.contourArea(cnt) > min_area:
-                            m = cv2.moments(cnt)
-                            if m["m00"]:
-                                self.mapping[(row, col)] = (int(m["m10"] / m["m00"]),
-                                                            int(m["m01"] / m["m00"]))
-                            break
-                else:  # numpy fallback: brightest pixel
-                    y, x = np.unravel_index(np.argmax(gray), gray.shape)
-                    if gray[y, x] > threshold:
-                        self.mapping[(row, col)] = (int(x), int(y))
-                time.sleep(0.02)
+                self.emitter.drive(row, col, 50)
+                codes = self.detector.read_all()
+                best = int(np.argmax(codes))
+                if codes[best] > self.threshold:
+                    self.mapping[(row, col)] = best
         return self.mapping
 
     @classmethod
+    def default_detector_lut(cls) -> Dict[Tuple[int, int], int]:
+        """Deterministic identity LUT used when no physical calibration is run."""
+        return {(r, c): r * cls.GRID + c
+                for r in range(cls.GRID) for c in range(cls.GRID)}
+
+    # back-compat for the old camera-era name (returns the same identity LUT
+    # shaped as the legacy (x,y) grid mapping it superseded).
+    @classmethod
     def default_grid_mapping(cls) -> Dict[Tuple[int, int], Tuple[int, int]]:
-        """Deterministic mapping used when no physical calibration is run."""
         return {(r, c): (int(c * 80 + 40), int(r * 60 + 30))
                 for r in range(cls.GRID) for c in range(cls.GRID)}
 
 
-class QubitImageProcessor:
-    """Read qubit states out of a fluorescence frame."""
+class QubitReadoutProcessor:
+    """Threshold graphene-detector photocurrent codes into qubit states.
 
-    def __init__(self, c_max: float = 0.2, threshold: float = 50.0):
-        self.c_max = c_max
-        self.threshold = threshold
+    A pumped site in the bright ms=0 spin state (state 0) reports a high
+    photocurrent code; a resonant microwave pulse flips it to the dark ms=+-1
+    state (state 1) and the code drops to the ODMR-dip level. We threshold
+    midway between the bright and dark levels to recover the bit.
+    """
 
-    def process(self, image: np.ndarray, mapping: Dict[Tuple[int, int], Tuple[int, int]],
-                roi: int = 12, num_qubits: int = 64,
-                background: Optional[np.ndarray] = None) -> List[int]:
-        bg = float(np.mean(background)) if background is not None else 0.0
-        gray = image if image.ndim == 2 else image.mean(-1)
+    # mirrors qssc.simulator constants
+    BRIGHT_CODE = 3200
+    DARK_CODE = 800
+
+    def __init__(self, bright: int = BRIGHT_CODE, dark: int = DARK_CODE):
+        self.bright = bright
+        self.dark = dark
+        self.threshold = 0.5 * (bright + dark)
+
+    def process(self, codes: np.ndarray, lut: Dict[Tuple[int, int], int],
+                num_qubits: int = 64) -> List[int]:
         states = [0] * num_qubits
         for i in range(num_qubits):
             r, c = divmod(i, 8)
-            pos = (r, c)
-            if pos not in mapping:
+            det = lut.get((r, c))
+            if det is None or det >= len(codes):
                 continue
-            cx, cy = mapping[pos]
-            y0, y1 = max(0, cy - roi), min(gray.shape[0], cy + roi)
-            x0, x1 = max(0, cx - roi), min(gray.shape[1], cx + roi)
-            roi_mean = float(gray[y0:y1, x0:x1].mean()) if (y1 > y0 and x1 > x0) else 0.0
-            contrast = (roi_mean - bg) / max(self.threshold - bg, 1e-6)
-            p1 = min(max(contrast / self.c_max, 0.0), 1.0)
-            states[i] = 1 if p1 > 0.5 else 0
+            states[i] = 1 if int(codes[det]) < self.threshold else 0
         return states
+
+
+# back-compat aliases for the old VCSEL/camera-era names
+LaserArrayController = EmitterController
+CameraInterface = DetectorInterface
+QubitImageProcessor = QubitReadoutProcessor
 
 
 # ---------------------------------------------------------------------------
@@ -312,16 +331,16 @@ class QSSCBackend(BackendV2):
 
     Parameters
     ----------
-    profile : defect profile (hBN VB- by default) -- sets T1/T2/readout error.
+    profile : defect profile (NV-diamond by default) -- sets T1/T2/readout error.
     sites : list of :class:`QubitSite` (from :func:`auto_align`). If ``None`` the
         backend builds a synthetic grid.
     hardware : optional FPGA connection (real or simulated). When provided the
-        optical readout is driven to visualise the result on the physical grid.
+        on-chip readout is driven to visualise the result on the physical grid.
     shots : default number of shots.
     seed : RNG seed for Aer (reproducible demos).
     """
 
-    def __init__(self, profile: DefectProfile | str = "hBN-VB",
+    def __init__(self, profile: DefectProfile | str = "NV",
                  sites: Optional[Sequence[QubitSite]] = None,
                  hardware=None, shots: int = 1024, seed: int = 42,
                  temperature_k: float = 300.0,
@@ -721,16 +740,20 @@ class QSSCBackend(BackendV2):
         return counts
 
     def _drive_optical_readout(self, circuit: QuantumCircuit, counts: dict, shots: int) -> dict:
-        """Fire the VCSEL grid to display the most-likely measured bitstring."""
+        """Drive the on-chip readout to display the most-likely measured bitstring.
+
+        The 8x8 CQD crossbar lights ONE emitter pixel at a time, so for each
+        measured-1 qubit we drive its pixel and read the coupled graphene detector
+        electrode's lock-in photocurrent before moving on -- no multi-pixel
+        accumulation, no camera, no image. The detector codes are thresholded to
+        recover the physical readout state per site.
+        """
         try:
-            from .simulator import SimulatedFPGA
-            laser = LaserArrayController(self.hardware)
-            camera = CameraInterface(self.hardware)
-            proc = QubitImageProcessor()
-            mapping = CalibrationManager.default_grid_mapping()
+            emitter = EmitterController(self.hardware)
+            detector = DetectorInterface(self.hardware)
+            proc = QubitReadoutProcessor()
+            lut = CalibrationManager.default_detector_lut()
             bitstring = max(counts, key=counts.get) if counts else "0" * circuit.num_clbits
-            # reset
-            self.hardware.send_command("CAPTURE_DARK")
             # map measured classical bits -> qubit grid positions
             meas_map = []
             for instr in circuit.data:
@@ -738,17 +761,19 @@ class QSSCBackend(BackendV2):
                     cl = circuit.find_bit(instr.clbits[0]).index
                     pq = circuit.find_bit(instr.qubits[0]).index
                     meas_map.append((cl, pq))
+            codes = np.zeros(self._n_qubits, dtype=np.int32)
             for cl, pq in meas_map:
                 str_idx = (circuit.num_clbits - 1) - cl
                 if str_idx < len(bitstring) and bitstring[str_idx] == "1" and pq < self._n_qubits:
                     r, c = divmod(pq, 8)
-                    laser.fire(r, c, 50)
-            image = camera.capture()
-            states = proc.process(image, mapping, num_qubits=self._n_qubits)
+                    det = lut.get((r, c), r * 8 + c)
+                    emitter.drive(r, c, 50)
+                    codes[det] = detector.read(det)
+            states = proc.process(codes, lut, num_qubits=self._n_qubits)
             return {"displayed_bitstring": bitstring, "read_states": states,
-                    "image_mean": float(np.mean(image))}
+                    "photocurrent_mean": float(np.mean(codes))}
         except Exception as exc:  # pragma: no cover - hardware path
-            logger.warning("optical readout skipped: %s", exc)
+            logger.warning("on-chip readout skipped: %s", exc)
             return {"error": str(exc)}
 
     # -- introspection -----------------------------------------------------
@@ -768,7 +793,8 @@ class QSSCBackend(BackendV2):
             "via the ADF4351 PLL with per-site pulses (no native 2-qubit gate "
             "between arbitrary distant sites without mediating modes).",
             f"Optical readout fidelity ~{self.profile.readout_error*100:.0f}% "
-            "error; single-shot spin readout in hBN ensembles is partial.",
+            "error; on-chip CQD pump + graphene/MoS2 detector + lock-in readout "
+            "(no camera).",
             "No mid-circuit measurement / fast feedback at the defect level "
             "(readout is optical, µs-scale) — error-correcting codes needing "
             "fast feedback are not supported by this control stack.",

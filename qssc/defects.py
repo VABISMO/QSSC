@@ -3,11 +3,18 @@
 
 Each :class:`DefectProfile` bundles the physical constants that the simulator,
 the ODMR model and the Qiskit noise model need for a given defect family.  The
-chip described in the fabrication protocol hosts boron-vacancy (VB-) centres in
-hexagonal boron nitride (hBN) and is designed to operate at **room
-temperature**; nitrogen-vacancy (NV) centres in diamond and silicon-vacancy
-related defects in SiC are supported as alternative defect families so the same
-control stack can drive different substrates.
+canonical chip described in the fabrication protocol is the **NV-diamond**
+compute chip — a CVD diamond plate hosting nitrogen-vacancy (NV-) centres,
+operated at **room temperature** with on-chip CQD ASE/LED pump + graphene/MoS₂
+photodetector + FPGA lock-in readout.  NV-diamond is the only defect family here
+whose room-temperature coherence (T2 ~ 1.8 ms in 12C-enriched diamond) is long
+enough to compute seriously at 300 K, so it is the **default** profile.
+
+Boron-vacancy (VB-) centres in hexagonal boron nitride (hBN) and silicon-vacancy
+related defects (V_Si) in SiC are kept as **sensor variants**: same control
+stack, shorter coherence (hBN T2 ~ 2 us, SiC T2 ~ 40 us), so the same software
+can drive different substrates, but they are not compute-capable at room
+temperature.
 """
 from __future__ import annotations
 
@@ -182,13 +189,13 @@ SIC_VS = DefectProfile(
 )
 
 PROFILES: Dict[str, DefectProfile] = {
-    "hBN-VB": HBN_VB,
     "NV": NV_DIAMOND,
+    "hBN-VB": HBN_VB,
     "SiC-VSi": SIC_VS,
 }
 
 
-def get_profile(key: str = "hBN-VB") -> DefectProfile:
+def get_profile(key: str = "NV") -> DefectProfile:
     """Return a defect profile by short name (case-insensitive)."""
     key = key.strip()
     if key in PROFILES:

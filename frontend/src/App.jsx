@@ -6,9 +6,9 @@ import {
 } from './components.jsx'
 
 const PROFILES = [
-  { id: 'hBN-VB', label: 'hBN · V_B⁻ (boron-vacancy)' },
-  { id: 'NV', label: 'Diamond · NV centre' },
-  { id: 'SiC-VSi', label: 'SiC · V_Si (silicon vacancy)' },
+  { id: 'NV', label: 'Diamond · NV centre (default / compute)' },
+  { id: 'hBN-VB', label: 'hBN · V_B⁻ (boron-vacancy · sensor)' },
+  { id: 'SiC-VSi', label: 'SiC · V_Si (silicon vacancy · sensor)' },
 ]
 const ALGOS = ['custom', 'shor', 'period', 'bell', 'math', 'grover', 'qft', 'qftnos', 'qrand', 'bb84']
 const ALGO_LABELS = {
@@ -121,7 +121,7 @@ export default function App() {
   const [mainTab, setMainTab] = useState('hardware')
 
   // ---- global control state ----
-  const [profile, setProfile] = useState('hBN-VB')
+  const [profile, setProfile] = useState('NV')
   const [temperature, setTemperature] = useState(273)
   const [seed, setSeed] = useState(42)
   const [noiseMode, setNoiseMode] = useState('real')
@@ -719,7 +719,7 @@ export default function App() {
           <div className="grid cols-2">
             <div className="card">
               <h2><span className="dot" />ODMR spectrum</h2>
-              <div className="hint">Optically Detected Magnetic Resonance — Lorentzian dips at D ± γB with hyperfine replicas.</div>
+              <div className="hint">Lock-in ODMR — the on-chip graphene/MoS₂ detector array's photocurrent dips at D ± γB (resonant MW flips the spin dark), with hyperfine replicas.</div>
               <OdmrChart data={odmr.data} />
               {odmr.error && <div className="error">{odmr.error}</div>}
             </div>
@@ -736,7 +736,7 @@ export default function App() {
           <div className="section-title">Detected signal</div>
           <div className="card">
             <h2><span className="dot" />Analog detected signal</h2>
-            <div className="hint">Time-resolved photoluminescence the on-chip 2D detector array records during a pulse sequence.</div>
+            <div className="hint">Lock-in-demodulated detector photocurrent the on-chip graphene/MoS₂ array records during a pulse sequence.</div>
             <div className="row" style={{ marginBottom: 10 }}>
               <div className="field">
                 <label>Sequence</label>

@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from qssc import (
     get_profile, coherence_at_temperature,
     auto_align, simulate_odmr, QSSCBackend,
-    make_camera_frame, detect_defects, PROFILES,
+    make_detector_response, PROFILES,
 )
 from qssc.protocol import (
     protocol_as_dict, protocol_summary, protocol_platforms,
@@ -29,7 +29,8 @@ app = FastAPI(
     title="QSSC — Quantum Solid State Chip (room temperature)",
     version="2.0.0",
     description="Simulator, Qiskit backend and fabrication-protocol API for a "
-                "room-temperature hBN spin-defect quantum chip.",
+                "room-temperature NV-diamond spin-defect quantum chip (on-chip "
+                "CQD emitter + graphene detector readout, no camera).",
 )
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
@@ -43,7 +44,7 @@ app.add_middleware(
 
 class RunRequest(BaseModel):
     algorithm: str = "shor"          # shor | period | bell | grover | math
-    profile: str = "hBN-VB"
+    profile: str = "NV"
     temperature_k: float = 300.0
     shots: int = 2048
     seed: int = 42
@@ -72,7 +73,7 @@ class RunRequest(BaseModel):
 
 class CustomCircuitRequest(BaseModel):
     code: str                        # OpenQASM 2 or Python snippet (defines `qc`)
-    profile: str = "hBN-VB"
+    profile: str = "NV"
     temperature_k: float = 300.0
     shots: int = 2048
     seed: int = 42
@@ -123,7 +124,7 @@ def profiles():
 
 
 @app.get("/api/backend/info")
-def backend_info(profile: str = "hBN-VB", temperature_k: float = 300.0,
+def backend_info(profile: str = "NV", temperature_k: float = 300.0,
                  seed: int = 42):
     b = _backend(profile, temperature_k, seed, "none")
     desc = b.describe()
@@ -133,7 +134,7 @@ def backend_info(profile: str = "hBN-VB", temperature_k: float = 300.0,
 
 
 @app.get("/api/odmr")
-def odmr(profile: str = "hBN-VB", b_field: float = 1e-3,
+def odmr(profile: str = "NV", b_field: float = 1e-3,
          points: int = 400, linewidth: float = 5.0):
     prof = get_profile(profile)
     f0 = prof.d_ghz
@@ -153,11 +154,11 @@ def odmr(profile: str = "hBN-VB", b_field: float = 1e-3,
 
 
 @app.get("/api/protocol")
-def protocol(platform: str = "hBN-VB"):
+def protocol(platform: str = "NV"):
     """Fabrication protocol for a given spin-defect platform.
 
-    ``platform`` matches the simulator profile keys (hBN-VB / NV / SiC-VSi).
-    Defaults to the hBN base for backward compatibility.
+    ``platform`` matches the simulator profile keys (NV / hBN-VB / SiC-VSi).
+    Defaults to the canonical NV-diamond compute chip.
     """
     return {"summary": protocol_summary(platform),
             "sections": protocol_as_dict(platform)}
@@ -170,7 +171,7 @@ def protocol_variants():
 
 
 @app.get("/api/calibration")
-def calibration(profile: str = "hBN-VB", grid: int = 8):
+def calibration(profile: str = "NV", grid: int = 8):
     from qssc.backend import CalibrationManager
     mapping = CalibrationManager.default_grid_mapping()
     sites = []
@@ -182,7 +183,7 @@ def calibration(profile: str = "hBN-VB", grid: int = 8):
 
 
 @app.get("/api/signal")
-def signal(profile: str = "hBN-VB", temperature_k: float = 300.0,
+def signal(profile: str = "NV", temperature_k: float = 300.0,
            b_field: float = 1e-3, detuning_mhz: float = 2.0,
            sequence: str = "ramsey", points: int = 240, seed: int = 42):
     """Analog detected-photoluminescence trace during a pulse sequence.
@@ -235,27 +236,31 @@ def signal(profile: str = "hBN-VB", temperature_k: float = 300.0,
 
 
 @app.post("/api/calibration/run")
-def calibration_run(profile: str = "hBN-VB", temperature_k: float = 300.0,
+def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
                     seed: int = 42, grid: int = 8, b_field: float = 1e-3,
                     points: int = 220):
     """Run the full calibration process the way the VABISMO software does.
 
-    Stages: (1) capture a fluorescence frame and detect defects, (2) auto-align
-    the qubit grid to the detected sites, (3) sweep the microwave frequency to
-    record an ODMR spectrum and fit the zero-field splitting D + linewidth.
-    Returns every stage's data so the dashboard can render the calibration.
+    Stages: (1) scan the on-chip detector array for defect photocurrent
+    (lock-in), (2) auto-align the qubit grid to the detected sites, (3) sweep
+    the microwave frequency to record an ODMR spectrum and fit the zero-field
+    splitting D + linewidth. Returns every stage's data so the dashboard can
+    render the calibration.
     """
     prof = get_profile(profile)
     rng = np.random.default_rng(seed)
 
-    # Stage 1 — defect detection on a simulated camera frame
-    shape = (96, 128)
-    centres = [{"x": c * 16 + 8, "y": r * 12 + 6, "intensity": 170.0}
-               for r in range(grid) for c in range(grid)]
-    frame = make_camera_frame(centres, shape=shape,
-                              fluorescence_factor=prof.fluorescence_factor)
-    defects = detect_defects(frame, threshold=50)
-    n_detected = len(defects)
+    # Stage 1 — scan the on-chip graphene/MoS2 detector array. Drive every
+    # emitter pixel and read the detector response; a site above the lock-in
+    # threshold counts as "detected". No camera frame — the detector array is
+    # the readout. Response keys are kept (frame_shape = detector-array shape,
+    # defects_detected = sites above threshold, frame_mean/max = photocurrent
+    # code stats) so the stage-0 dashboard render stays unchanged.
+    active = {(r, c) for r in range(grid) for c in range(grid)}
+    response = make_detector_response(active, profile=profile,
+                                       grid=grid, rng=rng).reshape(grid, grid)
+    threshold = 1000
+    n_detected = int(np.count_nonzero(response > threshold))
 
     # Stage 2 — auto-align grid
     sites = auto_align(prof, grid=grid, temperature_k=temperature_k, rng=rng)
@@ -291,11 +296,11 @@ def calibration_run(profile: str = "hBN-VB", temperature_k: float = 300.0,
     return {
         "profile": prof.short, "temperature_k": temperature_k,
         "stages": [
-            {"name": "1 · Detect defects (camera frame)",
-             "frame_shape": list(frame.shape),
+            {"name": "1 · Scan on-chip detector array",
+             "frame_shape": list(response.shape),
              "defects_detected": n_detected,
-             "frame_mean": round(float(frame.mean()), 2),
-             "frame_max": round(float(frame.max()), 2)},
+             "frame_mean": round(float(response.mean()), 2),
+             "frame_max": round(float(response.max()), 2)},
             {"name": "2 · Auto-align qubit grid",
              "sites_aligned": len(aligned), "sites": aligned},
             {"name": "3 · ODMR sweep + fit D",

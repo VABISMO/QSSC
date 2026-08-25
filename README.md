@@ -11,10 +11,13 @@ protocol, and a web dashboard. This project remasters and merges two earlier
 projects by the same author — an hBN spin-defect *chip design* and a Qiskit
 NV-diamond *simulator* — into one coherent, renamed deliverable.
 
-> Solid-state spin defects (hBN V_B⁻, NV-diamond, SiC V_Si) keep quantum
+> Solid-state spin defects (NV-diamond, hBN V_B⁻, SiC V_Si) keep quantum
 > coherence at **~300 K**, so the chip does not require a dilution refrigerator.
-> The V_B⁻ boron-vacancy in hexagonal boron nitride is the default defect:
-> zero-field splitting **D ≈ 3.46 GHz**, room-temperature ODMR readout.
+> The canonical **default** defect is the **nitrogen-vacancy (NV⁻) centre in
+> CVD diamond** — the only family here whose room-temperature coherence
+> (**T₂ ≈ 1.8 ms** in ¹²C-enriched diamond) is long enough to *compute*
+> seriously at 300 K. Zero-field splitting **D ≈ 2.87 GHz**, room-temperature
+> ODMR readout. hBN V_B⁻ and SiC V_Si are retained as **sensor variants**.
 
 ## What's in the box
 
@@ -23,7 +26,7 @@ NV-diamond *simulator* — into one coherent, renamed deliverable.
 | **Python core** | `qssc/` | `QSSCBackend` (Qiskit `BackendV2`), simulator, defect profiles, quantum circuits, fabrication-protocol model |
 | **REST backend** | `api/` | FastAPI app exposing the simulator, ODMR model, protocol and a circuit runner |
 | **Frontend** | `frontend/` | React 18 + Vite dashboard (ODMR chart, qubit grid, circuit runner, protocol viewer) |
-| **FPGA RTL** | `fpga/rtl` | 11 Verilog modules (Artix-7) — UART, SCCB/OV7670 camera, SPI/ADF4351 PLL, laser array, command parser, top-level |
+| **FPGA RTL** | `fpga/rtl` | 8 Verilog modules (Artix-7) — UART, SPI/ADF4351 PLL, 8×8 on-chip CQD emitter array, on-chip graphene/MoS₂ detector readout (analog MUX + XADC + 1 kHz lock-in), command parser, top-level |
 | **Hardware** | `hardware/` | KiCad PCB, XDC constraints, CNC G-code, `HARDWARE_DESIGN.md` |
 | **Protocol** | `docs/FABRICATION_PROTOCOL.md` | 5-section lab fabrication protocol, validated against published studies |
 | **Protocol (HTML)** | `docs/protocol.html` | Branded, print-ready HTML render of the protocol (regenerate with `python3 tools/build_protocol_html.py`) |
@@ -42,9 +45,9 @@ pip install -e ".[api,dev]"
 python -m pytest                       # 59 passed
 
 # try the CLI
-qssc info                              # backend / defect summary
+qssc info                              # backend / defect summary (defaults to NV)
 qssc shor 15                           # → factors 3 × 5
-qssc odmr --profile hBN-VB             # ODMR spectrum
+qssc odmr                              # ODMR spectrum (NV default, dip at 2.87 GHz)
 
 # start the REST backend
 uvicorn api.main:app --port 8000
@@ -56,14 +59,17 @@ npm install && npm run dev             # http://localhost:5173
 
 ## Defect platforms
 
-| Platform | Defect | D (GHz) | T₂ @ 300 K | Readout err | Excitation |
-|---|---|---|---|---|---|
-| hBN | V_B⁻ (boron-vacancy) | 3.46 | ~2 µs | 12 % | 561 nm |
-| Diamond | NV centre | 2.87 | ~1 ms* | 3 % | 532 nm |
-| SiC | V_Si (silicon vacancy) | 0.07 / 0.14 | ~40 µs | ~15 % | 780 nm |
+| Platform | Defect | D (GHz) | T₂ @ 300 K | Readout err | Excitation | Role |
+|---|---|---|---|---|---|---|
+| **Diamond** | **NV⁻ (nitrogen-vacancy)** | **2.87** | **~1.8 ms\*** | **8 %** | **532 nm (green)** | **default / compute** |
+| hBN | V_B⁻ (boron-vacancy) | 3.46 | ~2 µs | 12 % | 561 nm | sensor variant |
+| SiC | V_Si (silicon vacancy) | 0.07 / 0.14 | ~40 µs | ~15 % | 780 nm | sensor variant |
 
-\* NV diamond T₂ can reach milliseconds at room temperature in isotopically
-purified samples. hBN V_B⁻ is the default because of its low fabrication cost.
+\* NV-diamond T₂ ≈ 1.8 ms at 300 K in ¹²C-enriched CVD diamond
+(Balasubramanian 2009) — long enough to **compute** at room temperature
+(T₁ ≈ 6 ms, single-qubit gate ~25 ns, two-qubit gate ~200 ns, readout ~3 µs).
+hBN V_B⁻ and SiC V_Si are kept as **sensor variants** (their T₂ is too short
+for serious compute at 300 K, but they sense well).
 
 ## Qiskit backend
 
@@ -118,13 +124,16 @@ ready-made Bell / GHZ / QFT / QASM examples.
 
 ## FPGA control stack
 
-A single **Artix-7 XC7A35T** orchestrates an 8×8 VCSEL laser array, an
-**ADF4351** microwave PLL, an **OV7670** camera and a host UART link. The RTL
-([`fpga/rtl/`](fpga/rtl), 11 modules + a self-checking
-[testbench](fpga/sim/tb_top_level.v)) is parse-verified with pyverilog and the
-original repo's bugs (use-before-declare, dual-driven regs, SCCB corruption, R3
-width, grayscale overflow) have been fixed. Pin assignments live in
-[`fpga/constraints.xdc`](fpga/constraints.xdc).
+A single **Artix-7 XC7A35T** orchestrates an **8×8 on-chip CQD ASE/LED emitter
+array** (green ~520–540 nm, electrically pumped via an external higher-voltage
+driver), the **on-chip graphene/MoS₂ photodetector array** read through a TIA +
+analog MUX into the Artix-7's built-in **XADC** with **1 kHz lock-in**
+demodulation, an **ADF4351** microwave PLL, and a host UART link. **There is no
+camera and no alignment jig** — the chip integrates its own emitter and detector
+arrays and is read electrically (ODMR dip = reduced photocurrent at resonance).
+The RTL ([`fpga/rtl/`](fpga/rtl), 8 modules + a self-checking
+[testbench](fpga/sim/tb_top_level.v)) is parse-verified with pyverilog. Pin
+assignments live in [`fpga/constraints.xdc`](fpga/constraints.xdc).
 
 The host protocol is a small ASCII UART command set (115200 baud, 8-N-1,
 `\n`-terminated; all numbers decimal integers — see
@@ -133,17 +142,21 @@ specification):
 
 | Command | Action | Reply |
 |---|---|---|
-| `FIRE_LASER <row> <col> <duration_ms>` | fire VCSEL (row,col) | `OK` |
+| `DRIVE_EMITTER <row> <col> <duration_ms>` | drive CQD emitter pixel (row,col) | `OK` |
 | `APPLY_PULSE <qubit> <freq_khz> <amp> <duration_ns> <phase>` | program ADF4351 to `freq_khz` | `OK` |
-| `CAPTURE_FRAME` | grab 64×48 window, stream 3072 bytes | `<bytes>` then `OK` |
-| `CAPTURE_DARK` | same as `CAPTURE_FRAME` (dark flag) | `<bytes>` then `OK` |
+| `READ_DETECTOR <site>` | digitise one detector electrode (XADC) | `<code>` |
+| `READ_DETECTORS` | sweep all 64 electrodes, stream codes | `<code> <code> …` (64) |
+| `CALIBRATE` | drive each emitter + read detectors, build emitter→detector LUT | `OK` |
 
-`freq_khz` is the RF output in kHz (e.g. `3460000` for 3.46 GHz); `amp` 0–3
-maps to the ADF4351 output power index; `duration_ns`/`phase` (milliradians) are
-parsed and reserved for a future RF-gate/phase-register extension. The Python
-[`MicrowaveController`](qssc/backend.py) emits exactly this integer form, so
-the same control code drives the [`SimulatedFPGA`](qssc/simulator.py) and a
-real board.
+`freq_khz` is the RF output in kHz (e.g. `2870000` for 2.87 GHz NV⁻, `3460000`
+for 3.46 GHz hBN V_B⁻); `amp` 0–3 maps to the ADF4351 output power index;
+`duration_ns`/`phase` (milliradians) are parsed and reserved for a future
+RF-gate/phase-register extension. Detector codes are 12-bit ADC values
+(0–4095). The Python [`EmitterController`](qssc/backend.py) /
+[`DetectorInterface`](qssc/backend.py) /
+[`MicrowaveController`](qssc/backend.py) emit exactly this integer form, so the
+same control code drives the [`SimulatedFPGA`](qssc/simulator.py) and a real
+board.
 
 ## Fabrication protocol
 
@@ -169,17 +182,19 @@ support.
 ### Hardware
 
 - [`hardware/HARDWARE_DESIGN.md`](hardware/HARDWARE_DESIGN.md) — the full
-  hardware design document: system overview + block diagram, BOM (34 parts),
-  power sequencing, clocking, the FPGA↔PC UART protocol (§5), ADF4351 loop
-  filter & RF path, VCSEL current-limiting math, OV7670 camera interface &
-  optics, microwave antenna/CPW, controlled-impedance routing, decoupling, the
+  hardware design document: system overview + block diagram, BOM, power
+  sequencing, clocking, the FPGA↔PC UART protocol (§5), ADF4351 loop filter &
+  RF path, on-chip CQD emitter driver math, on-chip photodetector readout
+  (graphene TIA + analog MUX + Artix-7 XADC, 1 kHz lock-in, 650 nm long-pass
+  filter), microwave antenna/CPW, controlled-impedance routing, decoupling, the
   4-layer PCB stackup, critical-net trace geometry, CNC G-code files, the KiCad
-  project, and a references list (ADF4351 / XC7A35T / OV7670 / HMC441 datasheets).
-- [`fpga/rtl/`](fpga/rtl) — 11 Verilog modules: `top_level`, `command_parser`,
-  `uart_rx`/`uart_tx`, `spi_master` (ADF4351), `adf4351_ctrl`, `laser_array`,
-  `ov7670_ctrl` + `sccb_master` + `ov7670_config_rom`, `camera_capture`.
+  project, and a references list (ADF4351 / XC7A35T+XADC / HMC441 / NV readout).
+- [`fpga/rtl/`](fpga/rtl) — 8 Verilog modules: `top_level`, `command_parser`,
+  `uart_rx`/`uart_tx`, `spi_master` (ADF4351), `adf4351_ctrl`, `emitter_array`
+  (8×8 CQD crossbar), `photodetector_readout` (analog MUX + XADC + 1 kHz lock-in).
 - [`fpga/constraints.xdc`](fpga/constraints.xdc) — Artix-7 CPG236 pin
-  assignments and timing constraints (100 MHz TCXO, camera-domain false path).
+  assignments and timing constraints (100 MHz TCXO, emitter crossbar, detector
+  MUX, ADF4351 SPI; no camera domain).
 - [`fpga/sim/tb_top_level.v`](fpga/sim/tb_top_level.v) — self-checking testbench.
 - [`hardware/gcode/`](hardware/gcode) — CNC G-code for the microfluidic
   cylinder array, fluorescence-sensor routing, microlens array, and square
@@ -189,13 +204,14 @@ support.
 
 ### Fabrication protocol
 
-- [`docs/FABRICATION_PROTOCOL.md`](docs/FABRICATION_PROTOCOL.md) — 5-section
-  lab fabrication protocol for the **hBN V_B⁻** default chip (CQD emitter
-  array, hBN exfoliation + defect engineering + PMMA, on-chip 2D photodetectors,
-  waveguides/stacking/thermal management, safety), validated against landmark
-  publications.
 - [`docs/FABRICATION_PROTOCOL_Diamond.md`](docs/FABRICATION_PROTOCOL_Diamond.md)
-  — NV-diamond variant.
+  — 5-section lab fabrication protocol for the **canonical NV-diamond** compute
+  chip (CQD emitter array, CVD diamond + NV⁻ engineering, on-chip graphene/MoS₂
+  photodetectors, waveguides/stacking/thermal management, safety), validated
+  against landmark publications.
+- [`docs/FABRICATION_PROTOCOL.md`](docs/FABRICATION_PROTOCOL.md) — hBN V_B⁻
+  sensor-variant protocol (CQD emitter array, hBN exfoliation + defect
+  engineering + PMMA, on-chip 2D photodetectors, …).
 - [`docs/FABRICATION_PROTOCOL_SiC.md`](docs/FABRICATION_PROTOCOL_SiC.md) —
   SiC V_Si variant.
 - [`docs/protocol.html`](docs/protocol.html) /

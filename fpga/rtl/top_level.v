@@ -6,12 +6,20 @@
 // Chip (room temperature) control board. Instantiates and wires:
 //   * UART rx/tx           (115200 baud, 8-N-1)
 //   * command_parser       (text protocol over UART)
-//   * laser_array          (8x8 VCSEL driver)
-//   * ov7670_ctrl          (SCCB config + XCLK for the OV7670)
-//   * camera_capture       (double-buffered BRAM frame grabber)
+//   * emitter_array        (8x8 on-chip CQD emitter enable crossbar)
+//   * photodetector_readout(analog MUX + XADC + 1 kHz lock-in for the
+//                           on-chip graphene/MoS2 detector array)
 //   * adf4351_ctrl         (microwave PLL register sequencer)
 //   * spi_master           (32-bit SPI for the ADF4351)
 //   * refclk_out           (25 MHz reference for the ADF4351, 100 MHz / 4)
+//
+// There is NO camera and NO SCCB/pixel interface on this board: the chip is
+// read on-chip (CQD emitter pump -> graphene detector photocurrent -> TIA ->
+// analog MUX -> Artix-7 XADC, lock-in demodulated at 1 kHz). The XADC is a
+// hard block of the XC7A35T (fixed-package aux pins, assigned via the XADC
+// wizard / constraints); `xadc_behavioral` below is a behavioural stand-in
+// for that hard block so the design is simulatable. In a real build it is
+// replaced by the Xilinx XADC primitive.
 //
 // Port names match fpga/constraints.xdc.
 //============================================================================
@@ -21,24 +29,18 @@ module top_level (
     // UART (FT232)
     input             rx,
     output            tx,
-    // 8x8 VCSEL array
-    output [7:0]      laser_rows,
-    output [7:0]      laser_cols,
-    // OV7670 SCCB + pixel interface
-    inout             scl,
-    inout             sda,
-    output            xclk,
-    input             pclk,
-    input             vsync,
-    input             href,
-    input      [7:0]  d,
+    // 8x8 on-chip CQD emitter array crossbar (FPGA -> external emitter driver)
+    output [7:0]      emitter_rows,     // row anode-enables (active high)
+    output [7:0]      emitter_cols,     // column cathode-enables (active low)
+    // On-chip graphene/MoS2 photodetector readout front-end
+    output [5:0]      det_mux_sel,      // analog MUX select (which electrode)
+    output            mod_sync,        // 1 kHz lock-in modulation reference
     // ADF4351 SPI: {LE, CLK, DATA, MUXOUT}  (MUXOUT is an input from the PLL)
     inout  [3:0]      spi_pins,
     output            refclk_out       // 25 MHz to ADF4351 REF_IN
 );
     // ---- Parameters --------------------------------------------------------
     localparam CLKS_PER_BIT = 868;          // 100 MHz / 115200
-    localparam [15:0] CAM_FRAME_BYTES = 16'd3072;  // 64x48 window
 
     // ---- UART --------------------------------------------------------------
     wire [7:0] rx_byte;
@@ -63,23 +65,23 @@ module top_level (
         .o_Tx_Done ()
     );
 
-    // ---- Laser array -------------------------------------------------------
-    wire        laser_fire;
-    wire [2:0]  laser_row;
-    wire [2:0]  laser_col;
-    wire [31:0] laser_duration_ms;
-    wire        laser_busy;
+    // ---- Emitter array (8x8 CQD crossbar) ---------------------------------
+    wire        em_drive;
+    wire [2:0]  em_row;
+    wire [2:0]  em_col;
+    wire [31:0] em_duration_ms;
+    wire        em_busy;
 
-    laser_array laser_inst (
+    emitter_array em_inst (
         .clk          (clk_100mhz),
         .reset        (reset),
-        .fire         (laser_fire),
-        .row          (laser_row),
-        .col          (laser_col),
-        .duration_ms  (laser_duration_ms),
-        .laser_rows   (laser_rows),
-        .laser_cols   (laser_cols),
-        .busy         (laser_busy)
+        .drive        (em_drive),
+        .row          (em_row),
+        .col          (em_col),
+        .duration_ms  (em_duration_ms),
+        .emitter_rows (emitter_rows),
+        .emitter_cols (emitter_cols),
+        .busy         (em_busy)
     );
 
     // ---- ADF4351 PLL + SPI -------------------------------------------------
@@ -125,63 +127,83 @@ module top_level (
         .spi_done        (spi_done_w)
     );
 
-    // ---- OV7670 config + XCLK ---------------------------------------------
-    wire config_done;
-    ov7670_ctrl #(.XCLK_DIV(2)) ov_cfg_inst (
+    // ---- Photodetector readout (analog MUX + XADC + 1 kHz lock-in) --------
+    wire        det_read_one;
+    wire        det_read_all;
+    wire [5:0]  det_site;
+    wire        det_busy;
+    wire [11:0] det_code;
+    wire        det_code_valid;
+    wire [5:0]  det_code_idx;
+    wire        det_sweep_done;
+    wire [5:0]  det_mux_sel_int;
+    wire        xadc_start;
+    wire        xadc_busy;
+    wire [11:0] xadc_data;
+    wire        mod_sync_int;
+
+    photodetector_readout #(.N_DET(64), .CLK_HZ(100_000_000)) det_inst (
         .clk         (clk_100mhz),
         .reset       (reset),
-        .scl         (scl),
-        .sda         (sda),
-        .xclk        (xclk),
-        .config_done (config_done)
+        .read_one    (det_read_one),
+        .read_all    (det_read_all),
+        .site        (det_site),
+        .busy        (det_busy),
+        .code        (det_code),
+        .code_valid  (det_code_valid),
+        .code_idx    (det_code_idx),
+        .sweep_done  (det_sweep_done),
+        .mux_sel     (det_mux_sel_int),
+        .xadc_start  (xadc_start),
+        .xadc_busy   (xadc_busy),
+        .xadc_data   (xadc_data),
+        .mod_sync    (mod_sync_int)
     );
 
-    // ---- Camera capture (double-buffered BRAM) -----------------------------
-    wire        cam_capture_start;
-    wire        cam_frame_ready;
-    wire [15:0] cam_rd_addr;
-    wire [7:0]  cam_rd_data;
-    wire        cam_capturing;
+    assign det_mux_sel = det_mux_sel_int;
+    assign mod_sync    = mod_sync_int;
 
-    camera_capture #(
-        .X_START(288), .X_SIZE(64), .Y_START(216), .Y_SIZE(48),
-        .FRAME_SIZE(3072)
-    ) cam_inst (
-        .pclk            (pclk),
-        .reset           (reset),
-        .vsync           (vsync),
-        .href            (href),
-        .d               (d),
-        .capture_start   (cam_capture_start),
-        .frame_ready     (cam_frame_ready),
-        .rd_clk          (clk_100mhz),
-        .rd_addr         (cam_rd_addr),
-        .rd_data         (cam_rd_data),
-        .capturing_out   (cam_capturing)
+    // ---- XADC behavioural model (real build: Xilinx XADC primitive) ------
+    xadc_behavioral #(.CONV_CYCLES(100)) xadc_inst (
+        .clk     (clk_100mhz),
+        .reset   (reset),
+        .start   (xadc_start),
+        .mux_sel (det_mux_sel_int),
+        .busy    (xadc_busy),
+        .data    (xadc_data)
     );
+
+    // ---- Calibration LUT readback (unused by host in this build) ----------
+    wire [5:0] lut_rd_data;
+    wire [5:0] lut_rd_addr = 6'd0;
 
     // ---- Command parser (ties everything together) -------------------------
-    command_parser #(.FRAME_BYTES(3072)) parser_inst (
-        .clk               (clk_100mhz),
-        .reset             (reset),
-        .rx_byte           (rx_byte),
-        .rx_valid          (rx_valid),
-        .tx_byte           (tx_byte),
-        .tx_start          (tx_start),
-        .tx_busy           (tx_busy),
-        .laser_fire        (laser_fire),
-        .laser_row         (laser_row),
-        .laser_col         (laser_col),
-        .laser_duration_ms (laser_duration_ms),
-        .laser_busy        (laser_busy),
-        .pll_start         (pll_start),
-        .pll_freq_khz      (pll_freq_khz),
-        .pll_busy          (pll_busy),
-        .cam_capture_start (cam_capture_start),
-        .cam_frame_ready   (cam_frame_ready),
-        .cam_rd_addr       (cam_rd_addr),
-        .cam_rd_data       (cam_rd_data),
-        .cam_capturing     (cam_capturing)
+    command_parser #(.N_DET(64)) parser_inst (
+        .clk              (clk_100mhz),
+        .reset            (reset),
+        .rx_byte          (rx_byte),
+        .rx_valid         (rx_valid),
+        .tx_byte          (tx_byte),
+        .tx_start         (tx_start),
+        .tx_busy          (tx_busy),
+        .em_drive         (em_drive),
+        .em_row           (em_row),
+        .em_col           (em_col),
+        .em_duration_ms   (em_duration_ms),
+        .em_busy          (em_busy),
+        .pll_start        (pll_start),
+        .pll_freq_khz     (pll_freq_khz),
+        .pll_busy         (pll_busy),
+        .det_read_one     (det_read_one),
+        .det_read_all     (det_read_all),
+        .det_site         (det_site),
+        .det_busy         (det_busy),
+        .det_code         (det_code),
+        .det_code_valid   (det_code_valid),
+        .det_code_idx     (det_code_idx),
+        .det_sweep_done   (det_sweep_done),
+        .lut_rd_addr      (lut_rd_addr),
+        .lut_rd_data      (lut_rd_data)
     );
 
     // ---- 25 MHz reference clock for ADF4351 (100 MHz / 4) ------------------
@@ -192,4 +214,77 @@ module top_level (
         else       refclk_div <= refclk_div + 2'd1;
     end
     assign refclk_out = refclk_div[1];
+endmodule
+
+
+//============================================================================
+// xadc_behavioral
+// ----------------------------------------------------------------------------
+// Behavioural stand-in for the Artix-7 XADC hard block. On `start`, asserts
+// `busy` for CONV_CYCLES, then presents `data` = a deterministic photocurrent
+// code for the currently selected electrode. The real build replaces this
+// with the Xilinx XADC primitive reading the TIA output on the dedicated aux
+// pair; the code then comes from the analog front-end, not from mux_sel.
+//============================================================================
+module xadc_behavioral #(
+    parameter CONV_CYCLES = 100
+) (
+    input             clk,
+    input             reset,
+    input             start,
+    input      [5:0]  mux_sel,     // selected electrode (behavioural model only)
+    output reg        busy,
+    output reg [11:0] data
+);
+    localparam [3:0] S_IDLE = 4'd0;
+    localparam [3:0] S_CONV = 4'd1;
+    localparam [3:0] S_DONE = 4'd2;
+
+    reg [3:0]  state;
+    reg [9:0]  timer;     // covers CONV_CYCLES up to 1024
+    reg [5:0]  sel_latched;
+
+    initial begin
+        state  = S_IDLE;
+        timer  = 10'd0;
+        busy   = 1'b0;
+        data   = 12'd0;
+        sel_latched = 6'd0;
+    end
+
+    always @(posedge clk) begin
+        if (reset) begin
+            state <= S_IDLE;
+            timer <= 10'd0;
+            busy  <= 1'b0;
+            data  <= 12'd0;
+        end else begin
+            case (state)
+                S_IDLE: begin
+                    if (start) begin
+                        sel_latched <= mux_sel;
+                        busy        <= 1'b1;
+                        timer       <= CONV_CYCLES;
+                        state       <= S_CONV;
+                    end
+                end
+                S_CONV: begin
+                    if (timer <= 10'd1) begin
+                        // behavioural photocurrent code: electrode n -> 1000 + 40*n
+                        // (0..4095 range; 0 -> 1000, 63 -> 3520). Real build reads
+                        // the TIA aux voltage instead.
+                        data  <= 12'd1000 + {6'd0, sel_latched} * 12'd40;
+                        state <= S_DONE;
+                    end else begin
+                        timer <= timer - 10'd1;
+                    end
+                end
+                S_DONE: begin
+                    busy  <= 1'b0;
+                    state <= S_IDLE;
+                end
+                default: state <= S_IDLE;
+            endcase
+        end
+    end
 endmodule
