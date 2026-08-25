@@ -313,8 +313,7 @@ failed test/parse/sim run blocks both deploys). It then:
 - [`fpga/sim/tb_top_level.v`](fpga/sim/tb_top_level.v) — self-checking testbench.
 - [`hardware/gcode/`](hardware/gcode) — CNC G-code substrate toolpaths for the
   microfluidic cylinder array, waveguide/sensor-grid routing, and square cavity
-  chip carrier (described in `HARDWARE_DESIGN.md` §14; the `microlens-chip`
-  toolpath is a camera-era leftover, marked obsolete).
+  chip carrier (described in `HARDWARE_DESIGN.md` §14).
 - [`hardware/pcb/`](hardware/pcb) — KiCad PCB project (`qssc.kicad_*`) — a
   **starting skeleton, not a routed/verified board** (described honestly in
   `HARDWARE_DESIGN.md` §15).

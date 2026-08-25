@@ -526,8 +526,12 @@ the emitter and waveguide structures over the 8×8 site array.
 |----------------------------|-------------|-------------|
 | `square_chip_cnc.gcode`    | 2 mm flat   | Pockets a 30×30×3 mm acrylic sheet to leave an 8×8 array of 2 mm-diameter cylinders (64 sites) on a 1 mm base. Basic square-pillar chip carrier. |
 | `cylinder_chip.gcode`      | 2 mm flat   | Pockets a larger acrylic sheet to leave **four** identical 30×30 mm arrays (2×2 grid, 5 mm separation), each an 8×8 array of 2 mm cylinders — a multi-chip production run. |
-| `microlens-chip.gcode`     | 1 mm 90° V  | Pockets a 30×30×3 mm acrylic sheet to leave an 8×8 array of 2 mm-diameter **domes** with Fresnel-approximation inner V-grooves (−0.25 mm and −0.50 mm depths) acting as crude micro-lenses over each site. **⚠ Obsolete for this architecture** — the on-chip readout stack (CQD emitter → waveguide → diamond → filter → graphene detector) has *no microlens layer*; this toolpath is a carried-over leftover from the camera-era free-space-optics design. Retained only as a reference toolpath; safe to delete. |
-| `flourescense-sensro.gcode`| 1 mm 90° V  | Routes 8 vertical columns and 8 horizontal rows with 250 µm gaps at the 8×8 pixel locations (3.75 mm pitch, −0.15 mm groove depth) — the sensor-grid / waveguide channels on the substrate. |
+| `fluorescence-sensor.gcode`| 1 mm 90° V  | Routes 8 vertical columns and 8 horizontal rows with 250 µm gaps at the 8×8 pixel locations (3.75 mm pitch, −0.15 mm groove depth) — the sensor-grid / waveguide channels on the substrate. |
+
+The camera-era `microlens-chip.gcode` toolpath (Fresnel micro-lens domes over each
+site) was removed: the on-chip readout stack (CQD emitter → waveguide → diamond →
+filter → graphene detector) has no microlens layer, so it was a carried-over
+leftover from the free-space-optics design with no role on this chip.
 
 These toolpaths assume mm units (`G21`), absolute positioning (`G90`),
 feed-per-minute (`G94`), XY-plane (`G17`), and a spindle start (`M03 S8000`).

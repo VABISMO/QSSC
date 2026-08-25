@@ -253,12 +253,6 @@ class QubitReadoutProcessor:
         return states
 
 
-# back-compat aliases for the old VCSEL/camera-era names
-LaserArrayController = EmitterController
-CameraInterface = DetectorInterface
-QubitImageProcessor = QubitReadoutProcessor
-
-
 # ---------------------------------------------------------------------------
 # Qiskit job + backend
 # ---------------------------------------------------------------------------
