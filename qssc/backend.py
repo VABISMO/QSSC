@@ -110,17 +110,48 @@ class CameraInterface:
 
 
 class MicrowaveController:
+    """Microwave pulse driver over the FPGA UART link.
+
+    The wire protocol matches ``fpga/rtl/command_parser.v`` and
+    ``hardware/HARDWARE_DESIGN.md`` §5 exactly::
+
+        APPLY_PULSE <qubit:int> <freq_khz:int> <amp:int> <duration_ns:int> <phase:int>\\n
+
+    All five fields are decimal integers — the firmware parser rejects decimal
+    points and underscores, so a float GHz value or a ``r_c`` two-qubit token
+    would be answered ``ERR``.  This class keeps the Python-facing API in the
+    natural Qiskit units (GHz / fraction / radians) and converts to the integer
+    wire format on the way out, so the *same call* drives the
+    :class:`~qssc.simulator.SimulatedFPGA` and a real Artix-7 board.
+
+    Field encoding on the wire:
+
+    * ``qubit``       — site index 0..63 (single int; two-qubit gates are not a
+                        hardware primitive — see ``QSSCBackend.limitations()``).
+    * ``freq_khz``    — RF frequency in kHz, e.g. ``3460000`` for 3.46 GHz.
+    * ``amp``         — ADF4351 output power index 0..3 (``amp`` fraction × 3).
+    * ``duration_ns`` — pulse duration in ns (parsed; reserved by firmware for
+                        a future RF-gate extension).
+    * ``phase``       — pulse phase in **milliradians** (0 = +X, 3142 ≈ π).
+    """
+
     def __init__(self, fpga, ref_hz: float = 25e6):
         self.fpga = fpga
         self.ref_hz = ref_hz
 
     def apply_pulse(self, qubit, freq_ghz: float, amp: float,
                     duration_ns: int, phase: float = 0.0):
+        if not isinstance(qubit, (int, np.integer)):
+            raise ValueError(
+                "qubit must be a single site index (int 0..63); two-qubit "
+                "gates are not a hardware primitive — see QSSCBackend.limitations()")
         if not (0.0 <= amp <= 1.0):
             raise ValueError("amp out of [0,1]")
-        q = qubit if isinstance(qubit, int) else "_".join(map(str, qubit))
+        freq_khz = int(round(freq_ghz * 1e6))            # GHz  -> kHz (int)
+        amp_idx = int(round(max(0.0, min(1.0, amp)) * 3))  # [0,1] -> 0..3 power index
+        phase_mrad = int(round(phase * 1000))            # radians -> milliradians (int)
         return self.fpga.send_command(
-            f"APPLY_PULSE {q} {freq_ghz:.6f} {amp:.4f} {duration_ns} {phase:.6f}"
+            f"APPLY_PULSE {int(qubit)} {freq_khz} {amp_idx} {int(duration_ns)} {phase_mrad}"
         )
 
 

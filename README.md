@@ -29,7 +29,7 @@ NV-diamond *simulator* — into one coherent, renamed deliverable.
 | **Protocol (HTML)** | `docs/protocol.html` | Branded, print-ready HTML render of the protocol (regenerate with `python3 tools/build_protocol_html.py`) |
 | **Presentation** | `presentation/index.html` | Self-contained HTML deck with software mocks and diagrams |
 | **PDFs** | `presentation/QSSC_presentation.pdf`, `docs/QSSC_fabrication_protocol.pdf` | Headless-Chromium exports of the presentation and protocol |
-| **Tests** | `tests/` | 18 unit tests (defects, simulator, circuits, backend, protocol) |
+| **Tests** | `tests/` | 59 tests (defects, simulator, circuits, backend, protocol, crypto) |
 
 ## Quick start
 
@@ -39,11 +39,11 @@ python -m venv .venv && . .venv/bin/activate
 pip install -e ".[api,dev]"
 
 # run the test suite
-python -m pytest                       # 18 passed
+python -m pytest                       # 59 passed
 
 # try the CLI
 qssc info                              # backend / defect summary
-qssc shor --n 15                       # → factors 3 × 5
+qssc shor 15                           # → factors 3 × 5
 qssc odmr --profile hBN-VB             # ODMR spectrum
 
 # start the REST backend
@@ -71,13 +71,23 @@ purified samples. hBN V_B⁻ is the default because of its low fabrication cost.
 `CouplingMap`, `QubitProperties` and per-site `InstructionProperties`.
 Circuits run through Qiskit Aer and return standard `get_counts()`.
 
-Two noise modes:
+Three noise modes (set via the backend `noise_mode` option):
 
-- **`phenomenological`** (default, fast) — ideal Aer statevector + post-hoc
-  readout bit-flip per site + T₂ coherence damping. O(n) in qubits; runs
-  13-qubit Shor in well under a second.
-- **`aer`** (opt-in, honest) — full Aer thermal/depolarizing noise via the
-  density-matrix path. O(4ⁿ); practical only for small circuits.
+- **`real`** (default, honest) — the full physics path. For circuits with ≤ 10
+  active qubits and no opaque compiled blocks it runs a full Aer
+  density-matrix simulation with thermal + depolarizing + readout noise built
+  from the defect's real T₁/T₂ and gate times (O(4ⁿ)). Larger or compiled-block
+  circuits fall back to the **analytic decoherence limit** computed from the
+  *same* real T₂ and gate-time parameters, so a 13-qubit Shor run honestly
+  decoheres toward a near-uniform distribution instead of recovering factors.
+- **`phenomenological`** (fast analytic approximation) — ideal Aer statevector +
+  post-hoc per-site readout bit-flip + T₂ coherence damping blended into the
+  distribution. O(n) in qubits; runs in milliseconds regardless of size.
+- **`none`** (ideal) — noiseless statevector only.
+
+`aer` is accepted as an alias of `real`. The phenomenological and real modes
+share the *same* real T₂/gate-time parameters, so their coherence verdicts
+agree — only the granularity of the noise differs.
 
 Algorithms included: **Shor** (QPE period finding), **period finding**,
 **Grover search**, **Bell/GHZ**, and **quantum arithmetic** (add / sub / mul /
@@ -110,10 +120,30 @@ ready-made Bell / GHZ / QFT / QASM examples.
 
 A single **Artix-7 XC7A35T** orchestrates an 8×8 VCSEL laser array, an
 **ADF4351** microwave PLL, an **OV7670** camera and a host UART link. The RTL
-(`fpga/rtl/`) is parse-verified with pyverilog and the original repo's bugs
-(use-before-declare, dual-driven regs, SCCB corruption, R3 width, grayscale
-overflow) have been fixed. The host protocol is a small ASCII UART command set:
-`FIRE_LASER`, `APPLY_PULSE`, `CAPTURE_FRAME`, `CAPTURE_DARK`.
+([`fpga/rtl/`](fpga/rtl), 11 modules + a self-checking
+[testbench](fpga/sim/tb_top_level.v)) is parse-verified with pyverilog and the
+original repo's bugs (use-before-declare, dual-driven regs, SCCB corruption, R3
+width, grayscale overflow) have been fixed. Pin assignments live in
+[`fpga/constraints.xdc`](fpga/constraints.xdc).
+
+The host protocol is a small ASCII UART command set (115200 baud, 8-N-1,
+`\n`-terminated; all numbers decimal integers — see
+[`hardware/HARDWARE_DESIGN.md`](hardware/HARDWARE_DESIGN.md) §5 for the full
+specification):
+
+| Command | Action | Reply |
+|---|---|---|
+| `FIRE_LASER <row> <col> <duration_ms>` | fire VCSEL (row,col) | `OK` |
+| `APPLY_PULSE <qubit> <freq_khz> <amp> <duration_ns> <phase>` | program ADF4351 to `freq_khz` | `OK` |
+| `CAPTURE_FRAME` | grab 64×48 window, stream 3072 bytes | `<bytes>` then `OK` |
+| `CAPTURE_DARK` | same as `CAPTURE_FRAME` (dark flag) | `<bytes>` then `OK` |
+
+`freq_khz` is the RF output in kHz (e.g. `3460000` for 3.46 GHz); `amp` 0–3
+maps to the ADF4351 output power index; `duration_ns`/`phase` (milliradians) are
+parsed and reserved for a future RF-gate/phase-register extension. The Python
+[`MicrowaveController`](qssc/backend.py) emits exactly this integer form, so
+the same control code drives the [`SimulatedFPGA`](qssc/simulator.py) and a
+real board.
 
 ## Fabrication protocol
 
@@ -133,6 +163,55 @@ fault-tolerant processor. The software stack runs and is tested; the
 fabrication protocol is validated against the literature; the FPGA RTL and PCB
 are design artefacts. No result is claimed that the underlying science does not
 support.
+
+## Documentation index
+
+### Hardware
+
+- [`hardware/HARDWARE_DESIGN.md`](hardware/HARDWARE_DESIGN.md) — the full
+  hardware design document: system overview + block diagram, BOM (34 parts),
+  power sequencing, clocking, the FPGA↔PC UART protocol (§5), ADF4351 loop
+  filter & RF path, VCSEL current-limiting math, OV7670 camera interface &
+  optics, microwave antenna/CPW, controlled-impedance routing, decoupling, the
+  4-layer PCB stackup, critical-net trace geometry, CNC G-code files, the KiCad
+  project, and a references list (ADF4351 / XC7A35T / OV7670 / HMC441 datasheets).
+- [`fpga/rtl/`](fpga/rtl) — 11 Verilog modules: `top_level`, `command_parser`,
+  `uart_rx`/`uart_tx`, `spi_master` (ADF4351), `adf4351_ctrl`, `laser_array`,
+  `ov7670_ctrl` + `sccb_master` + `ov7670_config_rom`, `camera_capture`.
+- [`fpga/constraints.xdc`](fpga/constraints.xdc) — Artix-7 CPG236 pin
+  assignments and timing constraints (100 MHz TCXO, camera-domain false path).
+- [`fpga/sim/tb_top_level.v`](fpga/sim/tb_top_level.v) — self-checking testbench.
+- [`hardware/gcode/`](hardware/gcode) — CNC G-code for the microfluidic
+  cylinder array, fluorescence-sensor routing, microlens array, and square
+  cavity chip (described in `HARDWARE_DESIGN.md` §14).
+- [`hardware/pcb/`](hardware/pcb) — KiCad PCB project (starting layout;
+  described in `HARDWARE_DESIGN.md` §15).
+
+### Fabrication protocol
+
+- [`docs/FABRICATION_PROTOCOL.md`](docs/FABRICATION_PROTOCOL.md) — 5-section
+  lab fabrication protocol for the **hBN V_B⁻** default chip (CQD emitter
+  array, hBN exfoliation + defect engineering + PMMA, on-chip 2D photodetectors,
+  waveguides/stacking/thermal management, safety), validated against landmark
+  publications.
+- [`docs/FABRICATION_PROTOCOL_Diamond.md`](docs/FABRICATION_PROTOCOL_Diamond.md)
+  — NV-diamond variant.
+- [`docs/FABRICATION_PROTOCOL_SiC.md`](docs/FABRICATION_PROTOCOL_SiC.md) —
+  SiC V_Si variant.
+- [`docs/protocol.html`](docs/protocol.html) /
+  [`protocol_diamond.html`](docs/protocol_diamond.html) /
+  [`protocol_sic.html`](docs/protocol_sic.html) — branded, print-ready HTML
+  renders (regenerate with `python3 tools/build_protocol_html.py`).
+- [`docs/QSSC_fabrication_protocol.pdf`](docs/QSSC_fabrication_protocol.pdf) /
+  [`…_diamond.pdf`](docs/QSSC_fabrication_protocol_diamond.pdf) /
+  [`…_sic.pdf`](docs/QSSC_fabrication_protocol_sic.pdf) — PDF exports.
+
+### Presentation
+
+- [`presentation/index.html`](presentation/index.html) — self-contained HTML
+  deck with software mocks and diagrams.
+- [`presentation/QSSC_presentation.pdf`](presentation/QSSC_presentation.pdf) —
+  PDF export of the deck.
 
 ## License
 

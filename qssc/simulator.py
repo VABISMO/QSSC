@@ -42,9 +42,17 @@ class SimulatedFPGA:
     """In-process stand-in for the Artix-7 control board.
 
     Understands the same text commands as ``fpga/rtl/command_parser.v``:
-    ``FIRE_LASER row col duration_ms``, ``APPLY_PULSE qubit freq amp dur_ns phase``,
-    ``CAPTURE_FRAME`` and ``CAPTURE_DARK``.  Keeping the protocol identical means
-    the same Python control code drives the simulator and the real hardware.
+
+    * ``FIRE_LASER <row> <col> <duration_ms>``
+    * ``APPLY_PULSE <qubit> <freq_khz> <amp> <duration_ns> <phase>``
+    * ``CAPTURE_FRAME`` and ``CAPTURE_DARK``
+
+    The ``APPLY_PULSE`` fields are **decimal integers** matching the firmware
+    parser and ``hardware/HARDWARE_DESIGN.md`` §5: ``freq_khz`` in kHz,
+    ``amp`` 0..3, ``phase`` in milliradians. Keeping the wire format identical
+    means the same Python control code drives the simulator and the real
+    hardware — :class:`~qssc.backend.MicrowaveController` emits exactly this
+    integer form.
     """
 
     GRID = 8
@@ -75,11 +83,19 @@ class SimulatedFPGA:
                 self.sim_states[row * self.GRID + col] = 1
                 return "OK"
             if head == "APPLY_PULSE":
-                qarg = parts[1]
-                qs = tuple(map(int, qarg.split("_"))) if "_" in qarg else int(qarg)
-                freq = float(parts[2]); amp = float(parts[3])
-                dur = int(parts[4]); phase = float(parts[5])
-                return self._apply_pulse(qs, freq, amp, dur, phase)
+                # Canonical wire format (matches command_parser.v and
+                # HARDWARE_DESIGN.md §5): five decimal integers.
+                #   APPLY_PULSE <qubit> <freq_khz> <amp> <duration_ns> <phase>
+                # freq_khz -> GHz, phase (milliradians) -> radians for the
+                # physics model below.
+                qubit = int(parts[1])
+                freq_khz = int(parts[2])
+                amp = int(parts[3])
+                dur = int(parts[4])
+                phase_mrad = int(parts[5])
+                freq_ghz = freq_khz / 1e6
+                phase_rad = phase_mrad / 1000.0
+                return self._apply_pulse(qubit, freq_ghz, amp, dur, phase_rad)
             if head == "CAPTURE_DARK":
                 self.active_lasers.clear()
                 self.sim_states.clear()
@@ -91,21 +107,20 @@ class SimulatedFPGA:
             logger.error("sim command failed: %s (%s)", command, exc)
             return "ERR"
 
-    def _apply_pulse(self, qs, freq, amp, dur, phase) -> str:
-        # Reject if drive is far off resonance (proxy for the PLL lock check)
-        if abs(freq * 1e9 - self.sim_freq) > self.noise * self.sim_freq:
+    def _apply_pulse(self, qubit, freq_ghz, amp, dur, phase_rad) -> str:
+        # Reject if the drive is far off resonance (proxy for the PLL lock
+        # check). freq_ghz is GHz; self.sim_freq is Hz.
+        if abs(freq_ghz * 1e9 - self.sim_freq) > self.noise * self.sim_freq:
             return "ERR"
-        if isinstance(qs, int):
-            q = qs
-            self.sim_states.setdefault(q, 0)
-            if abs(phase - math.pi) < 1e-6:          # X gate
+        q = qubit
+        self.sim_states.setdefault(q, 0)
+        # phase arrives in radians (converted from integer milliradians on the
+        # wire). Tolerance ~1 mrad matches the integer-mrad quantisation.
+        if abs(phase_rad - math.pi) < 1e-3:          # X gate (phase ≈ π)
+            self.sim_states[q] = 1 - self.sim_states[q]
+        elif abs(phase_rad) > 1e-3:                  # RZ/RY: stochastic error
+            if self.rng.random() < self.noise:
                 self.sim_states[q] = 1 - self.sim_states[q]
-            elif abs(phase) > 1e-9:                  # RZ/RY: add stochastic error
-                if self.rng.random() < self.noise:
-                    self.sim_states[q] = 1 - self.sim_states[q]
-        else:  # two-qubit (controlled phase) -- toy entangling rule
-            if self.sim_states.get(qs[0], 0) == 1:
-                self.sim_states[qs[1]] = (self.sim_states.get(qs[1], 0) + int(round(phase / math.pi))) % 2
         return "OK"
 
     # -- image generation --------------------------------------------------
