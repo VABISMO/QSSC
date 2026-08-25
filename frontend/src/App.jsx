@@ -414,7 +414,7 @@ export default function App() {
             {/* Selected defect summary — one horizontal line below the form
                 selectors (label + value inline, not a stacked field). */}
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
-              <span className="muted" style={{ fontSize: 11.5px }}>Selected defect</span>
+              <span className="muted" style={{ fontSize: '11.5px' }}>Selected defect</span>
               <span className="mono" style={{ color: 'var(--brand)' }}>
                 {info.data ? `${info.data.defect} · D ≈ ${info.data.d_ghz} GHz` : 'loading…'}
               </span>
