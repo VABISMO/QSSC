@@ -281,7 +281,10 @@ export default function App() {
     <div className="app">
       {/* ============================= HEADER ============================= */}
       <header className="header">
-        <img className="logo" src="/favicon.svg" alt="QSSC logo" />
+        {/* BASE_URL is "/" on a root origin and "/QSSC/" on a GitHub Pages
+            project subpath, so this resolves correctly in both deployments
+            (a hard-coded "/favicon.svg" would 404 on the /QSSC/ subpath). */}
+        <img className="logo" src={`${import.meta.env.BASE_URL}favicon.svg`} alt="QSSC logo" />
         <div className="title">
           <h1><span className="grad">Quantum Solid State Chip</span></h1>
           <div className="sub">Solid-state spin-defect platform — Qiskit backend · FPGA control · fabrication protocol</div>
