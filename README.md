@@ -11,6 +11,9 @@ protocol, and a web dashboard. This project remasters and merges two earlier
 projects by the same author — an hBN spin-defect *chip design* and a Qiskit
 NV-diamond *simulator* — into one coherent, renamed deliverable.
 
+<img width="1820" height="951" alt="image" src="https://github.com/user-attachments/assets/8d7b3ccd-f5f2-4925-97b9-cd6bb6e4724e" />
+
+
 > Solid-state spin defects (NV-diamond, hBN V_B⁻, SiC V_Si) keep quantum
 > coherence at **~300 K**, so the chip does not require a dilution refrigerator.
 > The canonical **default** defect is the **nitrogen-vacancy (NV⁻) centre in
