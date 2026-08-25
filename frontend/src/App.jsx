@@ -410,12 +410,14 @@ export default function App() {
                 <label>RNG seed</label>
                 <input type="number" value={seed} onChange={e => setSeed(+e.target.value)} />
               </div>
-              <div className="field" style={{ flex: 1 }}>
-                <label>Selected defect</label>
-                <div className="mono" style={{ color: 'var(--brand)', paddingTop: 9 }}>
-                  {info.data ? `${info.data.defect} · D ≈ ${info.data.d_ghz} GHz` : 'loading…'}
-                </div>
-              </div>
+            </div>
+            {/* Selected defect summary — one horizontal line below the form
+                selectors (label + value inline, not a stacked field). */}
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
+              <span className="muted" style={{ fontSize: 11.5px }}>Selected defect</span>
+              <span className="mono" style={{ color: 'var(--brand)' }}>
+                {info.data ? `${info.data.defect} · D ≈ ${info.data.d_ghz} GHz` : 'loading…'}
+              </span>
             </div>
           </div>
 
