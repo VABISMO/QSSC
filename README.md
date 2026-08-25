@@ -3,7 +3,7 @@
 [![CI](https://github.com/VABISMO/QSSC/actions/workflows/ci.yml/badge.svg)](https://github.com/VABISMO/QSSC/actions/workflows/ci.yml)
 [![License: Apache-2.0 NC](https://img.shields.io/badge/license-Apache--2.0%20NC-blue.svg)](LICENSE)
 [![Python 3.10–3.12](https://img.shields.io/badge/python-3.10–3.12-blue.svg)](https://www.python.org)
-[![Tests](https://img.shields.io/badge/tests-61%20passed-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-63%20passed-brightgreen.svg)](#testing)
 
 A room-temperature **solid-state spin-defect** quantum platform: a Qiskit
 backend, an FPGA control stack with PCB design, a validated chip-fabrication
@@ -35,7 +35,7 @@ NV-diamond *simulator* — into one coherent, renamed deliverable.
 | **Protocol (HTML)** | `docs/protocol.html` | Branded, print-ready HTML render of the protocol (regenerate with `python3 tools/build_protocol_html.py`) |
 | **Presentation** | `presentation/index.html` | Self-contained HTML deck with software mocks and diagrams |
 | **PDFs** | `presentation/QSSC_presentation.pdf`, `docs/QSSC_fabrication_protocol.pdf` | Headless-Chromium exports of the presentation and protocol |
-| **Tests** | `tests/` | 61 tests (defects, simulator, circuits, backend, protocol, crypto) |
+| **Tests** | `tests/` | 63 tests (defects, simulator, circuits, backend, protocol, crypto) |
 
 ## Quick start
 
@@ -45,7 +45,7 @@ python -m venv .venv && . .venv/bin/activate
 pip install -e ".[api,dev]"
 
 # run the test suite
-python -m pytest                       # 61 passed
+python -m pytest                       # 63 passed
 
 # try the CLI
 qssc info                              # backend / defect summary (defaults to NV)
@@ -208,16 +208,18 @@ specification):
 | Command | Action | Reply |
 |---|---|---|
 | `DRIVE_EMITTER <row> <col> <duration_ms>` | drive CQD emitter pixel (row,col) | `OK` |
-| `APPLY_PULSE <qubit> <freq_khz> <amp> <duration_ns> <phase>` | program ADF4351 to `freq_khz` | `OK` |
+| `APPLY_PULSE <qubit> <freq_khz> <amp> <duration_ns> <phase>` | program ADF4351 + gate the MW pulse | `OK` |
 | `READ_DETECTOR <site>` | digitise one detector electrode (XADC) | `<code>` |
 | `READ_DETECTORS` | sweep all 64 electrodes, stream codes | `<code> <code> …` (64) |
 | `CALIBRATE` | drive each emitter + read detectors, build emitter→detector LUT | `OK` |
 
-`freq_khz` is the RF output in kHz (e.g. `2870000` for 2.87 GHz NV⁻, `3460000`
-for 3.46 GHz hBN V_B⁻); `amp` 0–3 maps to the ADF4351 output power index;
-`duration_ns`/`phase` (milliradians) are parsed and reserved for a future
-RF-gate/phase-register extension. Detector codes are 12-bit ADC values
-(0–4095). The Python [`EmitterController`](qssc/backend.py) /
+`freq_khz` is the RF carrier in kHz (e.g. `2870000` for 2.87 GHz NV⁻, `3460000`
+for 3.46 GHz hBN V_B⁻); the pulse is split across the ADF4351 and the RF switch:
+`freq_khz` → PLL carrier, `phase` (milliradians) → R1 PHASE register, `amp` 0–3
+→ R4 RF_PWR output-power index, `duration_ns` → the `mw_gate` RF-switch pin (a
+gate timer counts `duration_ns/10` cycles at 100 MHz). The FPGA does not shape
+the analog envelope — an external AWG/modulator does. Detector codes are 12-bit
+ADC values (0–4095). The Python [`EmitterController`](qssc/backend.py) /
 [`DetectorInterface`](qssc/backend.py) /
 [`MicrowaveController`](qssc/backend.py) emit exactly this integer form, so the
 same control code drives the [`SimulatedFPGA`](qssc/simulator.py) and a real

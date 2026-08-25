@@ -56,6 +56,34 @@ def test_detector_response():
     assert codes[0] > codes[1]  # (0,0) bright vs (0,1) background
 
 
+def test_detector_dip_is_ensemble_contrast():
+    # The on-resonance ODMR dip is the small *ensemble* contrast (~5%), not a
+    # 75% single-spin swing. A pumped electrode on-resonance (MW at D) reads
+    # DARK_CODE = BRIGHT_CODE*(1 - ODMR_CONTRAST), a few percent below bright.
+    rng = np.random.default_rng(0)
+    bright = make_detector_response({(0, 0)}, profile="NV", grid=8, rng=rng)[0]
+    rng = np.random.default_rng(0)
+    dark = make_detector_response({(0, 0)}, profile="NV", grid=8,
+                                  mw_freq_khz=2_870_000, rng=rng)[0]
+    dip_frac = (bright - dark) / bright
+    # real NV-ensemble ODMR: 3-8%. Reject the old 75% (regression guard).
+    assert 0.02 < dip_frac < 0.12, f"ODMR dip {dip_frac:.3f} not ensemble-scale"
+
+
+def test_odmr_resonance_linewidth():
+    # The pulse resonance acceptance is the ~5 MHz ODMR linewidth, not the old
+    # 287 MHz noise*D window. On-resonance and just-within-linewidth flip the
+    # spin; far off-resonance is rejected. (freq is in kHz: +4 MHz = +4000 kHz.)
+    fpga = SimulatedFPGA("NV", seed=0)
+    fpga.send_command("DRIVE_EMITTER 0 0 50")
+    # 2.87 GHz exactly (on) and +4 MHz (within the 5 MHz line) -> OK
+    assert fpga.send_command("APPLY_PULSE 0 2870000 2 200 0") == "OK"
+    assert fpga.send_command("APPLY_PULSE 0 2874000 2 200 0") == "OK"
+    # +10 MHz and +20 MHz (outside the ~5 MHz linewidth) -> ERR
+    assert fpga.send_command("APPLY_PULSE 0 2880000 2 200 0") == "ERR"
+    assert fpga.send_command("APPLY_PULSE 0 2890000 2 200 0") == "ERR"
+
+
 def test_auto_align_grid():
     sites = auto_align("hBN-VB", grid=8, rng=np.random.default_rng(0))
     assert len(sites) == 64
@@ -107,16 +135,22 @@ def test_readout_odmr_dip():
     # CQD pump -> graphene detector photocurrent -> ODMR dip at resonance.
     # A pumped site with no resonant MW reads bright (ms=0, high code); a
     # resonant X-gate (phase ~= pi) flips the spin to dark (ms=+-1, low code),
-    # and an off-resonance drive is rejected by the PLL-lock proxy (ERR).
+    # and an off-resonance drive is rejected by the linewidth check (ERR).
     fpga = SimulatedFPGA("NV", seed=3)
     assert fpga.send_command("DRIVE_EMITTER 5 5 50") == "OK"
-    bright = int(fpga.send_command("READ_DETECTOR 45"))
+    # Lock-in averaging: read the electrode several times and take the mean so
+    # the small ensemble ODMR dip (~5%, ~160 ADC counts) is resolved above the
+    # per-sample lock-in noise -- exactly what the 1 kHz lock-in does on the
+    # real chip. A single noisy sample would not robustly show the dip.
+    bright = np.mean([int(fpga.send_command("READ_DETECTOR 45")) for _ in range(20)])
     # resonant X-gate at D_NV = 2.87 GHz (phase 3142 mrad ~= pi) -> spin flip
     assert fpga.send_command("APPLY_PULSE 45 2870000 2 200 3142") == "OK"
-    dark = int(fpga.send_command("READ_DETECTOR 45"))
-    # the ODMR dip is a large, unambiguous drop in photocurrent
-    assert bright > dark + 1000
-    # off-resonance drive (4 GHz vs 2.87 GHz) -> ERR, no flip applied
+    dark = np.mean([int(fpga.send_command("READ_DETECTOR 45")) for _ in range(20)])
+    # the ODMR dip is the ~5% ensemble contrast (~160 counts); averaging leaves
+    # it well above the residual lock-in noise, so assert > 100 counts of dip.
+    assert bright > dark + 100
+    # off-resonance drive (4 GHz vs 2.87 GHz, far outside the ~5 MHz linewidth)
+    # -> ERR, no flip applied
     assert fpga.send_command("APPLY_PULSE 45 4000000 2 200 3142") == "ERR"
 
 

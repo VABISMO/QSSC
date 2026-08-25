@@ -43,13 +43,27 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 ADC_BITS = 12
 ADC_MAX = (1 << ADC_BITS) - 1            # 4095
-BRIGHT_CODE = 3200                        # pumped + spin ms=0 (bright) -> high photocurrent
-DARK_CODE = 800                           # pumped + spin ms=+-1 (dark) / ODMR dip
+# Each detector electrode sits under one emitter pixel and reads a *small
+# ensemble* of defects (not a single isolated spin), so the on-resonance PL dip
+# is the ensemble ODMR contrast, not the large single-NV spin-readout contrast.
+# Real NV-ensemble ODMR at 300 K is 3-8%; 5% is the honest mid-range and matches
+# the CW spectrum model (simulate_odmr, contrast_depth=0.03, same order).
+ODMR_CONTRAST = 0.05                      # ensemble ODMR dip fraction at resonance
+ODMR_LINEWIDTH_HZ = 5.0e6                 # ODMR linewidth (~5 MHz; matches simulate_odmr)
+BRIGHT_CODE = 3200                        # pumped ensemble, spin ms=0 (bright) -> full PL
+DARK_CODE = 3040                          # pumped ensemble at resonance -> BRIGHT*(1-ODMR_CONTRAST)
 BG_CODE = 100                             # unpumped electrode -> detector background floor
+# Post-lock-in photocurrent noise (ADC counts). The 1 kHz lock-in averages many
+# MW-modulation cycles, suppressing broadband noise so the small 5% dip (~160
+# counts) is resolved at ~4 sigma in a single read. The per-qubit *quantum*
+# readout error (profile.readout_error, ~8% for NV) is the spin
+# initialisation/projection imperfection, injected separately in the Qiskit
+# noise model -- it is decoupled from this detector SNR, as on real hardware.
 READOUT_NOISE = 40                        # std dev of lock-in photocurrent noise (ADC counts)
 ASE_GAIN = 1.15                            # ASE concentrates the CQD emission into the waveguide
 LOCKIN_MOD_HZ = 1000.0                    # MW modulation frequency for the lock-in readout
 DETECT_THRESHOLD = 1000                   # lock-in amplitude above which a site counts as coupled
+SITE_FAB_YIELD = 0.9                      # fraction of pixels the fabrication step wires correctly
 
 
 # ---------------------------------------------------------------------------
@@ -148,9 +162,13 @@ class SimulatedFPGA:
             return "ERR"
 
     def _apply_pulse(self, qubit, freq_ghz, amp, dur, phase_rad) -> str:
-        # Reject if the drive is far off resonance (proxy for the PLL lock
-        # check). freq_ghz is GHz; self.sim_freq is Hz.
-        if abs(freq_ghz * 1e9 - self.sim_freq) > self.noise * self.sim_freq:
+        # Reject if the drive is outside the ODMR linewidth of D (the pulse
+        # can only flip the spin within ~one linewidth). freq_ghz is GHz;
+        # self.sim_freq (D) is Hz. The old window was noise*D = 287 MHz, far
+        # wider than the real ~5 MHz NV ODMR line -- a pulse 200 MHz off would
+        # wrongly have flipped the spin. self.noise is reserved for the
+        # stochastic RZ/RY gate error below, not the resonance acceptance.
+        if abs(freq_ghz * 1e9 - self.sim_freq) > ODMR_LINEWIDTH_HZ:
             return "ERR"
         q = qubit
         self.sim_states.setdefault(q, 0)
@@ -236,7 +254,9 @@ def make_detector_response(active_emitters: set, profile: DefectProfile | str = 
     n = grid * grid
     on_resonance = False
     if mw_freq_khz is not None:
-        on_resonance = abs(mw_freq_khz * 1e3 - prof.zero_field_splitting) < prof.zero_field_splitting * 0.02
+        # on-resonance when the MW drive sits within one ODMR linewidth of D
+        # (the old 2%*D = 57 MHz window was ~11x too wide vs the real ~5 MHz line)
+        on_resonance = abs(mw_freq_khz * 1e3 - prof.zero_field_splitting) < ODMR_LINEWIDTH_HZ
     codes = np.empty(n, dtype=np.int32)
     for q in range(n):
         r, c = divmod(q, grid)
@@ -270,7 +290,7 @@ class QubitSite:
 
 
 def auto_align(profile: DefectProfile | str = "NV",
-                grid: int = 8, galvo_area: Tuple[float, float] = (20.0, 20.0),
+                grid: int = 8, site_pitch_um: float = 2.5,
                 temperature_k: float = 300.0, max_retries: int = 5,
                 rng: Optional[np.random.Generator] = None,
                 progress=None) -> List[QubitSite]:
@@ -284,18 +304,30 @@ def auto_align(profile: DefectProfile | str = "NV",
     lock-in photocurrent response, driven by the simulator physics so it is
     deterministic and fast.
 
-    Returns ``grid**2`` :class:`QubitSite` in index order; sites whose emitter
-    does not couple to a detector electrode above threshold are kept as
-    ``usable=False`` placeholders so the grid is always complete.
+    ``site_pitch_um`` is the centre-to-centre pitch of one emitter/detector
+    pixel. A site is registered as usable when it actually contains defects
+    *and* the fabrication step succeeded: the per-site yield is
+    ``SITE_FAB_YIELD * (1 - exp(-density * site_area))`` -- a Poisson "at least
+    one defect in the pixel" factor times a fabrication-yield factor. This
+    replaces the old ``galvo_area`` camera-era leftover, whose
+    ``density * galvo_area`` always clipped to 1.0 and made the
+    ``usable=False`` branch dead. With the Poisson model the not-usable branch
+    is live: e.g. at 300 K an NV site (5/um^2 over 6.25 um^2) is ~always
+    populated but still loses ~10% to fab yield, while a sparse hBN V_B- site
+    (0.30/um^2) is empty ~15% of the time.
+
+    Returns ``grid**2`` :class:`QubitSite` in index order; sites that fail the
+    yield draw are kept as ``usable=False`` placeholders so the grid is always
+    complete.
     """
     prof = get_profile(profile) if isinstance(profile, str) else profile
     rng = rng or np.random.default_rng()
     t1, t2 = coherence_at_temperature(prof, temperature_k)
     n_needed = grid * grid
-    # Fraction of emitter pixels that couple to a defect + detector electrode
-    # above the lock-in threshold (a per-site Bernoulli draw weighted by the
-    # defect density over the scanned area).
-    p_usable = float(np.clip(prof.defect_density_per_um2 * galvo_area[0] * galvo_area[1], 0.0, 1.0))
+    site_area_um2 = site_pitch_um * site_pitch_um
+    # Poisson ">=1 defect in the pixel" times a fabrication-yield factor.
+    p_defect = 1.0 - math.exp(-prof.defect_density_per_um2 * site_area_um2)
+    p_usable = float(np.clip(SITE_FAB_YIELD * p_defect, 0.0, 1.0))
     task = None
     if progress is not None:
         task = progress.add_task("Scanning on-chip detector array...", total=max_retries)
@@ -311,8 +343,8 @@ def auto_align(profile: DefectProfile | str = "NV",
             # collapse the error far below the physical readout floor.
             bright = float(np.clip((code - BG_CODE) / max(BRIGHT_CODE - BG_CODE, 1), 0.0, 1.0))
             err = prof.readout_error * (1.3 - 0.6 * bright)
-            x_um = (c + 0.5) * galvo_area[0] / grid
-            y_um = (r + 0.5) * galvo_area[1] / grid
+            x_um = (c + 0.5) * site_pitch_um
+            y_um = (r + 0.5) * site_pitch_um
             sites.append(QubitSite(
                 qubit_id=idx, row=r, col=c,
                 x_um=x_um, y_um=y_um, intensity=float(code),
