@@ -8,7 +8,7 @@ version = "2.0.0"
 description = "Quantum Solid State Chip (room temperature) — Qiskit backend, simulator, FPGA control stack & fabrication protocol."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "Apache-2.0" }
+license = { text = "Apache-2.0 WITH non-commercial restriction" }
 authors = [{ name = "AncientEncoder" }]
 dependencies = [
     "qiskit>=1.2",
@@ -35,3 +35,6 @@ include = ["qssc*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# make the top-level `api` package importable when running `pytest` directly
+# (qssc is installed editable; api is not a packaged module)
+pythonpath = ["."]

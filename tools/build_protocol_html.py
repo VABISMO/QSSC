@@ -1,20 +1,46 @@
 #!/usr/bin/env python3
-"""Render docs/FABRICATION_PROTOCOL.md into a branded, standalone HTML page.
+"""Render a fabrication-protocol Markdown file into a branded, standalone HTML page.
 
 Uses the same QSSC design system as the dashboard and the presentation, with
 the hexagon logo inlined and print CSS so headless Chromium can export a clean
-PDF. Run:
+PDF. Renders the hBN base by default; pass a variant name to render that one:
 
-    python3 tools/build_protocol_html.py
+    python3 tools/build_protocol_html.py                 # hBN base -> docs/protocol.html
+    python3 tools/build_protocol_html.py diamond          # -> docs/protocol_diamond.html
+    python3 tools/build_protocol_html.py sic             # -> docs/protocol_sic.html
 """
-import sys
+import argparse
 from pathlib import Path
 
 import markdown
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "docs" / "FABRICATION_PROTOCOL.md"
-OUT = ROOT / "docs" / "protocol.html"
+
+# Variant registry: (src md, out html, doc title, subtitle, meta).
+VARIANTS = {
+    "hbn": (
+        ROOT / "docs" / "FABRICATION_PROTOCOL.md",
+        ROOT / "docs" / "protocol.html",
+        "QSSC — Fabrication Protocol",
+        "Room-temperature hBN spin-defect (V_B⁻) quantum photonic chip · laboratory build, validated against published studies",
+        "QSSC v2.0.0<br/>Document v1.0<br/>Markdown source: FABRICATION_PROTOCOL.md",
+    ),
+    "diamond": (
+        ROOT / "docs" / "FABRICATION_PROTOCOL_Diamond.md",
+        ROOT / "docs" / "protocol_diamond.html",
+        "QSSC — Fabrication Protocol · NV-Diamond variant",
+        "Same chip architecture, middle block = CVD diamond NV⁻ plate (D ≈ 2.87 GHz, T₂ ≈ 1.8 ms @ 300 K) · green CQD pump + 650 nm filter + graphene detector reused unchanged",
+        "QSSC v2.0.0<br/>Diamond variant v1.0<br/>Markdown source: FABRICATION_PROTOCOL_Diamond.md",
+    ),
+    "sic": (
+        ROOT / "docs" / "FABRICATION_PROTOCOL_SiC.md",
+        ROOT / "docs" / "protocol_sic.html",
+        "QSSC — Fabrication Protocol · SiC variant",
+        "Same chip architecture, middle block = 4H-SiC wafer with V_Si (2|D| ≈ 70 MHz, T₂ ≈ 40 µs @ 300 K) · on-chip CIS/ZnS QD pump (730–760 nm, no big diode) + 850 nm filter",
+        "QSSC v2.0.0<br/>SiC variant v1.0<br/>Markdown source: FABRICATION_PROTOCOL_SiC.md",
+    ),
+}
+DEFAULT = "hbn"
 
 LOGO = """<svg viewBox="0 0 64 64" width="56" height="56" xmlns="http://www.w3.org/2000/svg">
   <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#6366f1"/></linearGradient></defs>
@@ -80,7 +106,7 @@ TEMPLATE = """<!doctype html>
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>QSSC — Fabrication Protocol</title>
+<title>{title}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
@@ -92,9 +118,9 @@ TEMPLATE = """<!doctype html>
     {logo}
     <div class="t">
       <h1><span class="grad">Quantum Solid State Chip</span> — Fabrication Protocol</h1>
-      <div class="sub">Room-temperature hBN spin-defect (V_B⁻) quantum photonic chip · laboratory build, validated against published studies</div>
+      <div class="sub">{subtitle}</div>
     </div>
-    <div class="meta">QSSC v2.0.0<br/>Document v1.0<br/>Markdown source: FABRICATION_PROTOCOL.md</div>
+    <div class="meta">{meta}</div>
   </header>
   {toc}
   {body}
@@ -105,8 +131,9 @@ TEMPLATE = """<!doctype html>
 """
 
 
-def main():
-    md = SRC.read_text(encoding="utf-8")
+def build(variant: str = DEFAULT) -> Path:
+    src, out, title, subtitle, meta = VARIANTS[variant]
+    md = src.read_text(encoding="utf-8")
     # table of contents from the H2/H3 headings
     toc_html = markdown.markdown(
         "\n".join(l for l in md.splitlines()
@@ -118,14 +145,24 @@ def main():
         extensions=["fenced_code", "tables", "sane_lists", "attr_list", "toc"],
         extension_configs={"toc": {"toc_depth": "2-3"}},
     )
-    # Style the generated TOC list as our .toc card
     toc_html = toc_html.replace('<div class="toc">', '<div class="toc" id="toc">')
     html = TEMPLATE.format(
-        css=CSS, logo=LOGO, toc=toc_html, body=body_html, bytes=len(md),
+        css=CSS, logo=LOGO, title=title, subtitle=subtitle, meta=meta,
+        toc=toc_html, body=body_html, bytes=len(md),
     )
-    OUT.write_text(html, encoding="utf-8")
-    print(f"wrote {OUT}  ({len(html)} bytes)")
+    out.write_text(html, encoding="utf-8")
+    print(f"wrote {out}  ({len(html)} bytes)")
+    return out
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("variant", nargs="?", default=DEFAULT,
+                        choices=sorted(VARIANTS),
+                        help="protocol variant to render (default: hbn)")
+    args = parser.parse_args()
+    build(args.variant)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

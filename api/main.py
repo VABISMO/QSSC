@@ -20,7 +20,9 @@ from qssc import (
     auto_align, simulate_odmr, QSSCBackend,
     make_camera_frame, detect_defects, PROFILES,
 )
-from qssc.protocol import protocol_as_dict, protocol_summary
+from qssc.protocol import (
+    protocol_as_dict, protocol_summary, protocol_platforms,
+)
 from api import jobs
 
 app = FastAPI(
@@ -151,8 +153,20 @@ def odmr(profile: str = "hBN-VB", b_field: float = 1e-3,
 
 
 @app.get("/api/protocol")
-def protocol():
-    return {"summary": protocol_summary(), "sections": protocol_as_dict()}
+def protocol(platform: str = "hBN-VB"):
+    """Fabrication protocol for a given spin-defect platform.
+
+    ``platform`` matches the simulator profile keys (hBN-VB / NV / SiC-VSi).
+    Defaults to the hBN base for backward compatibility.
+    """
+    return {"summary": protocol_summary(platform),
+            "sections": protocol_as_dict(platform)}
+
+
+@app.get("/api/protocol/platforms")
+def protocol_variants():
+    """List the available fabrication-protocol variants."""
+    return {"platforms": protocol_platforms()}
 
 
 @app.get("/api/calibration")

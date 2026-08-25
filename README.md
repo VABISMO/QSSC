@@ -1,5 +1,10 @@
 # QSSC — Quantum Solid State Chip (room temperature)
 
+[![CI](https://github.com/VABISMO/QSSC/actions/workflows/ci.yml/badge.svg)](https://github.com/VABISMO/QSSC/actions/workflows/ci.yml)
+[![License: Apache-2.0 NC](https://img.shields.io/badge/license-Apache--2.0%20NC-blue.svg)](LICENSE)
+[![Python 3.10–3.12](https://img.shields.io/badge/python-3.10–3.12-blue.svg)](https://www.python.org)
+[![Tests](https://img.shields.io/badge/tests-59%20passed-brightgreen.svg)](#testing)
+
 A room-temperature **solid-state spin-defect** quantum platform: a Qiskit
 backend, an FPGA control stack with PCB design, a validated chip-fabrication
 protocol, and a web dashboard. This project remasters and merges two earlier
@@ -131,4 +136,6 @@ support.
 
 ## License
 
-MIT — see `LICENSE`.
+Apache License 2.0 **with a non-commercial use restriction** — see
+[`LICENSE`](LICENSE). Academic research, teaching and personal use are fine;
+commercial use requires written permission from the author.

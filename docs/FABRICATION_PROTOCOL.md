@@ -33,8 +33,10 @@ SU-8 and PDMS are standard photo-patternable / soft-lithography polymers with op
 
 ```
                 ┌─────────────────────────────────────────────┐
-   top ITO/gold cathode  ───────────────────────────────────── │
-                │  CQD–PVA electroluminescent layer (≈80 nm)  │  ← Section 1
+   top Ag cathode (silver-paste syringe) ─────────────────── │
+                │  ZnO electron-transport layer (≈40 nm)     │  ← Section 1
+                │  CQD–PVA electroluminescent layer (≈80 nm,  │
+                │       green ~520–540 nm → pumps VB−)       │
                 │  PEDOT:PSS hole-injection (≈40 nm)          │
                 │  bottom ITO anode on glass/PET             │
    ─────────────┴─────────────────────────────────────────────┘
@@ -77,6 +79,8 @@ All costs are approximate, in USD, retail/small-lab quantities (2025–2026 pric
 | PEDOT:PSS (CLEVIOS P VP AI 4083) | Heraeus | 100 mL | $60 |
 | Polyvinyl alcohol (PVA, 87–89 % hydrolyzed, Mw 31–50 k) | Sigma 363170 | 100 g | $25 |
 | ITO-coated glass (15 Ω/sq, 25×25 mm) | Delta Technologies or Mitsufuji | 10 pk | $50 |
+| ZnO nanopowder (~20–40 nm, 99.5 %) | Sigma 544906 or maker-grade ZnO | 5 g | $30 |
+| Conductive silver paste (syringe, circuit-repair) | MG Chemicals 8341 / Elekit | 1 syringe | $10 |
 | Graphene (CVD, on Cu foil, 1 cm²) | Graphenea or 2D Semiconductors | 2 cm² | $90 |
 | MoS₂ (CVD, on SiO₂/Si, monolayer) | 2D Semiconductors | 1 cm² | $120 |
 | Au wire (99.99 %, 0.25 mm) | Kurt J. Lesker | 1 m | $40 |
@@ -114,14 +118,14 @@ All costs are approximate, in USD, retail/small-lab quantities (2025–2026 pric
 
 ## Section 1 — CQD Emitter Array
 
-**Goal:** Synthesize water-soluble, nitrogen-doped CQDs and integrate them into a patterned ITO/PEDOT:PSS/CQD–PVA/Ag electroluminescent diode array (8 × 8 pixels, 1 mm² each) on a 25 × 25 mm² ITO-glass substrate. Target: EL peak 450–620 nm, turn-on 4–8 V, radiance ≥ 10 cd/m², ASE threshold detectable under electrical overdrive.
+**Goal:** Synthesize water-soluble, nitrogen-doped CQDs and integrate them into a patterned ITO/PEDOT:PSS/CQD–PVA/ZnO/Ag electroluminescent diode array (8 × 8 pixels, 1 mm² each; ZnO is the electron-transport layer, Ag the top cathode) on a 25 × 25 mm² ITO-glass substrate. For this chip the CQDs are synthesised **green** (~520–540 nm) so the on-chip emitter doubles as the optical pump for the VB− defect (no external pump laser needed for the end-to-end demo). Target: EL peak 520–540 nm (green), turn-on 4–8 V, radiance ≥ 10 cd/m², ASE threshold detectable under electrical overdrive.
 
 ### 1.1 Hydrothermal synthesis of N-doped CQDs
 
 This follows the citric-acid + urea hydrothermal route, a well-established "bottom-up" CQD synthesis.
 
-1. **Charge.** In a 50 mL PTFE-lined autoclave, dissolve **1.0 g citric acid** + **1.0 g urea** in **10 mL DI water**. Stir 5 min until clear. (Optional: replace half the urea with **0.3 mL ethylenediamine** for red-shifted emission toward 550–620 nm.)
-2. **Hydrothermal.** Seal autoclave, place in hotplate oven preheated to **200 °C**, hold **6 h**. (Internal pressure ~10–15 bar autogenous.) Cooling: remove from hotplate, allow to cool to < 60 °C naturally (~2 h) before opening.
+1. **Charge.** In a 50 mL PTFE-lined autoclave, dissolve **1.0 g citric acid** + **1.0 g urea** in **10 mL DI water**. Stir 5 min until clear. **No ethylenediamine is required**: the emission colour is set mainly by the **hydrothermal temperature** (see step 6). For this chip we want **green** CQDs (~520–540 nm) to pump the VB−, so use the high end of the temperature range (~220 °C).
+2. **Hydrothermal.** Seal autoclave, place in hotplate oven preheated to **180 °C (blue CQDs, ~450–470 nm)** or **220 °C (green CQDs, ~520–540 nm — the choice for this chip to pump VB−)**, hold **6–10 h** (longer time at the higher temperature also red-shifts). (Internal pressure ~10–15 bar autogenous.) Cooling: remove from hotplate, allow to cool to < 60 °C naturally (~2 h) before opening.
 3. **Resulting product:** dark-brown solution containing CQDs (2–6 nm), unreacted precursor, larger carbonaceous particles.
 4. **Purification.**
    - Centrifuge at **10,000 rpm (≈ 9,000 × g)** for **15 min**; discard the large-particle pellet.
@@ -129,7 +133,7 @@ This follows the citric-acid + urea hydrothermal route, a well-established "bott
    - Dialyze against DI water (MWCO 1000 Da) for **48 h**, changing water every 8 h, to remove small molecules.
    - Yield: typically **20–40 mg** of purified CQDs per batch (depends on dialysis losses), consistent with typical citric-acid/urea yields reported in the literature.
 5. **Characterization (benchtop).** Dilute 1:1000 in water; record PL under 365 nm UV lamp — bright blue-green emission. Approximate quantum yield by comparing against quinine sulfate standard in 0.1 M H₂SO₄ (QY ≈ 54 % typical). Optional TEM drop-cast for size.
-6. **Wavelength tuning.** Emission can be tuned 450 (CA:urea 1:1) → 540 nm (CA:ethylenediamine) by varying the nitrogen dopant ratio and hydrothermal temperature (180–220 °C). Larger CQDs and more graphitic core → red shift.
+6. **Wavelength tuning (temperature is the primary knob).** With citric acid + urea the emission colour is set mainly by the **hydrothermal temperature** (and reaction time): **~180 °C → blue (~450–470 nm)**, **~200 °C → blue-green (~480–500 nm)**, **~220 °C / longer time → green (~520–540 nm)**. The mechanism is a larger sp² carbon core + heavier nitrogen doping + denser surface states at higher temperature → smaller effective bandgap → red shift. (Ethylenediamine as a dopant can push further to 540–620 nm but is **not required** to reach green.) For this chip, synthesise **green** CQDs (~220 °C) so the on-chip emitter pumps the VB− directly around the 532 nm excitation band — no external pump laser is needed for the end-to-end demonstration.
 
 ### 1.2 CQD–polymer electroluminescent ink
 
@@ -151,9 +155,16 @@ This follows the citric-acid + urea hydrothermal route, a well-established "bott
 13. Spin-coat CQD–PVA ink at **2000 rpm, 40 s** → ~80 nm. (Thicker films for ASE: **1500 rpm, 60 s** → ~120–150 nm.) Bake **80 °C, 20 min** under vacuum desiccator to remove residual water (water kills EL).
 14. **ASE waveguide geometry:** to favor in-plane ASE, deposit a second, thicker (~250 nm) neat-CQD strip on the pixel edge by drop-casting through a shadow mask (0.5 mm wide) and slow drying at 60 °C. This forms the gain strip into which the diode EL is edge-coupled.
 
+### 1.5b ZnO electron-transport layer (ETL)
+
+14b. **ZnO ETL.** Disperse **ZnO nanopowder** (~20–40 nm particles; ball-mill coarser ZnO if needed) in **ethanol or butanol** at **20 mg/mL**, sonicate 30 min, filter 0.45 µm. Spin-coat on the CQD–PVA layer at **3000 rpm, 30 s** → **~30–50 nm** ETL. Bake **150 °C, 10 min** on hotplate. ZnO (bandgap 3.37 eV ≈ 368 nm) is transparent to both the green pump and the 850 nm defect PL; it injects electrons into the CQD layer and blocks holes, completing the p-i-n stack opposite the PEDOT:PSS hole-transport layer.
+
 ### 1.6 Top cathode
 
-15. Thermal evaporate **Ag** (or Al) through a shadow mask, **100 nm**, rate **0.5–1 Å/s**, base pressure < 5 × 10⁻⁶ mbar. Pattern 8 × 8 matching pads. (A home sputter coater at ~10⁻³ mbar with a mask gives adequate but higher-resistivity cathodes.)
+15. **Top cathode (Ag).** Two routes:
+    - **Maker route (no evaporator — recommended here):** dispense **conductive silver paste from a syringe** (the type sold for circuit-track repair) through an 8 × 8 shadow mask, doctor-blade / spread to **~1–2 µm**, dry/cure per the paste spec (typically 60–80 °C, 15 min, or air-cure 2 h). Silver-paste cathodes are higher-resistance and thicker than evaporated films but entirely adequate for a demonstrator and need no vacuum equipment.
+    - **Lab route:** thermal evaporate **Ag** (or Al) through a shadow mask, **100 nm**, rate **0.5–1 Å/s**, base pressure < 5 × 10⁻⁶ mbar. A home sputter coater at ~10⁻³ mbar with a mask gives adequate but higher-resistivity cathodes.
+    Pattern 8 × 8 matching pads on the ZnO ETL.
 16. **Encapsulate:** spin 200 nm PMMA on top as moisture barrier; cure 120 °C, 10 min.
 
 ### 1.7 Electrical drive and EL check
@@ -209,7 +220,7 @@ The negatively-charged boron vacancy, VB−, is a spin-1 (S=1) defect with zero-
 
 ## Section 3 — On-Chip Fluorescence Photodetector Array (Graphene / MoS₂)
 
-**Goal:** Place a 1 × 4 graphene/MoS₂ photodetector array on the waveguide output facet to read defect fluorescence and pump EL, replacing discrete photodiodes.
+**Goal:** Place an **N-electrode graphene/MoS₂ photodetector array on-chip, aligned to the 8 × 8 qubit grid** — one detector electrode per addressed site, mirroring the emitter's N electrical contacts — and read it **directly by the FPGA**. No discrete photodiodes / Si APDs, and no external camera. The readout is entirely on-chip; coarse stacking only is needed because the emitter-pixel → qubit-site → detector-electrode mapping is recovered by **software pulse-capture calibration** (Section 5.6), so no micron-precision alignment jig is required.
 
 ### 3.1 CVD graphene transfer
 
@@ -261,7 +272,7 @@ The negatively-charged boron vacancy, VB−, is a spin-1 (S=1) defect with zero-
 
 ### 4.5 Contacts and encapsulation
 
-12. Au wire bonds or silver-paste tracks to a 0.1" header for: ITO anode (×8 rows), Ag cathode (×8 cols), photodetector drains (×4), gate (×1, optional electrolyte gate), thermistor (×2), TEC + and − (×2).
+12. Au wire bonds or silver-paste tracks to a 0.1" header for: ITO anode (×8 rows), Ag cathode (×8 cols), photodetector drains (×N, one electrode per addressed qubit site), gate (×1, optional electrolyte gate), thermistor (×2), TEC + and − (×2).
 13. Encapsulate active area under a **1 mm PDMS slab** (oxygen/moisture barrier, optical clear). Leave waveguide output facet exposed for optional off-chip fiber coupling.
 
 ### 4.6 Coplanar waveguide (MW) for ODMR
@@ -280,7 +291,7 @@ The negatively-charged boron vacancy, VB−, is a spin-1 (S=1) defect with zero-
 
 ### 5.2 ODMR of VB− in hBN
 
-4. **Optical:** 532 nm CW laser, ~1 mW at the sample, focused through a 20×/0.45 objective. Collect PL > 590 nm (long-pass filter) into a Si APD or the on-chip graphene detector.
+4. **Optical:** 532 nm CW laser (or the on-chip green CQD emitter), ~1 mW at the sample. Collect the VB− PL at **~850 nm** through a **650 nm red photographic long-pass filter** (passes the 850 nm NIR defect PL, blocks the 532 nm green pump) into the **on-chip graphene/MoS₂ detector array**. No Si APD / discrete photodiode — the readout is entirely on-chip.
 5. **Microwave:** sweep 3.30–3.60 GHz from the function generator through the CPW. Modulate MW at 1 kHz for lock-in detection of the ODMR dip.
 6. **Expected resonance:** the characteristic **7-line ¹⁴N hyperfine pattern** centred at **D ≈ 3.46 GHz** (coupling to 3 equivalent ¹⁴N, A/h ≈ 47 MHz, intensity ratios ≈ 1:3:6:7:6:3:1) [5]. ODMR contrast **0.5–3 %** (ensemble), linewidth **5–20 MHz** (broadened by strain and the ¹⁰B/¹¹B nuclear bath). At low resolution the seven lines merge into a single dip near 3.46 GHz.
 7. **Magnetic field sweep:** apply a static B₀ along the c-axis (a small permanent magnet on a linear stage); observe D shift following D(B) = D₀ ± γ_e·B₀ with γ_e/2π ≈ 28 GHz/T. The doublet splits symmetrically — confirms the spin-1 (S=1) triplet of VB−.
@@ -297,7 +308,11 @@ The negatively-charged boron vacancy, VB−, is a spin-1 (S=1) defect with zero-
 
 ### 5.5 End-to-end functional test
 
-12. Drive CQD pixel electrically → EL pumps hBN VB− ensemble → collect defect PL through waveguide → on-chip graphene/MoS₂ detector photocurrent modulated by MW at D ≈ 3.46 GHz → lock-in reads ODMR. A successful end-to-end ODMR with the CQD pump (no external laser) is the chip's defining demonstration.
+12. Drive CQD pixel electrically → green EL pumps the hBN VB− ensemble → collect the ~850 nm defect PL (through the 650 nm long-pass filter) at the on-chip graphene/MoS₂ detector → its photocurrent is modulated by MW at D ≈ 3.46 GHz → the FPGA / lock-in reads the ODMR dip. A successful end-to-end ODMR with the on-chip CQD pump (no external laser) is the chip's defining demonstration.
+
+### 5.6 Emitter↔qubit↔detector calibration (software pulse-capture)
+
+13. **No manual pixel-perfect alignment is required.** With the stack coarse-assembled (layer-to-layer registration ~100 µm is enough), run an automated calibration sweep from the FPGA: for each emitter pixel (i,j) fire a short green pump pulse, then sample every graphene/MoS₂ detector electrode and record which one(s) show a modulated ~850 nm response under MW at D ≈ 3.46 GHz. The sweep builds a lookup table mapping **emitter pixel → qubit site → detector electrode**. Subsequent operation addresses qubits through this table, so the chip tolerates coarse mechanical stacking and needs **no camera and no micron alignment jig for readout**. (A camera on the separate FPGA controller board, if present, is used only for initial visual inspection of the assembled chip — never for qubit readout.)
 
 ---
 

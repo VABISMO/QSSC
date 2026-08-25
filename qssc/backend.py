@@ -508,7 +508,7 @@ class QSSCBackend(BackendV2):
         distribution.
         """
         n_active = len(self._active_qubits(circuit))
-        _, _, n_compiled, _ = self._decomposed_cost(circuit)
+        _, _, n_compiled, _, _ = self._decomposed_cost(circuit)
         use_dm = (n_active <= self._dm_qubit_limit) and (n_compiled == 0)
         if use_dm:
             try:
@@ -550,7 +550,15 @@ class QSSCBackend(BackendV2):
         two_q = {"cx", "cz", "cp", "swap", "ecr", "iswap"}
         n1q = sum(int(ops.get(g, 0)) for g in one_q)
         n2q = sum(int(ops.get(g, 0)) for g in two_q)
-        # compiled blocks -> estimated decomposed 2-qubit gate count
+        # compiled blocks -> estimated decomposed 2-qubit gate count. These
+        # high-level blocks (modular exponentiation, QFT, multipliers, adders,
+        # phase estimation) have a tiny logical depth but decompose to a 2q-gate
+        # count that scales **quadratically** with the block's register width w
+        # (an n-bit multiplier/QFT/adder is O(n^2) entangling gates). The stored
+        # `factor` is the cost of a reference width-4 instance, so each block's
+        # cost is scaled by (w/4)^2 -- this is why increasing the number of
+        # qubits/bits makes the operation slower (longer decomposed duration)
+        # and pushes it further past the T2 coherence window.
         block_factor = {
             "unitary": 256, "c-unitary": 256,          # mod-mult / controlled-U
             "IQFT": 80, "QFT": 80, "qft": 80,          # QFT on control register
@@ -559,16 +567,23 @@ class QSSCBackend(BackendV2):
         }
         n_compiled = 0
         decomp_2q = 0
-        for name, count in ops.items():
+        for inst in circuit.data:
+            name = inst.operation.name
             if name in one_q or name in two_q or name in ("measure", "barrier"):
                 continue
             factor = block_factor.get(name, 64)  # generic compiled block
-            n_compiled += int(count)
-            decomp_2q += int(count) * factor
+            # block width (qubits): scale cost quadratically with width.
+            try:
+                w = int(inst.operation.num_qubits)
+            except Exception:  # noqa: BLE001
+                w = len(inst.qubits)
+            w = max(2, w)
+            n_compiled += 1
+            decomp_2q += factor * (w * w) / 16.0
         est_2q = n2q + decomp_2q
         est_1q = n1q + est_2q * 2
         quantum_time_s = est_1q * self._g1q + est_2q * self._g2q
-        return n1q, n2q, n_compiled, quantum_time_s
+        return n1q, n2q, n_compiled, quantum_time_s, est_2q
 
     def assess_circuit(self, circuit: QuantumCircuit) -> dict:
         """Honest physical-feasibility assessment of a circuit on this chip.
@@ -578,14 +593,13 @@ class QSSCBackend(BackendV2):
         coherence window — the key limitation of a 300 K spin-defect chip.
         """
         depth = max(circuit.depth(), 1)
-        n1q, n2q, n_compiled, quantum_time_s = self._decomposed_cost(circuit)
+        n1q, n2q, n_compiled, quantum_time_s, est_2q = self._decomposed_cost(circuit)
         duration_s = quantum_time_s + self._readout_t
         crit_path_s = depth * self._g1q + max(n2q, 0) * (self._g2q - self._g1q)
         t2 = self._t2
         budget_gates = int(t2 / self._g1q) if self._g1q > 0 else 0
         damping = 1.0 - math.exp(-duration_s / max(t2, 1e-15))
         within = duration_s <= t2
-        est_2q = n2q + n_compiled * 256
         if n_compiled > 0 and not within:
             verdict = ("contains compiled blocks (modular exponentiation / QFT / "
                        "arithmetic) whose decomposed depth (~%g 2q gates, ~%g us) "
@@ -665,7 +679,7 @@ class QSSCBackend(BackendV2):
         # the analytic limit agrees with the physical-feasibility verdict (a
         # Shor run that "is NOT physically executable at 300 K" must decohere to
         # a near-uniform distribution here, not recover its factors).
-        _, _, _, t_circuit = self._decomposed_cost(circuit)
+        _, _, _, t_circuit, _ = self._decomposed_cost(circuit)
         t2 = self._t2
         damping = 1.0 - math.exp(-t_circuit / max(t2, 1e-12))
         uniform = rng.integers(0, 2 ** nbits, size=shots)
