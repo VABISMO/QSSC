@@ -386,13 +386,13 @@ function computeRunPhysics(result, profile, temperature, infoData) {
     fidelity, readoutErr, T: Math.round(c.T), crystal: c.crystal }
 }
 
-export function RunPhysics({ result, profile, temperature, infoData }) {
+export function RunPhysics({ result, profile, temperature, infoData, assessment }) {
   const p = computeRunPhysics(result, profile, temperature, infoData)
   if (!p) {
     return (
       <div className="card runphysics-card">
         <h2><span className="dot" />Execution component physics</h2>
-        <div className="hint">Run a circuit — the CQD emitter array, waveguides, photodetectors and lock-in readout physics are calculated for the actual circuit that runs (active sites, pump energy, detector codes, SNR, readout time), not a fixed snapshot.</div>
+        <div className="hint">Run a circuit — the CQD emitter array, waveguides, photodetectors and lock-in readout physics are calculated for the actual circuit that runs (active sites, pump energy, detector codes, SNR, readout time), not a fixed snapshot. A green/red verdict shows whether the circuit is physically executable at this temperature.</div>
         <div className="muted" style={{ marginTop: 6 }}>No circuit run yet.</div>
       </div>
     )
@@ -405,6 +405,7 @@ export function RunPhysics({ result, profile, temperature, infoData }) {
     <div className="card runphysics-card">
       <h2><span className="dot" />Execution component physics <span className="muted" style={{ fontWeight: 400 }}>· {p.crystal} @ {p.T} K · {p.shots} shots · {p.nActive}q circuit</span></h2>
       <div className="hint">Calculated for the circuit that just ran — these numbers change with the algorithm, qubit count, shots, defect and temperature.</div>
+      {assessment && <div style={{ marginTop: 10 }}><Verdict assessment={assessment} /></div>}
       <div className="stats">
         {stat('CQD pixels fired', `${p.nMeasured}`, '/shot')}
         {stat('Drive / pixel', `${p.driveMa} mA · ${p.forwardV} V`, `→ ${p.elecPwrMw} mW`)}
@@ -532,7 +533,6 @@ export function Verdict({ assessment, approximate }) {
     <div className={`verdict ${ok ? 'ok' : 'bad'}`}>
       <div className="verdict-h">
         {ok ? '✓ Within coherence window' : '✗ Exceeds coherence budget'}
-        {approximate && <span className="tag approx">analytic limit (large circuit)</span>}
       </div>
       <div className="verdict-body">{assessment.verdict}</div>
       <div className="verdict-meta">

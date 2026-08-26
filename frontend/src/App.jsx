@@ -719,7 +719,7 @@ export default function App() {
               {info.loading && <div className="muted"><span className="spinner" /> loading backend target…</div>}
             </div>
 
-            <RunPhysics result={result} profile={profile} temperature={temperature} infoData={info.data} />
+            <RunPhysics result={result} profile={profile} temperature={temperature} infoData={info.data} assessment={runAssessment} />
 
             <div className="card optchain-card" style={{ gridColumn: '1 / -1' }}>
               <h2><span className="dot" />Optical readout chain</h2>
