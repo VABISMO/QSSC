@@ -195,100 +195,99 @@ def custom_symbol_def(lib, name, refpref, pins, body, value=None):
     return sym
 
 
-# ---- FPGA XC7A35T custom symbol ------------------------------------------
-# Pin numbers are the XDC package-pin names (signal->pin).  Power/XADC/JTAG
-# use symbolic numbers (fixed-package / not in XDC).  Pad->ball mapping must
-# be verified against UG475 before fabrication (see HARDWARE_DESIGN.md).
-FPGA_SIGNALS = [  # (number, name, etype, side, net)
-    ("G21", "clk_100mhz", "input", "L", "clk_100mhz"),
-    ("N17", "reset", "input", "L", "reset"),
-    ("P17", "rx", "input", "L", "UART_RX"),
-    ("TCK", "TCK", "input", "L", "TCK"),
-    ("TMS", "TMS", "input", "L", "TMS"),
-    ("TDI", "TDI", "input", "L", "TDI"),
-    ("VauxN0", "VauxN0", "input", "L", "GND"),
-    ("VauxP0", "VauxP0", "input", "L", "TIA_OUT"),
-    ("P18", "tx", "output", "R", "UART_TX"),
-    ("C18", "refclk_out", "output", "R", "refclk_25m"),
-    ("F16", "mod_sync", "output", "R", "mod_sync"),
-    ("E16", "mw_gate", "output", "R", "mw_gate"),
-    ("D17", "SPI_LE", "output", "R", "SPI_LE"),
-    ("D18", "SPI_CLK", "output", "R", "SPI_CLK"),
-    ("D19", "SPI_DATA", "output", "R", "SPI_DATA"),
-    ("E19", "ADF_MUXOUT", "input", "R", "ADF_MUXOUT"),
-    ("TDO", "TDO", "output", "R", "TDO"),
-]
-FPGA_ROWS = ["K16", "K17", "L18", "M16", "M17", "M18", "N16", "N18"]
-FPGA_COLS = ["P16", "K18", "R16", "R17", "R18", "T16", "T17", "T18"]
-FPGA_MUX = ["J17", "J16", "H17", "G18", "G17", "F18"]
-# power pins: (number, name, etype, net, side)  side T=top B=bottom
-FPGA_POWER = [
-    ("VCCINT", "VCCINT", "power_in", "+1V0", "T"),
-    ("VCCAUX", "VCCAUX", "power_in", "+1V8", "T"),
-    ("VCCADC", "VCCADC", "power_in", "+1V8", "T"),
-    ("VCCO0", "VCCO_0", "power_in", "+3V3", "T"),
-    ("VCCO1", "VCCO_1", "power_in", "+3V3", "T"),
-    ("VCCO2", "VCCO_2", "power_in", "+3V3", "T"),
-    ("VCCO3", "VCCO_3", "power_in", "+3V3", "T"),
-    ("GND1", "GND", "power_in", "GND", "B"),
-    ("GND2", "GND", "power_in", "GND", "B"),
-    ("GND3", "GND", "power_in", "GND", "B"),
-    ("GNDADC", "GNDADC", "power_in", "GND", "B"),
-    ("VREFP", "VREFP", "passive", "VREFP", "B"),
-    ("VREFN", "VREFN", "passive", "VREFN", "B"),
-]
+# ---- FPGA XC7A35T-1CPG236C real pinout (datasheet-correct) ----------------
+# The full CPG236 ballout (238 pads) is loaded from .tmpwork/fpga_cpg236_map.json,
+# which is generated from the official KiCad symbol
+# FPGA_Xilinx_Artix7:XC7A35T-CPG236 (every pad named).  This REPLACES the earlier
+# hand-authored pin table: that table assigned signals to balls that do not
+# exist on the CPG236 (G21, F16, E16, K16, M16, N16, P16, R16, T16, J16 -- the
+# XDC header wrongly said "CSG236 0.8 mm"; the real part is CPG236 0.5 mm) or to
+# dedicated power pads (M17/R17 = VCCO_14, C18 = VCCO_16) or to the dedicated
+# QSPI config-data balls (D18/D19/G18/F18 = D00..D03), which conflict with the
+# ADF4351 SPI that previously occupied them.  All 32 user-IO signals have been
+# re-routed to valid general-purpose IO balls; every power/ground/config/JTAG/
+# XADC pad is netted.  See the audit in HARDWARE_DESIGN.md §15.
+_FPGA_MAP = json.loads((ROOT / ".tmpwork" / "fpga_cpg236_map.json").read_text())
 
-
-def fpga_pin_list():
-    pins = []
-    # left inputs
-    left = [s for s in FPGA_SIGNALS if s[3] == "L"]
-    right = [s for s in FPGA_SIGNALS if s[3] == "R"]
-    y0 = 2.54 * (len(left) - 1) / 2 + 2.54
-    n = 0
-    for num, name, et, _, _ in left:
-        pins.append(dict(number=num, name=name, etype=et, x=-17.78, y=round(y0 - n * 2.54, 2), rot=0))
-        n += 1
-    # right: signals + rows + cols + mux
-    right_rows = []
-    for i, pnum in enumerate(FPGA_ROWS):
-        right_rows.append((pnum, f"emitter_rows{i}", "output", "R", f"emitter_rows{i}"))
-    for i, pnum in enumerate(FPGA_COLS):
-        right_rows.append((pnum, f"emitter_cols{i}", "output", "R", f"emitter_cols{i}"))
-    for i, pnum in enumerate(FPGA_MUX):
-        right_rows.append((pnum, f"det_mux_sel{i}", "output", "R", f"det_mux_sel{i}"))
-    allright = right + right_rows
-    y0r = 2.54 * (len(allright) - 1) / 2 + 2.54
-    n = 0
-    for num, name, et, _, _ in allright:
-        pins.append(dict(number=num, name=name, etype=et, x=17.78, y=round(y0r - n * 2.54, 2), rot=180))
-        n += 1
-    # top power
-    top = [p for p in FPGA_POWER if p[4] == "T"]
-    x0 = -2.54 * (len(top) - 1) / 2
-    for i, (num, name, et, net, _) in enumerate(top):
-        pins.append(dict(number=num, name=name, etype=et, x=round(x0 + i * 2.54, 2), y=-12.7, rot=90, length=2.54))
-    # bottom power
-    bot = [p for p in FPGA_POWER if p[4] == "B"]
-    x0b = -2.54 * (len(bot) - 1) / 2
-    for i, (num, name, et, net, _) in enumerate(bot):
-        pins.append(dict(number=num, name=name, etype=et, x=round(x0b + i * 2.54, 2), y=12.7, rot=270, length=2.54))
-    return pins
+# net per power/analog category
+_FPGA_PWR_NET = {
+    "VCCINT": "+1V0", "VCCBRAM": "+1V0", "VCCAUX": "+1V8", "VCCADC": "+1V8",
+    "GND": "GND", "GNDADC": "GND", "VCCBATT": "+3V3", "CFGBVS": "+3V3",
+    "VREFP": "VREFP", "VREFN": "GND", "MGT_GND": "GND",
+}
+# net per dedicated config / mode pin (QSPI x4 master boot: M[2:0]=001)
+_FPGA_CFG_NET = {
+    "D00": "SPI_D0", "D01": "SPI_D1", "D02": "SPI_D2", "D03": "SPI_D3",
+    "FCS_B": "SPI_CS", "CCLK": "SPI_CCLK", "DONE": "CONF_DONE",
+    "INIT_B": "CONF_INIT", "PROGRAM_B": "CONF_PROG",
+    "M0": "+3V3", "M1": "GND", "M2": "GND",
+}
+# user-IO signals that are FPGA inputs (the rest are outputs); all drawn as
+# bidirectional so ERC stays lenient on unused-direction pins.
+_FPGA_INPUT_NETS = {"clk_100mhz", "reset", "rx", "TCK", "TMS", "TDI",
+                    "ADF_MUXOUT", "TIA_OUT", "CONF_INIT", "CONF_PROG"}
 
 
 def fpga_net_map():
+    """{ball_name: net} for every FPGA pad that carries a net.
+
+    All power/ground/config/JTAG/XADC pads plus the 32 used user-IO signals are
+    netted.  Spare general-purpose IO balls are intentionally LEFT OUT (no net =
+    NC), which is correct practice for unused BGA IO (the pad is still soldered
+    for mechanical integrity, just carries no signal).  This nets ~140 of the
+    238 CPG236 pads -- all the ones that matter for power integrity, config
+    boot, and the board's I/O."""
     m = {}
-    for num, name, et, _, net in FPGA_SIGNALS:
-        m[num] = net
-    for i, pnum in enumerate(FPGA_ROWS):
-        m[pnum] = f"emitter_rows{i}"
-    for i, pnum in enumerate(FPGA_COLS):
-        m[pnum] = f"emitter_cols{i}"
-    for i, pnum in enumerate(FPGA_MUX):
-        m[pnum] = f"det_mux_sel{i}"
-    for num, name, et, net, _ in FPGA_POWER:
-        m[num] = net
+    s = _FPGA_MAP
+    for net, ball in s["signals"].items():
+        m[ball] = net
+    for cat, balls in s["power"].items():
+        net = _FPGA_PWR_NET[cat] if cat in _FPGA_PWR_NET else "+3V3"  # VCCO_*
+        for b in balls:
+            m[b] = net
+    for name, ball in s["config"].items():
+        m[ball] = _FPGA_CFG_NET[name]
+    for name, ball in s["jtag"].items():
+        m[ball] = name
+    m[s["xadc"]["VP"]] = "TIA_OUT"
+    m[s["xadc"]["VN"]] = "GND"
     return m
+
+
+def fpga_pin_list():
+    """Schematic pins for every netted FPGA ball, laid out on 4 sides at
+    1.27 mm pitch.  Matches fpga_net_map() 1:1 so every PCB pad that is netted
+    also appears on the schematic (datasheet-complete symbol)."""
+    nm = fpga_net_map()
+    left, right, top, bot = [], [], [], []
+    for ball, net in sorted(nm.items()):
+        if net in ("+1V0", "+1V8", "+3V3", "VREFP"):
+            top.append((ball, net, "power_in"))
+        elif net == "GND":
+            bot.append((ball, net, "power_in"))
+        elif net in _FPGA_INPUT_NETS:
+            left.append((ball, net, "bidirectional"))
+        else:
+            right.append((ball, net, "bidirectional"))
+    pins = []
+    sp = 1.27
+    yL = sp * (len(left) - 1) / 2
+    for i, (num, name, et) in enumerate(left):
+        pins.append(dict(number=num, name=name, etype=et, x=-17.78,
+                         y=round(yL - i * sp, 2), rot=0, length=2.54))
+    yR = sp * (len(right) - 1) / 2
+    for i, (num, name, et) in enumerate(right):
+        pins.append(dict(number=num, name=name, etype=et, x=17.78,
+                         y=round(yR - i * sp, 2), rot=180, length=2.54))
+    xT = -sp * (len(top) - 1) / 2
+    for i, (num, name, et) in enumerate(top):
+        pins.append(dict(number=num, name=name, etype=et, x=round(xT + i * sp, 2),
+                         y=-10.16, rot=90, length=2.54))
+    xB = -sp * (len(bot) - 1) / 2
+    for i, (num, name, et) in enumerate(bot):
+        pins.append(dict(number=num, name=name, etype=et, x=round(xB + i * sp, 2),
+                         y=10.16, rot=270, length=2.54))
+    return pins
 
 
 # ---- HMC441 custom symbol (5 logical pins; 16-pad QFN pad map TBD) --------
@@ -327,9 +326,22 @@ def authored_symbols():
     for n in ["+3V3", "+1V8", "+1V0", "+5V", "+5V_RF", "GND"]:
         syms.append(power_symbol_def(n))
     syms.append(PWR_FLAG_def())
-    # FPGA
+    # FPGA -- real 238-pad CPG236 pinout (power/ground/config/JTAG/XADC + 32 IO).
+    # Body box spans the 1.27 mm-pitched top/bottom pin rows (~+/-42 mm).
     syms.append(custom_symbol_def("qssc", "XC7A35T_CPG236", "U", fpga_pin_list(),
-                                  (-12.7, -10.16, 12.7, 10.16), value="XC7A35T-1CPG236C"))
+                                  (-44.45, -12.7, 44.45, 12.7), value="XC7A35T-1CPG236C"))
+    # W25Q128 config flash (SOIC-8, datasheet pinout).  QSPI x4 boot to the FPGA
+    # dedicated config balls D00..D03 / FCS_B / CCLK.
+    syms.append(custom_symbol_def("qssc", "W25Q128JVS", "U", [
+        dict(number="1", name="CS", etype="input", x=-7.62, y=2.54, rot=0),
+        dict(number="2", name="DO_D1", etype="bidirectional", x=-7.62, y=0, rot=0),
+        dict(number="3", name="WP_D2", etype="bidirectional", x=-7.62, y=-2.54, rot=0),
+        dict(number="4", name="GND", etype="power_in", x=0, y=7.62, rot=270),
+        dict(number="5", name="DI_D0", etype="bidirectional", x=7.62, y=-2.54, rot=180),
+        dict(number="6", name="CLK", etype="input", x=7.62, y=0, rot=180),
+        dict(number="7", name="HOLD_D3", etype="bidirectional", x=7.62, y=2.54, rot=180),
+        dict(number="8", name="VCC", etype="power_in", x=0, y=-7.62, rot=90),
+    ], (-5.08, -5.08, 5.08, 5.08), value="W25Q128JVSIQ"))
     # HMC441
     syms.append(custom_symbol_def("qssc", "HMC441LP3E", "U", HMC441_PINS,
                                   (-5.08, -5.08, 5.08, 5.08), value="HMC441LP3E"))
@@ -417,6 +429,7 @@ SYM_NAME = {
     "qssc:AMS1117-1.0": "AMS1117-1.0", "qssc:AMS1117-1.8": "AMS1117-1.8",
     "qssc:AMS1117-3.3": "AMS1117-3.3", "qssc:AMS1117-5.0": "AMS1117-5.0",
     "qssc:FT232RL": "FT232RL", "qssc:ADF4351": "ADF4351", "qssc:ADA4530-1": "ADA4530-1",
+    "qssc:W25Q128JVS": "W25Q128JVS",
     "qssc:ASE_osc": "ASE_osc", "qssc:Barrel_Jack": "Barrel_Jack",
     "qssc:Conn_Coaxial": "Conn_Coaxial", "qssc:Conn_02x08": "Conn_02x08",
     "qssc:Conn_02x05": "Conn_02x05", "qssc:Conn_01x02": "Conn_01x02",
@@ -496,6 +509,23 @@ add("LED1", "qssc:LED", "Green", "LED_SMD:LED_0603_1608Metric",
 # FPGA (center)
 add("U1", "qssc:XC7A35T_CPG236", "XC7A35T-1CPG236C", "Package_BGA:Xilinx_CPG236",
     200, 70, pins=fpga_net_map())
+
+# Config flash W25Q128 (QSPI x4 boot).  FPGA dedicated config balls:
+#   D00->SPI_D0, D01->SPI_D1, D02->SPI_D2, D03->SPI_D3, FCS_B->SPI_CS,
+#   CCLK->SPI_CCLK, DONE->CONF_DONE, INIT_B->CONF_INIT, PROGRAM_B->CONF_PROG.
+add("U8", "qssc:W25Q128JVS", "W25Q128JVSIQ", "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm",
+    140, 95, pins={"1": "SPI_CS", "2": "SPI_D1", "3": "SPI_D2", "4": "GND",
+                   "5": "SPI_D0", "6": "SPI_CCLK", "7": "SPI_D3", "8": "+3V3"})
+# Config pull-ups (open-drain config pins need a pull-up to +3V3 to boot).
+add("R75", "qssc:R", "4.7k", "Resistor_SMD:R_0603_1608Metric",
+    120, 90, pins={"1": "+3V3", "2": "CONF_DONE"})
+add("R76", "qssc:R", "4.7k", "Resistor_SMD:R_0603_1608Metric",
+    120, 95, pins={"1": "+3V3", "2": "CONF_INIT"})
+add("R77", "qssc:R", "4.7k", "Resistor_SMD:R_0603_1608Metric",
+    120, 100, pins={"1": "+3V3", "2": "CONF_PROG"})
+# XADC reference decoupling: VREFP decoupled to GND (internal reference mode).
+add("C40", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
+    215, 90, pins={"1": "VREFP", "2": "GND"})
 
 # Clock
 add("Y1", "qssc:ASE_osc", "100MHz TCXO", "Oscillator:Oscillator_SMD_Abracon_ASE-4Pin_3.2x2.5mm",
@@ -596,7 +626,8 @@ add("#FLG3", "power:PWR_FLAG", "PWR_FLAG", "", 45, 45, pins={"1": "GND"})
 RF_NETS = {"RF_OUT", "RF_OUT_N", "RF_IN", "RF_AMP_OUT", "J3_SIG", "LF_CP", "LF_MID",
            "LF_OUT", "CPout", "VTUNE", "refclk_25m"}
 USB_NETS = {"USB_DP", "USB_DM"}
-ANALOG_NETS = {"TIA_OUT", "TIA_OUT_N", "DET_IN", "DET_BIAS", "VREFP", "VREFN", "TIA_REF"}
+ANALOG_NETS = {"TIA_OUT", "TIA_OUT_N", "DET_IN", "DET_BIAS", "VREFP", "VREFN", "TIA_REF",
+               "VauxP0", "VauxN0"}
 POWER_NETS = {"+3V3", "+1V8", "+1V0", "+5V", "+5V_RF", "+5V_IN", "GND", "3V3OUT"}
 
 
@@ -957,6 +988,10 @@ def assign_pcb_positions():
         "REG1": (34, 14, 0), "REG2": (34, 26, 0), "REG3": (34, 38, 0), "REG4": (34, 50, 0),
         # FPGA (center)
         "U1": (70, 45, 0), "Y1": (70, 25, 0),
+        # config flash + pull-ups + XADC VREFP decoupling (bottom-right, clear of the
+        # ~17 mm FPGA BGA keepout which spans x[61.5,78.5] y[36.5,53.5])
+        "U8": (94, 58, 0), "R75": (102, 54, 0), "R76": (102, 58, 0),
+        "R77": (102, 62, 0), "C40": (88, 54, 0),
         # USB (bottom-center)
         "J1": (76, 62, 0), "J10": (70, 80, 180), "R71": (70, 72, 0), "R72": (74, 72, 0),
         "J8": (82, 52, 0),
