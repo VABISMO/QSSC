@@ -43,7 +43,6 @@ FAST_PORTS = {"tx", "{spi_pins[1]}", "refclk_out", "mw_gate",
 def emit() -> str:
     m = json.loads(MAP.read_text())
     sig = m["signals"]
-    cfg = m["config"]
     jtag = m["jtag"]
 
     def ball(name: str) -> str:

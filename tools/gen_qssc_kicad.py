@@ -310,6 +310,20 @@ def ams1117_pins():
     ]
 
 
+# ---- AP2127K-1.0 (Diodes Inc, SOT-23-5) -- REAL 1.0 V LDO -------------------
+# AMS1117 has NO 1.0 V option (min fixed output 1.5 V); the prior "AMS1117-1.0"
+# was a non-existent part. VCCINT=1.0 V uses the AP2127K-1.0 (600 mA, SOT-23-5).
+# Pinout per Diodes Inc AP2127K datasheet: 1=VIN 2=GND 3=EN 4=BP 5=VOUT.
+def ap2127k_pins():
+    return [
+        dict(number="1", name="VIN", etype="power_in", x=-7.62, y=-3.81, rot=0),
+        dict(number="3", name="EN", etype="input", x=-7.62, y=3.81, rot=0),
+        dict(number="2", name="GND", etype="power_in", x=0, y=7.62, rot=270),
+        dict(number="5", name="VOUT", etype="power_out", x=7.62, y=-3.81, rot=180),
+        dict(number="4", name="BP", etype="passive", x=7.62, y=3.81, rot=180),
+    ]
+
+
 # --------------------------------------------------------------------------
 # Standard-symbol pin coords (for computing label positions on the schematic)
 # We author custom minimal symbols that REPLICATE the standard pin numbers and
@@ -345,10 +359,13 @@ def authored_symbols():
     # HMC441
     syms.append(custom_symbol_def("qssc", "HMC441LP3E", "U", HMC441_PINS,
                                   (-5.08, -5.08, 5.08, 5.08), value="HMC441LP3E"))
-    # AMS1117 family (3 pins each, simple horizontal body)
-    for v in ["AMS1117-1.0", "AMS1117-1.8", "AMS1117-3.3", "AMS1117-5.0"]:
+    # AMS1117 family (3 pins each, simple horizontal body) -- 1.8/3.3/5.0 only;
+    # the 1.0 V rail uses the real AP2127K-1.0 (AMS1117 has no 1.0 V option).
+    for v in ["AMS1117-1.8", "AMS1117-3.3", "AMS1117-5.0"]:
         syms.append(custom_symbol_def("qssc", v, "U", ams1117_pins(),
                                       (-5.08, -5.08, 5.08, 5.08), value=v))
+    syms.append(custom_symbol_def("qssc", "AP2127K-1.0", "U", ap2127k_pins(),
+                                  (-5.08, -5.08, 5.08, 5.08), value="AP2127K-1.0"))
     # FT232RL: replicate standard pins/etypes with a custom layout
     syms.append(replicated_symbol("qssc", "FT232RL", "U",
                                   std_pins("Interface_USB", "FT232RL"), value="FT232RL"))
@@ -426,7 +443,7 @@ def replicated_symbol(lib, name, refpref, stdpinlist, value=None):
 # Map lib_id -> symbol name in our authored lib
 SYM_NAME = {
     "qssc:XC7A35T_CPG236": "XC7A35T_CPG236", "qssc:HMC441LP3E": "HMC441LP3E",
-    "qssc:AMS1117-1.0": "AMS1117-1.0", "qssc:AMS1117-1.8": "AMS1117-1.8",
+    "qssc:AP2127K-1.0": "AP2127K-1.0", "qssc:AMS1117-1.8": "AMS1117-1.8",
     "qssc:AMS1117-3.3": "AMS1117-3.3", "qssc:AMS1117-5.0": "AMS1117-5.0",
     "qssc:FT232RL": "FT232RL", "qssc:ADF4351": "ADF4351", "qssc:ADA4530-1": "ADA4530-1",
     "qssc:W25Q128JVS": "W25Q128JVS",
@@ -497,8 +514,17 @@ add("REG1", "qssc:AMS1117-3.3", "AMS1117-3.3", "Package_TO_SOT_SMD:SOT-223-3_Tab
     80, 30, pins={"1": "GND", "2": "+3V3", "3": "+5V"})
 add("REG2", "qssc:AMS1117-1.8", "AMS1117-1.8", "Package_TO_SOT_SMD:SOT-223-3_TabPin2",
     80, 50, pins={"1": "GND", "2": "+1V8", "3": "+5V"})
-add("REG3", "qssc:AMS1117-1.0", "AMS1117-1.0", "Package_TO_SOT_SMD:SOT-223-3_TabPin2",
-    80, 70, pins={"1": "GND", "2": "+1V0", "3": "+5V"})
+add("REG3", "qssc:AP2127K-1.0", "AP2127K-1.0", "Package_TO_SOT_SMD:SOT-23-5",
+    80, 70, pins={"1": "+5V", "2": "GND", "3": "+5V", "4": "BP_1V0", "5": "+1V0"})
+# REG3 (AP2127K-1.0) decoupling: 10uF in + 10uF/100nF out + 10nF bypass pin.
+add("C41", "qssc:C", "10nF", "Capacitor_SMD:C_0603_1608Metric",
+    92, 70, pins={"1": "BP_1V0", "2": "GND"})
+add("C42", "qssc:C", "10uF", "Capacitor_SMD:C_0805_2012Metric",
+    68, 70, pins={"1": "+5V", "2": "GND"})
+add("C43", "qssc:C", "10uF", "Capacitor_SMD:C_0805_2012Metric",
+    92, 78, pins={"1": "+1V0", "2": "GND"})
+add("C44", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
+    80, 78, pins={"1": "+1V0", "2": "GND"})
 add("REG4", "qssc:AMS1117-5.0", "AMS1117-5.0", "Package_TO_SOT_SMD:SOT-223-3_TabPin2",
     80, 90, pins={"1": "GND", "2": "+5V_RF", "3": "+5V"})
 add("R70", "qssc:R", "330", "Resistor_SMD:R_0603_1608Metric",
@@ -618,6 +644,10 @@ for i, (net, ref) in enumerate(_esd):
 add("#FLG1", "power:PWR_FLAG", "PWR_FLAG", "", 45, 30, pins={"1": "+5V_IN"})
 add("#FLG2", "power:PWR_FLAG", "PWR_FLAG", "", 70, 30, pins={"1": "+5V"})
 add("#FLG3", "power:PWR_FLAG", "PWR_FLAG", "", 45, 45, pins={"1": "GND"})
+# VREFP/VREFN: the Artix-7 XADC reference. When the internal 1.25 V reference
+# is used, VREFP is bypassed to GND (C40) and VREFN tied to GND; the pin is a
+# power input driven by the on-chip reference, which ERC cannot see -> flag it.
+add("#FLG4", "power:PWR_FLAG", "PWR_FLAG", "", 45, 60, pins={"1": "VREFP"})
 
 
 # --------------------------------------------------------------------------
@@ -986,6 +1016,8 @@ def assign_pcb_positions():
         # power (top-left)
         "J2": (10, 10, 180), "F1": (24, 10, 0), "R70": (20, 16, 0), "LED1": (26, 16, 0),
         "REG1": (34, 14, 0), "REG2": (34, 26, 0), "REG3": (34, 38, 0), "REG4": (34, 50, 0),
+        # REG3 (AP2127K-1.0) decoupling, around (34,38), clear of FPGA keepout x<61.5
+        "C42": (28, 36, 0), "C41": (40, 34, 0), "C43": (40, 42, 0), "C44": (28, 42, 0),
         # FPGA (center)
         "U1": (70, 45, 0), "Y1": (70, 25, 0),
         # config flash + pull-ups + XADC VREFP decoupling (bottom-right, clear of the
