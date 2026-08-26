@@ -562,7 +562,7 @@ through-cut outline carries 4 bridges so the freed part is retained by the stock
 
 ---
 
-## 15. KiCad Project — complete ERC-clean schematic + DRC-clean placed board (NOT routed)
+## 15. KiCad Project — complete ERC-clean schematic + DRC-clean board with copper-plane foundation (signal routing GUI-pending)
 
 The KiCad 8 project lives at [`hardware/pcb/`](pcb/) (`qssc.kicad_pro`,
 `qssc.kicad_sch`, `qssc.kicad_pcb`, `qssc-lib.kicad_sym`). It is regenerated
@@ -573,6 +573,14 @@ that script rewrites all four files reproducibly. The camera / VCSEL /
 Toshiba-TORX artefacts that used to live here are gone; the project reflects
 the on-chip readout design only (CQD emitter array + graphene/MoS₂ TIA + analog
 MUX → Artix-7 XADC, no camera).
+
+A second headless step, [`tools/route_qssc_pcb.py`](../tools/route_qssc_pcb.py),
+then layers a **copper-plane foundation** onto the placed board via the pcbnew
+Python API (KiCad 8 ships a headless `pcbnew` binding usable from system
+`python3`, no GUI). It is **not** an autorouter — it adds only the plane pours
+and ground mesh that any future GUI routing session builds on, reproducibly
+and DRC-clean. Re-running it is idempotent (it strips its own zones/tracks/vias
+first).
 
 > **Honest status — what IS done:**
 > - **Schematic:** 75 components, 97 nets. `kicad-cli sch erc` → **0 errors,
@@ -589,18 +597,35 @@ MUX → Artix-7 XADC, no camera).
 >   (Default / RF / Power / USB / Analog, track widths 0.20 / 0.30 / 0.50 /
 >   0.20 / 0.20 mm) and design rules (min clearance 0.15 mm, min track 0.15 mm,
 >   min hole clearance 0.18 mm). `kicad-cli pcb drc` → **0 errors, 0 warnings,
->   0 unconnected** (`unconnected_items` severity = `ignore` because the board
->   is not yet routed).
+>   0 unconnected** (`unconnected_items` severity = `ignore` because signal
+>   routing is not yet laid — see below).
+> - **Copper-plane foundation (headless, by `route_qssc_pcb.py`):** a solid
+>   **In1.Cu GND plane** (full board, continuous ground reference), a solid
+>   **In2.Cu +3V3 plane** (the main digital rail; the stackup's "PWR" layer is
+>   repurposed to +3V3, the highest-pad-count rail), **GND flood pours** on
+>   F.Cu and B.Cu (surface GND pads connect to a local ground immediately),
+>   and **104 GND stitching vias** on a 10 mm grid (each pad-clearance-checked)
+>   tying all copper layers into one connected ground mesh. Vias are placed
+>   *before* the plane fill so the +3V3 plane carves anti-pads around each via
+>   barrel. Pours use solid (`ZONE_CONNECTION_FULL`) pad connection to avoid
+>   starved-thermal violations. Result: **0 DRC violations, 0 unconnected,
+>   0 footprint errors** on the processed board. Re-runnable: the script strips
+>   its own output first, so it is idempotent.
 
 > **Honest status — what is NOT done (needs one GUI session):**
-> - **Copper routing is not laid.** KiCad 8 `kicad-cli` **cannot** export a
+> - **Signal routing is not laid.** KiCad 8 `kicad-cli` **cannot** export a
 >   Specctra DSN autorouter file or import an SES session — both are GUI-only
->   in `pcbnew`. So final copper (BGA fanout for the XC7A35T CPG236, 50 Ω RF
->   microstrip ADF4351 → HMC441 → SMA, the USB-C → FT232 differential pair,
->   analog guard rings around the TIA, and the In1.Cu GND / In2.Cu PWR plane
->   pours) requires **one interactive `pcbnew` session** (or the FreeRouting
->   GUI). The per-net-class track widths above encode the §10 impedance intent
->   but are not yet drawn as copper.
+>   in `pcbnew` — and a DRC-clean autoroute of a 65-net board with a 237-pad
+>   FPGA BGA cannot be produced headlessly without leaving violations (a
+>   "routed" board that fails DRC is worse than an honestly-unrouted one). So
+>   the remaining copper — **BGA fanout** for the XC7A35T CPG236, **50 Ω RF
+>   microstrip** ADF4351 → HMC441 → SMA, the **USB-C → FT232 differential pair**,
+>   **analog guard rings** around the TIA, the **+5V / +5V_RF / +5V_IN / +1V8 /
+>   +1V0 power rails**, and all **signal tracks** — requires **one interactive
+>   `pcbnew` session** (or the FreeRouting GUI). The copper-plane foundation
+>   above (planes + ground mesh) is already in place and DRC-clean; the
+>   per-net-class track widths encode the §10 impedance intent but the signal
+>   tracks themselves are not yet drawn.
 > - **FPGA BGA pad mapping is partial.** The XC7A35T-1CPG236C has 236 pads; the
 >   23 signal pads named in `fpga/constraints.xdc` (`reset`, `det_mux_sel*`,
 >   `emitter_rows*` / `emitter_cols*`, `SPI_*`, `clk_100mhz`, UART, XADC…) are
@@ -625,8 +650,14 @@ or fabricated), not a finished hardware product.
 .venv/bin/python tools/gen_qssc_kicad.py          # rewrites sch/pcb/pro/sym
 kicad-cli sch erc   --output /tmp/erc.txt hardware/pcb/qssc.kicad_sch   # 0 errors
 kicad-cli sch export netlist --output /tmp/qssc.net hardware/pcb/qssc.kicad_sch
+python3 tools/route_qssc_pcb.py                  # headless copper-plane foundation
 kicad-cli pcb drc   --output /tmp/drc.txt hardware/pcb/qssc.kicad_pcb   # 0 violations
 ```
+
+> `route_qssc_pcb.py` uses the system `python3` (which can `import pcbnew`),
+> **not** the project `.venv` — the venv has no `--system-site-packages`, so
+> `pcbnew` is only reachable from the system interpreter. The board it
+> produces is the one checked in.
 
 ---
 

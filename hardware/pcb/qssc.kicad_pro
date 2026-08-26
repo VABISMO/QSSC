@@ -215,6 +215,22 @@
   "cvpcb": {
     "equivalence_files": []
   },
+  "erc": {
+    "rule_severities": {
+      "endpoint_off_grid": "warning",
+      "label_dangling": "warning",
+      "lib_symbol_issues": "ignore",
+      "pin_not_connected": "warning",
+      "pin_not_driven": "warning"
+    },
+    "severities": {
+      "endpoint_off_grid": "warning",
+      "label_dangling": "warning",
+      "lib_symbol_issues": "ignore",
+      "pin_not_connected": "warning",
+      "pin_not_driven": "warning"
+    }
+  },
   "libraries": {
     "pinned_footprint_libs": [],
     "pinned_symbol_libs": []
@@ -251,10 +267,10 @@
         "line_style": 0,
         "microvia_diameter": 0.3,
         "microvia_drill": 0.1,
-        "name": "RF",
-        "pcb_color": "rgba(255, 0, 0, 0.000)",
+        "name": "Analog",
+        "pcb_color": "rgba(255, 255, 0, 0.000)",
         "schematic_color": "rgba(0, 0, 0, 0.000)",
-        "track_width": 0.3,
+        "track_width": 0.2,
         "via_diameter": 0.6,
         "via_drill": 0.3,
         "wire_width": 6
@@ -285,10 +301,10 @@
         "line_style": 0,
         "microvia_diameter": 0.3,
         "microvia_drill": 0.1,
-        "name": "USB",
-        "pcb_color": "rgba(0, 255, 0, 0.000)",
+        "name": "RF",
+        "pcb_color": "rgba(255, 0, 0, 0.000)",
         "schematic_color": "rgba(0, 0, 0, 0.000)",
-        "track_width": 0.2,
+        "track_width": 0.3,
         "via_diameter": 0.6,
         "via_drill": 0.3,
         "wire_width": 6
@@ -302,8 +318,8 @@
         "line_style": 0,
         "microvia_diameter": 0.3,
         "microvia_drill": 0.1,
-        "name": "Analog",
-        "pcb_color": "rgba(255, 255, 0, 0.000)",
+        "name": "USB",
+        "pcb_color": "rgba(0, 255, 0, 0.000)",
         "schematic_color": "rgba(0, 0, 0, 0.000)",
         "track_width": 0.2,
         "via_diameter": 0.6,
@@ -430,21 +446,5 @@
     "legacy_lib_list": []
   },
   "sheets": [],
-  "text_variables": {},
-  "erc": {
-    "severities": {
-      "pin_not_connected": "warning",
-      "pin_not_driven": "warning",
-      "label_dangling": "warning",
-      "endpoint_off_grid": "warning",
-      "lib_symbol_issues": "ignore"
-    },
-    "rule_severities": {
-      "pin_not_connected": "warning",
-      "pin_not_driven": "warning",
-      "label_dangling": "warning",
-      "endpoint_off_grid": "warning",
-      "lib_symbol_issues": "ignore"
-    }
-  }
+  "text_variables": {}
 }

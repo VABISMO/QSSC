@@ -8,10 +8,15 @@ Outputs (relative to repo root):
   hardware/pcb/qssc.kicad_pro   - project with net classes + design rules
 
 KiCad 8 `kicad-cli` cannot export Specctra DSN or import SES (GUI-only), so the
-board is placed + netted + rule-checked but NOT copper-routed.  Final routing
-(BGA fanout, 50 ohm RF microstrip, USB diff pair, analog guard rings) requires
-one pcbnew GUI session or the FreeRouting GUI.  FPGA BGA pad->signal mapping
-needs UG475 (not available headless), so FPGA pads are placed but left unnetted.
+board is placed + netted + rule-checked but NOT signal-routed.  The
+copper-plane FOUNDATION (In1.Cu GND plane, In2.Cu +3V3 plane, F.Cu/B.Cu GND
+floods, GND stitching vias) is now produced headlessly by the companion script
+``tools/route_qssc_pcb.py`` (via the pcbnew Python API -- KiCad 8 ships a
+headless binding usable from system python3, no GUI).  Final SIGNAL routing
+(BGA fanout, 50 ohm RF microstrip, USB diff pair, analog guard rings, the
+secondary power rails, and all signal tracks) still requires one pcbnew GUI
+session or the FreeRouting GUI.  FPGA BGA pad->signal mapping needs UG475 (not
+available headless), so FPGA pads are placed but left unnetted.
 """
 from __future__ import annotations
 
