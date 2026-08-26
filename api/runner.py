@@ -16,7 +16,7 @@ from math import gcd
 import numpy as np
 
 from qssc import (
-    auto_align, QSSCBackend,
+    auto_align, QSSCBackend, SimulatedFPGA,
     create_period_finding_circuit, create_shor_circuit, create_qft_nos_circuit,
     create_math_circuit, grover_search, postprocess_period,
     postprocess_period_swapless, select_coprime, is_prime,
@@ -32,8 +32,15 @@ def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
              grid: int = 8) -> QSSCBackend:
     sites = auto_align(profile=profile, grid=grid, temperature_k=temperature_k,
                        rng=np.random.default_rng(seed))
+    # Attach a SimulatedFPGA so the on-chip readout path fires per run -- the
+    # CQD emitter + graphene detector + lock-in model produces a displayed
+    # bitstring, per-site read states and a photocurrent mean that the
+    # frontend's Execution component physics card reflects the circuit that
+    # actually ran (not a fixed snapshot).
+    fpga = SimulatedFPGA(profile=profile, temperature_k=temperature_k, seed=seed)
     return QSSCBackend(profile=profile, sites=sites, seed=seed,
-                       temperature_k=temperature_k, noise_mode=noise_mode)
+                       temperature_k=temperature_k, noise_mode=noise_mode,
+                       hardware=fpga)
 
 
 def _circuit_meta(qc) -> dict:
@@ -317,6 +324,8 @@ def run_circuit(req: dict) -> dict:
 
     result["assessment"] = getattr(res, "assessment", {})
     result["approximate"] = getattr(res, "approximate", False)
+    if getattr(res, "optical", None) is not None:
+        result["optical"] = res.optical
     result["elapsed_ms"] = round((time.perf_counter() - t0) * 1000, 2)
     return result
 
@@ -348,4 +357,5 @@ def run_custom(req: dict) -> dict:
         "assessment": getattr(res, "assessment", {}),
         "approximate": getattr(res, "approximate", False),
         "elapsed_ms": round((time.perf_counter() - t0) * 1000, 2),
+        **({"optical": res.optical} if getattr(res, "optical", None) is not None else {}),
     }

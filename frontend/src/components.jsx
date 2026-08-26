@@ -163,28 +163,28 @@ const ADC_MAX = 4095, BRIGHT_CODE = 3200, LOCKIN_MOD_HZ = 1000
 // contrast modulates the PL), so it carries the spin-host identity + live T2.
 const OPT_PROFILE = {
   'NV': {
-    wl: 532, pumpMw: 3.36, forwardV: 2.8, etaEqe: 0.12,
+    wl: 532, pumpMw: 3.36, forwardV: 2.8, etaEqe: 0.12, driveMa: 10,
     etaEw: 0.05, etaWd: 0.05, wgLoss: 0.5, wgLen: 0.3,
     filter: '650 nm long-pass', filtT: 0.92, filterPasses: 'PL 637–800 nm',
     detector: 'graphene/MoS₂', resp: 0.10, contrast0: 0.05, linewidthMHz: 5,
     dGhz: 2.87, crystal: 'NV-diamond', crystalIcon: '💎', plRange: '637–800 nm',
-    t2UsRoom: 1800,
+    t2UsRoom: 1800, readoutNs: 800, readoutErr: 0.08,
   },
   'hBN-VB': {
-    wl: 532, pumpMw: 3.36, forwardV: 2.8, etaEqe: 0.12,
+    wl: 532, pumpMw: 3.36, forwardV: 2.8, etaEqe: 0.12, driveMa: 10,
     etaEw: 0.05, etaWd: 0.05, wgLoss: 0.5, wgLen: 0.3,
     filter: '650 nm long-pass', filtT: 0.92, filterPasses: 'PL 820–860 nm',
     detector: 'graphene/MoS₂', resp: 0.10, contrast0: 0.05, linewidthMHz: 5,
     dGhz: 3.46, crystal: 'hBN V_B⁻', crystalIcon: '⬡', plRange: '820–860 nm',
-    t2UsRoom: 2,
+    t2UsRoom: 2, readoutNs: 800, readoutErr: 0.12,
   },
   'SiC-VSi': {
-    wl: 916, pumpMw: 3.17, forwardV: 3.3, etaEqe: 0.08,
+    wl: 916, pumpMw: 3.17, forwardV: 3.3, etaEqe: 0.08, driveMa: 12,
     etaEw: 0.04, etaWd: 0.04, wgLoss: 0.6, wgLen: 0.3,
     filter: '850 nm long-pass', filtT: 0.90, filterPasses: 'PL 890–940 nm',
     detector: 'few-layer MoS₂', resp: 0.08, contrast0: 0.03, linewidthMHz: 70,
     dGhz: 0.07, crystal: 'SiC V_Si', crystalIcon: '🔷', plRange: '890–940 nm',
-    t2UsRoom: 40,
+    t2UsRoom: 40, readoutNs: 800, readoutErr: 0.10,
   },
 }
 
@@ -215,7 +215,7 @@ function fmtT2(us) {
   return us >= 1000 ? `${(us / 1000).toFixed(2)} ms` : `${us.toFixed(1)} µs`
 }
 
-export function OpticalChainDiagram({ data, infoData, profile, temperature }) {
+export function OpticalChainDiagram({ data, infoData, profile, temperature, activeSites }) {
   const o = data || {}
   const em = o.emitter || {}, wg = o.waveguide || {}, fl = o.filter || {},
         de = o.detector || {}, rd = o.readout || {}, lb = o.link_budget || {}
@@ -345,9 +345,78 @@ export function OpticalChainDiagram({ data, infoData, profile, temperature }) {
           <tspan fill="#34d399" fontWeight="700">{`${snr}σ`}</tspan>
         </text>
         <text x={VB_W / 2} y={220} textAnchor="middle" fontSize="11" fill="#94a3c4">
-          {`bright ${bright} / dark ${dark} · noise ${noiseCounts} c · pump→detector η ${etaEnd}%`}
+          {`bright ${bright} / dark ${dark} · noise ${noiseCounts} c · pump→detector η ${etaEnd}%${activeSites ? ` · ${activeSites}/64 sites active` : ''}`}
         </text>
       </svg>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// RunPhysics — the REAL per-run physics of every chip component, calculated
+// from the circuit that just ran (its width, shots) + the selected defect +
+// temperature. Unlike the chip-level BackendV2 params (fixed for a profile/T),
+// these change with the circuit: a 2-qubit Bell run lights 2 CQD pixels and
+// reads 2 detector electrodes; a 9-qubit Shor run lights 9, burns more pump
+// energy, takes longer to read out, and the N-shot-averaged lock-in SNR scales
+// as sqrt(shots). Computed client-side so it is always live.
+// ---------------------------------------------------------------------------
+function computeRunPhysics(result, profile, temperature, infoData) {
+  if (!result || !result.num_qubits) return null
+  const c = computeOpticalChain(profile, temperature)
+  const nActive = result.num_qubits
+  const nMeasured = result.num_clbits || result.num_qubits
+  const shots = result.shots || 0
+  const readoutNs = c.readoutNs
+  const elecPwrMw = c.driveMa * c.forwardV            // mW electrical per pixel
+  // optical pump energy: mW * ns = pJ ; -> nJ
+  const optNjPerSite = (c.pumpMw * readoutNs) / 1000
+  const optNjPerShot = nMeasured * optNjPerSite
+  const totalOptUj = (optNjPerShot * shots) / 1000    // nJ -> uJ
+  const readoutMs = (nMeasured * readoutNs * shots) / 1e6   // ns -> ms (sequential)
+  const iBrightUa = +c.iBright.toFixed(3)
+  const iDarkUa = +(c.iBright * (1 - c.contrast)).toFixed(3)
+  const readoutErr = infoData?.readout_error ?? c.readoutErr
+  const fidelity = 1 - readoutErr
+  const avgSnr = c.snr * Math.sqrt(Math.max(shots, 1))   // N-shot averaging
+  return { nActive, nMeasured, shots, driveMa: c.driveMa, forwardV: c.forwardV,
+    elecPwrMw, pumpMw: c.pumpMw, optNjPerSite, optNjPerShot, totalOptUj,
+    readoutMs, iBrightUa, iDarkUa, bright: c.bright, dark: c.dark, dip: c.dip,
+    snr: +c.snr.toFixed(1), avgSnr: Math.round(avgSnr), wgProp: c.wgProp,
+    fidelity, readoutErr, T: Math.round(c.T), crystal: c.crystal }
+}
+
+export function RunPhysics({ result, profile, temperature, infoData }) {
+  const p = computeRunPhysics(result, profile, temperature, infoData)
+  if (!p) {
+    return (
+      <div className="card runphysics-card">
+        <h2><span className="dot" />Execution component physics</h2>
+        <div className="hint">Run a circuit — the CQD emitter array, waveguides, photodetectors and lock-in readout physics are calculated for the actual circuit that runs (active sites, pump energy, detector codes, SNR, readout time), not a fixed snapshot.</div>
+        <div className="muted" style={{ marginTop: 6 }}>No circuit run yet.</div>
+      </div>
+    )
+  }
+  const pct = v => (v * 100).toFixed(1)
+  const stat = (k, v, u) => (
+    <div className="stat"><div className="k">{k}</div><div className="v">{v}{u != null && <small> {u}</small>}</div></div>
+  )
+  return (
+    <div className="card runphysics-card">
+      <h2><span className="dot" />Execution component physics <span className="muted" style={{ fontWeight: 400 }}>· {p.crystal} @ {p.T} K · {p.shots} shots · {p.nActive}q circuit</span></h2>
+      <div className="hint">Calculated for the circuit that just ran — these numbers change with the algorithm, qubit count, shots, defect and temperature.</div>
+      <div className="stats">
+        {stat('CQD pixels fired', `${p.nMeasured}`, '/shot')}
+        {stat('Drive / pixel', `${p.driveMa} mA · ${p.forwardV} V`, `→ ${p.elecPwrMw} mW`)}
+        {stat('Pump energy', p.totalOptUj >= 1000 ? (p.totalOptUj / 1000).toFixed(2) : p.totalOptUj.toFixed(2), p.totalOptUj >= 1000 ? 'mJ optical' : 'µJ optical')}
+        {stat('Waveguide paths', `${p.nMeasured}`, `η ${(p.wgProp * 100).toFixed(1)}%`)}
+        {stat('Detector electrodes', `${p.nMeasured}`, '/shot')}
+        {stat('Photocurrent', `${p.iBrightUa}`, `bright / ${p.iDarkUa} dark µA`)}
+        {stat('ADC codes', `${p.bright}/${p.dark}`, `dip ${p.dip} c`)}
+        {stat('Lock-in SNR', `${p.snr}σ`, `single · ${p.avgSnr}σ / ${p.shots} shots`)}
+        {stat('Readout fidelity', pct(p.fidelity), '%')}
+        {stat('Readout time', p.readoutMs >= 1000 ? (p.readoutMs / 1000).toFixed(2) : p.readoutMs.toFixed(2), p.readoutMs >= 1000 ? 's sequential' : 'ms sequential')}
+      </div>
     </div>
   )
 }

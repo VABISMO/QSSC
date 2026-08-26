@@ -400,6 +400,23 @@ def test_optical_readout_is_temperature_dependent():
     assert "MoS2" in sic["detector"]["type"]
 
 
+def test_runner_surfaces_per_run_optical():
+    """The runner result dict carries the per-run optical readout data
+    (displayed bitstring, measured states, photocurrent) computed in
+    backend._drive_optical_readout, so the frontend Execution component
+    physics card reflects the circuit that actually ran."""
+    from api.runner import run_circuit
+    r = run_circuit({"algorithm": "bell", "profile": "NV",
+                     "temperature_k": 295.0, "shots": 256, "seed": 1})
+    assert "error" not in r
+    assert "optical" in r, "runner must surface res.optical for per-run physics"
+    opt = r["optical"]
+    # the bell circuit measures 2 qubits over the 64-site grid
+    assert len(opt.get("read_states", [])) == 64
+    assert opt.get("displayed_bitstring")
+    assert opt.get("photocurrent_mean", 0) >= 0
+
+
 def test_backend_runs_bell():
     from qiskit import QuantumCircuit
     b = QSSCBackend("hBN-VB", sites=_quick_sites(), seed=0)

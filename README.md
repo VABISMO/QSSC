@@ -3,7 +3,7 @@
 [![CI](https://github.com/VABISMO/QSSC/actions/workflows/ci.yml/badge.svg)](https://github.com/VABISMO/QSSC/actions/workflows/ci.yml)
 [![License: Apache-2.0 NC](https://img.shields.io/badge/license-Apache--2.0%20NC-blue.svg)](LICENSE)
 [![Python 3.10–3.12](https://img.shields.io/badge/python-3.10–3.12-blue.svg)](https://www.python.org)
-[![Tests](https://img.shields.io/badge/tests-86%20passed-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-87%20passed-brightgreen.svg)](#testing)
 
 A room-temperature **solid-state spin-defect** quantum platform: a Qiskit
 backend, an FPGA control stack with PCB design, a validated chip-fabrication
@@ -35,7 +35,7 @@ NV-diamond *simulator* — into one coherent, renamed deliverable.
 | **Protocol (HTML)** | `docs/protocol.html` | Branded, print-ready HTML render of the protocol (regenerate with `python3 tools/build_protocol_html.py`) |
 | **Presentation** | `presentation/index.html` | Self-contained HTML deck with software mocks and diagrams |
 | **PDFs** | `presentation/QSSC_presentation.pdf`, `docs/QSSC_fabrication_protocol.pdf` | Headless-Chromium exports of the presentation and protocol |
-| **Tests** | `tests/` | 86 tests (defects, simulator, circuits, backend, API, protocol, crypto) |
+| **Tests** | `tests/` | 87 tests (defects, simulator, circuits, backend, API, protocol, crypto) |
 
 ## Quick start
 
@@ -45,7 +45,7 @@ python -m venv .venv && . .venv/bin/activate
 pip install -e ".[api,dev]"
 
 # run the test suite
-python -m pytest                       # 86 passed
+python -m pytest                       # 87 passed
 
 # try the CLI
 qssc info                              # backend / defect summary (defaults to NV)

@@ -2,8 +2,8 @@ import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { api } from './api.js'
 import {
   QubitGrid, OdmrChart, BarCounts,
-  SignalChart, CalibrationPanel, Verdict, PhysicsDetails,
-  OpticalChainDiagram,
+  SignalChart, CalibrationPanel, Verdict,
+  OpticalChainDiagram, RunPhysics,
 } from './components.jsx'
 
 const PROFILES = [
@@ -719,27 +719,15 @@ export default function App() {
               {info.loading && <div className="muted"><span className="spinner" /> loading backend target…</div>}
             </div>
 
-            <div className="card">
-              <h2><span className="dot" />How the physics maps to the chip</h2>
-              <div className="hint">What each parameter means and how it limits the circuits you can run.</div>
-              {info.data && (
-                <>
-                  <div className="legend">
-                    <span><b className="mono">T₁</b> = spin-lattice (energy) relaxation time — how long the spin keeps its energy state.</span>
-                    <span><b className="mono">T₂</b> = spin-spin (phase) coherence time — how long a superposition stays coherent. The quantum coherence time.</span>
-                  </div>
-                  <PhysicsDetails info={info.data} />
-                </>
-              )}
-              {info.loading && <div className="muted"><span className="spinner" /> loading explanation…</div>}
-            </div>
-
             <div className="card optchain-card">
               <h2><span className="dot" />Optical readout chain</h2>
               <div className="hint">The physics of every chip component, recalculated for the selected defect &amp; temperature: CQD ASE emitter → SU-8/PDMS waveguide → <b>defect crystal</b> (the spin host / qubit — pump in, photoluminescence out) → long-pass filter → 2D photodetector → TIA → Artix-7 XADC → 1 kHz lock-in. Cooling cuts detector noise (∝√T) and raises ODMR contrast, so the lock-in SNR climbs — change the temperature or defect above and watch the dip, noise and SNR update.</div>
-              <OpticalChainDiagram data={info.data && info.data.optical_readout} infoData={info.data} profile={profile} temperature={temperature} />
+              <OpticalChainDiagram data={info.data && info.data.optical_readout} infoData={info.data} profile={profile} temperature={temperature} activeSites={result?.num_qubits} />
             </div>
           </div>
+
+          {/* ============================= PER-RUN COMPONENT PHYSICS ============================= */}
+          <RunPhysics result={result} profile={profile} temperature={temperature} infoData={info.data} />
 
           {/* ============================= SPECTROSCOPY + CALIBRATION ============================= */}
           <div className="section-title">Spectroscopy &amp; calibration</div>
