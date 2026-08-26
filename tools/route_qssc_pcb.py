@@ -67,19 +67,25 @@ def _find_netcode(board, name):
 
 
 def _clear_routed(board):
-    """Remove every zone, track and via (idempotent on our own output). The
-    generated board has none, so this only matters on a re-run.
+    """Idempotent reset of the plane foundation: remove every zone (planes +
+    floods) and every GND track/via (the stitching mesh this script owns), but
+    KEEP non-GND signal tracks/vias so a prior ``route_signals.py`` pass (BGA
+    fanout + signal routing) is preserved when the plane foundation is
+    (re)built on top of it. The generated board has no tracks, so on a clean
+    board this only drops the zones; on a re-run it rebuilds the planes + mesh
+    while leaving signal routing intact.
 
     The swig track proxy is iterable by for-loop but ``list()`` of it can raise
     ``SwigPyObject not iterable`` after the board is mutated, so we collect
     references via comprehensions (which iterate, unlike ``list()``) first.
     """
-    tracks = [t for t in board.Tracks()]
-    for t in tracks:
-        board.Remove(t)
     zones = [z for z in board.Zones()]
     for z in zones:
         board.Remove(z)
+    tracks = [t for t in board.Tracks()]
+    for t in tracks:
+        if t.GetNetname() == "GND":
+            board.Remove(t)
 
 
 def _add_gnd_or_pwr_zone(board, layer, netcode, bbox):
@@ -113,12 +119,54 @@ def _pad_obstacle(board):
     return pads
 
 
-def _add_stitching_vias(board, netcode, bbox, pads):
+def _signal_obstacles(board):
+    """Return (circles, segs) for SIGNAL copper already on the board -- vias as
+    (cx, cy, r) circles and tracks as (x1, y1, x2, y2, hw) segments. GND and
+    unnetted copper are skipped: a GND stitching via on a GND track is fine, and
+    unnetted copper has no net to short. Used so the stitching-via grid never
+    pierces a signal track/via (the original pad-only check shorted ~20 nets)."""
+    circles = []
+    segs = []
+    for t in board.Tracks():
+        nm = t.GetNetname()
+        if not nm or nm == "GND":
+            continue
+        if isinstance(t, pcbnew.PCB_VIA):
+            c = t.GetPosition()
+            circles.append((c.x, c.y, t.GetWidth() / 2))
+        else:
+            s = t.GetStart()
+            e = t.GetEnd()
+            segs.append((s.x, s.y, e.x, e.y, t.GetWidth() / 2))
+    return circles, segs
+
+
+def _seg_dist2(px, py, x1, y1, x2, y2):
+    """Squared distance from point (px,py) to segment (x1,y1)-(x2,y2), in nm^2."""
+    dx = x2 - x1
+    dy = y2 - y1
+    if dx == 0 and dy == 0:
+        return (px - x1) ** 2 + (py - y1) ** 2
+    tt = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)
+    if tt < 0:
+        tt = 0
+    elif tt > 1:
+        tt = 1
+    cx = x1 + tt * dx
+    cy = y1 + tt * dy
+    return (px - cx) ** 2 + (py - cy) ** 2
+
+
+def _add_stitching_vias(board, netcode, bbox, pads, sig_circles, sig_segs):
     """Place GND through-vias on a coarse grid, skipping any point too close to
-    a pad. Ties the F.Cu/In1.Cu/B.Cu GND copper into one mesh. Returns the list
-    of created via objects (kept so callers can verify without re-loading the
-    board -- KiCad's python binding can return bare SwigPyObjects for a board
-    re-loaded after mutation)."""
+    a pad OR an existing signal track/via. Ties the F.Cu/In1.Cu/B.Cu GND copper
+    into one mesh. Returns the list of created via objects (kept so callers can
+    verify without re-loading the board -- KiCad's python binding can return
+    bare SwigPyObjects for a board re-loaded after mutation).
+
+    ``sig_circles``/``sig_segs`` are the signal via-circles / track-segments
+    snapshoted BEFORE _clear_routed (the swig proxy layer breaks board.Tracks()
+    after board.Remove(), so callers capture them up front)."""
     via_r = VIA_DIAM_NM / 2
     min_clear = via_r + STITCH_PAD_CLEARANCE_NM
     margin = 2_000_000  # 2 mm in from the board edge
@@ -139,6 +187,18 @@ def _add_stitching_vias(board, netcode, bbox, pads):
                     clear = False
                     break
             if clear:
+                for cx, cy, cr in sig_circles:           # signal vias
+                    dx = x - cx
+                    dy = y - cy
+                    if dx * dx + dy * dy < (min_clear + cr) ** 2:
+                        clear = False
+                        break
+            if clear:
+                for x1s, y1s, x2s, y2s, hw in sig_segs:   # signal tracks
+                    if _seg_dist2(x, y, x1s, y1s, x2s, y2s) < (min_clear + hw) ** 2:
+                        clear = False
+                        break
+            if clear:
                 v = pcbnew.PCB_VIA(board)
                 v.SetPosition(pcbnew.VECTOR2I(int(x), int(y)))
                 v.SetNetCode(netcode)
@@ -158,6 +218,12 @@ def build(board, gnd, p33, bbox, pads) -> dict:
     lifetime. Split out so tests can run it repeatedly on one board without
     re-loading (KiCad's python binding can hand back bare SwigPyObjects for a
     board re-loaded after a SaveBoard/mutation, which breaks repeated runs)."""
+    # Capture signal tracks/vias BEFORE _clear_routed mutates the board: the
+    # swig proxy layer breaks (board.Tracks() returns a bare SwigPyObject) once
+    # board.Remove() runs in _clear_routed, so the stitching-via grid must be
+    # built from obstacles snapshoted up front. _clear_routed keeps signal
+    # copper (only removes zones + GND tracks/vias), so the snapshot is valid.
+    sig_circles, sig_segs = _signal_obstacles(board)
     _clear_routed(board)
 
     zones = [_add_gnd_or_pwr_zone(board, IN1_CU, gnd, bbox)]            # GND plane
@@ -168,7 +234,7 @@ def build(board, gnd, p33, bbox, pads) -> dict:
 
     # GND stitching vias across the ground mesh (added BEFORE filling so the
     # +3V3 plane carves anti-pad clearances around each GND via barrel).
-    vias = _add_stitching_vias(board, gnd, bbox, pads)
+    vias = _add_stitching_vias(board, gnd, bbox, pads, sig_circles, sig_segs)
 
     # fill all zones now that vias exist (ZONE_FILLER.Fill takes a vector)
     vec = pcbnew.ZONES()
