@@ -106,7 +106,15 @@ parsetab.py
 parser.out
 
 # KiCad CLI scratch / DRC-ERC report artifacts (regenerated on demand)
-.tmpwork/
+# Ignore everything in .tmpwork/ EXCEPT the pinned pins.json snapshot that the
+# board generators load at import via std_pins() -- without it a fresh clone
+# cannot regenerate the checked-in boards. Rebuild (or upgrade to current KiCad
+# libs) with `python3 tools/build_pins_json.py`; see its docstring for the
+# pinned-vs-builder distinction (USB_C_Receptacle pin count differs across
+# KiCad versions). Using .tmpwork/* (not .tmpwork/) so the negation can reach
+# the file -- a trailing-slash directory exclude blocks all re-includes.
+.tmpwork/*
+!.tmpwork/pins.json
 hardware/pcb/*erc*.txt
 hardware/pcb/*drc*.txt
 hardware/pcb/t*.kicad_sch

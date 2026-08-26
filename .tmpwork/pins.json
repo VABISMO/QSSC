@@ -1,0 +1,1981 @@
+{
+  "Regulator_Linear:AMS1117-3.3": [
+    {
+      "etype": "power_in",
+      "x": 0.0,
+      "y": -7.62,
+      "rot": 90,
+      "length": 2.54,
+      "name": "GND",
+      "number": "1"
+    },
+    {
+      "etype": "power_out",
+      "x": 7.62,
+      "y": 0.0,
+      "rot": 180,
+      "length": 2.54,
+      "name": "VO",
+      "number": "2"
+    },
+    {
+      "etype": "power_in",
+      "x": -7.62,
+      "y": 0.0,
+      "rot": 0,
+      "length": 2.54,
+      "name": "VI",
+      "number": "3"
+    }
+  ],
+  "Regulator_Linear:AMS1117-1.8": [
+    {
+      "etype": "power_in",
+      "x": 0.0,
+      "y": -7.62,
+      "rot": 90,
+      "length": 2.54,
+      "name": "GND",
+      "number": "1"
+    },
+    {
+      "etype": "power_out",
+      "x": 7.62,
+      "y": 0.0,
+      "rot": 180,
+      "length": 2.54,
+      "name": "VO",
+      "number": "2"
+    },
+    {
+      "etype": "power_in",
+      "x": -7.62,
+      "y": 0.0,
+      "rot": 0,
+      "length": 2.54,
+      "name": "VI",
+      "number": "3"
+    }
+  ],
+  "Regulator_Linear:AMS1117-5.0": [
+    {
+      "etype": "power_in",
+      "x": 0.0,
+      "y": -7.62,
+      "rot": 90,
+      "length": 2.54,
+      "name": "GND",
+      "number": "1"
+    },
+    {
+      "etype": "power_out",
+      "x": 7.62,
+      "y": 0.0,
+      "rot": 180,
+      "length": 2.54,
+      "name": "VO",
+      "number": "2"
+    },
+    {
+      "etype": "power_in",
+      "x": -7.62,
+      "y": 0.0,
+      "rot": 0,
+      "length": 2.54,
+      "name": "VI",
+      "number": "3"
+    }
+  ],
+  "Interface_USB:FT232RL": [
+    {
+      "etype": "output",
+      "x": 20.32,
+      "y": 17.78,
+      "rot": 180,
+      "length": 3.81,
+      "name": "TXD",
+      "number": "1"
+    },
+    {
+      "etype": "input",
+      "x": 20.32,
+      "y": 2.54,
+      "rot": 180,
+      "length": 3.81,
+      "name": "DCD",
+      "number": "10"
+    },
+    {
+      "etype": "input",
+      "x": 20.32,
+      "y": 10.16,
+      "rot": 180,
+      "length": 3.81,
+      "name": "CTS",
+      "number": "11"
+    },
+    {
+      "etype": "bidirectional",
+      "x": 20.32,
+      "y": -17.78,
+      "rot": 180,
+      "length": 3.81,
+      "name": "CBUS4",
+      "number": "12"
+    },
+    {
+      "etype": "bidirectional",
+      "x": 20.32,
+      "y": -12.7,
+      "rot": 180,
+      "length": 3.81,
+      "name": "CBUS2",
+      "number": "13"
+    },
+    {
+      "etype": "bidirectional",
+      "x": 20.32,
+      "y": -15.24,
+      "rot": 180,
+      "length": 3.81,
+      "name": "CBUS3",
+      "number": "14"
+    },
+    {
+      "etype": "bidirectional",
+      "x": -20.32,
+      "y": 10.16,
+      "rot": 0,
+      "length": 3.81,
+      "name": "USBD+",
+      "number": "15"
+    },
+    {
+      "etype": "bidirectional",
+      "x": -20.32,
+      "y": 7.62,
+      "rot": 0,
+      "length": 3.81,
+      "name": "USBD-",
+      "number": "16"
+    },
+    {
+      "etype": "power_out",
+      "x": -20.32,
+      "y": 17.78,
+      "rot": 0,
+      "length": 3.81,
+      "name": "3V3OUT",
+      "number": "17"
+    },
+    {
+      "etype": "power_in",
+      "x": 2.54,
+      "y": -25.4,
+      "rot": 90,
+      "length": 3.81,
+      "name": "GND",
+      "number": "18"
+    },
+    {
+      "etype": "input",
+      "x": -20.32,
+      "y": 0.0,
+      "rot": 0,
+      "length": 3.81,
+      "name": "~{RESET}",
+      "number": "19"
+    },
+    {
+      "etype": "output",
+      "x": 20.32,
+      "y": 7.62,
+      "rot": 180,
+      "length": 3.81,
+      "name": "DTR",
+      "number": "2"
+    },
+    {
+      "etype": "power_in",
+      "x": 2.54,
+      "y": 25.4,
+      "rot": 270,
+      "length": 3.81,
+      "name": "VCC",
+      "number": "20"
+    },
+    {
+      "etype": "power_in",
+      "x": 5.08,
+      "y": -25.4,
+      "rot": 90,
+      "length": 3.81,
+      "name": "GND",
+      "number": "21"
+    },
+    {
+      "etype": "bidirectional",
+      "x": 20.32,
+      "y": -10.16,
+      "rot": 180,
+      "length": 3.81,
+      "name": "CBUS1",
+      "number": "22"
+    },
+    {
+      "etype": "bidirectional",
+      "x": 20.32,
+      "y": -7.62,
+      "rot": 180,
+      "length": 3.81,
+      "name": "CBUS0",
+      "number": "23"
+    },
+    {
+      "etype": "power_in",
+      "x": -5.08,
+      "y": -25.4,
+      "rot": 90,
+      "length": 3.81,
+      "name": "AGND",
+      "number": "25"
+    },
+    {
+      "etype": "input",
+      "x": -20.32,
+      "y": -17.78,
+      "rot": 0,
+      "length": 3.81,
+      "name": "TEST",
+      "number": "26"
+    },
+    {
+      "etype": "input",
+      "x": -20.32,
+      "y": -5.08,
+      "rot": 0,
+      "length": 3.81,
+      "name": "OSCI",
+      "number": "27"
+    },
+    {
+      "etype": "output",
+      "x": -20.32,
+      "y": -10.16,
+      "rot": 0,
+      "length": 3.81,
+      "name": "OSCO",
+      "number": "28"
+    },
+    {
+      "etype": "output",
+      "x": 20.32,
+      "y": 12.7,
+      "rot": 180,
+      "length": 3.81,
+      "name": "RTS",
+      "number": "3"
+    },
+    {
+      "etype": "power_in",
+      "x": -2.54,
+      "y": 25.4,
+      "rot": 270,
+      "length": 3.81,
+      "name": "VCCIO",
+      "number": "4"
+    },
+    {
+      "etype": "input",
+      "x": 20.32,
+      "y": 15.24,
+      "rot": 180,
+      "length": 3.81,
+      "name": "RXD",
+      "number": "5"
+    },
+    {
+      "etype": "input",
+      "x": 20.32,
+      "y": 0.0,
+      "rot": 180,
+      "length": 3.81,
+      "name": "RI",
+      "number": "6"
+    },
+    {
+      "etype": "power_in",
+      "x": 0.0,
+      "y": -25.4,
+      "rot": 90,
+      "length": 3.81,
+      "name": "GND",
+      "number": "7"
+    },
+    {
+      "etype": "input",
+      "x": 20.32,
+      "y": 5.08,
+      "rot": 180,
+      "length": 3.81,
+      "name": "DCR",
+      "number": "9"
+    }
+  ],
+  "Timer_PLL:ADF4351": [
+    {
+      "etype": "input",
+      "x": -20.32,
+      "y": 15.24,
+      "rot": 0,
+      "length": 2.54,
+      "name": "CLK",
+      "number": "1"
+    },
+    {
+      "etype": "power_in",
+      "x": -7.62,
+      "y": 27.94,
+      "rot": 270,
+      "length": 2.54,
+      "name": "AVDD",
+      "number": "10"
+    },
+    {
+      "etype": "power_in",
+      "x": -5.08,
+      "y": -27.94,
+      "rot": 90,
+      "length": 2.54,
+      "name": "AGNDVCO",
+      "number": "11"
+    },
+    {
+      "etype": "output",
+      "x": 20.32,
+      "y": 7.62,
+      "rot": 180,
+      "length": 2.54,
+      "name": "RF_OUT_A+",
+      "number": "12"
+    },
+    {
+      "etype": "output",
+      "x": 20.32,
+      "y": 5.08,
+      "rot": 180,
+      "length": 2.54,
+      "name": "RF_OUT_A-",
+      "number": "13"
+    },
+    {
+      "etype": "output",
+      "x": 20.32,
+      "y": -2.54,
+      "rot": 180,
+      "length": 2.54,
+      "name": "RF_OUT_B+",
+      "number": "14"
+    },
+    {
+      "etype": "output",
+      "x": 20.32,
+      "y": -5.08,
+      "rot": 180,
+      "length": 2.54,
+      "name": "RF_OUT_B-",
+      "number": "15"
+    },
+    {
+      "etype": "power_in",
+      "x": -2.54,
+      "y": 27.94,
+      "rot": 270,
+      "length": 2.54,
+      "name": "VVCO",
+      "number": "16"
+    },
+    {
+      "etype": "power_in",
+      "x": 0.0,
+      "y": 27.94,
+      "rot": 270,
+      "length": 2.54,
+      "name": "VVCO",
+      "number": "17"
+    },
+    {
+      "etype": "power_in",
+      "x": -2.54,
+      "y": -27.94,
+      "rot": 90,
+      "length": 2.54,
+      "name": "AGNDVCO",
+      "number": "18"
+    },
+    {
+      "etype": "input",
+      "x": -20.32,
+      "y": -7.62,
+      "rot": 0,
+      "length": 2.54,
+      "name": "TEMP",
+      "number": "19"
+    },
+    {
+      "etype": "input",
+      "x": -20.32,
+      "y": 12.7,
+      "rot": 0,
+      "length": 2.54,
+      "name": "DATA",
+      "number": "2"
+    },
+    {
+      "etype": "input",
+      "x": 20.32,
+      "y": -12.7,
+      "rot": 180,
+      "length": 2.54,
+      "name": "VTUNE",
+      "number": "20"
+    },
+    {
+      "etype": "power_in",
+      "x": 0.0,
+      "y": -27.94,
+      "rot": 90,
+      "length": 2.54,
+      "name": "AGNDVCO",
+      "number": "21"
+    },
+    {
+      "etype": "input",
+      "x": -20.32,
+      "y": -15.24,
+      "rot": 0,
+      "length": 2.54,
+      "name": "RSET",
+      "number": "22"
+    },
+    {
+      "etype": "input",
+      "x": -20.32,
+      "y": -10.16,
+      "rot": 0,
+      "length": 2.54,
+      "name": "VCOM",
+      "number": "23"
+    },
+    {
+      "etype": "input",
+      "x": -20.32,
+      "y": -12.7,
+      "rot": 0,
+      "length": 2.54,
+      "name": "VREF",
+      "number": "24"
+    },
+    {
+      "etype": "input",
+      "x": 20.32,
+      "y": 17.78,
+      "rot": 180,
+      "length": 2.54,
+      "name": "LD",
+      "number": "25"
+    },
+    {
+      "etype": "input",
+      "x": -20.32,
+      "y": 2.54,
+      "rot": 0,
+      "length": 2.54,
+      "name": "PDB_RF",
+      "number": "26"
+    },
+    {
+      "etype": "power_in",
+      "x": 2.54,
+      "y": -27.94,
+      "rot": 90,
+      "length": 2.54,
+      "name": "DGND",
+      "number": "27"
+    },
+    {
+      "etype": "power_in",
+      "x": 2.54,
+      "y": 27.94,
+      "rot": 270,
+      "length": 2.54,
+      "name": "DVDD",
+      "number": "28"
+    },
+    {
+      "etype": "input",
+      "x": -20.32,
+      "y": -2.54,
+      "rot": 0,
+      "length": 2.54,
+      "name": "REFIN",
+      "number": "29"
+    },
+    {
+      "etype": "input",
+      "x": -20.32,
+      "y": 10.16,
+      "rot": 0,
+      "length": 2.54,
+      "name": "LE",
+      "number": "3"
+    },
+    {
+      "etype": "output",
+      "x": 20.32,
+      "y": 15.24,
+      "rot": 180,
+      "length": 2.54,
+      "name": "MUXOUT",
+      "number": "30"
+    },
+    {
+      "etype": "power_in",
+      "x": 5.08,
+      "y": -27.94,
+      "rot": 90,
+      "length": 2.54,
+      "name": "SDGND",
+      "number": "31"
+    },
+    {
+      "etype": "power_in",
+      "x": 7.62,
+      "y": 27.94,
+      "rot": 270,
+      "length": 2.54,
+      "name": "SDVDD",
+      "number": "32"
+    },
+    {
+      "etype": "power_in",
+      "x": 7.62,
+      "y": -27.94,
+      "rot": 90,
+      "length": 2.54,
+      "name": "EP",
+      "number": "33"
+    },
+    {
+      "etype": "input",
+      "x": -20.32,
+      "y": 5.08,
+      "rot": 0,
+      "length": 2.54,
+      "name": "CE",
+      "number": "4"
+    },
+    {
+      "etype": "input",
+      "x": 20.32,
+      "y": -20.32,
+      "rot": 180,
+      "length": 2.54,
+      "name": "SW",
+      "number": "5"
+    },
+    {
+      "etype": "power_in",
+      "x": -10.16,
+      "y": 27.94,
+      "rot": 270,
+      "length": 2.54,
+      "name": "Vp",
+      "number": "6"
+    },
+    {
+      "etype": "input",
+      "x": 20.32,
+      "y": -15.24,
+      "rot": 180,
+      "length": 2.54,
+      "name": "CPout",
+      "number": "7"
+    },
+    {
+      "etype": "power_in",
+      "x": -10.16,
+      "y": -27.94,
+      "rot": 90,
+      "length": 2.54,
+      "name": "CPGND",
+      "number": "8"
+    },
+    {
+      "etype": "power_in",
+      "x": -7.62,
+      "y": -27.94,
+      "rot": 90,
+      "length": 2.54,
+      "name": "AGND",
+      "number": "9"
+    }
+  ],
+  "Amplifier_Operational:ADA4530-1": [
+    {
+      "etype": "input",
+      "x": -7.62,
+      "y": 2.54,
+      "rot": 0,
+      "length": 2.54,
+      "name": "+",
+      "number": "1"
+    },
+    {
+      "etype": "passive",
+      "x": 0.0,
+      "y": 7.62,
+      "rot": 270,
+      "length": 5.08,
+      "name": "~",
+      "number": "2"
+    },
+    {
+      "etype": "passive",
+      "x": 2.54,
+      "y": -7.62,
+      "rot": 90,
+      "length": 6.35,
+      "name": "IC",
+      "number": "3"
+    },
+    {
+      "etype": "power_in",
+      "x": -2.54,
+      "y": -7.62,
+      "rot": 90,
+      "length": 3.81,
+      "name": "V-",
+      "number": "4"
+    },
+    {
+      "etype": "power_in",
+      "x": -2.54,
+      "y": 7.62,
+      "rot": 270,
+      "length": 3.81,
+      "name": "V+",
+      "number": "5"
+    },
+    {
+      "etype": "output",
+      "x": 7.62,
+      "y": 0.0,
+      "rot": 180,
+      "length": 2.54,
+      "name": "~",
+      "number": "6"
+    },
+    {
+      "etype": "passive",
+      "x": 0.0,
+      "y": -7.62,
+      "rot": 90,
+      "length": 5.08,
+      "name": "~",
+      "number": "7"
+    },
+    {
+      "etype": "input",
+      "x": -7.62,
+      "y": -2.54,
+      "rot": 0,
+      "length": 2.54,
+      "name": "-",
+      "number": "8"
+    }
+  ],
+  "Oscillator:ASE-xxxMHz": [
+    {
+      "etype": "input",
+      "x": -7.62,
+      "y": 0.0,
+      "rot": 0,
+      "length": 2.54,
+      "name": "EN",
+      "number": "1"
+    },
+    {
+      "etype": "power_in",
+      "x": 0.0,
+      "y": -7.62,
+      "rot": 90,
+      "length": 2.54,
+      "name": "GND",
+      "number": "2"
+    },
+    {
+      "etype": "output",
+      "x": 7.62,
+      "y": 0.0,
+      "rot": 180,
+      "length": 2.54,
+      "name": "OUT",
+      "number": "3"
+    },
+    {
+      "etype": "power_in",
+      "x": 0.0,
+      "y": 7.62,
+      "rot": 270,
+      "length": 2.54,
+      "name": "Vdd",
+      "number": "4"
+    }
+  ],
+  "Device:R": [
+    {
+      "etype": "passive",
+      "x": 0.0,
+      "y": 3.81,
+      "rot": 270,
+      "length": 1.27,
+      "name": "~",
+      "number": "1"
+    },
+    {
+      "etype": "passive",
+      "x": 0.0,
+      "y": -3.81,
+      "rot": 90,
+      "length": 1.27,
+      "name": "~",
+      "number": "2"
+    }
+  ],
+  "Device:C": [
+    {
+      "etype": "passive",
+      "x": 0.0,
+      "y": 3.81,
+      "rot": 270,
+      "length": 2.794,
+      "name": "~",
+      "number": "1"
+    },
+    {
+      "etype": "passive",
+      "x": 0.0,
+      "y": -3.81,
+      "rot": 90,
+      "length": 2.794,
+      "name": "~",
+      "number": "2"
+    }
+  ],
+  "Device:L": [
+    {
+      "etype": "passive",
+      "x": 0.0,
+      "y": 3.81,
+      "rot": 270,
+      "length": 1.27,
+      "name": "1",
+      "number": "1"
+    },
+    {
+      "etype": "passive",
+      "x": 0.0,
+      "y": -3.81,
+      "rot": 90,
+      "length": 1.27,
+      "name": "2",
+      "number": "2"
+    }
+  ],
+  "Device:LED": [
+    {
+      "etype": "passive",
+      "x": -3.81,
+      "y": 0.0,
+      "rot": 0,
+      "length": 2.54,
+      "name": "K",
+      "number": "1"
+    },
+    {
+      "etype": "passive",
+      "x": 3.81,
+      "y": 0.0,
+      "rot": 180,
+      "length": 2.54,
+      "name": "A",
+      "number": "2"
+    }
+  ],
+  "Device:Polyfuse": [
+    {
+      "etype": "passive",
+      "x": 0.0,
+      "y": 3.81,
+      "rot": 270,
+      "length": 1.27,
+      "name": "~",
+      "number": "1"
+    },
+    {
+      "etype": "passive",
+      "x": 0.0,
+      "y": -3.81,
+      "rot": 90,
+      "length": 1.27,
+      "name": "~",
+      "number": "2"
+    }
+  ],
+  "Device:D": [
+    {
+      "etype": "passive",
+      "x": -3.81,
+      "y": 0.0,
+      "rot": 0,
+      "length": 2.54,
+      "name": "K",
+      "number": "1"
+    },
+    {
+      "etype": "passive",
+      "x": 3.81,
+      "y": 0.0,
+      "rot": 180,
+      "length": 2.54,
+      "name": "A",
+      "number": "2"
+    }
+  ],
+  "Connector:Barrel_Jack": [
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": 2.54,
+      "rot": 180,
+      "length": 2.54,
+      "name": "~",
+      "number": "1"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": -2.54,
+      "rot": 180,
+      "length": 2.54,
+      "name": "~",
+      "number": "2"
+    }
+  ],
+  "Connector:Conn_Coaxial": [
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 0.0,
+      "rot": 0,
+      "length": 2.54,
+      "name": "In",
+      "number": "1"
+    },
+    {
+      "etype": "passive",
+      "x": 0.0,
+      "y": -5.08,
+      "rot": 90,
+      "length": 2.54,
+      "name": "Ext",
+      "number": "2"
+    }
+  ],
+  "Connector:USB_C_Receptacle": [
+    {
+      "etype": "passive",
+      "x": 0.0,
+      "y": -40.64,
+      "rot": 90,
+      "length": 5.08,
+      "name": "GND",
+      "number": "A1"
+    },
+    {
+      "etype": "bidirectional",
+      "x": 15.24,
+      "y": -15.24,
+      "rot": 180,
+      "length": 5.08,
+      "name": "RX2-",
+      "number": "A10"
+    },
+    {
+      "etype": "bidirectional",
+      "x": 15.24,
+      "y": -17.78,
+      "rot": 180,
+      "length": 5.08,
+      "name": "RX2+",
+      "number": "A11"
+    },
+    {
+      "etype": "passive",
+      "x": 0.0,
+      "y": -40.64,
+      "rot": 90,
+      "length": 5.08,
+      "name": "GND",
+      "number": "A12"
+    },
+    {
+      "etype": "bidirectional",
+      "x": 15.24,
+      "y": -10.16,
+      "rot": 180,
+      "length": 5.08,
+      "name": "TX1+",
+      "number": "A2"
+    },
+    {
+      "etype": "bidirectional",
+      "x": 15.24,
+      "y": -7.62,
+      "rot": 180,
+      "length": 5.08,
+      "name": "TX1-",
+      "number": "A3"
+    },
+    {
+      "etype": "passive",
+      "x": 15.24,
+      "y": 25.4,
+      "rot": 180,
+      "length": 5.08,
+      "name": "VBUS",
+      "number": "A4"
+    },
+    {
+      "etype": "bidirectional",
+      "x": 15.24,
+      "y": 20.32,
+      "rot": 180,
+      "length": 5.08,
+      "name": "CC1",
+      "number": "A5"
+    },
+    {
+      "etype": "bidirectional",
+      "x": 15.24,
+      "y": 7.62,
+      "rot": 180,
+      "length": 5.08,
+      "name": "D+",
+      "number": "A6"
+    },
+    {
+      "etype": "bidirectional",
+      "x": 15.24,
+      "y": 12.7,
+      "rot": 180,
+      "length": 5.08,
+      "name": "D-",
+      "number": "A7"
+    },
+    {
+      "etype": "bidirectional",
+      "x": 15.24,
+      "y": -30.48,
+      "rot": 180,
+      "length": 5.08,
+      "name": "SBU1",
+      "number": "A8"
+    },
+    {
+      "etype": "passive",
+      "x": 15.24,
+      "y": 25.4,
+      "rot": 180,
+      "length": 5.08,
+      "name": "VBUS",
+      "number": "A9"
+    },
+    {
+      "etype": "passive",
+      "x": 0.0,
+      "y": -40.64,
+      "rot": 90,
+      "length": 5.08,
+      "name": "GND",
+      "number": "B1"
+    },
+    {
+      "etype": "bidirectional",
+      "x": 15.24,
+      "y": 0.0,
+      "rot": 180,
+      "length": 5.08,
+      "name": "RX1-",
+      "number": "B10"
+    },
+    {
+      "etype": "bidirectional",
+      "x": 15.24,
+      "y": -2.54,
+      "rot": 180,
+      "length": 5.08,
+      "name": "RX1+",
+      "number": "B11"
+    },
+    {
+      "etype": "passive",
+      "x": 0.0,
+      "y": -40.64,
+      "rot": 90,
+      "length": 5.08,
+      "name": "GND",
+      "number": "B12"
+    },
+    {
+      "etype": "bidirectional",
+      "x": 15.24,
+      "y": -25.4,
+      "rot": 180,
+      "length": 5.08,
+      "name": "TX2+",
+      "number": "B2"
+    },
+    {
+      "etype": "bidirectional",
+      "x": 15.24,
+      "y": -22.86,
+      "rot": 180,
+      "length": 5.08,
+      "name": "TX2-",
+      "number": "B3"
+    },
+    {
+      "etype": "passive",
+      "x": 15.24,
+      "y": 25.4,
+      "rot": 180,
+      "length": 5.08,
+      "name": "VBUS",
+      "number": "B4"
+    },
+    {
+      "etype": "bidirectional",
+      "x": 15.24,
+      "y": 17.78,
+      "rot": 180,
+      "length": 5.08,
+      "name": "CC2",
+      "number": "B5"
+    },
+    {
+      "etype": "bidirectional",
+      "x": 15.24,
+      "y": 5.08,
+      "rot": 180,
+      "length": 5.08,
+      "name": "D+",
+      "number": "B6"
+    },
+    {
+      "etype": "bidirectional",
+      "x": 15.24,
+      "y": 10.16,
+      "rot": 180,
+      "length": 5.08,
+      "name": "D-",
+      "number": "B7"
+    },
+    {
+      "etype": "bidirectional",
+      "x": 15.24,
+      "y": -33.02,
+      "rot": 180,
+      "length": 5.08,
+      "name": "SBU2",
+      "number": "B8"
+    },
+    {
+      "etype": "passive",
+      "x": 15.24,
+      "y": 25.4,
+      "rot": 180,
+      "length": 5.08,
+      "name": "VBUS",
+      "number": "B9"
+    },
+    {
+      "etype": "passive",
+      "x": -7.62,
+      "y": -40.64,
+      "rot": 90,
+      "length": 5.08,
+      "name": "SHIELD",
+      "number": "S1"
+    }
+  ],
+  "Connector_Generic:Conn_02x08_Odd_Even": [
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 7.62,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_1",
+      "number": "1"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": -2.54,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_10",
+      "number": "10"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": -5.08,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_11",
+      "number": "11"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": -5.08,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_12",
+      "number": "12"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": -7.62,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_13",
+      "number": "13"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": -7.62,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_14",
+      "number": "14"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": -10.16,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_15",
+      "number": "15"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": -10.16,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_16",
+      "number": "16"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": 7.62,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_2",
+      "number": "2"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 5.08,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_3",
+      "number": "3"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": 5.08,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_4",
+      "number": "4"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 2.54,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_5",
+      "number": "5"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": 2.54,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_6",
+      "number": "6"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 0.0,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_7",
+      "number": "7"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": 0.0,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_8",
+      "number": "8"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": -2.54,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_9",
+      "number": "9"
+    }
+  ],
+  "Connector_Generic:Conn_02x05_Odd_Even": [
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 5.08,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_1",
+      "number": "1"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": -5.08,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_10",
+      "number": "10"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": 5.08,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_2",
+      "number": "2"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 2.54,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_3",
+      "number": "3"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": 2.54,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_4",
+      "number": "4"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 0.0,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_5",
+      "number": "5"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": 0.0,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_6",
+      "number": "6"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": -2.54,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_7",
+      "number": "7"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": -2.54,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_8",
+      "number": "8"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": -5.08,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_9",
+      "number": "9"
+    }
+  ],
+  "Connector_Generic:Conn_01x02": [
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 0.0,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_1",
+      "number": "1"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": -2.54,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_2",
+      "number": "2"
+    }
+  ],
+  "Switch:SW_Push": [
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 0.0,
+      "rot": 0,
+      "length": 2.54,
+      "name": "1",
+      "number": "1"
+    },
+    {
+      "etype": "passive",
+      "x": 5.08,
+      "y": 0.0,
+      "rot": 180,
+      "length": 2.54,
+      "name": "2",
+      "number": "2"
+    }
+  ],
+  "Connector_Generic:Conn_02x30_Odd_Even": [
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 35.56,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_1",
+      "number": "1"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": 25.4,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_10",
+      "number": "10"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 22.86,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_11",
+      "number": "11"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": 22.86,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_12",
+      "number": "12"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 20.32,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_13",
+      "number": "13"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": 20.32,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_14",
+      "number": "14"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 17.78,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_15",
+      "number": "15"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": 17.78,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_16",
+      "number": "16"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 15.24,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_17",
+      "number": "17"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": 15.24,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_18",
+      "number": "18"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 12.7,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_19",
+      "number": "19"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": 35.56,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_2",
+      "number": "2"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": 12.7,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_20",
+      "number": "20"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 10.16,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_21",
+      "number": "21"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": 10.16,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_22",
+      "number": "22"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 7.62,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_23",
+      "number": "23"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": 7.62,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_24",
+      "number": "24"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 5.08,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_25",
+      "number": "25"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": 5.08,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_26",
+      "number": "26"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 2.54,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_27",
+      "number": "27"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": 2.54,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_28",
+      "number": "28"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 0.0,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_29",
+      "number": "29"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 33.02,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_3",
+      "number": "3"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": 0.0,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_30",
+      "number": "30"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": -2.54,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_31",
+      "number": "31"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": -2.54,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_32",
+      "number": "32"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": -5.08,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_33",
+      "number": "33"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": -5.08,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_34",
+      "number": "34"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": -7.62,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_35",
+      "number": "35"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": -7.62,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_36",
+      "number": "36"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": -10.16,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_37",
+      "number": "37"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": -10.16,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_38",
+      "number": "38"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": -12.7,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_39",
+      "number": "39"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": 33.02,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_4",
+      "number": "4"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": -12.7,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_40",
+      "number": "40"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": -15.24,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_41",
+      "number": "41"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": -15.24,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_42",
+      "number": "42"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": -17.78,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_43",
+      "number": "43"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": -17.78,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_44",
+      "number": "44"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": -20.32,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_45",
+      "number": "45"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": -20.32,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_46",
+      "number": "46"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": -22.86,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_47",
+      "number": "47"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": -22.86,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_48",
+      "number": "48"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": -25.4,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_49",
+      "number": "49"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 30.48,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_5",
+      "number": "5"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": -25.4,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_50",
+      "number": "50"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": -27.94,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_51",
+      "number": "51"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": -27.94,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_52",
+      "number": "52"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": -30.48,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_53",
+      "number": "53"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": -30.48,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_54",
+      "number": "54"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": -33.02,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_55",
+      "number": "55"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": -33.02,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_56",
+      "number": "56"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": -35.56,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_57",
+      "number": "57"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": -35.56,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_58",
+      "number": "58"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": -38.1,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_59",
+      "number": "59"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": 30.48,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_6",
+      "number": "6"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": -38.1,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_60",
+      "number": "60"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 27.94,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_7",
+      "number": "7"
+    },
+    {
+      "etype": "passive",
+      "x": 7.62,
+      "y": 27.94,
+      "rot": 180,
+      "length": 3.81,
+      "name": "Pin_8",
+      "number": "8"
+    },
+    {
+      "etype": "passive",
+      "x": -5.08,
+      "y": 25.4,
+      "rot": 0,
+      "length": 3.81,
+      "name": "Pin_9",
+      "number": "9"
+    }
+  ],
+  "74xGxx:74LVC1G04": [
+    {
+      "etype": "input",
+      "x": -15.24,
+      "y": 0.0,
+      "rot": 0,
+      "length": 7.62,
+      "name": "~",
+      "number": "2"
+    },
+    {
+      "etype": "power_in",
+      "x": -5.08,
+      "y": -10.16,
+      "rot": 90,
+      "length": 5.08,
+      "name": "GND",
+      "number": "3"
+    },
+    {
+      "etype": "output",
+      "x": 12.7,
+      "y": 0.0,
+      "rot": 180,
+      "length": 7.62,
+      "name": "~",
+      "number": "4"
+    },
+    {
+      "etype": "power_in",
+      "x": -5.08,
+      "y": 10.16,
+      "rot": 270,
+      "length": 5.08,
+      "name": "VCC",
+      "number": "5"
+    }
+  ]
+}

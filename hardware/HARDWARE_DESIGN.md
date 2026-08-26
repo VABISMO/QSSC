@@ -574,6 +574,22 @@ Toshiba-TORX artefacts that used to live here are gone; the project reflects
 the on-chip readout design only (CQD emitter array + graphene/MoS₂ TIA + analog
 MUX → Artix-7 XADC, no camera).
 
+> **Reproducibility — `pins.json`.** The generators call `std_pins("lib","sym")`
+> which reads `.tmpwork/pins.json` at import (the standard-KiCad-symbol pin
+> tables: number / name / electrical-type / symbol-editor geometry). That file
+> was a *build input with no builder* — a fresh clone with no `.tmpwork/` could
+> not regenerate the boards (the generator crashed at the `json.loads`). It is
+> now (a) committed as a **pinned snapshot** (un-ignored in `.gitignore`, so a
+> fresh clone reproduces the checked-in boards byte-for-byte) and (b) has a
+> builder, [`tools/build_pins_json.py`](../tools/build_pins_json.py), that
+> extracts the same tables from the installed KiCad symbol library — the proof
+> the pins come from real symbols, not hand-authored. The builder *upgrades*
+> to the current library and can differ from the pinned snapshot across KiCad
+> versions (notably `Connector:USB_C_Receptacle`: pinned = 25-pin full pinout,
+> newer KiCad = 19-pin USB-2.0 variant); see its docstring. Do not run the
+> builder expecting to reproduce the committed boards — re-run it only to
+> upgrade, then regenerate + re-ERC/DRC + commit.
+
 A second headless step, [`tools/route_qssc_pcb.py`](../tools/route_qssc_pcb.py),
 then layers a **copper-plane foundation** onto the placed board via the pcbnew
 Python API (KiCad 8 ships a headless `pcbnew` binding usable from system
