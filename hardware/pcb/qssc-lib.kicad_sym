@@ -2027,7 +2027,7 @@
 				)
 			)
 			(pin power_in line
-				(at -41.91 10.16 270)
+				(at -49.53 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2045,7 +2045,25 @@
 				)
 			)
 			(pin power_in line
-				(at -40.64 10.16 270)
+				(at -48.26 10.16 270)
+				(length 2.54)
+				(name "GND"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "A10"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at -46.99 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2063,7 +2081,7 @@
 				)
 			)
 			(pin power_in line
-				(at -39.37 10.16 270)
+				(at -45.72 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2081,7 +2099,25 @@
 				)
 			)
 			(pin power_in line
-				(at -38.1 10.16 270)
+				(at -44.45 10.16 270)
+				(length 2.54)
+				(name "GND"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "A2"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at -43.18 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2099,7 +2135,25 @@
 				)
 			)
 			(pin power_in line
-				(at -36.83 10.16 270)
+				(at -41.91 10.16 270)
+				(length 2.54)
+				(name "GND"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "A4"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at -40.64 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2117,7 +2171,25 @@
 				)
 			)
 			(pin power_in line
-				(at -35.56 10.16 270)
+				(at -39.37 10.16 270)
+				(length 2.54)
+				(name "GND"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "A6"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at -38.1 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2135,7 +2207,25 @@
 				)
 			)
 			(pin power_in line
-				(at -34.29 10.16 270)
+				(at -36.83 10.16 270)
+				(length 2.54)
+				(name "GND"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "A8"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at -35.56 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2153,7 +2243,7 @@
 				)
 			)
 			(pin power_in line
-				(at -33.02 10.16 270)
+				(at -34.29 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2163,6 +2253,24 @@
 					)
 				)
 				(number "B1"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at -33.02 10.16 270)
+				(length 2.54)
+				(name "GND"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "B10"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2216,7 +2324,7 @@
 						)
 					)
 				)
-				(number "B3"
+				(number "B2"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2234,7 +2342,7 @@
 						)
 					)
 				)
-				(number "B5"
+				(number "B3"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2252,7 +2360,7 @@
 						)
 					)
 				)
-				(number "B7"
+				(number "B4"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2270,7 +2378,7 @@
 						)
 					)
 				)
-				(number "B9"
+				(number "B5"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2288,7 +2396,7 @@
 						)
 					)
 				)
-				(number "C1"
+				(number "B6"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2306,7 +2414,7 @@
 						)
 					)
 				)
-				(number "C10"
+				(number "B7"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2324,7 +2432,7 @@
 						)
 					)
 				)
-				(number "C12"
+				(number "B8"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2342,7 +2450,7 @@
 						)
 					)
 				)
-				(number "C19"
+				(number "B9"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2360,7 +2468,7 @@
 						)
 					)
 				)
-				(number "C2"
+				(number "C1"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2378,7 +2486,7 @@
 						)
 					)
 				)
-				(number "C3"
+				(number "C10"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2396,7 +2504,7 @@
 						)
 					)
 				)
-				(number "C4"
+				(number "C12"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2414,7 +2522,7 @@
 						)
 					)
 				)
-				(number "C5"
+				(number "C19"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2432,7 +2540,7 @@
 						)
 					)
 				)
-				(number "C6"
+				(number "C2"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2450,7 +2558,7 @@
 						)
 					)
 				)
-				(number "C7"
+				(number "C3"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2468,7 +2576,7 @@
 						)
 					)
 				)
-				(number "D3"
+				(number "C4"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2486,7 +2594,7 @@
 						)
 					)
 				)
-				(number "E1"
+				(number "C5"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2504,7 +2612,7 @@
 						)
 					)
 				)
-				(number "E17"
+				(number "C6"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2522,7 +2630,7 @@
 						)
 					)
 				)
-				(number "E2"
+				(number "C7"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2540,7 +2648,7 @@
 						)
 					)
 				)
-				(number "E3"
+				(number "D1"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2558,7 +2666,7 @@
 						)
 					)
 				)
-				(number "F1"
+				(number "D2"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2576,7 +2684,7 @@
 						)
 					)
 				)
-				(number "F19"
+				(number "D3"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2594,7 +2702,7 @@
 						)
 					)
 				)
-				(number "F2"
+				(number "E1"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2612,7 +2720,7 @@
 						)
 					)
 				)
-				(number "F3"
+				(number "E17"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2630,7 +2738,7 @@
 						)
 					)
 				)
-				(number "G1"
+				(number "E2"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2648,7 +2756,7 @@
 						)
 					)
 				)
-				(number "G11"
+				(number "E3"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2666,7 +2774,7 @@
 						)
 					)
 				)
-				(number "G7"
+				(number "F1"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2684,7 +2792,7 @@
 						)
 					)
 				)
-				(number "G8"
+				(number "F19"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2702,7 +2810,7 @@
 						)
 					)
 				)
-				(number "G9"
+				(number "F2"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2720,7 +2828,7 @@
 						)
 					)
 				)
-				(number "H11"
+				(number "F3"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2738,7 +2846,7 @@
 						)
 					)
 				)
-				(number "H12"
+				(number "G1"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2756,7 +2864,7 @@
 						)
 					)
 				)
-				(number "H18"
+				(number "G11"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2774,7 +2882,7 @@
 						)
 					)
 				)
-				(number "H7"
+				(number "G7"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2792,7 +2900,7 @@
 						)
 					)
 				)
-				(number "H8"
+				(number "G8"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2810,7 +2918,7 @@
 						)
 					)
 				)
-				(number "H9"
+				(number "G9"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2828,7 +2936,7 @@
 						)
 					)
 				)
-				(number "J11"
+				(number "H11"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2846,7 +2954,7 @@
 						)
 					)
 				)
-				(number "J12"
+				(number "H12"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2864,7 +2972,7 @@
 						)
 					)
 				)
-				(number "J8"
+				(number "H18"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2882,7 +2990,7 @@
 						)
 					)
 				)
-				(number "J9"
+				(number "H7"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2900,7 +3008,7 @@
 						)
 					)
 				)
-				(number "K8"
+				(number "H8"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2918,7 +3026,7 @@
 						)
 					)
 				)
-				(number "L11"
+				(number "H9"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2936,7 +3044,7 @@
 						)
 					)
 				)
-				(number "L19"
+				(number "J11"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2954,7 +3062,7 @@
 						)
 					)
 				)
-				(number "L8"
+				(number "J12"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2972,7 +3080,7 @@
 						)
 					)
 				)
-				(number "L9"
+				(number "J8"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2990,7 +3098,7 @@
 						)
 					)
 				)
-				(number "M13"
+				(number "J9"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -3008,7 +3116,7 @@
 						)
 					)
 				)
-				(number "M9"
+				(number "K8"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -3026,7 +3134,7 @@
 						)
 					)
 				)
-				(number "N12"
+				(number "L11"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -3044,7 +3152,7 @@
 						)
 					)
 				)
-				(number "N13"
+				(number "L19"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -3062,7 +3170,7 @@
 						)
 					)
 				)
-				(number "N9"
+				(number "L8"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -3080,7 +3188,7 @@
 						)
 					)
 				)
-				(number "P2"
+				(number "L9"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -3098,7 +3206,7 @@
 						)
 					)
 				)
-				(number "T19"
+				(number "M13"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -3116,7 +3224,7 @@
 						)
 					)
 				)
-				(number "U10"
+				(number "M9"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -3134,7 +3242,7 @@
 						)
 					)
 				)
-				(number "U6"
+				(number "N12"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -3152,7 +3260,7 @@
 						)
 					)
 				)
-				(number "U9"
+				(number "N13"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -3170,7 +3278,7 @@
 						)
 					)
 				)
-				(number "V18"
+				(number "N9"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -3188,7 +3296,7 @@
 						)
 					)
 				)
-				(number "W1"
+				(number "P2"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -3206,7 +3314,7 @@
 						)
 					)
 				)
-				(number "W11"
+				(number "T19"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -3216,6 +3324,114 @@
 			)
 			(pin power_in line
 				(at 41.91 10.16 270)
+				(length 2.54)
+				(name "GND"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "U10"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at 43.18 10.16 270)
+				(length 2.54)
+				(name "GND"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "U6"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at 44.45 10.16 270)
+				(length 2.54)
+				(name "GND"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "U9"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at 45.72 10.16 270)
+				(length 2.54)
+				(name "GND"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "V18"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at 46.99 10.16 270)
+				(length 2.54)
+				(name "GND"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "W1"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at 48.26 10.16 270)
+				(length 2.54)
+				(name "GND"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "W11"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at 49.53 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
