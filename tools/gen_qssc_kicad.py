@@ -271,13 +271,21 @@ def fpga_pin_list():
             right.append((ball, net, "bidirectional"))
     pins = []
     sp = 1.27
+    # Columns are placed at x = +/-50.8 (1.27*40), OUTSIDE the bottom/top row
+    # extent (bottom row spans x in +/-49.53 = 1.27*39).  Putting the signal
+    # columns at the same x as an on-grid GND row pin would land two net labels
+    # (signal + GND) on the same point -> ERC multiple_net_names merges them to
+    # GND, silently shorting that signal to ground (this bit emitter_cols0: a
+    # right-column pin at y=10.16 met the bottom GND pin at x=17.78,y=10.16).
+    # 50.8 is the smallest on-grid x beyond the row extent, so the column and
+    # row coordinates can never coincide.  Keeps every pin on the 1.27 mm grid.
     yL = sp * (len(left) - 1) / 2
     for i, (num, name, et) in enumerate(left):
-        pins.append(dict(number=num, name=name, etype=et, x=-17.78,
+        pins.append(dict(number=num, name=name, etype=et, x=-50.8,
                          y=round(yL - i * sp, 2), rot=0, length=2.54))
     yR = sp * (len(right) - 1) / 2
     for i, (num, name, et) in enumerate(right):
-        pins.append(dict(number=num, name=name, etype=et, x=17.78,
+        pins.append(dict(number=num, name=name, etype=et, x=50.8,
                          y=round(yR - i * sp, 2), rot=180, length=2.54))
     xT = -sp * (len(top) - 1) / 2
     for i, (num, name, et) in enumerate(top):
@@ -389,6 +397,11 @@ def authored_symbols():
                                   std_pins("Connector_Generic", "Conn_02x05_Odd_Even"), value=""))
     syms.append(replicated_symbol("qssc", "Conn_01x02", "J",
                                   std_pins("Connector_Generic", "Conn_01x02"), value=""))
+    # Board-to-board chip-module connector: Samtec LSHM-130 (2x30 0.5 mm, 60 pos)
+    # mates the swappable chip module (MUX + TIA + emitter driver + R1-R64).
+    syms.append(replicated_symbol("qssc", "Conn_02x30_Odd_Even", "J",
+                                  std_pins("Connector_Generic", "Conn_02x30_Odd_Even"),
+                                  value="Samtec LSHM-130"))
     syms.append(replicated_symbol("qssc", "SW_Push", "SW",
                                   std_pins("Switch", "SW_Push"), value="RESET"))
     syms.append(replicated_symbol("qssc", "USB_C_Receptacle", "J",
@@ -450,6 +463,7 @@ SYM_NAME = {
     "qssc:ASE_osc": "ASE_osc", "qssc:Barrel_Jack": "Barrel_Jack",
     "qssc:Conn_Coaxial": "Conn_Coaxial", "qssc:Conn_02x08": "Conn_02x08",
     "qssc:Conn_02x05": "Conn_02x05", "qssc:Conn_01x02": "Conn_01x02",
+    "qssc:Conn_02x30_Odd_Even": "Conn_02x30_Odd_Even",
     "qssc:SW_Push": "SW_Push", "qssc:USB_C_Receptacle": "USB_C_Receptacle",
     "qssc:R": "R", "qssc:C": "C", "qssc:L": "L", "qssc:LED": "LED",
     "qssc:Polyfuse": "Polyfuse", "qssc:D": "D",
@@ -592,31 +606,43 @@ add("C35", "qssc:C", "100p", "Capacitor_SMD:C_0603_1608Metric", 390, 150, pins={
 add("J3", "qssc:Conn_Coaxial", "SMA", "Connector_Coaxial:SMA_Amphenol_132289_EdgeMount",
     420, 150, pins={"1": "J3_SIG", "2": "GND"})
 
-# TIA (on-board) + detector front-end connector J5 + bias J6
-add("U7", "qssc:ADA4530-1", "ADA4530-1", "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm",
-    140, 150, pins={"1": "DET_IN", "5": "+3V3", "4": "GND", "6": "TIA_OUT", "8": "DET_IN"})
-add("R74", "qssc:R", "1M", "Resistor_SMD:R_0603_1608Metric", 160, 150, pins={"1": "TIA_OUT", "2": "DET_IN"})
-add("J5", "qssc:Conn_02x08", "Detector FE", "Connector_PinHeader_2.54mm:PinHeader_2x08_P2.54mm_Vertical",
-    90, 150, pins={"1": "det_mux_sel0", "2": "det_mux_sel1", "3": "det_mux_sel2", "4": "det_mux_sel3",
-                   "5": "det_mux_sel4", "6": "det_mux_sel5", "7": "mod_sync", "8": "DET_IN",
-                   "9": "DET_BIAS", "10": "+3V3", "11": "GND", "12": "GND", "13": "GND",
-                   "14": "GND", "15": "GND", "16": "GND"})
-add("J6", "qssc:Conn_01x02", "DET_BIAS", "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical",
-    90, 180, pins={"1": "DET_BIAS", "2": "GND"})
+# Board-to-board chip-module connector J11 (Samtec LSHM-130, 2x30 0.5 mm).
+# The swappable chip MODULE (ADG732 64:1 MUX + ADA4530-1 TIA + TLC5955 emitter
+# driver + R1-R64 + Peltier) mates here. Only digital selects, the one TIA
+# analog output back to the XADC, detector bias, modulation reference, and
+# power rails cross -- the 64 detector electrodes stay on the module. Per
+# column: top pad (odd) = signal/power, bottom pad (even) = GND (signal-GND
+# pairing for the 0.5 mm-pitch mezzanine).
+J11P = {}
+for i in range(8):                          # cols 1-8 : emitter row anode-enables
+    J11P[str(1 + 2 * i)] = f"emitter_rows{i}"
+for i in range(8):                          # cols 9-16 : emitter col cathode-enables
+    J11P[str(17 + 2 * i)] = f"emitter_cols{i}"
+for i in range(6):                          # cols 17-22 : analog MUX select
+    J11P[str(33 + 2 * i)] = f"det_mux_sel{i}"
+J11P["45"] = "mod_sync"                     # col 23 : 1 kHz lock-in mod reference
+J11P["47"] = "TIA_OUT"                      # col 24 : TIA output -> FPGA XADC VauxP0
+J11P["49"] = "TIA_REF"                      # col 25 : TIA reference (module)
+J11P["51"] = "DET_BIAS"                     # col 26 : detector bias (future DAC)
+J11P["53"] = "THRM"                         # col 27 : module thermistor sense
+J11P["55"] = "+3V3"                         # col 28 : module logic rail
+J11P["57"] = "+5V"                          # col 29 : module power rail
+J11P["59"] = "+7V_EMIT"                    # col 30 : emitter driver high-voltage rail
+for i in range(1, 61):                      # all even pads = GND (return per signal)
+    if i % 2 == 0:
+        J11P[str(i)] = "GND"
+add("J11", "qssc:Conn_02x30_Odd_Even", "Samtec LSHM-130",
+    "Connector_Samtec:Samtec_LSHM-130-xx.x-x-DV-N_2x30_P0.50mm_Vertical",
+    90, 150, pins=J11P)
 
-# Emitter driver connector J4 (8 rows + 8 cols)
-J4P = {}
-for i in range(8):
-    J4P[str(i + 1)] = f"emitter_rows{i}"
-    J4P[str(i + 9)] = f"emitter_cols{i}"
-add("J4", "qssc:Conn_02x08", "Emitter drv", "Connector_PinHeader_2.54mm:PinHeader_2x08_P2.54mm_Vertical",
-    200, 160, pins=J4P)
-
-# Reset button + mw_gate + JTAG
-add("J7", "qssc:SW_Push", "RESET", "Button_Switch_THT:SW_PUSH_6mm_H5mm",
-    60, 70, pins={"1": "+3V3", "2": "reset"})
+# mw_gate drives the RF switch on THIS board (ADF4351 -> HMC441 -> SMA), so it
+# stays local (does not cross to the module): J8 header to the off-board switch.
 add("J8", "qssc:Conn_01x02", "MW_GATE", "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical",
     260, 110, pins={"1": "mw_gate", "2": "GND"})
+
+# Reset button + JTAG (mw_gate J8 header is defined above with J11)
+add("J7", "qssc:SW_Push", "RESET", "Button_Switch_THT:SW_PUSH_6mm_H5mm",
+    60, 70, pins={"1": "+3V3", "2": "reset"})
 add("J9", "qssc:Conn_02x05", "JTAG", "Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical",
     260, 30, pins={"1": "TCK", "2": "GND", "3": "TDO", "4": "GND", "5": "TMS",
                    "6": "GND", "7": "TDI", "8": "GND", "9": "GND", "10": "GND"})
@@ -1033,10 +1059,12 @@ def assign_pcb_positions():
         "R67": (84, 26, 0), "C31": (84, 30, 0), "R68": (84, 34, 0),
         "C32": (100, 26, 0), "C33": (100, 30, 0), "R73": (100, 34, 0),
         "C34": (100, 40, 0), "C35": (110, 34, 0), "R69": (110, 40, 0), "L2": (110, 46, 0),
-        # analog TIA + headers (left-center). J4/J5 are 2x8 (19.5mm tall) -> placed
-        # at y=64 so pads (y..82.6) stay on the 85mm board.
-        "U7": (26, 60, 0), "R74": (35, 60, 90),
-        "J5": (12, 64, 0), "J4": (44, 64, 0), "J6": (20, 78, 0),
+        # chip-module B2B connector J11 (Samtec LSHM-130, ~17x7.6 mm) lower-left,
+        # below the REG3/REG4 + C41-C44 cluster (y 34-53) and clear of J7 (10,40);
+        # the module mates along this edge.  Earlier (30,45) overlapped the
+        # REG/C-dec cluster courtyards and shorted emitter_cols pads into the
+        # +1V0/+1V8/GND decoupling pads that sat under it.
+        "J11": (24, 64, 0),
         "J7": (10, 40, 0), "J9": (10, 26, 0),
     }
     for c in COMPONENTS:

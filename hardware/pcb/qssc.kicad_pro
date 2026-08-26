@@ -366,10 +366,6 @@
         "pattern": "DET_BIAS"
       },
       {
-        "netclass": "Analog",
-        "pattern": "DET_IN"
-      },
-      {
         "netclass": "Power",
         "pattern": "GND"
       },
@@ -404,6 +400,10 @@
       {
         "netclass": "Analog",
         "pattern": "TIA_OUT"
+      },
+      {
+        "netclass": "Analog",
+        "pattern": "TIA_REF"
       },
       {
         "netclass": "USB",
