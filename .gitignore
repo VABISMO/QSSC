@@ -102,3 +102,9 @@ Thumbs.db
 # pyverilog parser artifacts
 parsetab.py
 parser.out
+
+# KiCad CLI scratch / DRC-ERC report artifacts (regenerated on demand)
+.tmpwork/
+hardware/pcb/*erc*.txt
+hardware/pcb/*drc*.txt
+hardware/pcb/t*.kicad_sch

@@ -538,29 +538,71 @@ feed-per-minute (`G94`), XY-plane (`G17`), and a spindle start (`M03 S8000`).
 
 ---
 
-## 15. Existing KiCad Project (starting skeleton — NOT a finished board)
+## 15. KiCad Project — complete ERC-clean schematic + DRC-clean placed board (NOT routed)
 
-The KiCad project lives at [`hardware/pcb/`](pcb/) (`qssc.kicad_pro`,
-`qssc.kicad_pcb`, `qssc.kicad_prl`).
+The KiCad 8 project lives at [`hardware/pcb/`](pcb/) (`qssc.kicad_pro`,
+`qssc.kicad_sch`, `qssc.kicad_pcb`, `qssc-lib.kicad_sym`). It is regenerated
+deterministically by [`tools/gen_qssc_kicad.py`](../tools/gen_qssc_kicad.py)
+from the BOM (§2), the impedance rules (§10), the 4-layer stackup (§12), the
+critical nets (§13), and the FPGA pinout in `fpga/constraints.xdc` — re-running
+that script rewrites all four files reproducibly. The camera / VCSEL /
+Toshiba-TORX artefacts that used to live here are gone; the project reflects
+the on-chip readout design only (CQD emitter array + graphene/MoS₂ TIA + analog
+MUX → Artix-7 XADC, no camera).
 
-> **Honest status:** this is a **starting skeleton, not a routed/verified
-> board.** `qssc.kicad_pcb` currently places only a handful of footprints
-> (the XC7A35T CPG236 package, two pin headers, a USB-C receptacle, and a
-> carried-over Toshiba TORX fiber-optic connector that is **not** part of the
-> on-chip readout design) and defines essentially **no nets**. There is no
-> schematic-to-PCB netlist, no routing, and no DRC-clean layout. It is a
-> placeholder to start from, **not** a buildable QSSC PCB — consistent with the
-> README honesty note that the FPGA/PCB are design artefacts.
+> **Honest status — what IS done:**
+> - **Schematic:** 75 components, 97 nets. `kicad-cli sch erc` → **0 errors,
+>   127 warnings** (benign: `pin_not_connected` / `pin_not_driven` /
+>   `label_dangling` on unused op-amp sections and a few spare IO, plus
+>   `endpoint_off_grid` because the authored symbols use a non-1.27 mm pin
+>   grid; `lib_symbol_issues` is ignored because the `power`/`qssc` symbol
+>   libraries are not in the project lib table). `kicad-cli sch export netlist`
+>   succeeds → 75 components / 97 nets (e.g. `clk_100mhz` correctly joins
+>   `U1.G21` + `Y1.3`).
+> - **PCB:** all 75 BOM footprints placed on a 130 × 85 mm 4-layer FR4 board,
+>   full netlist assigned to pads, correct 4-layer stackup (F.Cu signal /
+>   In1.Cu GND plane / In2.Cu PWR plane / B.Cu signal), net classes
+>   (Default / RF / Power / USB / Analog, track widths 0.20 / 0.30 / 0.50 /
+>   0.20 / 0.20 mm) and design rules (min clearance 0.15 mm, min track 0.15 mm,
+>   min hole clearance 0.18 mm). `kicad-cli pcb drc` → **0 errors, 0 warnings,
+>   0 unconnected** (`unconnected_items` severity = `ignore` because the board
+>   is not yet routed).
 
-To turn it into the real QSSC board: import it into KiCad, **remove the OV7670
-camera schematic block and the VCSEL daughter-board connector** (and the
-leftover TORX fiber-optic footprint), add the CQD emitter driver, TIA, analog
-MUX, and detector-bias blocks, update the symbol/footprint assignments to match
-the BOM in section 2, and re-annotate references. The schematic must be reworked
-to match the `top_level.v` port list (no `scl`/`sda`/`xclk`/`pclk`/`vsync`/
-`href`/`d[*]`; add `det_mux_sel`, `mod_sync`) and the pin assignments in
-`fpga/constraints.xdc` before routing. The BOM (section 2) is the authoritative
-component list for that rework.
+> **Honest status — what is NOT done (needs one GUI session):**
+> - **Copper routing is not laid.** KiCad 8 `kicad-cli` **cannot** export a
+>   Specctra DSN autorouter file or import an SES session — both are GUI-only
+>   in `pcbnew`. So final copper (BGA fanout for the XC7A35T CPG236, 50 Ω RF
+>   microstrip ADF4351 → HMC441 → SMA, the USB-C → FT232 differential pair,
+>   analog guard rings around the TIA, and the In1.Cu GND / In2.Cu PWR plane
+>   pours) requires **one interactive `pcbnew` session** (or the FreeRouting
+>   GUI). The per-net-class track widths above encode the §10 impedance intent
+>   but are not yet drawn as copper.
+> - **FPGA BGA pad mapping is partial.** The XC7A35T-1CPG236C has 236 pads; the
+>   23 signal pads named in `fpga/constraints.xdc` (`reset`, `det_mux_sel*`,
+>   `emitter_rows*` / `emitter_cols*`, `SPI_*`, `clk_100mhz`, UART, XADC…) are
+>   netted. The remaining ~213 power / ground / unused-IO pads need the
+>   UG475 7-series packaging pinout (VCCINT / VCCAUX / GND bank assignments),
+>   which is not available headless; they are placed but left unnetted and must
+>   be finished in the GUI with UG475. This is a design-artefact caveat, not a
+>   connectivity error in the nets that *are* defined.
+> - **AMS1117-5.0 dropout (flagged design issue):** REG1 is an AMS1117-5.0 fed
+>   from the +5 V barrel rail, so it has ~zero headroom and cannot regulate 5 V
+>   from 5 V. Either feed REG1 from a ≥6.5 V wall adapter (barrel jack is rated
+>   7–12 V) or drop the REG1 rail to a 3.3 V output and reuse the existing
+>   3.3 V regulator. Resolvable in the GUI without reworking the schematic.
+
+Consistent with the README honesty note, the FPGA RTL and this PCB are
+**design artefacts** (synthesised / placed-and-netted but not routed to copper
+or fabricated), not a finished hardware product.
+
+**Regenerate + verify (headless):**
+
+```bash
+.venv/bin/python tools/gen_qssc_kicad.py          # rewrites sch/pcb/pro/sym
+kicad-cli sch erc   --output /tmp/erc.txt hardware/pcb/qssc.kicad_sch   # 0 errors
+kicad-cli sch export netlist --output /tmp/qssc.net hardware/pcb/qssc.kicad_sch
+kicad-cli pcb drc   --output /tmp/drc.txt hardware/pcb/qssc.kicad_pcb   # 0 violations
+```
 
 ---
 
