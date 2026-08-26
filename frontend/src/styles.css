@@ -83,7 +83,8 @@ a.grad, .grad a { text-decoration: none; }
 
 /* stats */
 .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-.stat { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 11px 12px; }
+.stat { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 11px 12px;
+  display: flex; flex-direction: column; }
 .stat .k { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
 .stat .v { font-family: var(--font-mono); font-size: 18px; color: var(--text); margin-top: 3px; }
 .stat .v small { color: var(--muted); font-size: 11px; }
@@ -225,8 +226,8 @@ textarea.code-editor:focus { outline: 1px solid var(--brand); border-color: var(
 .verdict.warn { background: rgba(251,191,36,.08); border-color: rgba(251,191,36,.3); }
 .verdict.warn .verdict-h { color: var(--warn); }
 /* per-stat pass/fail chip */
-.stat .chip { display: inline-block; margin-top: 6px; font-size: 10px; font-family: var(--font-mono);
-  padding: 2px 7px; border-radius: 999px; font-weight: 600; letter-spacing: .03em; }
+.stat .chip { display: inline-block; margin-top: auto; font-size: 10px; font-family: var(--font-mono);
+  padding: 2px 7px; border-radius: 999px; font-weight: 600; letter-spacing: .03em; align-self: flex-start; }
 .stat .chip.ok { color: var(--ok); background: rgba(52,211,153,.12); border: 1px solid rgba(52,211,153,.28); }
 .stat .chip.warn { color: var(--warn); background: rgba(251,191,36,.12); border: 1px solid rgba(251,191,36,.28); }
 .stat .chip.bad { color: var(--err); background: rgba(248,113,113,.12); border: 1px solid rgba(248,113,113,.28); }
