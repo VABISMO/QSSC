@@ -518,46 +518,47 @@ decoupling vias to the correct rail plane directly at each cap.
 
 ## 14. CNC G-Code Files (Emitter / Waveguide Substrate Tooling)
 
-The `hardware/gcode/` directory contains CNC toolpaths (carried over from the
-original repository) for machining the PMMA / acrylic optical substrate and its
-micro-fluidic / micro-lens features. They are produced for a 3-axis CNC mill and
-are not part of the electronic PCB; they fabricate the carrier/tooling that hosts
-the emitter and waveguide structures over the 8×8 site array.
+The `hardware/gcode/` directory contains CNC toolpaths for machining the
+PMMA / acrylic optical substrate that hosts the emitter and waveguide structures
+over the 8×8 site array. They are produced for a 3-axis CNC mill and are not part
+of the electronic PCB. These are **macro carrier/substrate toolpaths (mm scale)** —
+they machine the substrate that hosts the emitter/waveguide, **not** the microchip
+features, which are made by lithography at 2.5 µm pitch (§1).
+
+The three files are **regenerated deterministically** by
+[`tools/gen_qssc_gcode.py`](../tools/gen_qssc_gcode.py) (re-run it to rewrite all
+three from explicit parameters; `tests/test_gcode.py` asserts the geometry). This
+replaced the carried-over hand-written QNOS toolpaths and fixed the issues those
+had:
 
 | File                       | Tool        | Description |
 |----------------------------|-------------|-------------|
-| `square_chip_cnc.gcode`    | 2 mm flat   | Pockets a 30×30×3 mm acrylic sheet to leave an 8×8 array of 2 mm-diameter cylinders (64 sites) on a 1 mm base. Basic square-pillar chip carrier. |
-| `cylinder_chip.gcode`      | 2 mm flat   | Pockets a larger acrylic sheet to leave **four** identical 30×30 mm arrays (2×2 grid, 5 mm separation), each an 8×8 array of 2 mm cylinders — a multi-chip production run. |
-| `fluorescence-sensor.gcode`| 1 mm 90° V  | Routes 8 vertical columns and 8 horizontal rows with 250 µm gaps at the 8×8 pixel locations (3.75 mm pitch, −0.15 mm groove depth) — the sensor-grid / waveguide channels on the substrate. |
+| `square_chip_cnc.gcode`    | 2 mm flat   | Pockets a 30×30×3 mm acrylic sheet to leave an 8×8 array of **round 2 mm-diameter cylinders** (64 sites) on a 1 mm base. A rough cross-hatch leaves square posts, then a `G02` circular finish pass rounds each to a true 2 mm cylinder. Outline through-cuts the 30 mm part with 4 bridges (tabs). |
+| `cylinder_chip.gcode`      | 2 mm flat   | Pockets a ~65×65×3 mm sheet to leave **four** identical 30×30 mm arrays (2×2 grid, 5 mm separation), each an 8×8 array of round 2 mm cylinders — a multi-chip production run. **Outlines free all four arrays** (each with 4 bridges). |
+| `fluorescence-sensor.gcode`| 1 mm 90° V (grooves) → 2 mm flat (outline) | Routes 8 vertical + 8 horizontal V-bit grooves (3.75 mm pitch, −0.15 mm depth), **segmented with 250 µm gaps at each crossing** so the 8×8 intersections stay as solid pixel pads. The through-cut outline is a **separate end-mill section** with an explicit tool-change note. |
 
 The camera-era `microlens-chip.gcode` toolpath (Fresnel micro-lens domes over each
 site) was removed: the on-chip readout stack (CQD emitter → waveguide → diamond →
 filter → graphene detector) has no microlens layer, so it was a carried-over
 leftover from the free-space-optics design with no role on this chip.
 
-These toolpaths assume mm units (`G21`), absolute positioning (`G90`),
-feed-per-minute (`G94`), XY-plane (`G17`), and a spindle start (`M03 S8000`).
+All three toolpaths assume mm units (`G21`), absolute positioning (`G90`),
+feed-per-minute (`G94`), XY-plane (`G17`), and a **safe-start block**: Z retracts
+to a safe height (`G0 Z10`) **before** the spindle starts (`M03 S8000`). Every
+through-cut outline carries 4 bridges so the freed part is retained by the stock.
 
-> **⚠ DEMO TOOLPATHS — NOT CAM-validated. Do not run "as-is".** These files are
-> carried over from the original repository and are **not** generated from a
-> reproducible script (unlike the KiCad project below). Each file now carries a
-> safety header comment (ignored by the controller) flagging the caveats below;
-> re-verify stock size, workpiece zero, fixturing, tooling and feeds in your CAM
-> before every run:
-> - **Spindle starts immediately** (`M03 S8000`) with no safe-start block — keep
->   the work area clear and confirm Z zero before cycle start.
-> - **Outline through-cut exits the stock.** Every file ends with an outline cut
->   at `Z = −3.0 mm` (through a 3 mm sheet) that travels ~1 mm *outside* the part
->   (`-1..31` on the 30 mm sheets; `34..66` on the multi-array file). Ensure no
->   clamps/fixturing lie in that path, or delete the outline section in CAM. The
->   `fluorescence-sensor` outline also uses the 1 mm V-bit for a through-profile
->   cut, which is not a V-bit operation — reassign a profile/end mill if kept.
-> - **`cylinder_chip.gcode` outline only frees a single 32×32 mm region**
->   (`34..66`) despite the file pocketing four 30×30 mm arrays — confirm in CAM
->   whether you intend to cut out all four arrays or only trim one.
-> - Regenerating these from a deterministic generator (like the KiCad project)
->   is the recommended fix so the geometry is auditable; until then treat them
->   as unverified design artefacts.
+> **⚠ DEMO TOOLPATHS — NOT CAM-validated. Do not run "as-is".** The generator
+> fixes the *geometry and safety structure* (round pillars, all-four-arrays
+> outline, correct tooling, safe-start, bridges); it does **not** know your
+> machine's tool offsets, backlash, fixturing or workpiece zero. The outline
+> through-cut still travels ~1 mm outside the part edge (bit-centre path), so
+> ensure no clamps/fixturing lie in that path, or delete the outline section in
+> CAM. Re-verify stock size, workpiece zero, fixturing, tooling and feeds in your
+> CAM/controller before every run. Regenerate with:
+>
+> ```bash
+> .venv/bin/python tools/gen_qssc_gcode.py          # rewrites all 3 .gcode
+> ```
 
 ---
 
