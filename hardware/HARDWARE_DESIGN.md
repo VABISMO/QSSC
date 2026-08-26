@@ -536,6 +536,18 @@ pours; do not let the 1.0 V core plane overlap unrelated digital return paths,
 and do not let the emitter-rail return overlap the detector analog ground. Place
 decoupling vias to the correct rail plane directly at each cap.
 
+> **Current build vs. full-routing target.** The committed main board is the
+> 4-layer stack above (DRC-clean, copper-plane foundation + 30 GND stitching
+> vias + first-pass 13/42 signal nets routed headlessly via HDI-lite BGA
+> via-in-pad, §15). Completing the remaining ~29 signal nets across all six
+> banks of the 0.5 mm 236-pad BGA is tight on two signal layers; a **6-layer
+> upgrade** (F.Cu sig / In1.Cu GND / In2.Cu sig+RF / In3.Cu PWR / In4.Cu GND /
+> B.Cu sig) is the planned path to finish routing — it adds two signal layers
+> with a continuous ground on both sides. That upgrade is a structural change
+> to the layer assignments in `route_qssc_pcb.py`/`route_signals.py` and is
+> deferred (the 4-layer board is the verified baseline). The chip module is
+> 4-layer (F.Cu sig / In1.Cu GND / In2.Cu PWR / B.Cu sig), §15A.
+
 ---
 
 ## 13. Electronics Traces — Critical Nets & Routing Constraints
