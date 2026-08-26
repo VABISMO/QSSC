@@ -180,9 +180,8 @@ function computeOpticalChain(profile, temperature) {
   const dip = Math.round(bright - dark)
   const snr = dip / noise
   const iBright = (bright / ADC_MAX)                                     // µA (1 MΩ, 1 Vref)
-  const vBright = iBright                                                 // V (1 MΩ)
   return { ...p, noise, contrast, aseGain, wgProp, etaEnd, afterAse, afterWg,
-    atDet, bright, dark, dip, snr, iBright, vBright, T }
+    atDet, bright, dark, dip, snr, iBright, T }
 }
 
 function fmtT2(us) {
@@ -224,7 +223,7 @@ export function OpticalChainDiagram({ data, infoData, profile, temperature, acti
   // optical_readout field is stale); fall back to profile defaults.
   const dGhz = infoData?.d_ghz ?? c.dGhz
   const t2Us = infoData?.t2_us ?? c.t2UsRoom
-  const dLabel = c.dGhz < 1 ? `2|D| ${Math.round(c.dGhz * 1000)} MHz` : `D ${dGhz} GHz`
+  const dLabel = dGhz < 1 ? `2|D| ${Math.round(dGhz * 1000)} MHz` : `D ${dGhz} GHz`
 
   const stages = [
     { icon: '💡', t: 'CQD ASE emitter', v: [`${wl} nm`, `${pump} mW pump`] },
@@ -342,6 +341,13 @@ function computeRunPhysics(result, profile, temperature, infoData) {
   const nActive = result.num_qubits
   const nMeasured = Math.min(result.num_clbits || result.num_qubits, result.num_qubits)
   const shots = result.shots || 0
+  // real per-run measured readout surfaced by the backend (read_states over
+  // the 64-site grid, the displayed bitstring, mean detector photocurrent).
+  // null when absent (e.g. a run that produced no optical readout).
+  const opt = result.optical || null
+  const measPhotocurrent = opt && typeof opt.photocurrent_mean === 'number'
+    ? Math.round(opt.photocurrent_mean) : null
+  const measBitstring = opt && opt.displayed_bitstring ? opt.displayed_bitstring : null
   const readoutNs = c.readoutNs
   const elecPwrMw = c.driveMa * c.forwardV            // mW electrical per pixel
   // optical pump energy: mW * ns = pJ ; -> nJ
@@ -373,6 +379,7 @@ function computeRunPhysics(result, profile, temperature, infoData) {
     readoutMs, iBrightUa, iDarkUa, bright: c.bright, dark: c.dark, dip: c.dip,
     noise: +c.noise.toFixed(0), contrastPct, snr: +c.snr.toFixed(1), avgSnr: Math.round(avgSnr),
     wgProp: c.wgProp, fidelity, readoutErr, T: Math.round(c.T), crystal: c.crystal,
+    measPhotocurrent, measBitstring,
     snrStatus, fidStatus, driveStatus, wgStatus, contrastStatus, gridStatus, overall }
 }
 
@@ -422,6 +429,9 @@ export function RunPhysics({ result, profile, temperature, infoData }) {
         {stat('ADC codes', `${p.bright}/${p.dark}`, `dip ${p.dip}c · noise ${p.noise}c`, 'info')}
         {stat('Drive / pixel', `${p.driveMa} mA · ${p.forwardV} V`, `→ ${p.elecPwrMw} mW`, p.driveStatus, '2–20 mA')}
         {stat('Photocurrent', `${p.iBrightUa}`, `bright / ${p.iDarkUa} dark µA`, 'info')}
+        {p.measPhotocurrent != null
+          ? stat('Measured readout', `${p.measPhotocurrent}`, `code · ${p.measBitstring ? `"${p.measBitstring.slice(0, 12)}${p.measBitstring.length > 12 ? '…' : ''}"` : 'mean det. code'}`, 'info')
+          : null}
         {stat('Waveguide paths', `${p.nMeasured}`, `η ${(p.wgProp * 100).toFixed(1)}%`, p.wgStatus, 'η ≥80%')}
         {stat('CQD pixels fired', `${p.nMeasured}`, '/shot', p.gridStatus, 'fits 8×8 grid')}
         {stat('Detector electrodes', `${p.nMeasured}`, '/shot', p.gridStatus, 'fits 8×8 grid')}

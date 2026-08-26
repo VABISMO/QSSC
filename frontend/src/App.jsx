@@ -107,13 +107,23 @@ function useAsync(fn, deps = []) {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
+  // Guard against the stale-response race: when deps change (e.g. the user
+  // switches profile) a new fetch starts while the old one may still be in
+  // flight. Tag each invocation; ignore resolutions from any but the latest
+  // so a slow old request can never overwrite the fresh data. The unmount
+  // effect sets the id to -1 so a late resolution after unmount is dropped.
+  const reqId = useRef(0)
   const run = useCallback(() => {
+    const id = ++reqId.current
     setLoading(true); setError(null)
-    Promise.resolve(fn()).then(d => setData(d)).catch(e => setError(e.message))
-      .finally(() => setLoading(false))
+    Promise.resolve(fn())
+      .then(d => { if (id === reqId.current) setData(d) })
+      .catch(e => { if (id === reqId.current) setError(e.message) })
+      .finally(() => { if (id === reqId.current) setLoading(false) })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps)
   useEffect(run, [run])
+  useEffect(() => () => { reqId.current = -1 }, [])
   return { data, error, loading, reload: run }
 }
 
@@ -147,6 +157,9 @@ export default function App() {
   const [result, setResult] = useState(null)  // finished result dict
   const [runErr, setRunErr] = useState(null)
   const pollRef = useRef(null)
+  // clear any pending status-poll timeout on unmount so it can't fire a
+  // setState on the unmounted component.
+  useEffect(() => () => { if (pollRef.current) clearTimeout(pollRef.current) }, [])
 
   // ---- analog signal + calibration state ----
   const [seq, setSeq] = useState('ramsey')
@@ -304,7 +317,7 @@ export default function App() {
           <span className={`pill ${health.data && health.data.status === 'ok' ? 'ok' : ''}`}>
             {health.loading ? '…' : health.data ? 'API online' : 'API down'}
           </span>
-          <span className="pill brand">QSSC v2.0</span>
+          <span className="pill brand">QSSC v2.0.0</span>
         </div>
       </header>
 
@@ -673,7 +686,9 @@ export default function App() {
                 <div className="hint">Top bitstrings from the most recent run (most-probable first).</div>
                 {runCounts
                   ? <BarCounts counts={runCounts} />
-                  : <div className="muted">No run yet — execute a circuit on the left.</div>}
+                  : runErr
+                    ? <div className="muted">Last run failed — see the error above.</div>
+                    : <div className="muted">No run yet — execute a circuit on the left.</div>}
               </div>
 
               <div className="card">
@@ -762,7 +777,7 @@ export default function App() {
           </div>
 
           <footer style={{ marginTop: 30, color: 'var(--dim)', fontSize: 12.5, textAlign: 'center' }}>
-            QSSC — Quantum Solid State Chip · v2.0.0 · hBN V_B⁻ / NV-diamond / SiC V_Si ·
+            QSSC — Quantum Solid State Chip · v2.0.0 · NV-diamond / hBN V_B⁻ / SiC V_Si ·
             Qiskit BackendV2 + Artix-7 FPGA control stack · async jobs (Redis/RQ) · history (MongoDB)
           </footer>
         </>

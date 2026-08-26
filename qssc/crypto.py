@@ -64,9 +64,12 @@ def derive_keypair(entropy: bytes, common_name: str = "QSSC-quantum-device",
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
     ).decode("ascii")
 
-    # serial number from the extra entropy (positive, <= 159 bits per RFC 5280)
+    # serial number from the extra entropy: positive and <= 159 bits per
+    # RFC 5280 (a 20-byte INTEGER with the high bit clear). Modulo 2**159-1
+    # then +1 keeps the result in [1, 2**159-1]; the old `% 2**159` + 1 could
+    # yield exactly 2**159 (a 160-bit value) when the residue was 2**159-1.
     extra = entropy[32:52] if len(entropy) >= 52 else entropy[32:] + b"\x00" * 20
-    serial = (int.from_bytes(extra[:20], "big") % (2 ** 159)) + 1
+    serial = (int.from_bytes(extra[:20], "big") % (2 ** 159 - 1)) + 1
 
     cn = (common_name or "QSSC-quantum-device").strip()[:64] or "QSSC-quantum-device"
     subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])

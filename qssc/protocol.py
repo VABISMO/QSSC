@@ -143,7 +143,7 @@ CHIP_PROTOCOL: List[Section] = [
         steps=[
             Step("Pressure", "—", "Autoclave at 220 °C is a pressure hazard; use a ≥3 MPa rated vessel."),
             Step("Solvents", "—", "NMP is toxic — substitute IPA. Ventilate for UV resins."),
-            Step("Electrical/thermal", "—", "Insulate Peltier & laser-diode wiring; avoid shorts."),
+            Step("Electrical/thermal", "—", "Insulate Peltier & CQD emitter-driver wiring; avoid shorts."),
             Step("PPE", "—", "Gloves, eye protection, ventilation for all chemicals."),
         ],
         expected="Safe reproducible fabrication.",

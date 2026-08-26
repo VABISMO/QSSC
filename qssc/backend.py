@@ -89,9 +89,6 @@ class EmitterController:
             raise ValueError("emitter position out of range")
         return self.fpga.send_command(f"DRIVE_EMITTER {row} {col} {duration_ms}")
 
-    # back-compat for the old VCSEL-era name
-    fire = drive
-
 
 class DetectorInterface:
     """Read the on-chip graphene/MoS2 photodetector array over the FPGA UART link.
@@ -366,7 +363,6 @@ class QSSCBackend(BackendV2):
         self._target = Target(dt=1e-9, qubit_properties=qprops,
                               num_qubits=self._n_qubits, coupling_map=coupling)
         self._build_target()
-        self._noise_model = self._build_noise_model()
         self._seed = seed
         self.noise_mode = noise_mode
         self._options = self._default_options()
@@ -403,23 +399,6 @@ class QSSCBackend(BackendV2):
                          for q in instr.qubits
                          if instr.operation.name not in ("barrier",)})
         return [q for q in active if q < self._n_qubits]
-
-    def _build_noise_model(self) -> NoiseModel:
-        """Site-wide single-qubit + readout noise (used for the target/basis)."""
-        nm = NoiseModel()
-        for q, s in enumerate(self.sites):
-            t1 = s.t1 if s.t1 > 0 else self._t1
-            t2 = s.t2 if s.t2 > 0 else self._t2
-            ro = float(s.readout_err)
-            try:
-                nm.add_quantum_error(
-                    thermal_relaxation_error(t1, t2, self._g1q),
-                    ["x", "y", "h", "rz", "ry", "s", "t"], [q])
-            except Exception:  # pragma: no cover
-                pass
-            nm.add_readout_error(
-                ReadoutError([[1 - ro, ro], [ro, 1 - ro]]), [q])
-        return nm
 
     def _build_real_noise_model(self, circuit: QuantumCircuit) -> NoiseModel:
         """Full physics noise model scoped to the circuit's active qubits.
@@ -459,10 +438,6 @@ class QSSCBackend(BackendV2):
                 logger.debug("real noise build skipped pair %s,%s: %s", q, q, exc)
             nm.add_readout_error(ReadoutError([[1 - ro, ro], [ro, 1 - ro]]), [q])
         return nm
-
-    def _scoped_noise_model(self, circuit: QuantumCircuit) -> NoiseModel:
-        """Back-compat alias: the full real physics noise model (scoped)."""
-        return self._build_real_noise_model(circuit)
 
     # -- BackendV2 API -----------------------------------------------------
     @property
@@ -566,14 +541,6 @@ class QSSCBackend(BackendV2):
         ideal = self._run_ideal(circuit, shots)
         counts = self._apply_phenomenological_noise(circuit, ideal, shots)
         return counts, True
-
-    def _run_aer_noisy(self, circuit: QuantumCircuit, shots: int) -> dict:
-        """Back-compat: full real-physics Aer run (may be slow)."""
-        nm = self._build_real_noise_model(circuit)
-        aer = AerSimulator(seed_simulator=self._seed, noise_model=nm,
-                           method="density_matrix")
-        t_circ = transpile(circuit, aer, optimization_level=1)
-        return aer.run(t_circ, shots=shots).result().get_counts()
 
     def _decomposed_cost(self, circuit: QuantumCircuit) -> tuple:
         """Estimate the *decomposed* (basis-gate) cost of a circuit.
@@ -876,7 +843,10 @@ class QSSCBackend(BackendV2):
             contrast0, linewidth_hz = ODMR_CONTRAST, self.profile.odmr_linewidth_hz
         # --- temperature dependence (anchored at 300 K) ---------------------
         set_resistor_ohm = 220
-        pump_popt_mw = drive_ma * forward_v * 1e-3 * 1000 * eta_eqe
+        # optical pump power out of the CQD pixel: drive_ma * forward_v is the
+        # electrical input in mW (mA * V), * eta_eqe is the wall-plug -> optical
+        # efficiency. (The old `* 1e-3 * 1000` here was a no-op that obscured units.)
+        pump_popt_mw = drive_ma * forward_v * eta_eqe
         noise_counts = READOUT_NOISE * math.sqrt(T / 300.0)
         contrast = contrast0 * min(1.6, max(0.5, 1.0 + 0.5 * (300.0 - T) / 300.0))
         ase_gain = ASE_GAIN * min(1.25, 1.0 + 0.10 * (300.0 - T) / 300.0)

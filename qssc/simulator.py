@@ -170,6 +170,11 @@ class SimulatedFPGA:
         # stochastic RZ/RY gate error below, not the resonance acceptance.
         if abs(freq_ghz * 1e9 - self.sim_freq) > self.profile.odmr_linewidth_hz:
             return "ERR"
+        # amp is the ADF4351 output-power index 0..3 (HARDWARE_DESIGN.md §5).
+        # Reject an out-of-range raw-UART value even though backend.apply_pulse
+        # already clamps it -- defense in depth for the wire protocol.
+        if not 0 <= amp <= 3:
+            return "ERR"
         q = qubit
         self.sim_states.setdefault(q, 0)
         # phase arrives in radians (converted from integer milliradians on the
