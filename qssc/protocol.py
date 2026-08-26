@@ -453,7 +453,7 @@ def protocol_summary(platform: str = "hBN-VB") -> dict:
                          host="4H-SiC wafer (bulk)", pl_nm="~916",
                          filter="850 nm long-pass (changed)"),
     }
-    s = summaries.get(platform, summaries["hBN-VB"])
+    s = dict(summaries.get(platform, summaries["hBN-VB"]))  # copy: don't mutate cache
     s["platform"] = platform
     s["sections"] = [
         {"id": x.id, "title": x.title, "goal": x.goal, "expected": x.expected,
