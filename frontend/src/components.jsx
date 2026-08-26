@@ -136,66 +136,157 @@ export function ChipStack() {
 }
 
 // ---------------------------------------------------------------------------
-// OpticalChainDiagram — SVG flow of the on-chip readout chain (the physics of
-// every chip component the simulator checks): CQD ASE emitter -> SU-8/PDMS
-// waveguide -> 650 nm long-pass -> graphene/MoS2 detector -> TIA -> XADC ->
-// 1 kHz lock-in. Corporate-colour gradient, per-stage values, and the ODMR
-// dip -> lock-in SNR headline. Values come from /api/backend/info
-// `optical_readout`; when the API is stale/missing the field, the fallback
-// constants (mirroring qssc/backend.py::optical_readout) keep the diagram
-// correct — these are fixed hardware-physics constants, not run-dependent.
+// OpticalChainDiagram — SVG flow of the on-chip readout chain: the physics of
+// every chip component the simulator checks, RECALCULATED for the current
+// profile + temperature (each execution). CQD ASE emitter -> SU-8/PDMS
+// waveguide -> defect crystal (spin host / qubit: pump in, PL out) -> long-pass
+// filter -> 2D photodetector -> TIA -> XADC -> 1 kHz lock-in.
+//
+// The per-stage numbers are computed client-side from `profile` + `temperature`
+// (mirroring qssc/backend.py::optical_readout) so the diagram is always live
+// and updates on every run even while the public API is stale. If the API
+// serves `optical_readout`, those server values override per-field (server is
+// then computing the same temperature/profile-dependent formulas).
+//
+// Temperature dependence (honest teaching model, anchored at 300 K):
+//   readout noise ~ N0 * sqrt(T/300)        (graphene dark current + TIA thermal)
+//   ODMR contrast ~ C0 * clamp(1 + 0.5*(300-T)/300, 0.5, 1.6)  (spin polarisation)
+//   ASE gain      ~ 1.15 * (1 + 0.10*(300-T)/300)              (semiconductor gain)
+//   WG loss       ~ 0.5 * (0.7 + 0.3*T/300) dB/cm              (polymer loss)
+// dip = BRIGHT * contrast ; SNR = dip / noise. Cooling raises contrast and
+// lowers noise, so the lock-in SNR climbs sharply — the readout improves cold.
 // ---------------------------------------------------------------------------
-export function OpticalChainDiagram({ data }) {
+const ADC_MAX = 4095, BRIGHT_CODE = 3200, LOCKIN_MOD_HZ = 1000
+
+// per-profile optical-stack config (source of truth mirrors backend.py).
+// The defect crystal is the central quantum element (pump in -> PL out, ODMR
+// contrast modulates the PL), so it carries the spin-host identity + live T2.
+const OPT_PROFILE = {
+  'NV': {
+    wl: 532, pumpMw: 3.36, forwardV: 2.8, etaEqe: 0.12,
+    etaEw: 0.05, etaWd: 0.05, wgLoss: 0.5, wgLen: 0.3,
+    filter: '650 nm long-pass', filtT: 0.92, filterPasses: 'PL 637–800 nm',
+    detector: 'graphene/MoS₂', resp: 0.10, contrast0: 0.05, linewidthMHz: 5,
+    dGhz: 2.87, crystal: 'NV-diamond', crystalIcon: '💎', plRange: '637–800 nm',
+    t2UsRoom: 1800,
+  },
+  'hBN-VB': {
+    wl: 532, pumpMw: 3.36, forwardV: 2.8, etaEqe: 0.12,
+    etaEw: 0.05, etaWd: 0.05, wgLoss: 0.5, wgLen: 0.3,
+    filter: '650 nm long-pass', filtT: 0.92, filterPasses: 'PL 820–860 nm',
+    detector: 'graphene/MoS₂', resp: 0.10, contrast0: 0.05, linewidthMHz: 5,
+    dGhz: 3.46, crystal: 'hBN V_B⁻', crystalIcon: '⬡', plRange: '820–860 nm',
+    t2UsRoom: 2,
+  },
+  'SiC-VSi': {
+    wl: 916, pumpMw: 3.17, forwardV: 3.3, etaEqe: 0.08,
+    etaEw: 0.04, etaWd: 0.04, wgLoss: 0.6, wgLen: 0.3,
+    filter: '850 nm long-pass', filtT: 0.90, filterPasses: 'PL 890–940 nm',
+    detector: 'few-layer MoS₂', resp: 0.08, contrast0: 0.03, linewidthMHz: 70,
+    dGhz: 0.07, crystal: 'SiC V_Si', crystalIcon: '🔷', plRange: '890–940 nm',
+    t2UsRoom: 40,
+  },
+}
+
+function computeOpticalChain(profile, temperature) {
+  const p = OPT_PROFILE[profile] || OPT_PROFILE['NV']
+  const T = Math.max(0.001, temperature)
+  const noise = 40 * Math.sqrt(T / 300)                                  // counts
+  const contrast = p.contrast0 * Math.min(1.6, Math.max(0.5, 1 + 0.5 * (300 - T) / 300))
+  const aseGain = 1.15 * Math.min(1.25, 1 + 0.10 * (300 - T) / 300)
+  const wgLoss = p.wgLoss * (0.7 + 0.3 * T / 300)
+  const wgProp = Math.pow(10, -(wgLoss * p.wgLen) / 10)
+  const etaEnd = p.etaEw * wgProp * p.etaWd * p.filtT
+  const afterAse = p.pumpMw * aseGain
+  const afterWg = afterAse * p.etaEw * wgProp * 1000                      // µW pump at crystal
+  const atDet = afterAse * etaEnd * 1000                                  // µW PL at detector
+  const bright = BRIGHT_CODE
+  const dark = Math.round(bright * (1 - contrast))
+  const dip = Math.round(bright - dark)
+  const snr = dip / noise
+  const iBright = (bright / ADC_MAX)                                     // µA (1 MΩ, 1 Vref)
+  const vBright = iBright                                                 // V (1 MΩ)
+  return { ...p, noise, contrast, aseGain, wgProp, etaEnd, afterAse, afterWg,
+    atDet, bright, dark, dip, snr, iBright, vBright, T }
+}
+
+function fmtT2(us) {
+  if (us == null) return ''
+  return us >= 1000 ? `${(us / 1000).toFixed(2)} ms` : `${us.toFixed(1)} µs`
+}
+
+export function OpticalChainDiagram({ data, infoData, profile, temperature }) {
   const o = data || {}
   const em = o.emitter || {}, wg = o.waveguide || {}, fl = o.filter || {},
         de = o.detector || {}, rd = o.readout || {}, lb = o.link_budget || {}
-  const wl = em.wavelength_nm ?? 532
-  const pump = em.pump_optical_power_mw ?? 3.36
-  const ase = em.ase_gain ?? 1.15
-  const afterAse = em.after_ase_mw ?? 3.86
-  const wgProp = wg.propagation_efficiency ?? 0.966
-  const afterWg = lb.after_waveguide_uw ?? 187
-  const filtT = fl.transmission ?? 0.92
-  const atDet = lb.at_detector_uw ?? 8.6
-  const resp = de.responsivity_a_per_w ?? 0.1
-  const iBright = rd.photocurrent_bright_ua ?? 0.78
+  // live client-side computation (always available); server `data` overrides
+  // per-field when the API has served optical_readout.
+  const c = computeOpticalChain(profile, temperature)
+  const wl = em.wavelength_nm ?? c.wl
+  const pump = em.pump_optical_power_mw ?? c.pumpMw
+  const afterAse = em.after_ase_mw ?? +c.afterAse.toFixed(2)
+  const wgProp = wg.propagation_efficiency ?? +c.wgProp.toFixed(3)
+  const afterWg = lb.after_waveguide_uw ?? +c.afterWg.toFixed(1)
+  const filterLabel = (fl.type ?? c.filter)
+  const filtT = fl.transmission ?? c.filtT
+  const filterPasses = fl.passes ?? c.filterPasses
+  const detLabel = (de.type ?? c.detector).replace(' photodetector array', '')
+  const resp = de.responsivity_a_per_w ?? c.resp
+  const atDet = lb.at_detector_uw ?? +c.atDet.toFixed(2)
+  const iBright = rd.photocurrent_bright_ua ?? +c.iBright.toFixed(3)
   const tiaMohm = (de.transimpedance_ohm ?? 1e6) / 1e6
   const vBright = iBright * tiaMohm
   const adcBits = de.adc_bits ?? 12
-  const bright = rd.bright_code ?? 3200
-  const dark = rd.dark_code ?? 3040
-  const dip = rd.dip_counts ?? 160
-  const snr = rd.single_read_snr_sigma ?? 4.0
-  const contrast = ((rd.odmr_contrast ?? 0.05) * 100).toFixed(0)
-  const etaEnd = ((lb.end_to_end_efficiency ?? 0.00222) * 100).toFixed(2)
+  const bright = rd.bright_code ?? c.bright
+  const dark = rd.dark_code ?? c.dark
+  const dip = rd.dip_counts ?? c.dip
+  const snr = rd.single_read_snr_sigma ?? +c.snr.toFixed(1)
+  const contrastPct = (((rd.odmr_contrast ?? c.contrast) * 100)).toFixed(1)
+  const etaEnd = ((lb.end_to_end_efficiency ?? c.etaEnd) * 100).toFixed(2)
+  const noiseCounts = Math.round(rd.readout_noise_counts ?? c.noise)
+  const T = Math.round(c.T)
+  // live spin-host values from /api/backend/info (served even while the
+  // optical_readout field is stale); fall back to profile defaults.
+  const dGhz = infoData?.d_ghz ?? c.dGhz
+  const t2Us = infoData?.t2_us ?? c.t2UsRoom
+  const dLabel = c.dGhz < 1 ? `2|D| ${Math.round(c.dGhz * 1000)} MHz` : `D ${dGhz} GHz`
 
   const stages = [
     { icon: '💡', t: 'CQD ASE emitter', v: [`${wl} nm`, `${pump} mW pump`] },
-    { icon: '〜', t: 'SU-8 / PDMS', t2: 'waveguide', v: ['ηew·ηwd 5%', `prop ${(wgProp * 100).toFixed(1)}%`] },
-    { icon: '◆', t: '650 nm long-pass', v: [`T ${(filtT * 100).toFixed(0)}%`, 'blocks pump'] },
-    { icon: '◼', t: 'graphene/MoS₂', v: [`R ${resp} A/W`, `${iBright} µA`] },
+    { icon: '〜', t: 'SU-8 / PDMS', t2: 'waveguide', v: [`ηew·ηwd ${(c.etaEw * c.etaWd * 100).toFixed(0)}%`, `prop ${(wgProp * 100).toFixed(1)}%`] },
+    { icon: c.crystalIcon, t: c.crystal, accent: true, v: [dLabel, `T₂ ${fmtT2(t2Us)}`] },
+    { icon: '◆', t: filterLabel.length > 16 ? filterLabel.slice(0, 14) + '…' : filterLabel, v: [`T ${(filtT * 100).toFixed(0)}%`, filterPasses] },
+    { icon: '◼', t: detLabel, v: [`R ${resp} A/W`, `${iBright} µA`] },
     { icon: '⚡', t: 'TIA', v: [`${tiaMohm} MΩ`, `→ ${vBright.toFixed(2)} V`] },
     { icon: '▣', t: 'XADC', v: [`${adcBits}-bit`, `${bright}/${dark}`] },
     { icon: '◎', t: '1 kHz lock-in', v: [`SNR ${snr}σ`, `dip ${dip} c`] },
   ]
-  // power entering each next stage (annotated on the arrow)
-  const powers = [`${afterAse} mW`, `${afterWg} µW`, `${atDet} µW`, `${iBright} µA`, `${vBright.toFixed(2)} V`, `${bright} code`]
+  // 8 stages -> 7 arrows. The crystal arrow is the pump->PL transduction
+  // (wavelength, not a power level); the rest are the link-budget powers.
+  const powers = [
+    `${afterAse} mW`, `${afterWg} µW pump`, `PL ${c.plRange}`,
+    `${atDet} µW`, `${iBright} µA`, `${vBright.toFixed(2)} V`, `${bright} code`,
+  ]
 
-  const SX = 16, W = 104, GAP = 40, STEP = W + GAP
+  const SX = 16, W = 100, GAP = 36, STEP = W + GAP
   const x = i => SX + i * STEP
   const cx = i => x(i) + W / 2
   const rectY = 44, rectH = 92, arrowY = 90
-  const VB_W = SX + 7 * W + 6 * GAP + SX   // 16 + 728 + 240 + 16 = 1000
+  const VB_W = SX + 8 * W + 7 * GAP + SX   // 16 + 800 + 252 + 16 = 1084
   return (
     <div className="optchain-wrap">
-      <svg viewBox={`0 0 ${VB_W} 290`} className="optchain" role="img"
-           aria-label="Optical readout chain: CQD ASE emitter to 1 kHz lock-in">
+      <svg viewBox={`0 0 ${VB_W} 246`} className="optchain" role="img"
+           aria-label={`Optical readout chain at ${T} K: CQD ASE emitter through ${c.crystal} crystal to 1 kHz lock-in`}>
         <defs>
           <linearGradient id="oc-flow" x1="0" x2="1" y1="0" y2="0">
             <stop offset="0" stopColor="#22d3ee" /><stop offset="1" stopColor="#6366f1" />
           </linearGradient>
           <linearGradient id="oc-stage" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0" stopColor="#1a2444" /><stop offset="1" stopColor="#141c38" />
+          </linearGradient>
+          <linearGradient id="oc-crystal" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="rgba(244,114,182,0.22)" />
+            <stop offset="1" stopColor="rgba(99,102,241,0.10)" />
           </linearGradient>
           <linearGradient id="oc-result" x1="0" x2="1" y1="0" y2="0">
             <stop offset="0" stopColor="rgba(244,114,182,0.16)" />
@@ -206,15 +297,17 @@ export function OpticalChainDiagram({ data }) {
           </marker>
         </defs>
 
-        {/* arrows + power annotations */}
+        {/* arrows + annotations */}
         {stages.slice(0, -1).map((_, i) => {
           const x1 = x(i) + W, x2 = x(i + 1)
           const mid = (x1 + x2) / 2
+          const isPL = i === 2
           return (
             <g key={`a${i}`}>
               <line x1={x1 + 2} y1={arrowY} x2={x2 - 4} y2={arrowY}
                     stroke="url(#oc-flow)" strokeWidth="2.2" markerEnd="url(#oc-ah)" />
-              <text x={mid} y={156} textAnchor="middle" fontSize="10.5" fill="#22d3ee" fontWeight="600">
+              <text x={mid} y={156} textAnchor="middle" fontSize={isPL ? 9.5 : 10.5}
+                    fill={isPL ? '#f472b6' : '#22d3ee'} fontWeight="600">
                 {powers[i]}
               </text>
             </g>
@@ -223,11 +316,13 @@ export function OpticalChainDiagram({ data }) {
 
         {/* stages */}
         {stages.map((s, i) => (
-          <g key={s.t}>
+          <g key={s.t + i}>
             <rect x={x(i)} y={rectY} width={W} height={rectH} rx="11"
-                  fill="url(#oc-stage)" stroke="#263056" strokeWidth="1" />
+                  fill={s.accent ? 'url(#oc-crystal)' : 'url(#oc-stage)'}
+                  stroke={s.accent ? '#f472b6' : '#263056'} strokeWidth={s.accent ? 1.4 : 1} />
             <text x={cx(i)} y={34} textAnchor="middle" fontSize="19">{s.icon}</text>
-            <text x={cx(i)} y={s.t2 ? 60 : 66} textAnchor="middle" fontSize="11" fill="#e6ecff" fontWeight="600">
+            <text x={cx(i)} y={s.t2 ? 60 : 66} textAnchor="middle" fontSize="11"
+                  fill={s.accent ? '#f472b6' : '#e6ecff'} fontWeight="700">
               {s.t}
             </text>
             {s.t2 && (
@@ -236,24 +331,21 @@ export function OpticalChainDiagram({ data }) {
               </text>
             )}
             <text x={cx(i)} y={s.t2 ? 92 : 89} textAnchor="middle" fontSize="10.5" fill="#22d3ee">{s.v[0]}</text>
-            <text x={cx(i)} y={s.t2 ? 108 : 106} textAnchor="middle" fontSize="10.5" fill="#94a3c4">{s.v[1]}</text>
+            <text x={cx(i)} y={s.t2 ? 108 : 106} textAnchor="middle" fontSize="9.5" fill="#94a3c4">{s.v[1]}</text>
           </g>
         ))}
 
         {/* result headline bar */}
-        <rect x={SX} y={178} width={VB_W - 2 * SX} height={66} rx="12"
+        <rect x={SX} y={172} width={VB_W - 2 * SX} height={62} rx="12"
               fill="url(#oc-result)" stroke="#f472b6" strokeWidth="1.2" />
-        <text x={VB_W / 2} y={205} textAnchor="middle" fontSize="14" fill="#e6ecff" fontWeight="700">
-          ODMR dip <tspan fill="#f472b6" fontWeight="700">{dip} counts ({contrast}%)</tspan>
-          {' → '}lock-in SNR <tspan fill="#34d399" fontWeight="700">{snr}σ</tspan>
+        <text x={VB_W / 2} y={199} textAnchor="middle" fontSize="14" fill="#e6ecff" fontWeight="700">
+          {`@ ${T} K · ${c.crystal} ODMR dip `}
+          <tspan fill="#f472b6" fontWeight="700">{`${dip} c (${contrastPct}%)`}</tspan>
+          {` → SNR `}
+          <tspan fill="#34d399" fontWeight="700">{`${snr}σ`}</tspan>
         </text>
-        <text x={VB_W / 2} y={227} textAnchor="middle" fontSize="11" fill="#94a3c4">
-          {`bright ${bright} / dark ${dark} ADC codes · end-to-end η ${etaEnd}% · reconciles with simulator BRIGHT_CODE`}
-        </text>
-
-        {/* footer */}
-        <text x={VB_W / 2} y={266} textAnchor="middle" fontSize="10" fill="#808db0">
-          Microlens: not used — waveguide-direct coupling (no lens, no imaging). Figures anchor to the FPGA simulator readout constants.
+        <text x={VB_W / 2} y={220} textAnchor="middle" fontSize="11" fill="#94a3c4">
+          {`bright ${bright} / dark ${dark} · noise ${noiseCounts} c · pump→detector η ${etaEnd}%`}
         </text>
       </svg>
     </div>

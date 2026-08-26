@@ -378,6 +378,28 @@ def test_optical_readout_chain():
     assert "optical_readout" in b.describe()
 
 
+def test_optical_readout_is_temperature_dependent():
+    """The optical chain RECALCULATES per run: cooling cuts detector noise
+    (sqrt T) and raises ODMR contrast, so the lock-in SNR must climb at 77 K
+    vs 300 K -- not stay at a fixed snapshot. Also the SiC NIR stack differs
+    (916 nm pump, 850 nm long-pass, few-layer MoS2 detector)."""
+    warm = QSSCBackend("NV", sites=_quick_sites(), seed=0, temperature_k=300.0)
+    cold = QSSCBackend("NV", sites=_quick_sites(), seed=0, temperature_k=77.0)
+    rw, rc = warm.optical_readout()["readout"], cold.optical_readout()["readout"]
+    # noise falls, contrast rises, SNR climbs sharply when cold
+    assert rc["readout_noise_counts"] < rw["readout_noise_counts"]
+    assert rc["odmr_contrast"] > rw["odmr_contrast"]
+    assert rc["single_read_snr_sigma"] > rw["single_read_snr_sigma"]
+    assert rc["single_read_snr_sigma"] > 4.0          # 77 K beats the 300 K 4sigma
+    # bright level is anchored (detector saturation), only dark/dip move
+    assert rc["bright_code"] == rw["bright_code"] == 3200
+    # SiC uses the NIR stack
+    sic = QSSCBackend("SiC-VSi", sites=_quick_sites(), seed=0).optical_readout()
+    assert sic["emitter"]["wavelength_nm"] >= 700
+    assert "850" in sic["filter"]["type"]
+    assert "MoS2" in sic["detector"]["type"]
+
+
 def test_backend_runs_bell():
     from qiskit import QuantumCircuit
     b = QSSCBackend("hBN-VB", sites=_quick_sites(), seed=0)

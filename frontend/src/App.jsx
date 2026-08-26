@@ -123,7 +123,9 @@ export default function App() {
 
   // ---- global control state ----
   const [profile, setProfile] = useState('NV')
-  const [temperature, setTemperature] = useState(273)
+  // Peltier liquid-cooling setpoint: 2-stage TEC + NTC + PID holds the chip at
+  // 295 K +/- 0.1 K (see docs/FABRICATION_PROTOCOL_Diamond.md, protocol.py).
+  const [temperature, setTemperature] = useState(295)
   const [seed, setSeed] = useState(42)
   const [noiseMode, setNoiseMode] = useState('real')
 
@@ -410,7 +412,7 @@ export default function App() {
                 </select>
               </div>
               <div className="field">
-                <label>Temperature (K)</label>
+                <label>Temperature (K) <span className="muted">· Peltier setpoint 295 K</span></label>
                 <input type="number" min="0.001" max="600" step="any" value={temperature} onChange={e => setTemperature(+e.target.value)} />
               </div>
               <div className="field">
@@ -734,8 +736,8 @@ export default function App() {
 
             <div className="card optchain-card">
               <h2><span className="dot" />Optical readout chain</h2>
-              <div className="hint">The physics of every chip component the simulator checks — pump → detector link budget: CQD ASE emitter → SU-8/PDMS waveguides → 650 nm long-pass → graphene/MoS₂ photodetector → TIA → Artix-7 XADC → 1 kHz lock-in. Values anchor to the same readout constants the FPGA model uses.</div>
-              <OpticalChainDiagram data={info.data && info.data.optical_readout} />
+              <div className="hint">The physics of every chip component, recalculated for the selected defect &amp; temperature: CQD ASE emitter → SU-8/PDMS waveguide → <b>defect crystal</b> (the spin host / qubit — pump in, photoluminescence out) → long-pass filter → 2D photodetector → TIA → Artix-7 XADC → 1 kHz lock-in. Cooling cuts detector noise (∝√T) and raises ODMR contrast, so the lock-in SNR climbs — change the temperature or defect above and watch the dip, noise and SNR update.</div>
+              <OpticalChainDiagram data={info.data && info.data.optical_readout} infoData={info.data} profile={profile} temperature={temperature} />
             </div>
           </div>
 
