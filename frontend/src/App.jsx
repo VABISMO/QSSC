@@ -666,7 +666,6 @@ export default function App() {
                       <pre className="code-editor" style={{ whiteSpace: 'pre-wrap', marginTop: 8, fontSize: 11, maxHeight: 240 }}>{result.certificate_pem}</pre>
                     </div>
                   )}
-                  <div style={{ marginTop: 12 }}><Verdict assessment={runAssessment} approximate={runApprox} /></div>
                 </div>
               )}
             </div>
@@ -717,9 +716,10 @@ export default function App() {
                 </div>
               )}
               {info.loading && <div className="muted"><span className="spinner" /> loading backend target…</div>}
+              {runAssessment && <div style={{ marginTop: 12 }}><Verdict assessment={runAssessment} /></div>}
             </div>
 
-            <RunPhysics result={result} profile={profile} temperature={temperature} infoData={info.data} assessment={runAssessment} />
+            <RunPhysics result={result} profile={profile} temperature={temperature} infoData={info.data} />
 
             <div className="card optchain-card" style={{ gridColumn: '1 / -1' }}>
               <h2><span className="dot" />Optical readout chain</h2>
