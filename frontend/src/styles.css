@@ -112,10 +112,22 @@ button:disabled { opacity: .5; cursor: progress; }
 .qgrid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; aspect-ratio: 1; max-width: 320px; }
 .qcell {
   border-radius: 5px; background: #0c1430; border: 1px solid #1d2748;
-  display: flex; align-items: center; justify-content: center; font-size: 8px; color: var(--dim);
-  transition: all .25s;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 600; color: #eaf2ff;
+  /* black outline so the site number reads on both the dark floor and the
+     bright cyan gradient, at any background alpha (intensity). */
+  text-shadow: 0 0 3px #000, 0 0 2px #000, 1px 1px 0 #000, -1px -1px 0 #000,
+               1px -1px 0 #000, -1px 1px 0 #000;
+  transition: background .25s, box-shadow .25s, border-color .25s;
 }
-.qcell.on { background: var(--grad); border-color: transparent; box-shadow: 0 0 12px rgba(34,211,238,.5); }
+/* lit cell: the brand gradient at alpha = --lit (0.2..1.0 over the dark
+   floor), so the measured-|1⟩ probability scales the fill without dimming
+   the number. A glow scaled by the same var marks high-probability sites. */
+.qcell.on {
+  background: linear-gradient(135deg, rgba(34,211,238, var(--lit,1)), rgba(99,102,241, var(--lit,1)));
+  border-color: transparent;
+  box-shadow: 0 0 calc(6px + 8px * var(--lit,1)) rgba(34,211,238, calc(.35 * var(--lit,1)));
+}
 .qcell.measured { border-color: #3b82f6; }      /* a qubit that was measured this run (even if |0⟩) */
 .qcell.usable { border-color: #263056; }
 .qgrid-legend { display: flex; gap: 14px; margin-top: 10px; font-size: 11.5px; color: var(--muted); }

@@ -169,7 +169,7 @@ def run_circuit(req: dict) -> dict:
 
     elif algo == "qft":
         from qiskit import QuantumCircuit
-        n = max(2, min(8, int(req.get("num_qubits", 4))))
+        n = max(2, min(20, int(req.get("num_qubits", 4))))
         x = int(req.get("x", 1)) % (2 ** n)
         qc = QuantumCircuit(n, n)
         for i in range(n):
@@ -210,7 +210,7 @@ def run_circuit(req: dict) -> dict:
         # self-signed X.509 device certificate. Cooling the chip -> less
         # bias -> higher extraction rate.
         from qiskit import QuantumCircuit
-        n = max(2, min(16, int(req.get("num_qubits", 8))))
+        n = max(2, min(20, int(req.get("num_qubits", 8))))
         num_bytes = max(16, min(64, int(req.get("num_bytes", 32))))
         cn = str(req.get("common_name") or "QSSC-quantum-device")
         need_bits = num_bytes * 8

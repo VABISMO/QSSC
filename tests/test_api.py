@@ -203,7 +203,7 @@ def test_run_rejects_oversize_shots(client):
 
 def test_custom_rejects_oversize_qubits(client):
     r = client.post("/api/circuit/custom",
-                    json={"code": GHZ_PY, "max_qubits": 20})
+                    json={"code": GHZ_PY, "max_qubits": 28})
     assert r.status_code == 422
 
 
@@ -313,6 +313,49 @@ def test_bell_grid_lights_measured_qubits(client):
     assert all(states[i] == -1 for i in range(2, len(states)))
     # photocurrent_mean reflects only the pumped electrodes (not the floor)
     assert opt["photocurrent_mean"] > 0.0
+
+
+# --- qubit-count cap (chip has 64 sites; classical sim is bounded) --------
+
+def test_circuit_run_bell_20_qubits(client):
+    """20 qubits (was capped at 12) runs and lights 20 measured grid sites."""
+    r = client.post("/api/circuit/run", params={"sync": True},
+                    json={"algorithm": "bell", "profile": "NV", "num_qubits": 20,
+                          "shots": 512, "seed": 1, "noise_mode": "real"})
+    assert r.status_code == 200, r.text
+    res = r.json()["result"]
+    assert "error" not in res, res.get("error")
+    assert sum(res["counts"].values()) == 512
+    assert res["num_clbits"] == 20
+    # 20 of the 64 sites were measured; the rest are -1
+    st = res["optical"]["read_states"]
+    assert sum(1 for v in st if v in (0, 1)) == 20
+    assert sum(1 for v in st if v == -1) == 44
+
+
+def test_circuit_run_qft_20_qubits(client):
+    """QFT on 20 qubits (non-Clifford, real statevector) completes."""
+    r = client.post("/api/circuit/run", params={"sync": True},
+                    json={"algorithm": "qft", "profile": "NV", "num_qubits": 20,
+                          "x": 1, "shots": 512, "seed": 2, "noise_mode": "real"})
+    assert r.status_code == 200, r.text
+    res = r.json()["result"]
+    assert "error" not in res, res.get("error")
+    assert sum(res["counts"].values()) == 512
+
+
+def test_too_wide_circuit_errors_not_faked(client):
+    """Regression: a circuit wider than the classical simulation ceiling
+    (math mul bits=8 -> 32 qubits > SIM_MAX_QUBITS=28) used to silently fall
+    back to fake all-zero counts. It must now return an honest error."""
+    r = client.post("/api/circuit/run", params={"sync": True},
+                    json={"algorithm": "math", "profile": "NV", "op": "mul",
+                          "a": 3, "b": 5, "bits": 8, "shots": 256, "seed": 3,
+                          "noise_mode": "real"})
+    assert r.status_code == 200
+    j = r.json()
+    assert j["status"] == "failed"
+    assert "32 qubits" in j["result"]["error"] or "bounded" in j["result"]["error"]
 
 
 # --- async job lifecycle ----------------------------------------------------

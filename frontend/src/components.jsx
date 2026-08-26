@@ -35,7 +35,13 @@ export function QubitGrid({ sites, counts, numClbits }) {
       <div className="qgrid">
         {cells.map(cell => {
           const lit = cell.prob > 0
-          const style = lit ? { opacity: (0.3 + 0.7 * cell.prob).toFixed(3) } : undefined
+          // intensity (measured-|1⟩ probability) is encoded in the BACKGROUND
+          // alpha via the --lit CSS var (0.2..1.0), NOT in whole-cell opacity
+          // -- opacity would dim the number too and make it unreadable at every
+          // intensity. The number itself stays full-opacity with a black
+          // outline (styles.css) so it reads on both the dark floor and the
+          // bright gradient.
+          const style = lit ? { '--lit': (0.2 + 0.8 * cell.prob).toFixed(3) } : undefined
           return (
             <div key={cell.idx}
                  className={`qcell ${lit ? 'on' : ''} ${cell.measured ? 'measured' : ''} ${cell.usable ? 'usable' : ''}`}

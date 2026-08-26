@@ -87,7 +87,7 @@ class RunRequest(BaseModel):
     op: str = "add"                  # math op
     num1: float = 2.0
     num2: Optional[float] = None
-    num_qubits: int = Field(2, ge=1, le=12)         # bell / qft / qrand
+    num_qubits: int = Field(2, ge=1, le=20)         # bell / qft / qrand
     n_items: Optional[int] = None    # grover: search space = 2^n_items
     marked: Optional[int] = None     # grover: marked index
     iterations: int = Field(1, ge=1, le=100)        # grover
@@ -108,10 +108,12 @@ class CustomCircuitRequest(BaseModel):
     shots: int = Field(2048, ge=1, le=4096)
     seed: int = Field(42, ge=0, le=2_147_483_647)
     noise_mode: str = "real"   # real (default, full physics) | phenomenological | none
-    # Cap at 12 qubits: the "real" mode runs a 4^n density matrix (12 qubits
-    # ~ 67 MB; 64 qubits would be ~2^66 bytes = instant OOM on a 512 MB free
-    # tier). Larger user circuits fall back to the analytic decoherence limit.
-    max_qubits: int = Field(12, ge=1, le=12)
+    # Cap at 20 qubits: the chip has 64 physical sites but the circuit is
+    # simulated classically (Aer statevector / density matrix, O(2^n) memory).
+    # 20 qubits is a safe statevector size (~16 MB) on the free Render worker;
+    # circuits wider than the backend's SIM_MAX_QUBITS (28) are rejected with a
+    # clear error rather than silently faked. See qssc.backend.SIM_MAX_QUBITS.
+    max_qubits: int = Field(20, ge=1, le=20)
 
 
 # ---------------------------------------------------------------------------
@@ -437,7 +439,11 @@ def run_circuit(req: RunRequest, sync: bool = False, request: Request = None):
     payload.setdefault("temperature_k", 300.0)
     if sync:
         from api.runner import run_circuit as _run
-        return {"job_id": None, "status": "finished", "result": _run(payload)}
+        try:
+            return {"job_id": None, "status": "finished", "result": _run(payload)}
+        except Exception as exc:  # noqa: BLE001 - surface sim errors, not a 500
+            return {"job_id": None, "status": "failed",
+                    "result": {"error": str(exc)}}
     job_id = jobs.enqueue("circuit", payload)
     return {"job_id": job_id, "status": "queued"}
 

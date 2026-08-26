@@ -47,6 +47,17 @@ from .simulator import (
 
 logger = logging.getLogger(__name__)
 
+# Classical simulation ceiling. The chip has 64 physical detector sites (the
+# 8x8 grid), but a quantum circuit is simulated classically by Aer as a
+# statevector / density matrix, which is O(2^n) in memory. AerSimulator's
+# default target tops out at 28 qubits (a 2^28 statevector ~4 GB); on the free
+# Render worker the practical safe width is lower (see API cap). Circuits
+# wider than this cannot be simulated honestly on any classical machine and
+# are rejected with a clear error instead of silently returning fake
+# all-zero counts. The grid still shows all 64 sites; only the *simulated*
+# subset that was measured lights up.
+SIM_MAX_QUBITS = 28
+
 
 # ---------------------------------------------------------------------------
 # Hardware abstractions (real serial + simulator share one interface)
@@ -468,6 +479,13 @@ class QSSCBackend(BackendV2):
         shots = int(options.get("shots", self.shots))
         job_id = f"qssc-{self._job_counter:04d}"
         mode = options.get("noise_mode", self.noise_mode)
+        if circuit.num_qubits > SIM_MAX_QUBITS:
+            raise ValueError(
+                f"circuit uses {circuit.num_qubits} qubits, but the classical "
+                f"simulator is bounded at {SIM_MAX_QUBITS} (a 2^{circuit.num_qubits} "
+                f"statevector cannot be held in memory). The chip has 64 physical "
+                f"sites; the simulator runs circuits on a classical subset. Use a "
+                f"smaller register or a lower N.")
         ideal_counts = self._run_ideal(circuit, shots)
         assessment = self.assess_circuit(circuit)
         approximate = False
@@ -487,14 +505,19 @@ class QSSCBackend(BackendV2):
                           noise_mode=mode, approximate=approximate)
 
     def _run_ideal(self, circuit: QuantumCircuit, shots: int) -> dict:
-        """Fast ideal statevector simulation via Aer (no noise model)."""
-        try:
-            aer = AerSimulator(seed_simulator=self._seed)
-            t_circ = transpile(circuit, aer, optimization_level=1)
-            return aer.run(t_circ, shots=shots).result().get_counts()
-        except Exception as exc:  # pragma: no cover
-            logger.error("ideal Aer run failed: %s", exc)
-            return {"0" * max(circuit.num_clbits, 1): shots}
+        """Fast ideal statevector simulation via Aer (no noise model).
+
+        Raises on failure rather than silently returning fake all-zero
+        counts -- a circuit that Aer cannot simulate (too wide, unsupported
+        op...) must surface as an honest error, not a fabricated |0...0>
+        result that would mislead the dashboard into showing "everything
+        measured zero". The width guard in :meth:`_execute` rejects
+        over-wide circuits first; this catch-all only fires for unexpected
+        Aer failures.
+        """
+        aer = AerSimulator(seed_simulator=self._seed)
+        t_circ = transpile(circuit, aer, optimization_level=1)
+        return aer.run(t_circ, shots=shots).result().get_counts()
 
     def _run_real(self, circuit: QuantumCircuit, shots: int,
                   assessment: dict) -> tuple:

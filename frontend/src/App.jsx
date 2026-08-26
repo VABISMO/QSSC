@@ -41,9 +41,9 @@ const SEQS = [
 // = the number of key-exchange rounds.
 const QUBIT_CFG = {
   custom:  null,                                  // custom circuit defines its own width
-  bell:    { min: 2, max: 16, step: 1, def: 4,  label: 'Qubits n',         hint: 'GHZ chain on n qubits (H + CNOT ladder)' },
-  qrand:   { min: 2, max: 16, step: 1, def: 8,  label: 'Qubits n',         hint: 'n qubits prepared in |+⟩ → von-Neumann-extracted entropy' },
-  qft:     { min: 2, max: 8,  step: 1, def: 4,  label: 'Qubits n',         hint: 'QFT of an n-qubit computational-basis state' },
+  bell:    { min: 2, max: 20, step: 1, def: 4,  label: 'Qubits n',         hint: 'GHZ chain on n qubits (H + CNOT ladder)' },
+  qrand:   { min: 2, max: 20, step: 1, def: 8,  label: 'Qubits n',         hint: 'n qubits prepared in |+⟩ → von-Neumann-extracted entropy' },
+  qft:     { min: 2, max: 20, step: 1, def: 4,  label: 'Qubits n',         hint: 'QFT of an n-qubit computational-basis state' },
   grover:  { min: 2, max: 8,  step: 1, def: 3,  label: 'Search qubits n',  hint: 'search space of 2ⁿ items' },
   math:    { min: 2, max: 6,  step: 1, def: 4,  label: 'Word qubits n',    hint: 'n-bit arithmetic register' },
   // shor / period / qftnos: the qubit count is a CONSEQUENCE of the integer N
