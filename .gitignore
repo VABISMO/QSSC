@@ -82,6 +82,8 @@ htmlcov/
 *.bak
 fp-info-cache
 fp-lib-table
+*.kicad_prl
+*.kicad_prl.bak
 *-save.kicad_pcb
 gerber/
 *.gbr

@@ -704,7 +704,11 @@ kicad-cli pcb drc   --output /tmp/drc.txt hardware/pcb/qssc.kicad_pcb   # 0 viol
 > interpreter. Both are resource-capped when run via `tools/` (CPUQuota /
 > MemoryMax) so they do not freeze the host. The board the pipeline produces
 > is the one checked in. The full pipeline (routing + planes + DRC) is
-> scripted in `/tmp/qssc_route_pipeline.sh`.
+> scripted in `/tmp/qssc_route_pipeline.sh`. The same `route_qssc_pcb.py` is
+> reused for the chip module — there is no BGA on the module so `route_signals`
+> is skipped; run the plane pass with
+> `QSSC_PCB_PATH=hardware/pcb/chip_module.kicad_pcb python3 tools/route_qssc_pcb.py`
+> (the `QSSC_PCB_PATH` env var overrides the default board path).
 
 ### 15A. Swappable chip MODULE (second board) — ERC + DRC clean
 
@@ -734,16 +738,29 @@ On-module parts (all real, datasheet-pinned — no invented symbols):
   16 emitter pads on the periphery) generated headlessly.
 - **10 k NTC thermistor divider** → `THRM` sense line back to the FPGA.
 - Per-IC 100 nF decoupling + 10 µF bulk; `PWR_FLAG` on +3V3 / +5V / +7V_EMIT /
-  GND so the connector-fed power rails are ERC-driven.
+  GND so the connector-fed power rails are ERC-driven. Each `PWR_FLAG` also
+  carries a real **thru-hole `TestPoint_Loop_D1.80mm`** footprint, so the four
+  power rails are probeable along the left edge — and the plated +3V3 pad is
+  what stitches the In2.Cu +3V3 plane to all layers (without a plated +3V3
+  hole the solid +3V3 pour is an isolated-copper fill).
+- **Copper-plane foundation (headless, by `route_qssc_pcb.py` via
+  `QSSC_PCB_PATH=…chip_module.kicad_pcb`):** solid **In1.Cu GND** plane,
+  solid **In2.Cu +3V3** plane, **F.Cu + B.Cu GND flood pours**, and **30 GND
+  stitching vias** on a 10 mm pad/signal-clearance-checked grid — the 64 analog
+  detector lines and the TIA sit over a continuous ground reference.
 
 Status: `kicad-cli sch erc` → **0 errors** (26 warnings, the same tolerated
 classes as the main board — off-grid authored pins, NC pins, single-pin
 passthrough nets `mod_sync`/`DET_BIAS` reserved for the not-yet-placed emitter
 driver / bias DAC); `kicad-cli pcb drc --severity-error --severity-warning` →
-**0 violations, 0 unconnected, 0 footprint errors**. 97 nets (incl. all 64
-DET_IN, 8+8 emitter rows/cols, 6 mux selects). The CQD emitter high-voltage
-driver (TLC5955) + per-pixel set resistors + Peltier drive land in a follow-up
-batch; the +7V_EMIT rail is brought across and flagged now.
+**0 violations, 0 unconnected, 0 footprint errors** (incl. after the plane +
+stitching pass — the +3V3 TestPoint keeps the power pour non-isolated). 97
+nets (incl. all 64 DET_IN, 8+8 emitter rows/cols, 6 mux selects). The CQD
+emitter high-voltage driver (TLC5955) + per-pixel set resistors + Peltier drive
+land in a follow-up batch; the +7V_EMIT rail is brought across and flagged
+now. **Note:** the +7V_EMIT boost must NOT use TPS61023 (its max output is
+5.5 V) — a ≥7 V-capable part such as TPS61040 (up to 28 V) is required once
+the emitter driver topology and exact rail voltage are fixed.
 
 ---
 

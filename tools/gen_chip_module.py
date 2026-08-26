@@ -404,14 +404,23 @@ def build_module_components():
     _addm("C7", "qssc:C", "10uF", "Capacitor_SMD:C_0805_2012Metric",
           (170, 70), 0, {"1": "+3V3", "2": "GND"}, (20, 30, 0))   # +3V3 bulk
 
-    # PWR_FLAG on every rail so the connector-fed power_in pins are "driven"
-    _addm("#FLG1", "power:PWR_FLAG", "PWR_FLAG", "", (100, 30), 0,
+    # PWR_FLAG on every rail so the connector-fed power_in pins are "driven".
+    # Each PWR_FLAG also carries a real thru-hole TestPoint footprint (wire-loop
+    # bead, TestPoint_Loop_D1.80mm Drill1.0mm) so the module has probeable +3V3 /
+    # +5V / +7V_EMIT / GND points along the left edge.  The +3V3 one is what
+    # stitches the In2.Cu +3V3 plane to all layers (its plated barrel connects
+    # the SMD-only +3V3 rail to the power plane -- without it the +3V3 zone is
+    # an isolated_copper fill).  Courtyard is a r=1.8 mm circle; at 5 mm y-pitch
+    # (4/9/14/19) the four never overlap (3.6 < 5) and the x=6 column clears the
+    # board edge (x=0) and every other part.
+    _TP = "TestPoint:TestPoint_Loop_D1.80mm_Drill1.0mm_Beaded"
+    _addm("#FLG1", "power:PWR_FLAG", "PWR_FLAG", _TP, (100, 30), 0,
           {"1": "+3V3"}, (6, 4, 0))
-    _addm("#FLG2", "power:PWR_FLAG", "PWR_FLAG", "", (100, 40), 0,
+    _addm("#FLG2", "power:PWR_FLAG", "PWR_FLAG", _TP, (100, 40), 0,
           {"1": "+5V"}, (6, 9, 0))
-    _addm("#FLG3", "power:PWR_FLAG", "PWR_FLAG", "", (100, 50), 0,
+    _addm("#FLG3", "power:PWR_FLAG", "PWR_FLAG", _TP, (100, 50), 0,
           {"1": "+7V_EMIT"}, (6, 14, 0))
-    _addm("#FLG4", "power:PWR_FLAG", "PWR_FLAG", "", (100, 60), 0,
+    _addm("#FLG4", "power:PWR_FLAG", "PWR_FLAG", _TP, (100, 60), 0,
           {"1": "GND"}, (6, 19, 0))
 
 
