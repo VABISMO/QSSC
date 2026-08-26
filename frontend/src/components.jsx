@@ -379,12 +379,28 @@ function computeRunPhysics(result, profile, temperature, infoData) {
   const readoutErr = infoData?.readout_error ?? c.readoutErr
   const fidelity = 1 - readoutErr
   const avgSnr = c.snr * Math.sqrt(Math.max(shots, 1))   // N-shot averaging
+  // ---- per-metric pass/fail vs the chip's operating range ----
+  // green = inside spec / works; amber = marginal; red = out of spec / fails
+  const snrStatus = c.snr >= 3 ? 'ok' : c.snr >= 2 ? 'warn' : 'bad'      // 3sigma = confident single-shot ODMR dip
+  const fidStatus = fidelity >= 0.9 ? 'ok' : fidelity >= 0.8 ? 'warn' : 'bad'
+  const driveStatus = (c.driveMa >= 2 && c.driveMa <= 20) ? 'ok' : 'bad'  // CQD pixel 2-20 mA spec
+  const wgStatus = c.wgProp >= 0.8 ? 'ok' : c.wgProp >= 0.5 ? 'warn' : 'bad'
+  const contrastPct = +(c.contrast * 100).toFixed(1)
+  const contrastStatus = c.contrast >= 0.04 ? 'ok' : c.contrast >= 0.02 ? 'warn' : 'bad'
+  // overall = worst meaningful signal (single-read SNR dominates: if the dip
+  // doesn't resolve above noise in one shot, the readout doesn't work at this T)
+  const worst = (arr) => arr.includes('bad') ? 'bad' : arr.includes('warn') ? 'warn' : 'ok'
+  const overall = worst([snrStatus, fidStatus, driveStatus, wgStatus, contrastStatus])
   return { nActive, nMeasured, shots, driveMa: c.driveMa, forwardV: c.forwardV,
     elecPwrMw, pumpMw: c.pumpMw, optNjPerSite, optNjPerShot, totalOptUj,
     readoutMs, iBrightUa, iDarkUa, bright: c.bright, dark: c.dark, dip: c.dip,
-    snr: +c.snr.toFixed(1), avgSnr: Math.round(avgSnr), wgProp: c.wgProp,
-    fidelity, readoutErr, T: Math.round(c.T), crystal: c.crystal }
+    noise: +c.noise.toFixed(0), contrastPct, snr: +c.snr.toFixed(1), avgSnr: Math.round(avgSnr),
+    wgProp: c.wgProp, fidelity, readoutErr, T: Math.round(c.T), crystal: c.crystal,
+    snrStatus, fidStatus, driveStatus, wgStatus, contrastStatus, overall }
 }
+
+const CHIP_LABEL = { ok: '✓ in spec', warn: '⚠ marginal', bad: '✗ out of spec' }
+const CHIP_LABEL_SHORT = { ok: 'OK', warn: 'marginal', bad: 'FAIL' }
 
 export function RunPhysics({ result, profile, temperature, infoData }) {
   const p = computeRunPhysics(result, profile, temperature, infoData)
@@ -392,30 +408,47 @@ export function RunPhysics({ result, profile, temperature, infoData }) {
     return (
       <div className="card runphysics-card">
         <h2><span className="dot" />Execution component physics</h2>
-        <div className="hint">Run a circuit — the CQD emitter array, waveguides, photodetectors and lock-in readout physics are calculated for the actual circuit that runs (active sites, pump energy, detector codes, SNR, readout time), not a fixed snapshot.</div>
+        <div className="hint">Run a circuit — the CQD emitter array, waveguides, photodetectors and lock-in readout physics are calculated for the actual circuit that runs, with a green/amber/red verdict on whether each value is inside the chip's operating spec.</div>
         <div className="muted" style={{ marginTop: 6 }}>No circuit run yet.</div>
       </div>
     )
   }
   const pct = v => (v * 100).toFixed(1)
-  const stat = (k, v, u) => (
-    <div className="stat"><div className="k">{k}</div><div className="v">{v}{u != null && <small> {u}</small>}</div></div>
+  const stat = (k, v, u, status, spec) => (
+    <div className="stat">
+      <div className="k">{k}</div>
+      <div className="v">{v}{u != null && <small> {u}</small>}</div>
+      {status && <span className={`chip ${status}`}>{CHIP_LABEL_SHORT[status]} · {spec}</span>}
+    </div>
   )
+  const overallTxt = p.overall === 'ok' ? '✓ Readout works at this temperature'
+    : p.overall === 'warn' ? '⚠ Readout marginal — cool the chip'
+    : '✗ Readout too noisy — does not work at this temperature'
+  const overallWhy = p.overall === 'ok'
+    ? 'single-shot ODMR dip resolves ≥3σ above detector noise; fidelity ≥90%'
+    : p.overall === 'warn'
+    ? 'single-shot SNR is 2–3σ or fidelity 80–90% — readout borderline; cooling raises contrast & cuts noise'
+    : 'single-shot SNR <2σ or fidelity <80% — the ODMR dip does not resolve; lower the temperature or pick a brighter defect'
   return (
     <div className="card runphysics-card">
       <h2><span className="dot" />Execution component physics <span className="muted" style={{ fontWeight: 400 }}>· {p.crystal} @ {p.T} K · {p.shots} shots · {p.nActive}q circuit</span></h2>
-      <div className="hint">Calculated for the circuit that just ran — these numbers change with the algorithm, qubit count, shots, defect and temperature.</div>
-      <div className="stats">
-        {stat('CQD pixels fired', `${p.nMeasured}`, '/shot')}
-        {stat('Drive / pixel', `${p.driveMa} mA · ${p.forwardV} V`, `→ ${p.elecPwrMw} mW`)}
-        {stat('Pump energy', p.totalOptUj >= 1000 ? (p.totalOptUj / 1000).toFixed(2) : p.totalOptUj.toFixed(2), p.totalOptUj >= 1000 ? 'mJ optical' : 'µJ optical')}
-        {stat('Waveguide paths', `${p.nMeasured}`, `η ${(p.wgProp * 100).toFixed(1)}%`)}
-        {stat('Detector electrodes', `${p.nMeasured}`, '/shot')}
-        {stat('Photocurrent', `${p.iBrightUa}`, `bright / ${p.iDarkUa} dark µA`)}
-        {stat('ADC codes', `${p.bright}/${p.dark}`, `dip ${p.dip} c`)}
-        {stat('Lock-in SNR', `${p.snr}σ`, `single · ${p.avgSnr}σ / ${p.shots} shots`)}
-        {stat('Readout fidelity', pct(p.fidelity), '%')}
-        {stat('Readout time', p.readoutMs >= 1000 ? (p.readoutMs / 1000).toFixed(2) : p.readoutMs.toFixed(2), p.readoutMs >= 1000 ? 's sequential' : 'ms sequential')}
+      <div className="hint">Calculated for the circuit that just ran — each value is checked against the chip's operating spec.</div>
+      <div className={`verdict ${p.overall}`} style={{ marginTop: 10 }}>
+        <div className="verdict-h">{overallTxt}</div>
+        <div className="verdict-body">{overallWhy}</div>
+      </div>
+      <div className="stats" style={{ marginTop: 10 }}>
+        {stat('Lock-in SNR', `${p.snr}σ`, `single · ${p.avgSnr}σ / ${p.shots} shots`, p.snrStatus, '≥3σ single-shot')}
+        {stat('Readout fidelity', pct(p.fidelity), '%', p.fidStatus, '≥90%')}
+        {stat('ODMR contrast', `${p.contrastPct}`, '%', p.contrastStatus, '≥4% dip')}
+        {stat('ADC codes', `${p.bright}/${p.dark}`, `dip ${p.dip}c · noise ${p.noise}c`, null)}
+        {stat('Drive / pixel', `${p.driveMa} mA · ${p.forwardV} V`, `→ ${p.elecPwrMw} mW`, p.driveStatus, '2–20 mA')}
+        {stat('Photocurrent', `${p.iBrightUa}`, `bright / ${p.iDarkUa} dark µA`, null)}
+        {stat('Waveguide paths', `${p.nMeasured}`, `η ${(p.wgProp * 100).toFixed(1)}%`, p.wgStatus, 'η ≥80%')}
+        {stat('CQD pixels fired', `${p.nMeasured}`, '/shot', null)}
+        {stat('Detector electrodes', `${p.nMeasured}`, '/shot', null)}
+        {stat('Pump energy', p.totalOptUj >= 1000 ? (p.totalOptUj / 1000).toFixed(2) : p.totalOptUj.toFixed(2), p.totalOptUj >= 1000 ? 'mJ optical' : 'µJ optical', null)}
+        {stat('Readout time', p.readoutMs >= 1000 ? (p.readoutMs / 1000).toFixed(2) : p.readoutMs.toFixed(2), p.readoutMs >= 1000 ? 's sequential' : 'ms sequential', null)}
       </div>
     </div>
   )
