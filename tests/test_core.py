@@ -390,6 +390,28 @@ def test_user_circuit_python_and_qasm():
                            "qc = QuantumCircuit(99)", max_qubits=64)
 
 
+def test_user_circuit_numpy_file_io_blocked():
+    from qssc import build_user_circuit, UserCircuitError
+    # numpy numeric use still works via the convenience np
+    ok = ("import numpy as np\n"
+          "from qiskit import QuantumCircuit\n"
+          "qc = QuantumCircuit(2, 2)\nqc.h(0); qc.cx(0,1); qc.measure(0,0)\n")
+    build_user_circuit(ok)
+    # numpy file-IO stripped from the convenience np ...
+    with pytest.raises(UserCircuitError):
+        build_user_circuit(
+            "from qiskit import QuantumCircuit\n"
+            "qc = QuantumCircuit(2); qc.h(0)\n"
+            "np.load('/etc/passwd')\n")
+    # ... and from a bare `import numpy`
+    with pytest.raises(UserCircuitError):
+        build_user_circuit(
+            "import numpy\n"
+            "from qiskit import QuantumCircuit\n"
+            "qc = QuantumCircuit(2); qc.h(0)\n"
+            "numpy.fromfile('/etc/passwd')\n")
+
+
 # -- backend -----------------------------------------------------------------
 
 def _quick_sites(n=16):

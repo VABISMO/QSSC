@@ -351,6 +351,29 @@ class _UserAstValidator(_ast.NodeVisitor):
         self.generic_visit(node)
 
 
+# numpy file-IO entry points the user script must not reach. The AST sandbox
+# blocks `open`/dunder escapes, but numpy's own ``np.load``/``np.fromfile``/
+#``np.savetxt`` read and write the host filesystem directly, so strip them
+# from the exposed ``np``. This is defense in depth for a localhost lab tool,
+# not a claim of absolute sandboxing.
+_USER_NP_BLOCKED = {
+    "load", "save", "savez", "savez_compressed", "savetxt", "fromfile",
+    "genfromtxt", "loadtxt", "memmap", "tofile",
+}
+
+
+class _SafeNumpy:
+    """Proxy over numpy that raises on the file-IO attributes."""
+
+    def __init__(self, npmod):
+        object.__setattr__(self, "_np", npmod)
+
+    def __getattr__(self, name):
+        if name in _USER_NP_BLOCKED:
+            raise UserCircuitError(f"numpy file I/O '{name}' is not allowed")
+        return getattr(self._np, name)
+
+
 def build_user_circuit(code: str, max_qubits: int = 64) -> QuantumCircuit:
     """Build a Qiskit circuit from user-supplied source.
 
@@ -371,9 +394,12 @@ def build_user_circuit(code: str, max_qubits: int = 64) -> QuantumCircuit:
     .. note::
 
        This is a **local lab / demo tool**. The AST sandbox closes the known
-       restricted-builtins escape (`obj.__init__.__globals__`), but no pure-Python
-       sandbox is absolute; do not expose this endpoint to untrusted remote
-       clients. The API already binds to localhost.
+       restricted-builtins escape (`obj.__init__.__globals__`) and strips
+       numpy's file-IO entry points (``np.load``/``np.fromfile``/``np.savetxt``
+       …) from both the convenience ``np`` and a bare ``import numpy``, but no
+       pure-Python sandbox is absolute — dotted imports (``import numpy.linalg``)
+       still reach the real module. Do not expose this endpoint to untrusted
+       remote clients. The API already binds to localhost.
     """
     text = (code or "").strip()
     if not text:
@@ -418,7 +444,14 @@ def build_user_circuit(code: str, max_qubits: int = 64) -> QuantumCircuit:
     def _safe_import(name, globals=None, locals=None, fromlist=(), level=0):
         if level != 0 or name not in _USER_ALLOWED_MODULES:
             raise UserCircuitError(f"import of '{name}' is not allowed")
-        return _builtins.__import__(name, globals, locals, fromlist, level)
+        mod = _builtins.__import__(name, globals, locals, fromlist, level)
+        # bare `import numpy` / `import numpy as np` also gets the file-IO
+        # stripped proxy. (Dotted imports like `import numpy.linalg` return the
+        # real submodule and are a known residual — this is a localhost lab
+        # tool, not a hardened sandbox; see the module docstring.)
+        if name == "numpy":
+            return _SafeNumpy(mod)
+        return mod
 
     namespace = {
         # primitives the user script may use directly (no import needed)
@@ -426,7 +459,7 @@ def build_user_circuit(code: str, max_qubits: int = 64) -> QuantumCircuit:
         "QuantumRegister": QuantumRegister,
         "ClassicalRegister": ClassicalRegister,
         # convenience aliases matching common tutorials
-        "np": np, "math": math, "pi": math.pi,
+        "np": _SafeNumpy(np), "math": math, "pi": math.pi,
     }
     safe_builtins = {
         "abs": abs, "min": min, "max": max, "range": range, "len": len,
