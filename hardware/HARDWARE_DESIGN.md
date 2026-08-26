@@ -538,6 +538,27 @@ leftover from the free-space-optics design with no role on this chip.
 These toolpaths assume mm units (`G21`), absolute positioning (`G90`),
 feed-per-minute (`G94`), XY-plane (`G17`), and a spindle start (`M03 S8000`).
 
+> **⚠ DEMO TOOLPATHS — NOT CAM-validated. Do not run "as-is".** These files are
+> carried over from the original repository and are **not** generated from a
+> reproducible script (unlike the KiCad project below). Each file now carries a
+> safety header comment (ignored by the controller) flagging the caveats below;
+> re-verify stock size, workpiece zero, fixturing, tooling and feeds in your CAM
+> before every run:
+> - **Spindle starts immediately** (`M03 S8000`) with no safe-start block — keep
+>   the work area clear and confirm Z zero before cycle start.
+> - **Outline through-cut exits the stock.** Every file ends with an outline cut
+>   at `Z = −3.0 mm` (through a 3 mm sheet) that travels ~1 mm *outside* the part
+>   (`-1..31` on the 30 mm sheets; `34..66` on the multi-array file). Ensure no
+>   clamps/fixturing lie in that path, or delete the outline section in CAM. The
+>   `fluorescence-sensor` outline also uses the 1 mm V-bit for a through-profile
+>   cut, which is not a V-bit operation — reassign a profile/end mill if kept.
+> - **`cylinder_chip.gcode` outline only frees a single 32×32 mm region**
+>   (`34..66`) despite the file pocketing four 30×30 mm arrays — confirm in CAM
+>   whether you intend to cut out all four arrays or only trim one.
+> - Regenerating these from a deterministic generator (like the KiCad project)
+>   is the recommended fix so the geometry is auditable; until then treat them
+>   as unverified design artefacts.
+
 ---
 
 ## 15. KiCad Project — complete ERC-clean schematic + DRC-clean placed board (NOT routed)

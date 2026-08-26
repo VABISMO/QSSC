@@ -1,3 +1,15 @@
+; =====================================================================
+; QSSC CNC DEMO TOOLPATH — carried over from the QNOS project, NOT CAM-validated.
+; VERIFY in your CAM before EVERY run: stock size, workpiece zero, fixturing,
+;   tooling, feeds/speeds, and travel clearance. Do not run this file "as-is".
+; SAFETY: the spindle starts immediately (M03 S8000) with no safe-start block —
+;   keep the work area clear and confirm Z zero before cycle start.
+; This file pockets FOUR 30x30 mm arrays (2x2, 5 mm separation) of 64 (8x8)
+;   2 mm cylinders each. The trailing outline cut only frees a SINGLE 32x32 mm
+;   region (34..66) — re-check in CAM whether you intend to cut out all four
+;   arrays or only trim; the outline does not match the 4-array footprint.
+; The outline is a THROUGH-cut (Z = -3.0 mm) — ensure no clamps lie in its path.
+; =====================================================================
 G21 G90 G94 G17
 ; G-code for pocketing to leave 4 identical arrays of 2mm diameter cylinders on a 1mm base from a larger acrylic sheet using a 2mm bit
 ; Each array: 30mm x 30mm with 8x8 cylinders

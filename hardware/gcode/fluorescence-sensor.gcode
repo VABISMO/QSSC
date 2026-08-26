@@ -1,3 +1,15 @@
+; =====================================================================
+; QSSC CNC DEMO TOOLPATH — carried over from the QNOS project, NOT CAM-validated.
+; VERIFY in your CAM before EVERY run: stock size, workpiece zero, fixturing,
+;   tooling, feeds/speeds, and travel clearance. Do not run this file "as-is".
+; SAFETY: the spindle starts immediately (M03 S8000) with no safe-start block —
+;   keep the work area clear and confirm Z zero before cycle start.
+; The final "Outline cut" is a THROUGH-cut (Z = -3.0 mm on a 3 mm sheet) that
+;   travels OUTSIDE the 30 mm part (-1..31) — ensure NO clamps or fixturing
+;   lie in the -1..31 outline path, or delete that section in CAM.
+; Tooling assumed: 1 mm 90° V-bit for the sensor grooves; the outline through-
+;   cut is NOT a V-bit operation — reassign a profile/end bit in CAM if kept.
+; =====================================================================
 G21 G90 G94 G17
 ; G-code for routing 8 vertical columns and 8 horizontal rows with gaps of 250um at pixel locations on a 30mm x 30mm x 3mm substrate using a 1mm V-bit
 ; Pixel centers at 3.75mm pitch, gaps 0.25mm wide at each pixel position
