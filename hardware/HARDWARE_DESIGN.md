@@ -706,6 +706,45 @@ kicad-cli pcb drc   --output /tmp/drc.txt hardware/pcb/qssc.kicad_pcb   # 0 viol
 > is the one checked in. The full pipeline (routing + planes + DRC) is
 > scripted in `/tmp/qssc_route_pipeline.sh`.
 
+### 15A. Swappable chip MODULE (second board) — ERC + DRC clean
+
+The "socket for the chip" the design demands is a **separate, swappable module
+board** (`hardware/pcb/chip_module.kicad_{pro,sch,pcb}`) that carries the
+quantum die + its analog front-end and mates the main control board at **J11
+(Samtec LSHM-130 N)** via **J1 (Samtec LSHM-130 S)**. It is regenerated
+deterministically by [`tools/gen_chip_module.py`](../tools/gen_chip_module.py),
+which re-uses `gen_qssc_kicad`'s sexp machinery by swapping the component list
+and authored-symbol set. The 64 detector electrodes stay on the module; only
+digital selects, the one TIA analog output, detector bias, the modulation
+reference, the thermistor sense, and power rails cross the connector.
+
+On-module parts (all real, datasheet-pinned — no invented symbols):
+
+- **2× ADG732BCPZ** (Analog Devices 48-lead LFCSP, CP-48-1, 7×7 mm EP) — two
+  32:1 analog MUX giving 64:1 over the 64 graphene detector electrodes. The 6th
+  select bit drives U1.EN directly and, through a **74LVC1G04** inverter,
+  U2.EN, so `det_mux_sel5=0` reads channels 0–31 and `=1` reads 32–63. Channel
+  → pad map is the ADG732 datasheet pinout (verified against the generic QFN-48
+  footprint's pad coordinates: pin 1 top-left CCW, matching ADI CP-48-1).
+- **ADA4530-1** electrometer TIA (SOIC-8) with **Rf 1 MΩ + Cf 1.5 pF** feedback;
+  `TIA_OUT` crosses J1 back to the Artix-7 XADC `VauxP0`.
+- **QSSC_Chip** — the quantum die, 80 pads (DET0–63 → DET_IN0–63, ER0–7 →
+  emitter_rows0–7, EC0–7 → emitter_cols0–7); a datasheet-authored 80-pin
+  symbol + an inline 80-pad footprint (8×8 detector grid at 0.5 mm pitch,
+  16 emitter pads on the periphery) generated headlessly.
+- **10 k NTC thermistor divider** → `THRM` sense line back to the FPGA.
+- Per-IC 100 nF decoupling + 10 µF bulk; `PWR_FLAG` on +3V3 / +5V / +7V_EMIT /
+  GND so the connector-fed power rails are ERC-driven.
+
+Status: `kicad-cli sch erc` → **0 errors** (26 warnings, the same tolerated
+classes as the main board — off-grid authored pins, NC pins, single-pin
+passthrough nets `mod_sync`/`DET_BIAS` reserved for the not-yet-placed emitter
+driver / bias DAC); `kicad-cli pcb drc --severity-error --severity-warning` →
+**0 violations, 0 unconnected, 0 footprint errors**. 97 nets (incl. all 64
+DET_IN, 8+8 emitter rows/cols, 6 mux selects). The CQD emitter high-voltage
+driver (TLC5955) + per-pixel set resistors + Peltier drive land in a follow-up
+batch; the +7V_EMIT rail is brought across and flagged now.
+
 ---
 
 ## 16. References
