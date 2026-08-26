@@ -264,3 +264,8 @@ textarea.code-editor:focus { outline: 1px solid var(--brand); border-color: var(
   .fpga-grid { gap: 10px; }
   .verdict-meta { gap: 10px; }
 }
+/* Optical readout chain SVG diagram (Backend physics) */
+.optchain-card { grid-column: 1 / -1; }
+.optchain-wrap { width: 100%; overflow-x: auto; margin-top: 4px; }
+.optchain { width: 100%; min-width: 680px; height: auto; display: block; }
+@media (max-width: 920px) { .optchain { min-width: 680px; } }

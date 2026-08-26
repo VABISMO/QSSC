@@ -136,6 +136,131 @@ export function ChipStack() {
 }
 
 // ---------------------------------------------------------------------------
+// OpticalChainDiagram — SVG flow of the on-chip readout chain (the physics of
+// every chip component the simulator checks): CQD ASE emitter -> SU-8/PDMS
+// waveguide -> 650 nm long-pass -> graphene/MoS2 detector -> TIA -> XADC ->
+// 1 kHz lock-in. Corporate-colour gradient, per-stage values, and the ODMR
+// dip -> lock-in SNR headline. Values come from /api/backend/info
+// `optical_readout`; when the API is stale/missing the field, the fallback
+// constants (mirroring qssc/backend.py::optical_readout) keep the diagram
+// correct — these are fixed hardware-physics constants, not run-dependent.
+// ---------------------------------------------------------------------------
+export function OpticalChainDiagram({ data }) {
+  const o = data || {}
+  const em = o.emitter || {}, wg = o.waveguide || {}, fl = o.filter || {},
+        de = o.detector || {}, rd = o.readout || {}, lb = o.link_budget || {}
+  const wl = em.wavelength_nm ?? 532
+  const pump = em.pump_optical_power_mw ?? 3.36
+  const ase = em.ase_gain ?? 1.15
+  const afterAse = em.after_ase_mw ?? 3.86
+  const wgProp = wg.propagation_efficiency ?? 0.966
+  const afterWg = lb.after_waveguide_uw ?? 187
+  const filtT = fl.transmission ?? 0.92
+  const atDet = lb.at_detector_uw ?? 8.6
+  const resp = de.responsivity_a_per_w ?? 0.1
+  const iBright = rd.photocurrent_bright_ua ?? 0.78
+  const tiaMohm = (de.transimpedance_ohm ?? 1e6) / 1e6
+  const vBright = iBright * tiaMohm
+  const adcBits = de.adc_bits ?? 12
+  const bright = rd.bright_code ?? 3200
+  const dark = rd.dark_code ?? 3040
+  const dip = rd.dip_counts ?? 160
+  const snr = rd.single_read_snr_sigma ?? 4.0
+  const contrast = ((rd.odmr_contrast ?? 0.05) * 100).toFixed(0)
+  const etaEnd = ((lb.end_to_end_efficiency ?? 0.00222) * 100).toFixed(2)
+
+  const stages = [
+    { icon: '💡', t: 'CQD ASE emitter', v: [`${wl} nm`, `${pump} mW pump`] },
+    { icon: '〜', t: 'SU-8 / PDMS', t2: 'waveguide', v: ['ηew·ηwd 5%', `prop ${(wgProp * 100).toFixed(1)}%`] },
+    { icon: '◆', t: '650 nm long-pass', v: [`T ${(filtT * 100).toFixed(0)}%`, 'blocks pump'] },
+    { icon: '◼', t: 'graphene/MoS₂', v: [`R ${resp} A/W`, `${iBright} µA`] },
+    { icon: '⚡', t: 'TIA', v: [`${tiaMohm} MΩ`, `→ ${vBright.toFixed(2)} V`] },
+    { icon: '▣', t: 'XADC', v: [`${adcBits}-bit`, `${bright}/${dark}`] },
+    { icon: '◎', t: '1 kHz lock-in', v: [`SNR ${snr}σ`, `dip ${dip} c`] },
+  ]
+  // power entering each next stage (annotated on the arrow)
+  const powers = [`${afterAse} mW`, `${afterWg} µW`, `${atDet} µW`, `${iBright} µA`, `${vBright.toFixed(2)} V`, `${bright} code`]
+
+  const SX = 16, W = 104, GAP = 40, STEP = W + GAP
+  const x = i => SX + i * STEP
+  const cx = i => x(i) + W / 2
+  const rectY = 44, rectH = 92, arrowY = 90
+  const VB_W = SX + 7 * W + 6 * GAP + SX   // 16 + 728 + 240 + 16 = 1000
+  return (
+    <div className="optchain-wrap">
+      <svg viewBox={`0 0 ${VB_W} 290`} className="optchain" role="img"
+           aria-label="Optical readout chain: CQD ASE emitter to 1 kHz lock-in">
+        <defs>
+          <linearGradient id="oc-flow" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0" stopColor="#22d3ee" /><stop offset="1" stopColor="#6366f1" />
+          </linearGradient>
+          <linearGradient id="oc-stage" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#1a2444" /><stop offset="1" stopColor="#141c38" />
+          </linearGradient>
+          <linearGradient id="oc-result" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0" stopColor="rgba(244,114,182,0.16)" />
+            <stop offset="1" stopColor="rgba(34,211,238,0.16)" />
+          </linearGradient>
+          <marker id="oc-ah" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+            <path d="M0,0 L7,3.2 L0,6.4 Z" fill="#6366f1" />
+          </marker>
+        </defs>
+
+        {/* arrows + power annotations */}
+        {stages.slice(0, -1).map((_, i) => {
+          const x1 = x(i) + W, x2 = x(i + 1)
+          const mid = (x1 + x2) / 2
+          return (
+            <g key={`a${i}`}>
+              <line x1={x1 + 2} y1={arrowY} x2={x2 - 4} y2={arrowY}
+                    stroke="url(#oc-flow)" strokeWidth="2.2" markerEnd="url(#oc-ah)" />
+              <text x={mid} y={156} textAnchor="middle" fontSize="10.5" fill="#22d3ee" fontWeight="600">
+                {powers[i]}
+              </text>
+            </g>
+          )
+        })}
+
+        {/* stages */}
+        {stages.map((s, i) => (
+          <g key={s.t}>
+            <rect x={x(i)} y={rectY} width={W} height={rectH} rx="11"
+                  fill="url(#oc-stage)" stroke="#263056" strokeWidth="1" />
+            <text x={cx(i)} y={34} textAnchor="middle" fontSize="19">{s.icon}</text>
+            <text x={cx(i)} y={s.t2 ? 60 : 66} textAnchor="middle" fontSize="11" fill="#e6ecff" fontWeight="600">
+              {s.t}
+            </text>
+            {s.t2 && (
+              <text x={cx(i)} y={73} textAnchor="middle" fontSize="11" fill="#e6ecff" fontWeight="600">
+                {s.t2}
+              </text>
+            )}
+            <text x={cx(i)} y={s.t2 ? 92 : 89} textAnchor="middle" fontSize="10.5" fill="#22d3ee">{s.v[0]}</text>
+            <text x={cx(i)} y={s.t2 ? 108 : 106} textAnchor="middle" fontSize="10.5" fill="#94a3c4">{s.v[1]}</text>
+          </g>
+        ))}
+
+        {/* result headline bar */}
+        <rect x={SX} y={178} width={VB_W - 2 * SX} height={66} rx="12"
+              fill="url(#oc-result)" stroke="#f472b6" strokeWidth="1.2" />
+        <text x={VB_W / 2} y={205} textAnchor="middle" fontSize="14" fill="#e6ecff" fontWeight="700">
+          ODMR dip <tspan fill="#f472b6" fontWeight="700">{dip} counts ({contrast}%)</tspan>
+          {' → '}lock-in SNR <tspan fill="#34d399" fontWeight="700">{snr}σ</tspan>
+        </text>
+        <text x={VB_W / 2} y={227} textAnchor="middle" fontSize="11" fill="#94a3c4">
+          {`bright ${bright} / dark ${dark} ADC codes · end-to-end η ${etaEnd}% · reconciles with simulator BRIGHT_CODE`}
+        </text>
+
+        {/* footer */}
+        <text x={VB_W / 2} y={266} textAnchor="middle" fontSize="10" fill="#808db0">
+          Microlens: not used — waveguide-direct coupling (no lens, no imaging). Figures anchor to the FPGA simulator readout constants.
+        </text>
+      </svg>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // SignalChart — oscilloscope-style analog trace of the detected photoluminescence
 // during a pulse sequence (Ramsey / ODMR / pulse), from /api/signal.
 // ---------------------------------------------------------------------------
