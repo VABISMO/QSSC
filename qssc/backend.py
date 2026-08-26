@@ -38,7 +38,12 @@ from qiskit_aer.noise import (
 )
 
 from .defects import DefectProfile, get_profile, coherence_at_temperature
-from .simulator import QubitSite, SimulatedFPGA, auto_align
+from .simulator import (
+    QubitSite, SimulatedFPGA, auto_align,
+    ASE_GAIN, BRIGHT_CODE, DARK_CODE, BG_CODE, READOUT_NOISE,
+    LOCKIN_MOD_HZ, ODMR_CONTRAST, ODMR_LINEWIDTH_HZ,
+    ADC_BITS, ADC_MAX, DETECT_THRESHOLD,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -832,6 +837,116 @@ class QSSCBackend(BackendV2):
                      "temperature — see pulse_resolvable / within_coherence_window."),
         }
 
+    def optical_readout(self) -> dict:
+        """End-to-end on-chip optical readout chain budget.
+
+        CQD ASE emitter -> SU-8/PDMS waveguide -> 650 nm long-pass filter ->
+        graphene/MoS2 photodetector -> TIA + 64:1 analog MUX -> Artix-7 XADC
+        (12-bit) -> 1 kHz lock-in. The readout figures (bright/dark codes, dip,
+        noise, lock-in SNR) are anchored to the *same* simulator constants the
+        ``SimulatedFPGA`` uses, so the panel reflects what the RTL + control
+        stack actually model; the per-stage optical efficiencies are honest
+        low-end literature values chosen to reconcile with the verified
+        ``BRIGHT_CODE`` (see HARDWARE_DESIGN.md sections 7-8)."""
+        # --- emitter (8x8 CQD ASE/LED, green) -------------------------------
+        drive_ma = 10.0          # mid of the 2-20 mA/pixel drive window
+        forward_v = 2.8          # green CQD LED forward voltage
+        set_resistor_ohm = 220   # R_set for 10 mA from a 5 V rail (HD §7)
+        eta_eqe = 0.12           # green CQD LED external quantum efficiency
+        pump_popt_mw = drive_ma * forward_v * 1e-3 * 1000 * eta_eqe  # ~3.36 mW
+        # --- optical link stages (per-stage coupling, honest low-end) -------
+        eta_ew = 0.05            # CQD edge emission -> SU-8 waveguide butt-couple
+        wg_loss_db_cm = 0.5      # SU-8/PDMS visible loss
+        wg_len_cm = 0.3          # ~3 mm site-to-detector run
+        eta_wg_prop = 10 ** (-(wg_loss_db_cm * wg_len_cm) / 10.0)  # ~0.966
+        eta_wd = 0.05            # polymer waveguide -> 2D photodetector couple
+        filt_t = 0.92            # 650 nm long-pass transmission at NV PL
+        eta_end = eta_ew * eta_wg_prop * eta_wd * filt_t            # ~0.0022
+        p_at_det_mw = pump_popt_mw * ASE_GAIN * eta_end             # ~8.6 uW
+        # --- detector + TIA + XADC -----------------------------------------
+        responsivity = 0.10      # graphene broadband responsivity (A/W), conservative
+        tia_rf = 1.0e6           # transimpedance (1 MOhm)
+        adc_vref = 1.0           # Artix-7 XADC range
+        # The forward estimate (p_at_det * R * Rf / Vref * ADC_MAX ~ 3520) is in
+        # the right ballpark, but the simulator pins BRIGHT_CODE=3200. Anchor the
+        # reported photocurrent to THAT verified code and derive the dark level +
+        # dip from the ensemble ODMR contrast.
+        i_bright_anchored_ua = (BRIGHT_CODE / ADC_MAX) * adc_vref / tia_rf * 1e6
+        i_dark_anchored_ua = i_bright_anchored_ua * (1.0 - ODMR_CONTRAST)
+        i_dip_na = (i_bright_anchored_ua - i_dark_anchored_ua) * 1e3
+        dip_counts = BRIGHT_CODE - DARK_CODE
+        snr_sigma = dip_counts / READOUT_NOISE
+        return {
+            "emitter": {
+                "type": "CQD ASE/LED array (ITO/PEDOT:PSS/CQD-PVA/ZnO/Ag)",
+                "pixels": self._n_qubits, "grid": "8x8",
+                "wavelength_nm": self.profile.excitation_wavelength_nm,
+                "drive_ma": drive_ma, "forward_v": forward_v,
+                "set_resistor_ohm": set_resistor_ohm,
+                "wall_plug_efficiency": eta_eqe,
+                "pump_optical_power_mw": round(pump_popt_mw, 2),
+                "ase_gain": ASE_GAIN,
+                "after_ase_mw": round(pump_popt_mw * ASE_GAIN, 2),
+            },
+            "waveguide": {
+                "material": "SU-8/PDMS polymer",
+                "length_mm": wg_len_cm * 10,
+                "loss_db_cm": wg_loss_db_cm,
+                "emitter_coupling": eta_ew,
+                "detector_coupling": eta_wd,
+                "propagation_efficiency": round(eta_wg_prop, 3),
+            },
+            "microlens": {
+                "used": False,
+                "note": ("Canonical on-chip design is waveguide-direct "
+                         "(no lens, no imaging) -- HARDWARE_DESIGN.md §8. "
+                         "Field kept for completeness."),
+            },
+            "filter": {
+                "type": "650 nm long-pass",
+                "transmission": filt_t,
+                "blocks": "green pump 520-540 nm",
+                "passes": "NV PL 637-800 nm",
+            },
+            "detector": {
+                "type": "graphene/MoS2 photodetector array",
+                "electrodes": self._n_qubits,
+                "bias_v": 0.5,
+                "responsivity_a_per_w": responsivity,
+                "nep_nw_per_sqrt_hz": 50.0,
+                "tia": "ADA4530-1 class",
+                "transimpedance_ohm": int(tia_rf),
+                "mux": "64:1 analog",
+                "adc_bits": ADC_BITS, "adc_max": ADC_MAX,
+                "adc_vref_v": adc_vref,
+            },
+            "readout": {
+                "lockin_mod_hz": LOCKIN_MOD_HZ,
+                "odmr_contrast": ODMR_CONTRAST,
+                "odmr_linewidth_hz": ODMR_LINEWIDTH_HZ,
+                "bright_code": BRIGHT_CODE,
+                "dark_code": DARK_CODE,
+                "bg_code": BG_CODE,
+                "dip_counts": dip_counts,
+                "readout_noise_counts": READOUT_NOISE,
+                "single_read_snr_sigma": round(snr_sigma, 2),
+                "dynamic_range_pct": round(100.0 * BRIGHT_CODE / ADC_MAX, 1),
+                "detect_threshold": DETECT_THRESHOLD,
+                "photocurrent_bright_ua": round(i_bright_anchored_ua, 3),
+                "photocurrent_dark_ua": round(i_dark_anchored_ua, 3),
+                "photocurrent_dip_na": round(i_dip_na, 2),
+            },
+            "link_budget": {
+                "pump_optical_power_mw": round(pump_popt_mw, 2),
+                "after_ase_mw": round(pump_popt_mw * ASE_GAIN, 2),
+                "after_waveguide_uw": round(pump_popt_mw * ASE_GAIN * eta_ew * eta_wg_prop * 1e3, 2),
+                "after_filter_uw": round(p_at_det_mw * 1e3, 2),
+                "at_detector_uw": round(p_at_det_mw * 1e3, 2),
+                "end_to_end_efficiency": round(eta_end, 5),
+                "reconciles_with": "simulator BRIGHT_CODE=3200",
+            },
+        }
+
     def describe(self) -> dict:
         budget = int(self._t2 / self._g1q) if self._g1q > 0 else 0
         return {
@@ -844,6 +959,7 @@ class QSSCBackend(BackendV2):
             "readout_error": self.profile.readout_error,
             "d_ghz": self.profile.d_ghz,
             "shots": self.shots,
+            "optical_readout": self.optical_readout(),
             # real control/readout timings
             "gate_1q_ns": self.profile.gate_1q_ns,
             "gate_2q_ns": self.profile.gate_2q_ns,

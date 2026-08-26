@@ -735,6 +735,40 @@ export default function App() {
               <div className="hint">Layered structure of the on-chip device (top → bottom): the CQD emitter array pumps the diamond NV⁻ host green; the graphene/MoS₂ photodetector array reads the ODMR photocurrent back through a 1 kHz lock-in — no camera, no alignment jig.</div>
               <ChipStack />
             </div>
+
+            <div className="card">
+              <h2><span className="dot" />Optical readout chain</h2>
+              <div className="hint">End-to-end pump → detector link budget the simulator checks: CQD ASE emitter array → SU-8/PDMS waveguides → 650 nm long-pass → graphene/MoS₂ photodetector → TIA + XADC + 1 kHz lock-in. Figures anchor to the same readout constants the FPGA model uses.</div>
+              {info.error && <div className="error">{info.error}</div>}
+              {info.data && info.data.optical_readout && (() => {
+                const o = info.data.optical_readout;
+                const lb = o.link_budget;
+                return (
+                  <>
+                    <div className="stats">
+                      <div className="stat"><div className="k">Emitter λ</div><div className="v">{o.emitter.wavelength_nm}<small> nm</small></div></div>
+                      <div className="stat"><div className="k">Pump power</div><div className="v">{o.emitter.pump_optical_power_mw}<small> mW</small></div></div>
+                      <div className="stat"><div className="k">ASE gain</div><div className="v">×{o.emitter.ase_gain}</div></div>
+                      <div className="stat"><div className="k">WG η<sub>prop</sub></div><div className="v">{(o.waveguide.propagation_efficiency * 100).toFixed(1)}<small> %</small></div></div>
+                      <div className="stat"><div className="k">Filter T</div><div className="v">{(o.filter.transmission * 100).toFixed(0)}<small> %</small></div></div>
+                      <div className="stat"><div className="k">At detector</div><div className="v">{lb.at_detector_uw}<small> µW</small></div></div>
+                      <div className="stat"><div className="k">Responsivity</div><div className="v">{o.detector.responsivity_a_per_w}<small> A/W</small></div></div>
+                      <div className="stat"><div className="k">TIA R<sub>f</sub></div><div className="v">{(o.detector.transimpedance_ohm / 1e6).toFixed(0)}<small> MΩ</small></div></div>
+                      <div className="stat"><div className="k">Photocurrent</div><div className="v">{o.readout.photocurrent_bright_ua}<small> µA</small></div></div>
+                      <div className="stat"><div className="k">ODMR dip</div><div className="v">{o.readout.photocurrent_dip_na}<small> nA</small></div></div>
+                      <div className="stat"><div className="k">Lock-in SNR</div><div className="v">{o.readout.single_read_snr_sigma}<small> σ</small></div></div>
+                      <div className="stat"><div className="k">Contrast</div><div className="v">{(o.readout.odmr_contrast * 100).toFixed(1)}<small> %</small></div></div>
+                    </div>
+                    <div className="legend">
+                      <span><b className="mono">Link budget:</b> {lb.pump_optical_power_mw} mW pump → ×{o.emitter.ase_gain} ASE → {lb.after_waveguide_uw} µW in WG → {o.filter.type} → {lb.at_detector_uw} µW at detector (end-to-end η ≈ {(lb.end_to_end_efficiency * 100).toFixed(2)} %, reconciles with {lb.reconciles_with}).</span>
+                      <span><b className="mono">Readout:</b> bright {o.readout.bright_code} / dark {o.readout.dark_code} ADC codes (12-bit), dip {o.readout.dip_counts} counts vs {o.readout.readout_noise_counts}-count noise → {o.readout.single_read_snr_sigma}σ single-read, lock-in @ {o.readout.lockin_mod_hz} Hz, linewidth {o.readout.odmr_linewidth_hz / 1e6} MHz.</span>
+                      <span><b className="mono">Microlens:</b> {o.microlens.used ? 'used' : 'not used — ' + o.microlens.note}</span>
+                    </div>
+                  </>
+                );
+              })()}
+              {info.loading && <div className="muted"><span className="spinner" /> loading optical chain…</div>}
+            </div>
           </div>
 
           {/* ============================= SPECTROSCOPY + CALIBRATION ============================= */}

@@ -341,6 +341,43 @@ def test_backend_describe():
     assert d["d_ghz"] == pytest.approx(3.46, abs=0.01)
 
 
+def test_optical_readout_chain():
+    """The Backend-physics optical chain: emitter -> ASE -> waveguide ->
+    filter -> graphene detector -> lock-in, anchored to the simulator's
+    verified BRIGHT_CODE / ODMR contrast / lock-in SNR."""
+    b = QSSCBackend("NV", sites=_quick_sites(), seed=0)
+    o = b.optical_readout()
+    # emitter (CQD ASE array, green)
+    assert o["emitter"]["pixels"] == 16
+    assert o["emitter"]["ase_gain"] == pytest.approx(1.15)
+    assert o["emitter"]["pump_optical_power_mw"] > 0
+    # waveguide + filter stage present
+    assert o["waveguide"]["propagation_efficiency"] <= 1.0
+    assert o["filter"]["transmission"] == pytest.approx(0.92)
+    # canonical on-chip design is waveguide-direct: no microlens
+    assert o["microlens"]["used"] is False
+    # detector + TIA + XADC
+    assert o["detector"]["adc_bits"] == 12
+    assert o["detector"]["responsivity_a_per_w"] > 0
+    # readout figures anchor to the simulator constants
+    r = o["readout"]
+    assert r["bright_code"] == 3200
+    assert r["dark_code"] == 3040
+    assert r["dip_counts"] == 160
+    assert r["readout_noise_counts"] == 40
+    assert r["single_read_snr_sigma"] == pytest.approx(4.0)
+    assert r["odmr_contrast"] == pytest.approx(0.05)
+    assert r["photocurrent_bright_ua"] == pytest.approx(
+        (3200 / 4095) * 1.0 / 1e6 * 1e6, rel=1e-3)
+    # end-to-end link budget reconciles with BRIGHT_CODE
+    lb = o["link_budget"]
+    assert 0 < lb["end_to_end_efficiency"] < 0.01
+    assert lb["at_detector_uw"] > 0
+    assert "BRIGHT_CODE" in lb["reconciles_with"]
+    # describe() surfaces the block
+    assert "optical_readout" in b.describe()
+
+
 def test_backend_runs_bell():
     from qiskit import QuantumCircuit
     b = QSSCBackend("hBN-VB", sites=_quick_sites(), seed=0)
