@@ -885,12 +885,6 @@ class QSSCBackend(BackendV2):
                 "detector_coupling": eta_wd,
                 "propagation_efficiency": round(eta_wg_prop, 3),
             },
-            "microlens": {
-                "used": False,
-                "note": ("Canonical on-chip design is waveguide-direct "
-                         "(no lens, no imaging) -- HARDWARE_DESIGN.md §8. "
-                         "Field kept for completeness."),
-            },
             "filter": {
                 "type": filt_type,
                 "transmission": filt_t,

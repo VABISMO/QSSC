@@ -444,8 +444,8 @@ def test_optical_readout_chain():
     # waveguide + filter stage present
     assert o["waveguide"]["propagation_efficiency"] <= 1.0
     assert o["filter"]["transmission"] == pytest.approx(0.92)
-    # canonical on-chip design is waveguide-direct: no microlens
-    assert o["microlens"]["used"] is False
+    # canonical on-chip design is waveguide-direct: no microlens stage at all
+    assert "microlens" not in o
     # detector + TIA + XADC
     assert o["detector"]["adc_bits"] == 12
     assert o["detector"]["responsivity_a_per_w"] > 0
