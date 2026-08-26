@@ -126,8 +126,10 @@ def run_circuit(req: dict) -> dict:
         op = req.get("op", "add")
         num1 = float(req.get("a") if req.get("a") is not None
                      else req.get("num1", 2.0))
-        num2 = float(req.get("b") if req.get("b") is not None
-                     else req.get("num2"))
+        raw_b = req.get("b") if req.get("b") is not None else req.get("num2")
+        # sqrt/log only take one operand; a missing second arg must not crash
+        # with float(None). create_math_circuit accepts num2=None (defaults 0).
+        num2 = float(raw_b) if raw_b is not None else None
         qc = create_math_circuit(op, num1, num2, bits=req.get("bits"))
         res = b.run(qc, shots=shots).result()
         counts = res.get_counts()

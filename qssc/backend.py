@@ -41,7 +41,7 @@ from .defects import DefectProfile, get_profile, coherence_at_temperature
 from .simulator import (
     QubitSite, SimulatedFPGA, auto_align,
     ASE_GAIN, BRIGHT_CODE, BG_CODE, READOUT_NOISE,
-    LOCKIN_MOD_HZ, ODMR_CONTRAST, ODMR_LINEWIDTH_HZ,
+    LOCKIN_MOD_HZ, ODMR_CONTRAST,
     ADC_BITS, ADC_MAX, DETECT_THRESHOLD,
 )
 
@@ -217,13 +217,6 @@ class CalibrationManager:
     def default_detector_lut(cls) -> Dict[Tuple[int, int], int]:
         """Deterministic identity LUT used when no physical calibration is run."""
         return {(r, c): r * cls.GRID + c
-                for r in range(cls.GRID) for c in range(cls.GRID)}
-
-    # back-compat for the old camera-era name (returns the same identity LUT
-    # shaped as the legacy (x,y) grid mapping it superseded).
-    @classmethod
-    def default_grid_mapping(cls) -> Dict[Tuple[int, int], Tuple[int, int]]:
-        return {(r, c): (int(c * 80 + 40), int(r * 60 + 30))
                 for r in range(cls.GRID) for c in range(cls.GRID)}
 
 
@@ -872,7 +865,7 @@ class QSSCBackend(BackendV2):
             filt_type, filt_blocks, filt_passes = (
                 "850 nm long-pass", "NIR pump ~916 nm", "SiC PL 890-940 nm")
             det_type, responsivity = "few-layer MoS2 photodetector array", 0.08
-            contrast0, linewidth_hz = 0.03, 70e6              # V_Si 2|D|=70 MHz
+            contrast0, linewidth_hz = 0.03, self.profile.odmr_linewidth_hz  # V_Si ensemble
         else:
             drive_ma, forward_v, eta_eqe = 10.0, 2.8, 0.12    # green CQD LED
             eta_ew, eta_wd = 0.05, 0.05
@@ -880,7 +873,7 @@ class QSSCBackend(BackendV2):
             filt_type, filt_blocks, filt_passes = (
                 "650 nm long-pass", "green pump 520-540 nm", "defect PL >650 nm")
             det_type, responsivity = "graphene/MoS2 photodetector array", 0.10
-            contrast0, linewidth_hz = ODMR_CONTRAST, ODMR_LINEWIDTH_HZ
+            contrast0, linewidth_hz = ODMR_CONTRAST, self.profile.odmr_linewidth_hz
         # --- temperature dependence (anchored at 300 K) ---------------------
         set_resistor_ohm = 220
         pump_popt_mw = drive_ma * forward_v * 1e-3 * 1000 * eta_eqe

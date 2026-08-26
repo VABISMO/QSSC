@@ -111,31 +111,6 @@ export function BarCounts({ counts, max = 8 }) {
 }
 
 // ---------------------------------------------------------------------------
-// ChipStack — schematic of the van der Waals heterostructure layers.
-// ---------------------------------------------------------------------------
-export function ChipStack() {
-  const layers = [
-    { name: 'Encapsulation (PMMA / epoxy)', nm: '~1 µm', c: '#1f2a52' },
-    { name: 'On-chip 2D photodetector array (graphene / MoS₂)', nm: '36×36', c: '#2a3a6e' },
-    { name: 'CVD diamond spin-defect host (NV⁻, D≈2.87 GHz, T₂≈1.8 ms)', nm: '~0.5 mm', c: '#34407d' },
-    { name: 'Polymer waveguides (SU-8 / PDMS, n≈1.5)', nm: '2–5 µm', c: '#3b4a8f' },
-    { name: 'CQD emitter array (PEDOT:PSS / CQD / ZnO p-i-n)', nm: '~0.2 µm', c: '#43549f' },
-    { name: 'ITO-coated glass substrate + Cu contacts', nm: '1–5 cm²', c: '#1b2348' },
-    { name: 'Peltier (TEC1-12706) + liquid cooling stack', nm: 'thermal', c: '#16203f' },
-  ]
-  return (
-    <div className="stack">
-      {layers.map((l, i) => (
-        <div className="layer" key={i} style={{ background: l.c }}>
-          <span>{l.name}</span>
-          <span className="nm">{l.nm}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
 // OpticalChainDiagram — SVG flow of the on-chip readout chain: the physics of
 // every chip component the simulator checks, RECALCULATED for the current
 // profile + temperature (each execution). CQD ASE emitter -> SU-8/PDMS
@@ -182,7 +157,7 @@ const OPT_PROFILE = {
     wl: 916, pumpMw: 3.17, forwardV: 3.3, etaEqe: 0.08, driveMa: 12,
     etaEw: 0.04, etaWd: 0.04, wgLoss: 0.6, wgLen: 0.3,
     filter: '850 nm long-pass', filtT: 0.90, filterPasses: 'PL 890–940 nm',
-    detector: 'few-layer MoS₂', resp: 0.08, contrast0: 0.03, linewidthMHz: 70,
+    detector: 'few-layer MoS₂', resp: 0.08, contrast0: 0.03, linewidthMHz: 1.5,
     dGhz: 0.07, crystal: 'SiC V_Si', crystalIcon: '🔷', plRange: '890–940 nm',
     t2UsRoom: 40, readoutNs: 800, readoutErr: 0.10,
   },
@@ -365,7 +340,7 @@ function computeRunPhysics(result, profile, temperature, infoData) {
   if (!result || !result.num_qubits) return null
   const c = computeOpticalChain(profile, temperature)
   const nActive = result.num_qubits
-  const nMeasured = result.num_clbits || result.num_qubits
+  const nMeasured = Math.min(result.num_clbits || result.num_qubits, result.num_qubits)
   const shots = result.shots || 0
   const readoutNs = c.readoutNs
   const elecPwrMw = c.driveMa * c.forwardV            // mW electrical per pixel
@@ -388,7 +363,7 @@ function computeRunPhysics(result, profile, temperature, infoData) {
   const contrastPct = +(c.contrast * 100).toFixed(1)
   const contrastStatus = c.contrast >= 0.04 ? 'ok' : c.contrast >= 0.02 ? 'warn' : 'bad'
   // does the circuit fit the 8x8 = 64-site chip? (physical-execution gate)
-  const gridStatus = nMeasured <= 64 ? 'ok' : 'bad'
+  const gridStatus = nActive <= 64 ? 'ok' : 'bad'
   // overall = worst meaningful signal (single-read SNR dominates: if the dip
   // doesn't resolve above noise in one shot, the readout doesn't work at this T)
   const worst = (arr) => arr.includes('bad') ? 'bad' : arr.includes('warn') ? 'warn' : 'ok'
@@ -437,7 +412,7 @@ export function RunPhysics({ result, profile, temperature, infoData }) {
       <h2><span className="dot" />Execution component physics <span className="muted" style={{ fontWeight: 400 }}>· {p.crystal} @ {p.T} K · {p.shots} shots · {p.nActive}q circuit</span></h2>
       <div className="hint">Calculated for the circuit that just ran — each value is checked against the chip's operating spec.</div>
       <div className={`verdict ${p.overall}`} style={{ marginTop: 10 }}>
-        <div className="verdict-h">{overallTxt}</div>
+        <div className="verdict-h"><span className="verdict-tag">Readout feasibility</span>{overallTxt}</div>
         <div className="verdict-body">{overallWhy}</div>
       </div>
       <div className="stats" style={{ marginTop: 10 }}>
@@ -561,12 +536,13 @@ export function CalibrationPanel({ profile, temperature, seed, run, running, res
 // ---------------------------------------------------------------------------
 // Verdict — the honest physical-feasibility assessment of the latest run.
 // ---------------------------------------------------------------------------
-export function Verdict({ assessment, approximate }) {
+export function Verdict({ assessment }) {
   if (!assessment) return null
   const ok = assessment.within_coherence
   return (
     <div className={`verdict ${ok ? 'ok' : 'bad'}`}>
       <div className="verdict-h">
+        <span className="verdict-tag">Coherence budget</span>
         {ok ? '✓ Within coherence window' : '✗ Exceeds coherence budget'}
       </div>
       <div className="verdict-body">{assessment.verdict}</div>
@@ -577,49 +553,6 @@ export function Verdict({ assessment, approximate }) {
         <span>decoherence <b className="mono">{(assessment.decoherence_fraction * 100).toFixed(0)}%</b></span>
         <span>budget <b className="mono">{assessment.coherence_budget_gates}</b> 1q gates</span>
       </div>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// PhysicsDetails — limitations, FPGA compatibility, references, real timings.
-// ---------------------------------------------------------------------------
-export function PhysicsDetails({ info }) {
-  if (!info) return null
-  const fpga = info.fpga || {}
-  const lims = info.limitations || []
-  const refs = info.references || []
-  return (
-    <div className="phys">
-      <div className="phys-row">
-        <span><b className="mono">{info.gate_1q_ns}</b> ns 1q</span>
-        <span><b className="mono">{info.gate_2q_ns}</b> ns 2q</span>
-        <span><b className="mono">{info.readout_ns}</b> ns readout</span>
-        <span><b className="mono">{info.init_ns}</b> ns init</span>
-      </div>
-      <div className={`fpga-box ${fpga.compatible ? 'ok' : 'bad'}`}>
-        <div className="fpga-h">FPGA · {fpga.fpga} @ {fpga.fpga_clock_mhz} MHz · {fpga.mw_source}</div>
-        <div className="fpga-grid">
-          <span>tick <b className="mono">{fpga.fpga_tick_ns} ns</b></span>
-          <span>pulse resolvable <b className="mono">{String(fpga.pulse_resolvable)}</b></span>
-          <span>readout samplable <b className="mono">{String(fpga.readout_samplable)}</b></span>
-          <span>within coherence <b className="mono">{String(fpga.within_coherence_window)}</b></span>
-          <span className={fpga.compatible ? 'okt' : 'badt'}>→ {fpga.compatible ? 'compatible' : 'NOT compatible'}</span>
-        </div>
-        {fpga.note && <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>{fpga.note}</div>}
-      </div>
-      {lims.length > 0 && (
-        <div className="lim">
-          <div className="lim-h">Limitations (honest, paper-grounded)</div>
-          <ul>{lims.map((l, i) => <li key={i}>{l}</li>)}</ul>
-        </div>
-      )}
-      {refs.length > 0 && (
-        <details className="refs">
-          <summary>References ({refs.length})</summary>
-          <ul>{refs.map((r, i) => <li key={i}>{r}</li>)}</ul>
-        </details>
-      )}
     </div>
   )
 }

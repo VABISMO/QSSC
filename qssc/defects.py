@@ -49,6 +49,10 @@ class DefectProfile:
     fluorescence_factor: float         # brightness enhancement vs baseline
     readout_error: float               # single-shot readout error (0..1)
     defect_density_per_um2: float      # emitters / um^2
+    # ODMR resonance linewidth (FWHM) in Hz -- the acceptance window for a MW
+    # pulse to flip the spin, and the width of the photocurrent dip in the ODMR
+    # sweep. NV ~5 MHz; hBN-VB ensemble ~tens of MHz; SiC V_Si ensemble ~1-2 MHz.
+    odmr_linewidth_hz: float = 5.0e6
     # --- Real control/readout timings (nanoseconds) from the literature ---
     gate_1q_ns: float = 50.0           # single-qubit (microwave pi-pulse) duration
     gate_2q_ns: float = 400.0          # two-qubit (entangling) gate duration
@@ -159,6 +163,7 @@ SIC_VS = DefectProfile(
     short="SiC-VSi",
     zero_field_splitting=0.070e9,    # 2|D| = 70 MHz, 4H-SiC V2 line, S=3/2 (Kraus 2014)
     gyromagnetic_ratio=28.0e9,
+    odmr_linewidth_hz=1.5e6,        # V_Si ensemble inhomogeneous ODMR linewidth ~1-2 MHz
     hyperfine_coupling=-1.5e6,        # 29Si (I=1/2, 4.7%) weak hyperfine
     quadrupole_splitting=0.0,         # no dominant I>=1 nucleus in SiC
     nuclear_spin=0.5,                 # 29Si, I = 1/2 (28Si/30Si/12C are I=0)

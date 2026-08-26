@@ -74,7 +74,9 @@ def info(profile, temperature):
         t.add_row(k, str(desc[k]))
     console.print(t)
     console.print(f"[dim]Protocol summary:[/]")
-    console.print_json(json.dumps(protocol_summary()))
+    # pass the selected profile so `qssc info --profile NV` shows the NV
+    # protocol, not the hBN base (the protocol module's bare default).
+    console.print_json(json.dumps(protocol_summary(profile)))
 
 
 @cli.command()

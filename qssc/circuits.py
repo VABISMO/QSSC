@@ -221,15 +221,22 @@ def create_math_circuit(op: str, num1: float, num2: Optional[float] = None,
     min_bits = max(1, math.ceil(math.log2(max(a1, a2, 1)))) + 2
     bits = max(min_bits, int(bits)) if bits else min_bits
     if op in ("add", "sub"):
-        if op == "sub":
-            n2 = -n2; a2 = abs(n2)
+        # DraperQFTAdder computes |a>|b> -> |a>|a+b>, leaving the sum in qr_b
+        # (qr_a is restored). So to add we encode the operands as-is; to subtract
+        # we encode -n2. Encoding the signed value modulo 2^bits gives its
+        # two's-complement representation, so negative operands and sub() both work:
+        # sub(10,3) -> 10 + (2^bits-3) = 7 (mod 2^bits); add(10,-3) likewise -> 7.
+        operand_b = n2 if op == "add" else -n2
+        mod = 1 << bits
+        enc_a = a1 % mod
+        enc_b = (operand_b if operand_b >= 0 else operand_b + mod) % mod
         qr_a = QuantumRegister(bits, "a"); qr_b = QuantumRegister(bits, "b")
         cr = ClassicalRegister(bits, "out")
         qc = QuantumCircuit(qr_a, qr_b, cr)
         for i in range(bits):
-            if (a1 >> i) & 1:
+            if (enc_a >> i) & 1:
                 qc.x(qr_a[i])
-            if (a2 >> i) & 1:
+            if (enc_b >> i) & 1:
                 qc.x(qr_b[i])
         qc.append(DraperQFTAdder(bits), qr_a[:] + qr_b[:])
         qc.measure(qr_b, cr)

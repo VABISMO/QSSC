@@ -138,10 +138,7 @@ export default function App() {
   const [mathOp, setMathOp] = useState('mul')
   const [mathA, setMathA] = useState(3)
   const [mathB, setMathB] = useState(5)
-  const [mathBits, setMathBits] = useState(4)
-  const [groverN, setGroverN] = useState(8)
   const [groverMarked, setGroverMarked] = useState(5)
-  const [qftN, setQftN] = useState(4)
   const [qftX, setQftX] = useState(1)
   const [qrBytes, setQrBytes] = useState(32)
   const [qrCN, setQrCN] = useState('QSSC-quantum-device')
@@ -289,7 +286,6 @@ export default function App() {
 
   const runCounts = result && (result.counts || (result.result && result.result.counts))
   const runAssessment = result && result.assessment
-  const runApprox = result && result.approximate
   const runBits = result && result.num_clbits
 
   return (

@@ -43,6 +43,17 @@ _fallback_exec = ThreadPoolExecutor(max_workers=2)
 _fallback_store: dict[str, dict] = {}
 _fallback_lock = threading.Lock()
 
+# One-time secret delivery: qrand derives an Ed25519 private key + symmetric
+# key. Those must NEVER persist to MongoDB / disk (anyone who later reads the
+# job record could recover the private key). Instead the worker strips them
+# from the result before persisting and stashes them here, keyed by job_id;
+# the first finished-status poll merges them into the view and pops them, so
+# the caller gets the private key exactly once (like a sealed envelope) while
+# the long-lived job record carries only the public cert + entropy. In-memory
+# only -> a restart clears them (re-run qrand to regenerate). See SECURITY.
+_secret_store: dict[str, dict] = {}
+_secret_lock = threading.Lock()
+
 _queue_disabled = False
 
 
@@ -113,6 +124,26 @@ def _record(job_id: str, **fields):
 
 # --- worker entrypoints (executed by `rq worker`, or in-process fallback) ----
 
+# Secret fields a qrand run produces. These are stripped from the result before
+# it is persisted to MongoDB / the fallback store and held in _secret_store for
+# one-time delivery on the first finished-status poll.
+_SECRET_FIELDS = ("private_key_pem", "symmetric_key_hex")
+
+
+def _stash_secrets(job_id: str, result: dict) -> None:
+    """Move qrand secret fields out of ``result`` into the one-time secret store
+    (in-place on ``result``). Non-qrand results are a no-op."""
+    secrets = {f: result.pop(f) for f in _SECRET_FIELDS if f in result}
+    if secrets:
+        with _secret_lock:
+            _secret_store[job_id] = secrets
+
+
+def _pop_secrets(job_id: str) -> dict:
+    with _secret_lock:
+        return _secret_store.pop(job_id, {})
+
+
 def _worker_run(kind: str, job_id: str, payload: dict) -> dict:
     from api import runner
     _record(job_id, status="started", started_at=_now_ms())
@@ -122,6 +153,8 @@ def _worker_run(kind: str, job_id: str, payload: dict) -> dict:
         else:
             result = runner.run_circuit(payload)
         ok = "error" not in result
+        if ok:
+            _stash_secrets(job_id, result)
         _record(job_id, status="finished" if ok else "failed",
                 finished_at=_now_ms(), result=result, success=ok)
         return {"job_id": job_id, "status": "finished" if ok else "failed"}
@@ -236,7 +269,17 @@ def get_job(job_id: str) -> dict | None:
                     rec["status"] = rq_status
         except Exception:  # noqa: BLE001
             pass
-    return _mongo_to_view(rec)
+    view = _mongo_to_view(rec)
+    # One-time secret delivery: on the first finished read, merge the qrand
+    # private/symmetric key back into the result view and drop it from memory.
+    # Merge into a NEW result dict (not the persisted record's dict, which the
+    # shallow _mongo_to_view copy shares by reference in the fallback path) so
+    # the secret is never written back into the stored job record.
+    if view.get("status") == "finished":
+        secrets = _pop_secrets(job_id)
+        if secrets and isinstance(view.get("result"), dict):
+            view["result"] = {**view["result"], **secrets}
+    return view
 
 
 def list_jobs(limit: int = 50) -> list[dict]:
@@ -259,6 +302,7 @@ def list_jobs(limit: int = 50) -> list[dict]:
 
 
 def delete_job(job_id: str) -> bool:
+    _pop_secrets(job_id)  # drop any undelivered one-time secrets too
     coll = _get_mongo()
     if coll is not None:
         try:

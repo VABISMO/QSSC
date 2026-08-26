@@ -33,7 +33,6 @@ export const api = {
     get(`/api/backend/info?profile=${profile}&temperature_k=${temperature_k}&seed=${seed}`),
   odmr: (profile, b_field, points) =>
     get(`/api/odmr?profile=${profile}&b_field=${b_field}&points=${points}`),
-  protocol: () => get('/api/protocol'),
   calibration: (profile) => get(`/api/calibration?profile=${profile}`),
   signal: (o) => get(`/api/signal?${q(o)}`),
   calibrationRun: (o) => post(`/api/calibration/run?${q(o)}`, {}),

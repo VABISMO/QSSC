@@ -276,6 +276,47 @@ def test_qrand_result_bson_serialisable():
         pass
 
 
+def test_qrand_private_key_not_persisted(monkeypatch):
+    """The qrand private key + symmetric key must never be persisted to the
+    job store (Mongo / fallback). The worker stashes them in a one-time
+    in-memory store and strips them from the persisted result; the first
+    finished-status poll delivers them once, and subsequent polls do not.
+    Regression for the private-key-in-MongoDB leak."""
+    from api import jobs
+    # force the in-process fallback (no Redis/Mongo) for a deterministic test
+    monkeypatch.setattr(jobs, "_get_redis", lambda: None)
+    monkeypatch.setattr(jobs, "_get_mongo", lambda: None)
+    jobs._fallback_store.clear()
+    jobs._secret_store.clear()
+    payload = {"algorithm": "qrand", "profile": "hBN-VB",
+               "temperature_k": 300.0, "seed": 42, "noise_mode": "real",
+               "shots": 8192, "num_qubits": 8, "num_bytes": 16,
+               "common_name": "QSSC-secret-scrub"}
+    job_id = jobs.enqueue("circuit", payload)
+    import time as _t
+    first_finished = None
+    for _ in range(400):
+        rec = jobs.get_job(job_id)
+        if rec and rec.get("status") == "finished":
+            first_finished = rec  # the first finished read delivers secrets
+            break
+        _t.sleep(0.1)
+    assert first_finished is not None, "qrand job did not finish"
+    # (1) one-time delivery: the first finished poll carries the private key
+    assert "BEGIN PRIVATE KEY" in first_finished["result"]["private_key_pem"]
+    assert first_finished["result"]["symmetric_key_hex"]
+    # (2) the persisted record (in-process fallback store) never stored secrets
+    persisted = jobs._fallback_store[job_id]["result"]
+    assert "BEGIN CERTIFICATE" in persisted["certificate_pem"]
+    assert "private_key_pem" not in persisted
+    assert "symmetric_key_hex" not in persisted
+    # (3) re-polling does NOT re-deliver the one-time secrets
+    rec2 = jobs.get_job(job_id)
+    assert "private_key_pem" not in rec2["result"]
+    assert "symmetric_key_hex" not in rec2["result"]
+    jobs.delete_job(job_id)
+
+
 # -- QKD (BB84) --------------------------------------------------------------
 
 def test_bb84_secure_without_eve_detected_with_eve():
@@ -297,6 +338,33 @@ def test_math_circuits_build():
     for op, args in [("add", (2, 3)), ("mul", (3, 4)), ("sqrt", (16, None))]:
         qc = create_math_circuit(op, args[0], args[1])
         assert qc.num_clbits > 0
+
+
+def _math_top(op, a, b, shots=4096, seed=0):
+    """Run a math circuit via the runner (the real, transpiled path) and return
+    the top result integer."""
+    from api.runner import run_circuit
+    r = run_circuit({"algorithm": "math", "op": op, "a": a, "b": b,
+                     "profile": "NV", "shots": shots, "seed": seed})
+    assert "error" not in r, f"runner error: {r.get('error')}"
+    return r["result"]
+
+
+def test_math_sub_add_signed():
+    # regression: sub() used to add (a no-op `n2=-n2; a2=abs(n2)`), and add() with
+    # a negative second operand also added. Both must now produce a-b / a+b.
+    assert _math_top("sub", 10, 3) == 7, "sub(10,3) must be 7, not 13"
+    assert _math_top("add", 10, -3) == 7, "add(10,-3) must be 7, not 13"
+    assert _math_top("add", 3, 4) == 7
+    assert _math_top("sub", 20, 5) == 15
+
+
+def test_math_sqrt_log_no_second_operand():
+    # regression: runner crashed with float(None) when sqrt/log had no 2nd operand
+    from api.runner import run_circuit
+    r = run_circuit({"algorithm": "math", "op": "sqrt", "a": 16,
+                     "profile": "NV", "shots": 256, "seed": 0})
+    assert "error" not in r, f"sqrt without b must not crash: {r.get('error')}"
 
 
 def test_user_circuit_python_and_qasm():

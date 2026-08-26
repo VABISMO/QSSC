@@ -168,7 +168,7 @@ class SimulatedFPGA:
         # wider than the real ~5 MHz NV ODMR line -- a pulse 200 MHz off would
         # wrongly have flipped the spin. self.noise is reserved for the
         # stochastic RZ/RY gate error below, not the resonance acceptance.
-        if abs(freq_ghz * 1e9 - self.sim_freq) > ODMR_LINEWIDTH_HZ:
+        if abs(freq_ghz * 1e9 - self.sim_freq) > self.profile.odmr_linewidth_hz:
             return "ERR"
         q = qubit
         self.sim_states.setdefault(q, 0)
@@ -256,7 +256,7 @@ def make_detector_response(active_emitters: set, profile: DefectProfile | str = 
     if mw_freq_khz is not None:
         # on-resonance when the MW drive sits within one ODMR linewidth of D
         # (the old 2%*D = 57 MHz window was ~11x too wide vs the real ~5 MHz line)
-        on_resonance = abs(mw_freq_khz * 1e3 - prof.zero_field_splitting) < ODMR_LINEWIDTH_HZ
+        on_resonance = abs(mw_freq_khz * 1e3 - prof.zero_field_splitting) < prof.odmr_linewidth_hz
     codes = np.empty(n, dtype=np.int32)
     for q in range(n):
         r, c = divmod(q, grid)

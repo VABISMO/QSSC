@@ -405,7 +405,9 @@ electrical; there is no camera, no lens, and no imaging.
 ## 9. Microwave Antenna / CPW Design (≈2.87 / 3.46 GHz)
 
 - **Frequency plan.** ADF4351 PFD = 25 MHz, MOD = 125 (200 kHz channel
-  resolution on the VCO), PRESCALER = 4/5.
+  resolution on the VCO), PRESCALER = 8/9. The firmware sets PR1=1 (8/9) so the
+  PLL covers the full VCO range 2.2–4.4 GHz; the 4/5 prescaler is only valid to
+  RF 3.6 GHz and would silently misprogram any target in the 3.6–4.4 GHz band.
   - 2.87 GHz (NV⁻): VCO = 2.87 GHz (RF_DIV = ÷1), INT = 114, FRAC = 100
     (114 + 100/125 = 114.8 → 114.8 × 25 MHz = 2870 MHz).
   - 3.46 GHz (hBN V_B⁻): VCO = 3.46 GHz (RF_DIV = ÷1), INT = 138, FRAC = 50

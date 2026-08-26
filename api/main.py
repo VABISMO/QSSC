@@ -233,7 +233,7 @@ def backend_info(profile: str = "NV", temperature_k: float = 300.0,
 
 @app.get("/api/odmr")
 def odmr(profile: str = "NV", b_field: float = 1e-3,
-         points: int = 400, linewidth: float = 5.0):
+         points: int = 400, linewidth: float | None = None):
     prof = get_profile(profile)
     f0 = prof.d_ghz
     # adaptive span: wide enough to show the full hyperfine fingerprint
@@ -241,7 +241,10 @@ def odmr(profile: str = "NV", b_field: float = 1e-3,
     span = max(0.08, abs(prof.hyperfine_coupling) / 1e9 * prof.n_equivalent_nuclei * 1.15 + 0.03)
     points = _clamp_points(points)
     freqs = np.linspace(f0 - span, f0 + span, points)
-    f, c = simulate_odmr(prof, freqs, b_field_t=b_field, linewidth_mhz=linewidth)
+    # linewidth defaults to the profile's ODMR linewidth (NV ~5 MHz, SiC ~1.5 MHz)
+    # unless the caller overrides it explicitly.
+    lw = linewidth if linewidth is not None else prof.odmr_linewidth_hz / 1e6
+    f, c = simulate_odmr(prof, freqs, b_field_t=b_field, linewidth_mhz=lw)
     dip = float(f[np.argmin(c)])
     return {
         "profile": prof.short, "d_ghz": prof.d_ghz,
@@ -271,13 +274,17 @@ def protocol_variants():
 
 @app.get("/api/calibration")
 def calibration(profile: str = "NV", grid: int = 8):
+    """Default emitter-pixel -> qubit-site -> detector-electrode LUT (the
+    identity mapping used before a physical calibration sweep is run). The
+    on-chip readout has no camera pixels; each site is identified by its
+    emitter (row, col) and the graphene detector electrode it drives."""
     from qssc.backend import CalibrationManager
-    mapping = CalibrationManager.default_grid_mapping()
+    lut = CalibrationManager.default_detector_lut()
     sites = []
     for idx in range(grid * grid):
         r, c = divmod(idx, grid)
-        x, y = mapping[(r, c)]
-        sites.append({"qubit_id": idx, "row": r, "col": c, "pixel_x": x, "pixel_y": y})
+        sites.append({"qubit_id": idx, "row": r, "col": c,
+                      "electrode": lut.get((r, c), idx)})
     return {"grid": grid, "sites": sites}
 
 
