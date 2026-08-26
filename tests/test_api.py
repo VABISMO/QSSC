@@ -212,6 +212,109 @@ def test_run_rejects_bad_temperature(client):
     assert r.status_code == 422
 
 
+# --- integration: every demo algorithm runs end-to-end through the API ----
+# one parametrized case per counts-producing algorithm; the non-counts ones
+# (qrand crypto, bb84 qkd) get dedicated tests below.
+
+ALGO_CASES = [
+    ("bell",     {"num_qubits": 2}),
+    ("qft",      {"num_qubits": 3, "x": 1}),
+    ("grover",   {"n_items": 3, "marked": 5}),
+    ("math",     {"op": "add", "a": 3, "b": 2, "bits": 4}),
+    ("period",   {"n": 15}),
+    ("qftnos",   {"n": 15}),
+]
+
+
+@pytest.mark.parametrize("algo, extra", ALGO_CASES)
+def test_circuit_run_all_algorithms(client, algo, extra):
+    """Every demo algorithm returns 200/finished with well-formed counts and
+    the on-chip optical readout block attached."""
+    body = {"algorithm": algo, "profile": "NV", "shots": 512, "seed": 7,
+            "noise_mode": "phenomenological"}
+    body.update(extra)
+    r = client.post("/api/circuit/run", params={"sync": True}, json=body)
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["status"] == "finished"
+    res = j["result"]
+    assert "error" not in res, (algo, res.get("error"))
+    assert res["counts"], f"{algo}: empty counts"
+    assert sum(res["counts"].values()) == body["shots"]
+    assert res["num_clbits"] >= 1
+    # the on-chip detector readout fires for every counts-producing run
+    opt = res["optical"]
+    assert opt is not None
+    assert "displayed_bitstring" in opt and "read_states" in opt
+    assert "photocurrent_mean" in opt
+
+
+def test_circuit_run_qrand_crypto(client):
+    """qrand returns quantum entropy + an X.509 keypair (no counts shape)."""
+    r = client.post("/api/circuit/run", params={"sync": True},
+                    json={"algorithm": "qrand", "profile": "NV", "num_qubits": 8,
+                          "num_bytes": 16, "shots": 8192, "seed": 3,
+                          "noise_mode": "ideal"})
+    assert r.status_code == 200, r.text
+    res = r.json()["result"]
+    assert "error" not in res, res.get("error")
+    assert len(res["entropy_hex"]) == 32          # 16 bytes
+    assert res["extraction"]["sufficient"] is True
+    assert res["symmetric_key_hex"]
+    assert "BEGIN CERTIFICATE" in res["certificate_pem"]
+    assert int(res["serial"], 16) < 2 ** 159       # RFC 5280 serial bound
+
+
+def test_circuit_run_bb84_qkd(client):
+    """bb84 returns a QBER + sifted key (no circuit counts)."""
+    r = client.post("/api/circuit/run", params={"sync": True},
+                    json={"algorithm": "bb84", "profile": "NV", "num_bits": 64,
+                          "eavesdrop": False, "shots": 256, "seed": 5,
+                          "noise_mode": "ideal"})
+    assert r.status_code == 200, r.text
+    res = r.json()["result"]
+    assert "error" not in res, res.get("error")
+    assert res["qber"] >= 0.0
+    assert res["sifted_bits"] >= 1
+    # an honest channel (no Eve, low readout noise) stays under the 11% threshold
+    assert res["qber"] < res["qber_threshold"]
+    assert res["secure"] is True
+
+
+def test_bell_grid_lights_measured_qubits(client):
+    """Regression for the reported bug: running a Bell pair returned bitstring
+    '00' and lit no qubits. The grid must light by per-qubit P(|1>) across all
+    counts (so both qubits light for |00>+|11>), and the optical read_states
+    must mark the electrodes that were never pumped as -1 (not threshold them
+    to |1>)."""
+    r = client.post("/api/circuit/run", params={"sync": True},
+                    json={"algorithm": "bell", "profile": "NV", "num_qubits": 2,
+                          "shots": 1024, "seed": 1, "noise_mode": "real"})
+    res = r.json()["result"]
+    counts = res["counts"]
+    total = sum(counts.values())
+    nc = res["num_clbits"]
+
+    def p1(qubit):
+        # circuit clbit i maps to bitstring position (num_clbits-1-i)
+        s = nc - 1 - qubit
+        return sum(c for bs, c in counts.items()
+                   if s < len(bs) and bs[s] == "1") / total
+
+    # both measured qubits carry ~50% |1>, so the grid lights even when the
+    # single most-likely outcome is '00'
+    assert 0.1 < p1(0) < 0.9 and 0.1 < p1(1) < 0.9
+
+    opt = res["optical"]
+    states = opt["read_states"]
+    # the two pumped sites are read as a real 0/1; the other 62 are -1
+    measured = [states[i] for i in (0, 1)]
+    assert all(v in (0, 1) for v in measured)
+    assert all(states[i] == -1 for i in range(2, len(states)))
+    # photocurrent_mean reflects only the pumped electrodes (not the floor)
+    assert opt["photocurrent_mean"] > 0.0
+
+
 # --- async job lifecycle ----------------------------------------------------
 
 def _wait_for_job(client, job_id, timeout=40):

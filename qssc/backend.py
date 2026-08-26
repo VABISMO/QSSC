@@ -720,6 +720,8 @@ class QSSCBackend(BackendV2):
                     pq = circuit.find_bit(instr.qubits[0]).index
                     meas_map.append((cl, pq))
             codes = np.zeros(self._n_qubits, dtype=np.int32)
+            measured_dets: list = []
+            measured_pqs: set = set()
             for cl, pq in meas_map:
                 str_idx = (circuit.num_clbits - 1) - cl
                 if str_idx < len(bitstring) and pq < self._n_qubits:
@@ -733,9 +735,21 @@ class QSSCBackend(BackendV2):
                     emitter.drive(r, c, 50)
                     self.hardware.sim_states[pq] = bit
                     codes[det] = detector.read(det)
+                    measured_dets.append(det)
+                    measured_pqs.add(pq)
             states = proc.process(codes, lut, num_qubits=self._n_qubits)
+            # electrodes that were never pumped read code 0 (below threshold),
+            # which process() would threshold as state 1 (dark). Mark them -1 so
+            # "not read this run" is distinguishable from "read as |1⟩".
+            for i in range(self._n_qubits):
+                if i not in measured_pqs:
+                    states[i] = -1
+            # photocurrent mean over the electrodes actually pumped (the
+            # unpumped floor would otherwise drag the mean to ~0).
+            photocurrent_mean = (float(np.mean([codes[d] for d in measured_dets]))
+                                 if measured_dets else 0.0)
             return {"displayed_bitstring": bitstring, "read_states": states,
-                    "photocurrent_mean": float(np.mean(codes))}
+                    "photocurrent_mean": photocurrent_mean}
         except Exception as exc:  # pragma: no cover - hardware path
             logger.warning("on-chip readout skipped: %s", exc)
             return {"error": str(exc)}

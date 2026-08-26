@@ -693,11 +693,11 @@ export default function App() {
 
               <div className="card">
                 <h2><span className="dot" />Qubit grid (8×8)</h2>
-                <div className="hint">Auto-aligned defect sites; the top measured bitstring lights up the physical qubits.</div>
+                <div className="hint">Auto-aligned defect sites; each measured qubit lights up by its measured-|1⟩ probability across all shots.</div>
                 {cal.data && cal.data.sites && (
                   <QubitGrid
                     sites={cal.data.sites}
-                    bitstring={runCounts ? Object.keys(runCounts).sort((a, b) => runCounts[b] - runCounts[a])[0] : null}
+                    counts={runCounts}
                     numClbits={runBits}
                   />
                 )}

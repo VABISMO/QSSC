@@ -5,31 +5,47 @@ import React from 'react'
 // cells light up for the measured bitstring of the most recent run (lock-in
 // readout, no camera).
 // ---------------------------------------------------------------------------
-export function QubitGrid({ sites, bitstring, numClbits }) {
+export function QubitGrid({ sites, counts, numClbits }) {
+  // Per-qubit P(measured |1⟩) across ALL counts. Qiskit bitstrings are
+  // MSB-first, so classical bit i maps to string index (numClbits-1-i). A cell
+  // lights with intensity = that bit's measured-1 probability, so an entangled
+  // Bell/GHZ run visibly lights its measured qubits even when the single top
+  // bitstring is all-zeros (the old "light the top bitstring" rendering went
+  // dark for any run whose top outcome was |0...0⟩).
+  const total = counts ? Object.values(counts).reduce((s, c) => s + (+c), 0) : 0
+  const p1 = Array.from({ length: 64 }, () => 0)
+  if (counts && total > 0 && numClbits) {
+    for (const [bs, c] of Object.entries(counts)) {
+      const n = +c
+      for (let i = 0; i < numClbits && i < 64; i++) {
+        const s = numClbits - 1 - i
+        if (s >= 0 && s < bs.length && bs[s] === '1') p1[i] += n
+      }
+    }
+    for (let i = 0; i < 64; i++) p1[i] = total ? p1[i] / total : 0
+  }
   const cells = Array.from({ length: 64 }, (_, idx) => {
     const r = Math.floor(idx / 8), c = idx % 8
     const site = sites && sites[idx]
-    // qiskit bitstring: index 0 is the most-significant (last measured) bit;
-    // classical bit cl maps to string index (numClbits-1-cl). We light a cell
-    // when its measured classical bit is '1'.
-    let on = false
-    if (bitstring && numClbits) {
-      const strIdx = numClbits - 1 - idx
-      if (strIdx >= 0 && strIdx < bitstring.length) on = bitstring[strIdx] === '1'
-    }
-    return { idx, r, c, on, usable: site ? site.intensity > 100 : false }
+    const measured = !!(numClbits && idx < numClbits)
+    return { idx, r, c, prob: p1[idx], measured, usable: site ? site.intensity > 100 : false }
   })
   return (
     <div>
       <div className="qgrid">
-        {cells.map(cell => (
-          <div key={cell.idx}
-               className={`qcell ${cell.on ? 'on' : ''} ${cell.usable ? 'usable' : ''}`}
-               title={`q${cell.idx} (${cell.r},${cell.c})`}>{cell.idx}</div>
-        ))}
+        {cells.map(cell => {
+          const lit = cell.prob > 0
+          const style = lit ? { opacity: (0.3 + 0.7 * cell.prob).toFixed(3) } : undefined
+          return (
+            <div key={cell.idx}
+                 className={`qcell ${lit ? 'on' : ''} ${cell.measured ? 'measured' : ''} ${cell.usable ? 'usable' : ''}`}
+                 style={style}
+                 title={`q${cell.idx} (${cell.r},${cell.c})${cell.measured ? ` · P(|1⟩)=${(cell.prob * 100).toFixed(0)}%` : ''}`}>{cell.idx}</div>
+          )
+        })}
       </div>
       <div className="qgrid-legend">
-        <span><span className="sw" style={{ background: 'var(--grad)' }} />|1⟩ readout</span>
+        <span><span className="sw" style={{ background: 'var(--grad)' }} />|1⟩ readout (P)</span>
         <span><span className="sw" style={{ background: '#0c1430', border: '1px solid #263056' }} />defect site</span>
         <span><span className="sw" style={{ background: '#0c1430', border: '1px solid #1d2748' }} />dark</span>
       </div>
