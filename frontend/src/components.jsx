@@ -40,7 +40,8 @@ export function QubitGrid({ sites, bitstring, numClbits }) {
 // ---------------------------------------------------------------------------
 // OdmrChart — SVG line chart of the ODMR contrast vs frequency.
 // ---------------------------------------------------------------------------
-export function OdmrChart({ data }) {
+export function OdmrChart({ data, error }) {
+  if (error) return <div className="error">{error}</div>
   if (!data || !data.frequencies_ghz) return <div className="muted">Loading spectrum…</div>
   const f = data.frequencies_ghz
   const c = data.contrast
@@ -138,7 +139,8 @@ export function ChipStack() {
 // SignalChart — oscilloscope-style analog trace of the detected photoluminescence
 // during a pulse sequence (Ramsey / ODMR / pulse), from /api/signal.
 // ---------------------------------------------------------------------------
-export function SignalChart({ data }) {
+export function SignalChart({ data, error }) {
+  if (error) return <div className="error">{error}</div>
   if (!data || !data.time_ns) return <div className="muted">Loading signal…</div>
   const t = data.time_ns, s = data.signal
   const W = 520, H = 200, P = 32

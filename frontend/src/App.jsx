@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { api } from './api.js'
 import {
   QubitGrid, OdmrChart, BarCounts,
-  SignalChart, CalibrationPanel, Verdict, PhysicsDetails,
+  SignalChart, CalibrationPanel, Verdict, PhysicsDetails, ChipStack,
 } from './components.jsx'
 
 const PROFILES = [
@@ -117,7 +117,7 @@ function useAsync(fn, deps = []) {
 }
 
 export default function App() {
-  // ---- top-level tabs: Hardware (default) / Historial ----
+  // ---- top-level tabs: Hardware (default) / History ----
   const [mainTab, setMainTab] = useState('hardware')
 
   // ---- global control state ----
@@ -230,7 +230,14 @@ export default function App() {
       if (enq.error) { setRunErr(enq.error); setJob(null); return }
       const jobId = enq.job_id
       setJob({ job_id: jobId, status: enq.status })
-      const poll = async () => {
+      // Poll the job status until it finishes or fails. Cap the poll count so a
+      // stuck/unknown-status job (or a transient fetch error) cannot poll
+      // forever: after MAX_POLLS * 600 ms the dashboard gives up with a timeout
+      // error instead of spinning indefinitely. A transient fetch error
+      // (e.g. a 404 while the job record is still being written) retries up to
+      // the same cap rather than aborting the whole run on the first blip.
+      const MAX_POLLS = 200
+      const poll = async (n = 0) => {
         try {
           const rec = await api.job(jobId)
           setJob({ job_id: jobId, status: rec.status })
@@ -243,11 +250,16 @@ export default function App() {
             setResult(rec.result || null)
             setJob(null)
             refreshHistory()
+          } else if (n >= MAX_POLLS) {
+            setRunErr(`job ${jobId} did not finish after ${Math.round(MAX_POLLS * 0.6)}s (last status: ${rec.status})`)
+            setJob(null)
+            refreshHistory()
           } else {
-            pollRef.current = setTimeout(poll, 600)
+            pollRef.current = setTimeout(() => poll(n + 1), 600)
           }
         } catch (e) {
-          setRunErr(e.message); setJob(null)
+          if (n >= MAX_POLLS) { setRunErr(e.message); setJob(null) }
+          else pollRef.current = setTimeout(() => poll(n + 1), 600)
         }
       }
       poll()
@@ -306,7 +318,7 @@ export default function App() {
           <span className="mt-ic">{'</>'}</span> Code
         </div>
         <div className={`maintab ${mainTab === 'history' ? 'active' : ''}`} onClick={() => { setMainTab('history'); refreshHistory() }}>
-          <span className="mt-ic">◷</span> Historial
+          <span className="mt-ic">◷</span> History
         </div>
       </div>
 
@@ -717,6 +729,12 @@ export default function App() {
               )}
               {info.loading && <div className="muted"><span className="spinner" /> loading explanation…</div>}
             </div>
+
+            <div className="card">
+              <h2><span className="dot" />Chip architecture</h2>
+              <div className="hint">Layered structure of the on-chip device (top → bottom): the CQD emitter array pumps the diamond NV⁻ host green; the graphene/MoS₂ photodetector array reads the ODMR photocurrent back through a 1 kHz lock-in — no camera, no alignment jig.</div>
+              <ChipStack />
+            </div>
           </div>
 
           {/* ============================= SPECTROSCOPY + CALIBRATION ============================= */}
@@ -725,8 +743,7 @@ export default function App() {
             <div className="card">
               <h2><span className="dot" />ODMR spectrum</h2>
               <div className="hint">Lock-in ODMR — the on-chip graphene/MoS₂ detector array's photocurrent dips at D ± γB (resonant MW flips the spin dark), with hyperfine replicas.</div>
-              <OdmrChart data={odmr.data} />
-              {odmr.error && <div className="error">{odmr.error}</div>}
+              <OdmrChart data={odmr.data} error={odmr.error} />
             </div>
             <div className="card">
               <h2><span className="dot" />Calibration process</h2>
@@ -754,8 +771,7 @@ export default function App() {
                 <input type="number" step="any" value={detuning} onChange={e => setDetuning(+e.target.value)} />
               </div>
             </div>
-            <SignalChart data={signal.data} />
-            {signal.error && <div className="error">{signal.error}</div>}
+            <SignalChart data={signal.data} error={signal.error} />
           </div>
 
           <footer style={{ marginTop: 30, color: 'var(--dim)', fontSize: 12.5, textAlign: 'center' }}>

@@ -7,7 +7,7 @@
   --border: #263056;
   --text: #e6ecff;
   --muted: #94a3c4;
-  --dim: #6b78a0;
+  --dim: #808db0;   /* lifted from #6b78a0 for WCAG AA contrast on small text (~5.1:1 on the dark bg, was ~3.9:1) */
   --brand: #22d3ee;
   --brand-2: #6366f1;
   --accent: #f472b6;
@@ -177,7 +177,7 @@ textarea.code-editor:focus { outline: 1px solid var(--brand); border-color: var(
   letter-spacing: .08em; margin: 26px 0 14px; display: flex; align-items: center; gap: 10px; }
 .section-title::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 
-/* ---- main top-level tabs (Hardware / Historial) ---- */
+/* ---- main top-level tabs (Hardware / History) ---- */
 .maintabs { display: flex; gap: 8px; margin-bottom: 18px; border-bottom: 1px solid var(--border); padding-bottom: 0; }
 .maintab {
   font-family: var(--font-head); font-size: 14px; padding: 11px 18px; cursor: pointer; color: var(--muted);
@@ -247,3 +247,20 @@ textarea.code-editor:focus { outline: 1px solid var(--brand); border-color: var(
 .hstatus.failed { color: var(--err); border-color: rgba(248,113,113,.3); background: rgba(248,113,113,.08); }
 .hstatus.queued, .hstatus.started { color: var(--warn); border-color: rgba(251,191,36,.3); }
 .hist-time { font-size: 11px; white-space: nowrap; }
+
+/* ---- mobile (phones) ---- */
+@media (max-width: 600px) {
+  .app { padding: 18px 12px 60px; }
+  .header { flex-wrap: wrap; gap: 12px; }
+  .title h1 { font-size: 21px; }
+  .title .sub { font-size: 12px; }
+  .badge { margin-left: 0; width: 100%; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .stat .v { font-size: 16px; }
+  .bar-row { grid-template-columns: 84px 1fr 52px; }
+  .kv { grid-template-columns: 108px 1fr; }
+  .maintab { padding: 9px 12px; font-size: 13px; }
+  .qgrid { max-width: 100%; }
+  .fpga-grid { gap: 10px; }
+  .verdict-meta { gap: 10px; }
+}
