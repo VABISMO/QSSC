@@ -387,16 +387,18 @@ function computeRunPhysics(result, profile, temperature, infoData) {
   const wgStatus = c.wgProp >= 0.8 ? 'ok' : c.wgProp >= 0.5 ? 'warn' : 'bad'
   const contrastPct = +(c.contrast * 100).toFixed(1)
   const contrastStatus = c.contrast >= 0.04 ? 'ok' : c.contrast >= 0.02 ? 'warn' : 'bad'
+  // does the circuit fit the 8x8 = 64-site chip? (physical-execution gate)
+  const gridStatus = nMeasured <= 64 ? 'ok' : 'bad'
   // overall = worst meaningful signal (single-read SNR dominates: if the dip
   // doesn't resolve above noise in one shot, the readout doesn't work at this T)
   const worst = (arr) => arr.includes('bad') ? 'bad' : arr.includes('warn') ? 'warn' : 'ok'
-  const overall = worst([snrStatus, fidStatus, driveStatus, wgStatus, contrastStatus])
+  const overall = worst([snrStatus, fidStatus, driveStatus, wgStatus, contrastStatus, gridStatus])
   return { nActive, nMeasured, shots, driveMa: c.driveMa, forwardV: c.forwardV,
     elecPwrMw, pumpMw: c.pumpMw, optNjPerSite, optNjPerShot, totalOptUj,
     readoutMs, iBrightUa, iDarkUa, bright: c.bright, dark: c.dark, dip: c.dip,
     noise: +c.noise.toFixed(0), contrastPct, snr: +c.snr.toFixed(1), avgSnr: Math.round(avgSnr),
     wgProp: c.wgProp, fidelity, readoutErr, T: Math.round(c.T), crystal: c.crystal,
-    snrStatus, fidStatus, driveStatus, wgStatus, contrastStatus, overall }
+    snrStatus, fidStatus, driveStatus, wgStatus, contrastStatus, gridStatus, overall }
 }
 
 const CHIP_LABEL = { ok: '✓ in spec', warn: '⚠ marginal', bad: '✗ out of spec' }
@@ -418,7 +420,8 @@ export function RunPhysics({ result, profile, temperature, infoData }) {
     <div className="stat">
       <div className="k">{k}</div>
       <div className="v">{v}{u != null && <small> {u}</small>}</div>
-      {status && <span className={`chip ${status}`}>{CHIP_LABEL_SHORT[status]} · {spec}</span>}
+      {status === 'info' && <span className="chip info">descriptive</span>}
+      {status && status !== 'info' && <span className={`chip ${status}`}>{CHIP_LABEL_SHORT[status]} · {spec}</span>}
     </div>
   )
   const overallTxt = p.overall === 'ok' ? '✓ Readout works at this temperature'
@@ -441,14 +444,14 @@ export function RunPhysics({ result, profile, temperature, infoData }) {
         {stat('Lock-in SNR', `${p.snr}σ`, `single · ${p.avgSnr}σ / ${p.shots} shots`, p.snrStatus, '≥3σ single-shot')}
         {stat('Readout fidelity', pct(p.fidelity), '%', p.fidStatus, '≥90%')}
         {stat('ODMR contrast', `${p.contrastPct}`, '%', p.contrastStatus, '≥4% dip')}
-        {stat('ADC codes', `${p.bright}/${p.dark}`, `dip ${p.dip}c · noise ${p.noise}c`, null)}
+        {stat('ADC codes', `${p.bright}/${p.dark}`, `dip ${p.dip}c · noise ${p.noise}c`, 'info')}
         {stat('Drive / pixel', `${p.driveMa} mA · ${p.forwardV} V`, `→ ${p.elecPwrMw} mW`, p.driveStatus, '2–20 mA')}
-        {stat('Photocurrent', `${p.iBrightUa}`, `bright / ${p.iDarkUa} dark µA`, null)}
+        {stat('Photocurrent', `${p.iBrightUa}`, `bright / ${p.iDarkUa} dark µA`, 'info')}
         {stat('Waveguide paths', `${p.nMeasured}`, `η ${(p.wgProp * 100).toFixed(1)}%`, p.wgStatus, 'η ≥80%')}
-        {stat('CQD pixels fired', `${p.nMeasured}`, '/shot', null)}
-        {stat('Detector electrodes', `${p.nMeasured}`, '/shot', null)}
-        {stat('Pump energy', p.totalOptUj >= 1000 ? (p.totalOptUj / 1000).toFixed(2) : p.totalOptUj.toFixed(2), p.totalOptUj >= 1000 ? 'mJ optical' : 'µJ optical', null)}
-        {stat('Readout time', p.readoutMs >= 1000 ? (p.readoutMs / 1000).toFixed(2) : p.readoutMs.toFixed(2), p.readoutMs >= 1000 ? 's sequential' : 'ms sequential', null)}
+        {stat('CQD pixels fired', `${p.nMeasured}`, '/shot', p.gridStatus, 'fits 8×8 grid')}
+        {stat('Detector electrodes', `${p.nMeasured}`, '/shot', p.gridStatus, 'fits 8×8 grid')}
+        {stat('Pump energy', p.totalOptUj >= 1000 ? (p.totalOptUj / 1000).toFixed(2) : p.totalOptUj.toFixed(2), p.totalOptUj >= 1000 ? 'mJ optical' : 'µJ optical', 'info')}
+        {stat('Readout time', p.readoutMs >= 1000 ? (p.readoutMs / 1000).toFixed(2) : p.readoutMs.toFixed(2), p.readoutMs >= 1000 ? 's sequential' : 'ms sequential', 'info')}
       </div>
     </div>
   )
