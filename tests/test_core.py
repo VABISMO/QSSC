@@ -417,6 +417,35 @@ def test_runner_surfaces_per_run_optical():
     assert opt.get("photocurrent_mean", 0) >= 0
 
 
+def test_readout_reflects_measured_bit():
+    """The per-run optical readout must reflect the measured bit, not a fixed
+    bright level: a measured-1 qubit is pumped with its spin in the dark ms=+-1
+    state (the ODMR dip the circuit's MW drove) and thresholds to state 1; a
+    measured-0 stays bright and thresholds to state 0. Catches the stale
+    DARK_CODE=800 / no-state-injection regression where read_states was inverted."""
+    from qssc.simulator import SimulatedFPGA
+    from qssc.backend import QubitReadoutProcessor, EmitterController, DetectorInterface, CalibrationManager
+    fpga = SimulatedFPGA("NV", seed=7)
+    em = EmitterController(fpga)
+    det = DetectorInterface(fpga)
+    proc = QubitReadoutProcessor()
+    lut = CalibrationManager.default_detector_lut()
+    # threshold must sit between bright (3200) and the ~5% dark dip (3040)
+    assert proc.threshold == 0.5 * (3200 + 3040)
+    # measured bit 0 -> spin bright -> high code; measured bit 1 -> dark dip -> low code
+    em.drive(0, 0, 50); fpga.sim_states[0] = 0
+    code_bright = det.read(0)
+    em.drive(0, 0, 50); fpga.sim_states[0] = 1
+    code_dark = det.read(0)
+    assert code_bright > code_dark, "bright spin must read higher than dark dip"
+    import numpy as np
+    codes = np.zeros(64, dtype=np.int32)
+    codes[0] = code_bright
+    codes[1] = code_dark
+    states = proc.process(codes, lut, num_qubits=64)
+    assert states[0] == 0 and states[1] == 1, "readout must recover the measured bit"
+
+
 def test_backend_runs_bell():
     from qiskit import QuantumCircuit
     b = QSSCBackend("hBN-VB", sites=_quick_sites(), seed=0)

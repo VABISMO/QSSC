@@ -236,9 +236,9 @@ class QubitReadoutProcessor:
     midway between the bright and dark levels to recover the bit.
     """
 
-    # mirrors qssc.simulator constants
+    # mirrors qssc.simulator constants (ensemble ODMR: dark = bright*(1-contrast))
     BRIGHT_CODE = 3200
-    DARK_CODE = 800
+    DARK_CODE = 3040                       # BRIGHT * (1 - ODMR_CONTRAST), the ~5% dip
 
     def __init__(self, bright: int = BRIGHT_CODE, dark: int = DARK_CODE):
         self.bright = bright
@@ -762,10 +762,16 @@ class QSSCBackend(BackendV2):
             codes = np.zeros(self._n_qubits, dtype=np.int32)
             for cl, pq in meas_map:
                 str_idx = (circuit.num_clbits - 1) - cl
-                if str_idx < len(bitstring) and bitstring[str_idx] == "1" and pq < self._n_qubits:
+                if str_idx < len(bitstring) and pq < self._n_qubits:
+                    bit = int(bitstring[str_idx] == "1")
                     r, c = divmod(pq, 8)
                     det = lut.get((r, c), r * 8 + c)
+                    # Pump the pixel (DRIVE_EMITTER), then set the spin state to
+                    # the measured bit: 0 = bright ms=0 (high PL), 1 = dark ms=+-1
+                    # (the ODMR dip the preceding MW pulses drove). The pump only
+                    # illuminates; the spin state reflects the circuit's result.
                     emitter.drive(r, c, 50)
+                    self.hardware.sim_states[pq] = bit
                     codes[det] = detector.read(det)
             states = proc.process(codes, lut, num_qubits=self._n_qubits)
             return {"displayed_bitstring": bitstring, "read_states": states,

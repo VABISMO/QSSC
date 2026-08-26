@@ -507,4 +507,6 @@ def delete_script(sid: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("api.main:app", host="0.0.0.0", port=8000, reload=False)
+    # Bind 127.0.0.1 for the local lab run so the exec sandbox is not exposed to
+    # the LAN. The Dockerfile binds 0.0.0.0 (required by Render's health check).
+    uvicorn.run("api.main:app", host="127.0.0.1", port=8000, reload=False)

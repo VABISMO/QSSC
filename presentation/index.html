@@ -217,7 +217,7 @@
 <section class="slide" id="s6">
   <div class="kicker">05 · FPGA control electronics</div>
   <h2 class="title">An <span class="grad">Artix-7</span> drives the whole chip</h2>
-  <p class="lead">A single FPGA orchestrates the green-CQD pump, microwave synthesis, on-chip detector sampling and host UART — replacing racks of lab equipment with one board. The OV7670 on the controller board is for visual inspection only; qubit readout is the on-chip graphene/MoS₂ array plus software pulse-capture calibration — <b>not a camera</b>.</p>
+  <p class="lead">A single FPGA orchestrates the green-CQD pump, microwave synthesis, on-chip detector sampling and host UART — replacing racks of lab equipment with one board. Qubit readout is the on-chip graphene/MoS₂ photodetector array plus a software pulse-capture calibration sweep — <b>no camera, no alignment jig</b>.</p>
   <div class="arch">
     <div class="node"><div class="t">Host PC</div><div class="s">UART</div></div>
     <div class="arrow">→</div>
@@ -226,9 +226,9 @@
     <div class="node"><div class="t">ADF4351</div><div class="s">µW PLL</div></div>
   </div>
   <div class="grid3" style="margin-top:8px">
-    <div class="card"><h3>RTL (Verilog)</h3><p style="color:var(--muted);font-size:13px">11 modules: <code class="inl">uart_rx/tx</code>, <code class="inl">sccb_master</code>, <code class="inl">ov7670_ctrl</code>, <code class="inl">spi_master</code>, <code class="inl">adf4351_ctrl</code>, <code class="inl">laser_array</code>, <code class="inl">camera_capture</code>, <code class="inl">command_parser</code>, <code class="inl">top_level</code>. Parse-verified with pyverilog.</p></div>
-    <div class="card"><h3>PCB</h3><p style="color:var(--muted);font-size:13px">KiCad schematic + footprint, 8×8 VCSEL array routing, OV7670 camera, SMA microwave out, Peltier driver, USB-UART. Constraints in <code class="inl">constraints.xdc</code>.</p></div>
-    <div class="card"><h3>Protocol</h3><p style="color:var(--muted);font-size:13px">Simple ASCII UART commands: <code class="inl">FIRE_LASER</code>, <code class="inl">APPLY_PULSE</code>, <code class="inl">CAPTURE_FRAME</code>, <code class="inl">CAPTURE_DARK</code>.</p></div>
+    <div class="card"><h3>RTL (Verilog)</h3><p style="color:var(--muted);font-size:13px">8 modules: <code class="inl">uart_rx/tx</code>, <code class="inl">spi_master</code>, <code class="inl">adf4351_ctrl</code>, <code class="inl">emitter_array</code>, <code class="inl">photodetector_readout</code>, <code class="inl">command_parser</code>, <code class="inl">top_level</code>. Parse-verified with pyverilog, iverilog sim 10/10, yosys synth fits XC7A35T.</p></div>
+    <div class="card"><h3>PCB</h3><p style="color:var(--muted);font-size:13px">KiCad schematic + footprint, on-chip CQD emitter-driver crossbar + graphene/MoS₂ detector array + TIA + analog MUX → Artix-7 XADC, SMA microwave out, Peltier driver, USB-UART. Constraints in <code class="inl">constraints.xdc</code>.</p></div>
+    <div class="card"><h3>Protocol</h3><p style="color:var(--muted);font-size:13px">ASCII UART commands: <code class="inl">DRIVE_EMITTER</code>, <code class="inl">APPLY_PULSE</code>, <code class="inl">READ_DETECTOR</code>, <code class="inl">READ_DETECTORS</code>, <code class="inl">CALIBRATE</code>.</p></div>
   </div>
 </section>
 

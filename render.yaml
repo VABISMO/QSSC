@@ -23,8 +23,11 @@ services:
       # for local dev. Override at deploy time if the Pages URL changes.
       - key: QSSC_CORS_ORIGINS
         value: https://vabismo.github.io
-      # Keep the custom-circuit endpoint functional (capped at 12 qubits /
-      # 4096 shots by the request models). Set to "0" to hard-disable it on a
-      # hardened public deploy; set QSSC_CUSTOM_API_KEY to require an X-API-Key.
+      # Custom-circuit endpoint execs user-supplied Python behind an AST
+      # sandbox that is NOT a hardened isolation boundary -- it is a local
+      # lab / demo tool. On a public internet-facing deploy it MUST stay OFF
+      # (or require QSSC_CUSTOM_API_KEY). Default "0" here; the endpoint stays
+      # enabled for local dev where this env var is unset (os.getenv default
+      # "1"). To re-enable on Render: set this to "1" AND set QSSC_CUSTOM_API_KEY.
       - key: QSSC_ENABLE_CUSTOM_CIRCUIT
-        value: "1"
+        value: "0"
