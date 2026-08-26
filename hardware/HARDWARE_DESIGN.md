@@ -579,3 +579,81 @@ component list for that rework.
   `docs/FABRICATION_PROTOCOL*.md`.
 - Original QNOS BOM and system diagram (QNOS-QISKIT README) — carried-over BOM
   baseline, now adapted to the on-chip readout architecture.
+
+---
+
+## 17. FPGA RTL Synthesis (yosys `synth_xilinx` → Artix-7 xc7)
+
+The control RTL (`fpga/rtl/*.v`, top module `top_level`) is synthesised with
+**yosys `synth_xilinx -family xc7`**, which maps the design to the Series-7
+cell library (LUT/FF/CARRY4/BRAM/DSP/IOBUF/BUFG) the same way Vivado's
+synthesis would, producing a Vivado-compatible EDIF netlist and a resource +
+logic-quality report. This is a **synthesis-level** check; it is **not**
+place-and-route and carries **no timing closure** (no Vivado is available in
+this environment — see the README honesty note).
+
+**How to run (local):**
+
+```bash
+bash fpga/synth/run_synth.sh
+# → fpga/synth/qssc_top.edif   (Vivado-compatible netlist)
+# → fpga/synth/qssc_top.json   (portable JSON netlist)
+# → fpga/synth/synth.log       (full yosys log)
+# → fpga/synth/SYNTH_REPORT.md (resource + quality summary)
+```
+
+`run_synth.sh` auto-detects yosys (on `PATH`, then `$HOME/oss-cad-suite`, then
+`/tmp/oss-cad-suite`). Install yosys via the
+[oss-cad-suite](https://github.com/YosysHQ/oss-cad-suite-build) bundle if
+needed. The flow is also wired into CI (the `fpga` job downloads a pinned
+oss-cad-suite with caching, runs the synth, and gates on the COMPLETE banner +
+zero inferred latches + zero blackboxes + "fits XC7A35T").
+
+**Verified result (2026-08-26, yosys 0.68+130, top `top_level`):**
+
+| Resource        |   Used | Available (XC7A35T-1CPG236C) | Utilisation |
+|-----------------|-------:|-----------------------------:|------------:|
+| LUT (6-input)   |  2 063 |                       20 800 |       9.9 % |
+| Flip-flop       |  1 016 |                       41 600 |       2.4 % |
+| CARRY4          |    554 |                        5 200 |      10.7 % |
+| Block RAM 36Kb  |      0 |                           50 |       0.0 % |
+| DSP48E1         |      8 |                           90 |       8.9 % |
+| I/O buffer      |     33 |                          250 |      13.2 % |
+| Global clock BUFG |    1 |                           32 |       3.1 % |
+
+The 8 DSP48E1 slices come from the integer multipliers in `command_parser`
+(site/index arithmetic); no block RAM is used (the small 8-byte `reply_mem`
+reply buffer maps to distributed LUTRAM/registers). The design uses **~10 %**
+of the smallest Artix-7 35T part — it fits with a very large margin, leaving
+room for future expansion (more detector channels, a soft processor, etc.).
+
+**Logic-quality gates — all clean:**
+
+- **Inferred latches: 0.** No combinational `always @*` block holds state, so
+  there are no level-sensitive latches (a common synthesis hazard).
+- **Blackbox / unmapped cells: 0.** Every module resolves and maps to the
+  7-series library; no undefined primitives. (The XADC is modelled
+  behaviourally by the `xadc_behavioral` stub in `top_level.v`; on real silicon
+  it is the fixed-package Artix-7 hard block, instantiated via the Xilinx XADC
+  wizard in Vivado — the stub synthesises to ordinary logic so it does not
+  blackbox the flow.)
+- **Width / driver warnings: 0.** (An earlier run flagged `reply_mem[5..7]` as
+  "used but has no driver"; fixed by zero-initialising those never-loaded reply
+  slots in the reset block of `command_parser.v`, since the send FSM's
+  `reply_start+reply_idx` index is a 3-bit value the synthesiser cannot bound
+  statically even though `reply_len ≤ 5` caps transmission.)
+
+**What this validates / what it does not:**
+
+- ✅ **Validates:** the RTL is synthesizable, maps cleanly to the 7-series cell
+  library, infers no latches or blackboxes, and the resource estimate fits the
+  XC7A35T-1CPG236C with ~90 % of the part free. Combined with the iverilog
+  self-checking testbench (`fpga/sim`, 10/10 functional checks) and the
+  pyverilog parse + XDC↔port consistency checks, the FPGA control stack is
+  verified at the **functional + synthesizability + resource-fit** levels.
+- ❌ **Does NOT validate:** post-place-and-route timing (no Vivado delays),
+  clock-tree insertion, actual pin routing / DRC, or bitstream generation. A
+  Vivado P&R run is still required to close timing at 100 MHz and produce a
+  `.bit` file. The 100 MHz `create_clock` constraint is already declared in
+  `fpga/constraints.xdc` with a `set_false_path` through reset, so a Vivado run
+  has the timing intent it needs.

@@ -266,6 +266,14 @@ module command_parser #(
             reply_idx      <= 3'd0;
             reply_len      <= 3'd0;
             reply_start    <= 3'd0;
+            // reply_mem only ever loads bytes [0..4] (max reply_len=5 for the
+            // 4-digit decimal code + separator; "OK\n"=3, "ERR\n"=4). Zero the
+            // upper three slots so the send FSM's reply_start+reply_idx index
+            // (a 3-bit value the synthesizer can't bound statically) never
+            // reads an undriven bit.
+            reply_mem[5]   <= 8'h00;
+            reply_mem[6]   <= 8'h00;
+            reply_mem[7]   <= 8'h00;
             rall_loop      <= 1'b0;
             code_is_last   <= 1'b0;
             read_all_mode  <= 1'b0;

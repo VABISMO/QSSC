@@ -1,0 +1,46 @@
+# Yosys synthesis script for the QSSC FPGA control RTL.
+# Target: Xilinx Artix-7 XC7A35T-1CPG236C (the QSSC control FPGA).
+# Goal: a Vivado-like gate-level mapping (LUT/FF/CARRY/BRAM/DSP) so the stat
+# report is a realistic resource estimate, plus a structural netlist we can
+# diff against the XDC pin list. This is NOT place-and-route (no Vivado here),
+# so there is no post-P&R timing — only a synthesis-level logic check that
+# catches inferred latches, width mismatches, blackboxes and unmapped cells.
+#
+# Run:
+#   bash fpga/synth/run_synth.sh        # locates yosys, runs, builds the report
+#   yosys -s fpga/synth/synth_yosys.ys  # raw yosys script mode (native commands)
+
+# --- read all behavioural RTL (top + every submodule) -----------------------
+read_verilog fpga/rtl/uart_rx.v
+read_verilog fpga/rtl/uart_tx.v
+read_verilog fpga/rtl/spi_master.v
+read_verilog fpga/rtl/emitter_array.v
+read_verilog fpga/rtl/photodetector_readout.v
+read_verilog fpga/rtl/adf4351_ctrl.v
+read_verilog fpga/rtl/command_parser.v
+read_verilog fpga/rtl/top_level.v
+
+# --- hierarchy + selection --------------------------------------------------
+hierarchy -check -top top_level
+
+# Quick structural checks BEFORE synthesis: report any latches the front-end
+# inferred (combinational always @* blocks that hold state). synth_xilinx
+# runs `proc` internally too, but an explicit -latches warn surfaces them in
+# the log up front.
+proc -latches warn
+
+# --- Xilinx-flavour synthesis (7-series LUT/FF/CARRY/BRAM/DSP mapping) ------
+# -run <from>:<to> lets us stop before techmapping if we want, but we want the
+# full flow through to a Vivado-compatible cell library.
+synth_xilinx -top top_level -family xc7 -edif fpga/synth/qssc_top.edif
+
+# --- reports ----------------------------------------------------------------
+# Cell counts in the Xilinx tech-mapped netlist (LUT1..LUT6, FDRE/FDCE,
+# CARRY4, BRAM36, DSP48E1, IOBUF, BUFG, ...).
+stat
+
+# Write a portable JSON netlist too (handy for tooling / pin cross-check).
+write_json fpga/synth/qssc_top.json
+
+# Echo a final banner so a grep on the log finds the verdict easily.
+log "=== QSSC yosys synth_xilinx COMPLETE (top_level, target xc7 / Artix-7) ==="

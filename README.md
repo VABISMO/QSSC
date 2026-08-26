@@ -181,14 +181,20 @@ demodulation, an **ADF4351** microwave PLL, and a host UART link. **There is no
 camera and no alignment jig** — the chip integrates its own emitter and detector
 arrays and is read electrically (ODMR dip = reduced photocurrent at resonance).
 The RTL ([`fpga/rtl/`](fpga/rtl), 8 modules + a self-checking
-[testbench](fpga/sim/tb_top_level.v)) is **parse-verified with pyverilog and
-functionally simulated with iverilog** — the testbench drives
+[testbench](fpga/sim/tb_top_level.v)) is **parse-verified with pyverilog,
+functionally simulated with iverilog, and synthesised with yosys
+`synth_xilinx` (xc7)** — the testbench drives
 `DRIVE_EMITTER 3 4 50` (asserts emitter rows/cols + `OK` reply) and
 `READ_DETECTORS` (asserts the full 64-electrode stream `1000 1040 … 3520\n`,
-320 bytes). Both run in CI. (A first iverilog run caught two real handshake
-bugs pyverilog could not — an XADC busy race and a missing consumer-ack —
-now fixed.) Pin assignments live in
-[`fpga/constraints.xdc`](fpga/constraints.xdc).
+320 bytes, 10/10 checks pass). The yosys synthesis maps the design to the
+Series-7 cell library and confirms it fits the XC7A35T-1CPG236C with ~90 % of
+the part free (≈2063 LUTs / 9.9 %, 1016 FFs / 2.4 %, 8 DSP48E1 / 8.9 %, 0
+inferred latches, 0 blackboxes). All three checks run in CI. (A first iverilog
+run caught two real handshake bugs pyverilog could not — an XADC busy race and
+a missing consumer-ack — now fixed.) Pin assignments live in
+[`fpga/constraints.xdc`](fpga/constraints.xdc); the synthesis flow + report
+live in [`fpga/synth/`](fpga/synth) (see
+[`hardware/HARDWARE_DESIGN.md`](hardware/HARDWARE_DESIGN.md) §17).
 
 > **Which board + cable?** The RTL is vendor-neutral Verilog except the Xilinx
 > XADC hard block, so the **same firmware runs on any Xilinx 7-series FPGA with

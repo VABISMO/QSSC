@@ -80,8 +80,11 @@ jobs:
   # FPGA RTL — parse-verify (pyverilog) + functional simulate (iverilog)
   # ──────────────────────────────────────────────────────────────────────
   fpga:
-    name: FPGA RTL (parse + simulate)
+    name: FPGA RTL (parse + simulate + synth)
     runs-on: ubuntu-latest
+    env:
+      # Pinned oss-cad-suite release that provides yosys for the synth step.
+      OSS_CAD_SUITE_TAG: "2026-08-26"
     steps:
       - uses: actions/checkout@v4
       - name: Install iverilog + pyverilog
@@ -104,6 +107,30 @@ jobs:
           iverilog -g2012 -o /tmp/qssc_tb.vvp -s tb_top_level rtl/*.v sim/tb_top_level.v
           vvp /tmp/qssc_tb.vvp | tee /tmp/sim.log
           grep -q "ALL CHECKS PASSED" /tmp/sim.log
+      - name: Cache oss-cad-suite (yosys)
+        id: ocs-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/oss-cad-suite
+          key: oss-cad-suite-${{ env.OSS_CAD_SUITE_TAG }}
+      - name: Install oss-cad-suite (yosys)
+        if: steps.ocs-cache.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          tag="${OSS_CAD_SUITE_TAG}"
+          url="https://github.com/YosysHQ/oss-cad-suite-build/releases/download/${tag}/oss-cad-suite-linux-x64-${tag//-/}.tgz"
+          curl -fL -o /tmp/ocs.tgz "$url"
+          tar xzf /tmp/ocs.tgz -C "$HOME"
+          rm -f /tmp/ocs.tgz
+      - name: yosys synth_xilinx (synthesizability + resource fit, xc7)
+        run: |
+          set -e
+          bash fpga/synth/run_synth.sh
+          # Gate: synthesis must reach the COMPLETE banner, infer no latches,
+          # map no blackboxes, and the report must say it fits the XC7A35T.
+          grep -q "synth_xilinx COMPLETE" fpga/synth/synth.log
+          ! grep -qi "inferred latch" fpga/synth/synth.log
+          grep -q "Fits XC7A35T.*yes" fpga/synth/SYNTH_REPORT.md
 
   # ──────────────────────────────────────────────────────────────────────
   # Frontend dashboard build

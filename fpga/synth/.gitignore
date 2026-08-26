@@ -1,0 +1,5 @@
+# yosys synthesis build artifacts (regenerable via run_synth.sh)
+synth.log
+qssc_top.edif
+qssc_top.json
+qssc_top_graph.dot
