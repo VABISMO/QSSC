@@ -435,6 +435,7 @@ export default function App() {
 
           {/* ============================= CIRCUIT RUNNER ============================= */}
           <div className="section-title">Circuit Runner</div>
+          <div className="grid cols-2">
           <div className="card">
               <h2><span className="dot" />Run a quantum algorithm</h2>
               <div className="hint">Enqueued as an async Redis/RQ job; the dashboard polls and updates when it is ready. Custom circuit loads by default.</div>
@@ -667,29 +668,29 @@ export default function App() {
               )}
             </div>
 
-          {/* ============================= MEASUREMENT ============================= */}
-          <div className="section-title">Measurement</div>
-          <div className="grid cols-2">
-            <div className="card histcard">
-              <h2><span className="dot" />Measurement histogram</h2>
-              <div className="hint">Top bitstrings from the most recent run (most-probable first).</div>
-              {runCounts
-                ? <BarCounts counts={runCounts} />
-                : <div className="muted">No run yet — execute a circuit above.</div>}
-            </div>
+            {/* measurement column (right): histogram + qubit grid */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+              <div className="card histcard">
+                <h2><span className="dot" />Measurement histogram</h2>
+                <div className="hint">Top bitstrings from the most recent run (most-probable first).</div>
+                {runCounts
+                  ? <BarCounts counts={runCounts} />
+                  : <div className="muted">No run yet — execute a circuit on the left.</div>}
+              </div>
 
-            <div className="card">
-              <h2><span className="dot" />Qubit grid (8×8)</h2>
-              <div className="hint">Auto-aligned defect sites; the top measured bitstring lights up the physical qubits.</div>
-              {cal.data && cal.data.sites && (
-                <QubitGrid
-                  sites={cal.data.sites}
-                  bitstring={runCounts ? Object.keys(runCounts).sort((a, b) => runCounts[b] - runCounts[a])[0] : null}
-                  numClbits={runBits}
-                />
-              )}
-              {cal.loading && <div className="muted"><span className="spinner" /> calibrating…</div>}
-              {cal.error && <div className="error">{cal.error}</div>}
+              <div className="card">
+                <h2><span className="dot" />Qubit grid (8×8)</h2>
+                <div className="hint">Auto-aligned defect sites; the top measured bitstring lights up the physical qubits.</div>
+                {cal.data && cal.data.sites && (
+                  <QubitGrid
+                    sites={cal.data.sites}
+                    bitstring={runCounts ? Object.keys(runCounts).sort((a, b) => runCounts[b] - runCounts[a])[0] : null}
+                    numClbits={runBits}
+                  />
+                )}
+                {cal.loading && <div className="muted"><span className="spinner" /> calibrating…</div>}
+                {cal.error && <div className="error">{cal.error}</div>}
+              </div>
             </div>
           </div>
 

@@ -59,7 +59,15 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_run" ]; then
             CONC="${{ github.event.workflow_run.conclusion }}"
             echo "workflow_run conclusion: $CONC"
-            if [ "$CONC" != "success" ]; then
+            if [ "$CONC" = "cancelled" ]; then
+              # A cancelled CI run (typically a newer push superseded it) is not
+              # an error -- there is simply nothing new to deploy. Skip
+              # gracefully so the Deploy workflow doesn't show a red X for a
+              # benign supersede; the newer push's own CI will re-trigger Deploy.
+              echo "::notice::triggering CI run was cancelled (superseded) -- skipping deploy, no error."
+              echo "ok=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            elif [ "$CONC" != "success" ]; then
               echo "::error::CI run that triggered this deploy was not success ($CONC)"
               echo "ok=false" >> "$GITHUB_OUTPUT"
               exit 1
