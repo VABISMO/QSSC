@@ -555,17 +555,26 @@ pours; do not let the 1.0 V core plane overlap unrelated digital return paths,
 and do not let the +5 V emitter-crossbar return overlap the detector analog
 ground. Place decoupling vias to the correct rail plane directly at each cap.
 
-> **Current build vs. full-routing target.** The committed main board is the
-> 4-layer stack above (DRC-clean, copper-plane foundation + 99 GND stitching
-> vias + first-pass 19/71 signal nets routed headlessly via HDI-lite BGA
-> via-in-pad, §15). Completing the remaining ~52 signal nets across all six
-> banks of the 0.5 mm 236-pad BGA is tight on two signal layers; a **6-layer
-> upgrade** (F.Cu sig / In1.Cu GND / In2.Cu sig+RF / In3.Cu PWR / In4.Cu GND /
-> B.Cu sig) is the planned path to finish routing — it adds two signal layers
-> with a continuous ground on both sides. That upgrade is a structural change
-> to the layer assignments in `route_qssc_pcb.py`/`route_signals.py` and is
-> deferred (the 4-layer board is the verified baseline). The chip module is
-> 4-layer (F.Cu sig / In1.Cu GND / In2.Cu PWR / B.Cu sig), §15A.
+> **Current build vs. full-routing target — re-verified 2026-08-27, see §15.**
+> The committed main board carries the 4-layer stack above, the DRC-clean
+> copper-plane foundation (In1.Cu GND / In2.Cu +3V3 / F.Cu+B.Cu GND floods + GND
+> stitching vias), **and a committed first-pass signal routing** (~14 of 61
+> signal nets, 118 tracks, 143 vias) that is **DRC-clean** — `kicad-cli pcb drc`
+> on the committed board *in its project* reports 0 violations. The router is
+> DRC-clean by construction: the 0.3 mm pad keepout = 0.15 mm clearance + 0.1 mm
+> half-track + 0.05 mm margin, so any track it places clears a foreign pad by
+> ≥0.2 mm > the 0.15 mm netclass clearance — it **cannot** produce net-to-net
+> shorts (verified: 0 `shorting_items` / 0 `clearance` violations even under the
+> strictest default-severity DRC; the earlier "~20 DRC shorts" note here was a
+> misdiagnosis from DRC'ing the `.kicad_pcb` *without* its `.kicad_pro`, which
+> made KiCad use default severities). What is NOT yet routed is structural, not a
+> bug: **24 of 33 netted FPGA signal balls are interior** (surrounded on F.Cu, no
+> room for a via) and **cannot escape on two signal layers** — they need **HDI
+> blind vias or a 6-layer stackup** (F.Cu sig / In1.Cu GND / In2.Cu sig / In3.Cu
+> sig / In4.Cu +3V3 / B.Cu sig) with two pad-free inner signal layers for BGA
+> escape. That stackup change is a design decision that needs your go-ahead
+> before I touch the verified 4-layer baseline. The chip module is 4-layer
+> (F.Cu sig / In1.Cu GND / In2.Cu PWR / B.Cu sig), §15A.
 
 ---
 
@@ -682,31 +691,46 @@ maze router could not finish a 65-net board DRC-clean within the resource cap).
 What it *does* deliver headlessly:
 
 - **FPGA BGA fanout — HDI-lite via-in-pad.** The XC7A35T-1CPG236C is a 0.5 mm
-  pitch BGA; the 23 signal balls that have a net sit in a 3-column strip on the
-  right edge. Balls whose neighbour-with-a-net sits one pitch toward +X cannot
-  escape on F.Cu, so the fanout places a 0.20 mm / 0.10 mm (drill) **via-in-pad**
-  on those shadowed balls (HDI-lite: the via sits in the SMD pad, annular ring
-  0.05 mm) and drops to B.Cu to escape. The board's design rules are relaxed for
-  this on the fly (`m_ViasMinSize` 0.20 mm, `m_MinThroughDrill` 0.10 mm,
-  `m_ViasMinAnnularWidth` 0.05 mm). 9 such vias are placed (verified by
-  `tests/test_pcb_route_signals.py`). Routing vias elsewhere are 0.40 / 0.20 mm
-  with a uniform mark radius of 0.6 mm, giving a worst-case via-via clearance
-  of 0.20 mm ≥ the 0.15 mm netclass minimum.
-- **First-pass signal routing.** A collision-checked orthogonal (L/Z) line
-  router routes the non-GND / non-+3V3 signal nets longest-span-first, F.Cu
-  then B.Cu, dropping a routing via on a layer change. It is O(track length)
-  per net (light, no priority-queue A*), so it stays within the CPU/RAM cap the
-  user requires. `USB_DP` / `USB_DM` are excluded (the J10 USB-C 0.5 mm
-  differential pair needs manual neck-down). On the canonical board it routes
-  13 / 42 routable signal nets on the first pass — a real PCB is finished by
-  hand from there, but the first pass is DRC-clean (no shorts, no clearance
-  violations, no dangling vias: vias on nets the router could not finish are
-  removed so they do not become `via_dangling` DRC warnings).
-- **Clean DRC.** After the pipeline runs, `kicad-cli pcb drc --severity-error
-  --severity-warning` reports **0 violations, 0 unconnected, 0 footprint
-  errors**. (The `unconnected_items` severity stays `ignore` because the
-  board is only first-pass routed — fully-unrouted nets are silent in DRC, so
-  the count is 0 rather than the 29 nets still to hand-route.)
+  pitch BGA. The fanout places a 0.20 mm / 0.10 mm (drill) **via-in-pad** on
+  every netted non-GND ball that has another netted ball one pitch toward +X
+  ("shadowed", i.e. blocked from escaping rightward on F.Cu), and drops to B.Cu
+  to escape. The board's design rules are relaxed for this on the fly
+  (`m_ViasMinSize` 0.20 mm, `m_MinThroughDrill` 0.10 mm, `m_ViasMinAnnularWidth`
+  0.05 mm). ~45 such vias are placed before routing; vias on nets the router
+  then fails to finish are removed (so they do not become `via_dangling`
+  warnings), leaving ~13–18. `tests/test_pcb_route_signals.py` verifies the HDI
+  rules + that GND balls are skipped and +3V3 balls are not. **Structural
+  caveat:** at 0.5 mm pitch the 0.20 mm via-in-pad keepouts (radius 0.6 mm) on
+  adjacent balls overlap, so B.Cu under the BGA is a solid keepout block — the
+  via-in-pad cannot by itself let an *interior* ball escape on two layers. The
+  fanout is therefore genuinely useful only for the edge/unshadowed balls that
+  escape on F.Cu and the few shadowed balls near the escape edge with an open
+  B.Cu corridor; the rest stay honestly unrouted until HDI/6-layer (below).
+- **First-pass signal routing (committed, DRC-clean).** A collision-checked
+  orthogonal (L/Z) line router routes the non-GND / non-+3V3 signal nets
+  longest-span-first, F.Cu then B.Cu. `USB_DP` / `USB_DM` are excluded. On the
+  canonical board it routes ~14 of 61 signal nets (118 tracks, 143 vias) and is
+  **DRC-clean** — `kicad-cli pcb drc` on the committed board in its project
+  reports 0 violations. The 0.3 mm pad keepout = 0.15 mm clearance + 0.1 mm
+  half-track + 0.05 mm margin, so a track centre kept outside a foreign pad's
+  keepout guarantees ≥0.2 mm edge clearance > the 0.15 mm netclass clearance —
+  the router **cannot short** by construction. (The earlier note claiming "~20
+  DRC shorts / needs a geometry-exact rewrite" was a misdiagnosis: those
+  numbers came from DRC'ing the `.kicad_pcb` *without* its `.kicad_pro`, so
+  KiCad applied default severities and reported pre-existing connector
+  `hole_clearance`/`copper_edge_clearance` + ignored-severity silk/via-dangling
+  items — never net-to-net shorts. No router rewrite is needed.)
+- **DRC of the committed board.** `kicad-cli pcb drc` on the committed
+  `qssc.kicad_pcb` *in its project* (`hardware/pcb/qssc.kicad_pro`) reports **0
+  violations / 0 unconnected**. The board carries 118 signal tracks + 143 vias
+  + 6 zones (the 4 `route_qssc_pcb` emits plus a prior partial-run pair, a
+  harmless pipeline artefact; re-running `route_qssc_pcb.py` normalises to 4).
+  DRC'ing the `.kicad_pcb` *alone* (no `.kicad_pro`) reports ~19 items under
+  *default* severities — pre-existing connector `hole_clearance` (J10 USB-C
+  NPTH mounting holes) and `copper_edge_clearance` (J3 SMA edge pads) plus
+  ignored-severity silk/via-dangling — none of them net-to-net shorts, and all
+  of them demoted to `ignore` by the project's own DRC severities. Always DRC
+  the board in its project directory, not the `.kicad_pcb` in isolation.
 
 > **Honest status — what IS done:**
 > - **Schematic:** 75 components, 97 nets. `kicad-cli sch erc` → **0 errors,
@@ -722,47 +746,56 @@ What it *does* deliver headlessly:
 >   In1.Cu GND plane / In2.Cu PWR plane / B.Cu signal), net classes
 >   (Default / RF / Power / USB / Analog, track widths 0.20 / 0.30 / 0.50 /
 >   0.20 / 0.20 mm) and design rules (min clearance 0.15 mm, min track 0.15 mm,
->   min hole clearance 0.18 mm). `kicad-cli pcb drc` → **0 errors, 0 warnings,
->   0 unconnected** on the routed board.
+>   min hole clearance 0.18 mm). `kicad-cli pcb drc` on the **committed** board
+>   *in its project* → **0 violations** (the routed board, not an unrouted one).
 > - **Copper-plane foundation (headless, by `route_qssc_pcb.py`):** a solid
->   **In1.Cu GND plane** (full board, continuous ground reference), a solid
->   **In2.Cu +3V3 plane** (the main digital rail; the stackup's "PWR" layer is
->   repurposed to +3V3, the highest-pad-count rail), **GND flood pours** on
+>   **In1.Cu GND plane**, a solid **In2.Cu +3V3 plane**, **GND flood pours** on
 >   F.Cu and B.Cu (surface GND pads connect to a local ground immediately),
->   and **99 GND stitching vias** on a 10 mm grid (each pad- and
->   signal-copper-checked) tying all copper layers into one connected ground
->   mesh. Vias are placed *before* the plane fill so the +3V3 plane carves
->   anti-pads around each via barrel. Pours use solid
->   (`ZONE_CONNECTION_FULL`) pad connection to avoid starved-thermal
->   violations. Result: **0 DRC violations, 0 unconnected, 0 footprint errors**
->   on the processed board. Re-runnable: the script strips its own output
->   first (zones + GND tracks/vias), preserving signal routing, so it is
->   idempotent.
+>   and ~91–99 **GND stitching vias** on a 10 mm grid tying all copper layers
+>   into one ground mesh. DRC-clean. Verified by `tests/test_pcb_route.py` (4
+>   zones, GND stitching present, idempotent). The committed board carries 6
+>   zones (the 4 this script emits plus a prior partial-run pair, a harmless
+>   pipeline artefact; re-running `route_qssc_pcb.py` normalises to 4).
 > - **BGA fanout + first-pass signal routing (headless, by
->   `route_signals.py`):** 16 shadowed BGA balls get HDI-lite 0.20/0.10 mm
->   via-in-pad fanout (signal escapes + the +3V3 plane balls, which need the
->   through-hole via to reach the In2.Cu +3V3 plane — GND balls are skipped,
->   the F.Cu GND flood connects them directly; verified by
->   `tests/test_pcb_route_signals.py`); 19 / 71 signal nets are routed
->   first-pass with 28 routing vias and 118 track segments (99 GND stitching
->   + 16 BGA fanout + 28 routing = 143 vias total), F.Cu then B.Cu, USB diff
->   pair excluded. DRC on the routed board: **0 violations, 0 unconnected**.
->   Verified by `tests/test_pcb_route.py` (4 zones, GND stitching present,
->   idempotent).
+>   `route_signals.py`):** committed and **DRC-clean**. ~14 of 61 signal nets
+>   routed (118 tracks, 143 vias) — the edge/unshadowed BGA balls + the
+>   peripheral nets a 2-layer line router can place cleanly. The router cannot
+>   short by construction (0.3 mm pad keepout → ≥0.2 mm edge clearance). The
+>   remaining 47 nets are left honestly unrouted, not force-routed.
 
-> **Honest status — what is NOT done (needs one GUI session):**
-> - **Signal routing is first-pass only (19 / 71 nets).** KiCad 8 `kicad-cli`
->   **cannot** export a Specctra DSN autorouter file or import an SES session
->   — both are GUI-only in `pcbnew` — so the headless line router does a
->   collision-checked first pass only. The remaining copper — the rest of the
->   signal nets, **50 Ω RF microstrip** ADF4351 → HMC441 → SMA, the
->   **USB-C → FT232 differential pair** (`USB_DP`/`USB_DM`, excluded for
->   manual neck-down), **analog guard rings** around the TIA, and the
->   **+5V / +5V_RF / +5V_IN / +1V8 / +1V0 power rails** — requires **one
->   interactive `pcbnew` session** (or the FreeRouting GUI) to finish. The
->   copper-plane foundation + BGA fanout + first-pass signal routing above are
->   already in place and DRC-clean; the per-net-class track widths encode the
->   §10 impedance intent.
+> **Honest status — what is NOT done (re-verified 2026-08-27):**
+> - **24 interior BGA signal balls cannot escape on two signal layers.** The
+>   CPG236 concentrates user-IO in interior bands; 24 of 33 netted signal balls
+>   are surrounded on F.Cu (no free cell between 0.5 mm balls) and have no room
+>   for a nearby via. The via-in-pad escapes trap on B.Cu (the keepouts overlap
+>   into a solid block). These structurally need **HDI blind/buried vias or a
+>   6-layer stackup** (two pad-free inner signal layers for BGA escape). The
+>   6-layer change is a stackup decision that needs your go-ahead before I
+>   touch the verified 4-layer baseline. Until then those nets stay honestly
+>   unrouted (DRC-clean — `unconnected_items` is demoted to `ignore`), not
+>   force-routed.
+> - **Power rails have no pours → decoupling caps are half-wired (the "small
+>   components unwired" you see).** Every decoupling cap is connected on its
+>   GND side (F.Cu/B.Cu GND flood) but **open on its power side**, because the
+>   power rails have no surface copper: +3V3 has an In2.Cu *plane* but a surface
+>   +3V3 cap needs a via to reach it (none placed), and **+1V0 / +1V8 / +5V /
+>   +5V_RF / +5V_IN** have no plane and no pour at all. The rail pad-bboxes
+>   **massively overlap** (all span the FPGA-adjacent region where the
+>   decoupling caps cluster and interleave — +1V0 54×43 mm, +1V8 55×41 mm,
+>   +5V 48×58 mm, +5V_RF 79×46 mm, +5V_IN 63×74 mm), so full-board per-rail
+>   rectangles would **short** the overlapping nets. They need **per-rail tight
+>   polygon pours or per-cap short tracks + vias** computed so neighbouring
+>   rails' pours never overlap — a non-trivial manual-layout task. +1V0/+1V8
+>   are *additionally* blocked by interior BGA power balls (need the HDI/6-layer
+>   escape above); the +5V family is peripheral and the most tractable. This is
+>   the real remaining wiring work, not a router bug.
+> - **Still deferred to one GUI/manual session:** the **50 Ω RF microstrip**
+>   ADF4351 → HMC441 → SMA, the **USB-C → FT232 differential pair**
+>   (`USB_DP`/`USB_DM`, excluded), **analog guard rings** around the TIA, and
+>   the power-ball pours above. KiCad 8 `kicad-cli` cannot export a Specctra
+>   DSN / import an SES session (GUI-only in `pcbnew`), so the final copper is
+>   interactive. The per-net-class track widths already encode the §10
+>   impedance intent.
 > - **FPGA BGA pad mapping is partial.** The XC7A35T-1CPG236C has 236 pads; the
 >   23 signal pads named in `fpga/constraints.xdc` (`reset`, `det_mux_sel*`,
 >   `emitter_rows*` / `emitter_cols*`, `SPI_*`, `clk_100mhz`, UART, XADC…) are
@@ -787,23 +820,27 @@ or fabricated), not a finished hardware product.
 .venv/bin/python tools/gen_qssc_kicad.py          # rewrites sch/pcb/pro/sym
 kicad-cli sch erc   --output /tmp/erc.txt hardware/pcb/qssc.kicad_sch   # 0 errors
 kicad-cli sch export netlist --output /tmp/qssc.net hardware/pcb/qssc.kicad_sch
-PYTHONPATH=tools python3 tools/route_signals.py   # headless BGA fanout + 1st-pass routing
-python3 tools/route_qssc_pcb.py                  # headless planes + GND mesh (keeps signals)
-kicad-cli pcb drc   --output /tmp/drc.txt hardware/pcb/qssc.kicad_pcb   # 0 violations
+PYTHONPATH=tools python3 tools/route_signals.py   # BGA fanout + first-pass signals (DRC-clean)
+PYTHONPATH=tools python3 tools/route_qssc_pcb.py  # headless planes + GND mesh (DRC-clean)
+kicad-cli pcb drc   --output /tmp/drc.txt hardware/pcb/qssc.kicad_pcb   # 0 violations (in project)
+# NB: always DRC the board in its project dir (with qssc.kicad_pro) so the
+# project's DRC severities apply. DRC'ing the .kicad_pcb ALONE uses default
+# severities and reports pre-existing connector hole/edge items + ignored
+# silk/via-dangling that the project demotes to "ignore" — misleading.
 ```
 
 > `route_signals.py` and `route_qssc_pcb.py` use the system `python3` (which
 > can `import pcbnew`), **not** the project `.venv` — the venv has no
 > `--system-site-packages`, so `pcbnew` is only reachable from the system
 > interpreter. Both are resource-capped when run via `tools/` (CPUQuota /
-> MemoryMax) so they do not freeze the host. The board the pipeline produces
-> is the one checked in. The full pipeline (routing + planes + DRC) is
-> scripted in `/tmp/qssc_route_pipeline.sh`. The same `route_qssc_pcb.py` is
-> reused for the chip module — `route_signals.py` runs there too, but its BGA
-> fanout is skipped (the module's U1 is an ADG732 **QFN-48, not a BGA**; a
-> via-in-pad on a QFN pad is a fabrication defect, so `_bga_fanout` guards on
-> pad count < 100 and returns empty). First-pass line routing still proceeds
-> (14 nets, 54 segments, 15 routing vias). Run the plane pass with
+> MemoryMax) so they do not freeze the host. **The committed board carries the
+> committed first-pass signal routing + planes — DRC-clean (0 violations in
+> project).** The same `route_qssc_pcb.py` is reused for the chip module —
+> `route_signals.py` runs there too, but its BGA fanout is skipped (the
+> module's U1 is an ADG732 **QFN-48, not a BGA**; a via-in-pad on a QFN pad is
+> a fabrication defect, so `_bga_fanout` guards on pad count < 100 and returns
+> empty). First-pass line routing still proceeds (14 nets, 54 segments, 15
+> routing vias). Run the plane pass with
 > `QSSC_PCB_PATH=hardware/pcb/chip_module.kicad_pcb python3 tools/route_qssc_pcb.py`
 > (the `QSSC_PCB_PATH` env var overrides the default board path).
 
