@@ -236,7 +236,7 @@
     "pinned_symbol_libs": []
   },
   "meta": {
-    "filename": "chip_module.kicad_pro",
+    "filename": "qssc.kicad_pro",
     "version": 1
   },
   "net_settings": {
@@ -267,10 +267,10 @@
         "line_style": 0,
         "microvia_diameter": 0.3,
         "microvia_drill": 0.1,
-        "name": "Analog",
-        "pcb_color": "rgba(255, 255, 0, 0.000)",
+        "name": "RF",
+        "pcb_color": "rgba(255, 0, 0, 0.000)",
         "schematic_color": "rgba(0, 0, 0, 0.000)",
-        "track_width": 0.2,
+        "track_width": 0.3,
         "via_diameter": 0.6,
         "via_drill": 0.3,
         "wire_width": 6
@@ -301,10 +301,10 @@
         "line_style": 0,
         "microvia_diameter": 0.3,
         "microvia_drill": 0.1,
-        "name": "RF",
-        "pcb_color": "rgba(255, 0, 0, 0.000)",
+        "name": "USB",
+        "pcb_color": "rgba(0, 255, 0, 0.000)",
         "schematic_color": "rgba(0, 0, 0, 0.000)",
-        "track_width": 0.3,
+        "track_width": 0.2,
         "via_diameter": 0.6,
         "via_drill": 0.3,
         "wire_width": 6
@@ -318,8 +318,8 @@
         "line_style": 0,
         "microvia_diameter": 0.3,
         "microvia_drill": 0.1,
-        "name": "USB",
-        "pcb_color": "rgba(0, 255, 0, 0.000)",
+        "name": "Analog",
+        "pcb_color": "rgba(255, 255, 0, 0.000)",
         "schematic_color": "rgba(0, 0, 0, 0.000)",
         "track_width": 0.2,
         "via_diameter": 0.6,
@@ -340,10 +340,6 @@
       {
         "netclass": "Power",
         "pattern": "+5V"
-      },
-      {
-        "netclass": "Power",
-        "pattern": "+7V_EMIT"
       },
       {
         "netclass": "Analog",

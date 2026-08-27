@@ -61,9 +61,11 @@ power rails cross J11 — the 64 detector electrodes stay on the module.
 - **U3 — ADA4530-1** TIA (Rf 1 MΩ + Cf 1.5 pF) → `TIA_OUT` back to the FPGA XADC.
 - **U5 — QSSC_Chip** die (80 pads: DET0–63 + ER0–7 + EC0–7) — the CQD emitter
   array + graphene detector array + diamond host, bonded on-module.
+- **Emitter driver — discrete MOSFET crossbar on +5 V** (29 parts, §7/§15A):
+  2× 74HCT240 inverting level-shifter (3.3 V FPGA → 0/5 V gate drive) + 8×
+  AO3401A P-MOS high-side row switches + 8× AO3400A N-MOS low-side column
+  sinks + 8× 220 Ω set resistors + 3 decoupling. No boost, no DAC, no TLC5955.
 - **TH1** 10 k NTC thermistor → `THRM`.
-- *(Emitter high-voltage driver TLC5955 + per-pixel R1–R64 + Peltier drive are
-  not yet placed — pending the emitter driver rail-voltage decision, §7/§15A.)*
 
 The FPGA runs four concurrent functions: (1) a UART text command parser
 (`command_parser.v`), (2) CQD emitter row/col enable with millisecond timing
@@ -94,11 +96,11 @@ flowchart TD
         MUX -->|"selects 1 of 64"| TIA["U3 TIA ADA4530-1"]
         TIA -->|"TIA_OUT analog"| J11
         MUX --> DET["U5 chip: 8x8 graphene/MoS2 detectors"]
-        J11 -->|"emitter_rows/cols"| DRV["emitter driver (TLC5955 + R1-64 — pending)"]
+        J11 -->|"emitter_rows/cols (3.3V)"| DRV["emitter driver: 2x74HCT240 + 8 P-MOS + 8 N-MOS + 8x220R on +5V"]
         DRV --> EM["U5 chip: 8x8 CQD ASE ~520-540nm"]
         J11 -->|"THRM"| NTC["TH1 10k NTC"]
     end
-    U1 <-->|"J11: emitter_rows/cols, det_mux_sel, mod_sync, TIA_OUT, DET_BIAS, +3V3/+5V/+7V_EMIT, GND"| J11
+    U1 <-->|"J11: emitter_rows/cols, det_mux_sel, mod_sync, TIA_OUT, DET_BIAS, +3V3/+5V, GND"| J11
     J3 --> A1["A1 Loop/CPW Antenna"]
     A1 -->|"MW 2.87/3.46GHz"| Sub["CVD diamond / hBN / SiC 64 sites"]
     EM -->|"green pump + SU-8/PDMS waveguide"| Sub
@@ -200,8 +202,8 @@ connection, and the 64 detector electrodes never leave the module.
 | 1  | Xilinx Artix-7 FPGA              | U1       | XC7A35T-1CPG236C               | 1   | Central control: UART, emitter timing, detector MUX/XADC, SPI  | CPG236 BGA 0.5 mm             | 1.0 V core, 1.8 V aux, 3.3 V I/O; on-chip XADC used for detector readout. Package is CPG236 (0.5 mm pitch), footprint `Package_BGA:Xilinx_CPG236` |
 | 3  | Microwave PLL synthesizer        | U3       | ADF4351BCPZ                    | 1   | RF synthesis 35 MHz–4.4 GHz (2.87/3.46 GHz)                    | LFCSP-32 5×5 mm               | 3.3 V, SPI, REF_IN ≤250 MHz, ~0 dBm out |
 | 4  | 8×8 on-chip CQD emitter array    | U4       | CQD ASE/LED (ITO/PEDOT:PSS/CQD-PVA/ZnO/Ag) | 1 | Green pump of 64 sites; on the chip, driven by external driver | On-chip (no daughter PCB) | ~520–540 nm, 4–8 V, 2–20 mA/pixel, 8 anode × 8 cathode crossbar |
-| 4a | CQD emitter driver               | —        | High-voltage pixel driver stage | 1   | FPGA enables this; it sources 4–8 V / 2–20 mA per pixel       | Discrete / driver IC          | FPGA pins are logic enables only (3.3 V) |
-| 5  | Emitter-driver limit resistors   | R1–R64   | per driver design               | 64  | Per-pixel current set for the external driver                  | 0603                          | Value set by the driver stage (not (3.3−Vf)/If as for a VCSEL) |
+| 4a | CQD emitter driver (on module)   | U6/U7,Q1–Q16,R1–R8,C8–C10 | discrete MOSFET crossbar | 29  | Drives 1 pixel at a time from +5 V; 2× 74HCT240 invert+level-shift, 8× AO3401A P-MOS rows, 8× AO3400A N-MOS cols, 8× 220 Ω set R, 3 decoupling | TSSOP-20 / SOT-23 / 0603 / 0805 | No boost, no DAC, no TLC5955 — simplest functional 8×8 matrix switch on +5 V (§7/§15A) |
+| 5  | Emitter-driver set resistors     | R1–R8    | 220 Ω 1%                        | 8   | Per-column current set: (5−Vpixel)/Ipixel ≈ (5−2.8)/10mA ≈ 220 Ω | 0603                          | On the module, in the col-sink leg of each pixel |
 | 6  | On-chip photodetector array       | U6       | 8×8 graphene/MoS₂ electrodes    | 1   | One photodetector per qubit site (photocurrent readout)         | On-chip                       | Bias 0.1–1 V; integrated with SU-8/PDMS waveguides |
 | 7  | Photodetector TIA                 | U7       | Low-noise TIA op-amp            | 1   | Converts selected electrode photocurrent → voltage            | SOIC/MSOP                     | e.g. OPA380 / ADA4530-1 class; nA–µA range |
 | 8  | Analog multiplexer                | U8       | 64:1 (or 8:1 stacked) analog MUX | 1   | Selects one detector electrode into the TIA/XADC               | e.g. ADG732 / DG408 chain      | FPGA `det_mux_sel[5:0]` selects |
@@ -216,7 +218,7 @@ connection, and the 64 detector electrodes never leave the module.
 | 17 | 1.0 V LDO                        | REG3     | AP2127K-1.0 (Diodes Inc)       | 1   | 1.0 V FPGA core (VCCINT)                                       | SOT-23-5                      | AMS1117 has NO 1.0 V option (min fixed 1.5 V) — "AMS1117-1.0" was a non-existent part. AP2127K-1.0 600 mA; pinout 1=VIN 2=GND 3=EN 4=BP 5=VOUT (EN tied to IN, always-on) |
 | 18 | USB-UART bridge                  | J1/J10   | USB-C (GCT USB4105) + FT232RL  | 1   | PC serial link + 5 V VBUS                                       | USB-C 16P / SSOP-28           | FT232RL is SSOP-28 (not SOIC-20); USB-C UFP with R71/R72 5.1 k on CC1/CC2 (replaces the old USB Micro-B) |
 | 18a| Config flash (FPGA boot)        | U8       | W25Q128JVSIQ (Winbond)         | 1   | Artix-7 QSPI x4 config boot (`SPI_BUSWIDTH 4`)                 | SOIC-8 3.9×4.9 mm             | CS/CLK/DIO0-3 → FPGA dedicated config balls; HOLD/WP pulled to +3V3 |
-| 18b| Board-to-board module connector  | J11      | Samtec LSHM-130 (2×30, 0.5 mm) | 1   | The "socket": the swappable chip module mates here             | Samtec LSHM-130 Vertical      | Carries emitter_rows/cols, det_mux_sel, mod_sync, TIA_OUT/REF, DET_BIAS, THRM, +3V3, +5V, +7V_EMIT, GND — the 64 detector electrodes stay on the module (see §15A) |
+| 18b| Board-to-board module connector  | J11      | Samtec LSHM-130 (2×30, 0.5 mm) | 1   | The "socket": the swappable chip module mates here             | Samtec LSHM-130 Vertical      | Carries emitter_rows/cols, det_mux_sel, mod_sync, TIA_OUT/REF, DET_BIAS, THRM, +3V3, +5V, GND — the 64 detector electrodes + emitter driver stay on the module (see §15A) |
 | 19 | Power connector                  | J2       | Barrel 5.5×2.1 mm              | 1   | 5 VDC input (alternative to USB-C VBUS)                         | PJ-102AH (CUI)                | 5 V 3 A source; footprint `Connector_BarrelJack:BarrelJack_CUI_PJ-102AH_Horizontal` |
 | 20 | PTC resettable fuse              | F1       | 2 A PTC                        | 1   | Input overcurrent protection                                   | 1206                          | — |
 | 21 | Power LED                        | LED1     | Green 0603                     | 1   | Power-on indicator                                             | LED_0603                      | Series R70 330 Ω |
@@ -226,7 +228,7 @@ connection, and the 64 detector electrodes never leave the module.
 | 25 | Host substrate (canonical)       | —        | CVD diamond plate (NV⁻)        | 1   | Canonical compute host: 12C-enriched CVD diamond, NV centres   | Optical plate (non-electronic)| T₂ ≈ 1.8 ms @ 300 K — "compute at 300 K: YES" |
 | 25a| Host substrate (sensor variants) | —        | hBN (V_B⁻) / SiC (V_Si)        | —   | Sensor variants; same board, MW freq + substrate change        | Optical plate                 | hBN T₂ ~2 µs (sensor, not compute) |
 | 26 | RF amplifier                     | U5       | HMC441LP3E                     | 1   | RF power amplification to ~10–20 dBm                           | QFN-16 3×3                    | 5 V (REG4); 0.1–13 GHz |
-| 27 | 5 V LDO (RF amp + emitter drv)   | REG4     | AMS1117-5.0                    | 1   | RF amp supply + emitter driver headroom                        | SOT-223                       | ≥500 mA; emitter driver may need a separate 4–8 V rail |
+| 27 | 5 V LDO (RF amp + emitter drv)   | REG4     | AMS1117-5.0                    | 1   | RF amp supply + on-module CQD emitter driver (+5 V cross-module) | SOT-223                       | ≥500 mA; the discrete MOSFET emitter crossbar runs directly on +5 V (no boost rail) |
 | 28 | RF amp bias resistor             | R69      | 10 Ω 1/4 W                     | 1   | HMC441 bias                                                    | 0805                          | See datasheet |
 | 29 | RF amp choke inductor            | L2       | 100 nH ±10%                    | 1   | DC bias choke on RF output                                     | 0603                          | Bias decoupling |
 | 30 | Microwave antenna                | A1       | Loop / CPW resonator (custom)  | 1   | MW delivery to the host                                        | Custom SMD/wire               | 2–3 GHz, 50 Ω |
@@ -237,7 +239,9 @@ connection, and the 64 detector electrodes never leave the module.
 
 > **Removed vs. the old QNOS-derived BOM:** U2 OV7670 camera, L1 M12 lens,
 > Y2 XCLK oscillator, R65/R66 SCCB pull-ups, the 270 Ω VCSEL limit resistors
-> (R1–R64 repurposed as emitter-driver set resistors), the USB Micro-B
+> (the old 270 Ω VCSEL limit resistors are gone — the on-chip CQD emitter now
+> uses 8× 220 Ω set resistors in a discrete MOSFET crossbar on the module,
+> §7/§15A), the USB Micro-B
 > receptacle (replaced by USB-C J10), and the J4/J5 pin headers (superseded by
 > the J11 board-to-board connector — the emitter crossbar and detector
 > front-end now live on the swappable module, §15A). The 8×8 VCSEL daughter
@@ -254,17 +258,17 @@ connection, and the 64 detector electrodes never leave the module.
 Input is **5 V** from J2 (or USB-C VBUS), protected by F1 (2 A PTC). The rails
 are generated by three LDOs (plus REG4 for the RF amp): REG1/REG2/REG4 are
 AMS1117 (SOT-223); REG3 is an AP2127K-1.0 (SOT-23-5) because the AMS1117 family
-has no 1.0 V option. A future **+7V_EMIT** rail for the CQD emitter driver
-crosses J11 to the module but has no regulator on the main board yet (the
-boost part — TPS61023 cannot reach 7 V; TPS61040 up to 28 V is the candidate —
-is deferred until the emitter driver rail voltage is fixed, §7/§15A).
+has no 1.0 V option. The CQD emitter driver runs directly on the **+5 V** rail
+(REG4) — the discrete MOSFET crossbar on the module needs no boost, so there is
+no +7V_EMIT rail (the earlier TPS61040 boost + TLC5955 plan was dropped as
+unnecessary complexity, §7/§15A).
 
 | Rail  | Reg  | Tolerance | Use                                  | Notes |
 |-------|------|-----------|--------------------------------------|-------|
 | 3.3 V | REG1 | ±3%       | FPGA VCCO, ADF4351, FT232, detector front-end (MUX/TIA) | Main I/O rail, ≥1 A |
 | 1.8 V | REG2 | ±3%       | FPGA VCCAUX / VCCAUX_IO              | ≥1 A |
 | 1.0 V | REG3 | ±3%       | FPGA VCCINT (core)                   | AP2127K-1.0 600 mA; XC7A35T VCCINT peak well under that (synth uses ~10% of LUTs) |
-| 5.0 V | REG4 | ±3%       | HMC441 RF amplifier + CQD emitter driver headroom | ≥500 mA; emitter driver needs a separate 4–8 V rail (the +7V_EMIT line) — see §7 |
+| 5.0 V | REG4 | ±3%       | HMC441 RF amplifier + on-module CQD emitter driver (crossbar) | ≥500 mA; emitter driver runs directly on +5 V (one pixel at a time → ~10 mA peak) |
 
 **Sequencing.** Artix-7 requires VCCINT (1.0 V) and VCCAUX (1.8 V) to be present
 before VCCO (3.3 V) is applied, or at worst to ramp together. The recommended
@@ -278,7 +282,7 @@ sequence on this board is:
    VCCO. For production, use an enable-able LDO for REG1 gated by a power-good
    of REG3+REG2 (and gate the AP2127K EN pin the same way).
 2. 3.3 V (REG1) ramps → peripheral ICs (ADF4351, FT232, detector MUX/TIA) power up.
-3. 5.0 V (REG4) ramps → HMC441 bias and the CQD emitter driver headroom settle.
+3. 5.0 V (REG4) ramps → HMC441 bias and the on-module CQD emitter crossbar settle.
 
 **Decoupling.** Each VCC/GND pin pair of every IC gets a 100 nF X7R (C1–C20)
 within 3 mm. Bulk 10 µF (C21–C30) sits at each regulator output and at the FPGA
@@ -289,10 +293,9 @@ decoupling, kept away from digital switching.
 
 **Power estimation (rough).** FPGA ~0.3–0.5 W (1.0 V × ~0.3 A), 1.8 V aux ~30 mA,
 3.3 V I/O ~120 mA + detector front-end ~20 mA, ADF4351 ~30 mA, HMC441 ~70 mA at
-5 V, CQD emitter driver ~64 × 10 mA = 640 mA peak when one full row is addressed
-(firmware addresses one pixel at a time → ~10–20 mA peak). The emitter driver
-should be on its own regulated 4–8 V rail, not the 3.3 V rail. Total budget well
-within a 5 V/3 A source.
+5 V, CQD emitter driver ~10 mA peak (firmware addresses one pixel at a time;
+the discrete MOSFET crossbar runs on +5 V, ~9 mA at 2 V headroom across the
+220 Ω set resistor). Total budget well within a 5 V/3 A source.
 
 ---
 
@@ -375,34 +378,46 @@ high-Q.
 
 The 8×8 on-chip CQD ASE/LED emitter array is an electrically-pumped green
 (~520–540 nm) pixel array (ITO/PEDOT:PSS/CQD–PVA/ZnO/Ag stack), wired as an 8-row
-anode × 8-column cathode crossbar. Each pixel needs **4–8 V and 2–20 mA** — far
-more than a 3.3 V FPGA pin can source — so the FPGA **does not drive the pixels
-directly**. It instead enables an **external higher-voltage emitter driver stage**
-through the 8 row anode-enables (`emitter_rows[7:0]`, active high) and 8 column
+anode × 8-column cathode crossbar. Each pixel needs a few mA at a couple of volts
+— more than a 3.3 V FPGA pin should source directly — so the FPGA **does not
+drive the pixels directly**. It instead enables the on-module driver through the
+8 row anode-enables (`emitter_rows[7:0]`, active high) and 8 column
 cathode-enables (`emitter_cols[7:0]`, active low). The `emitter_array.v` module
 asserts `emitter_rows = (1<<row)` and `emitter_cols = ~(1<<col)` for the requested
 duration (`DRIVE_EMITTER <row> <col> <duration_ms>`), lighting exactly one pixel.
 
-**Driver-stage design.** The external driver converts the FPGA logic enables
-into the 4–8 V / 2–20 mA pixel drive. A per-pixel set resistor (R1–R64, value set
-by the driver stage) limits the current. For a simple constant-current driver:
+**Driver-stage design — discrete MOSFET crossbar on +5 V (29 parts, placed on
+the module).** The simplest functional 8×8 matrix switch: no boost, no DAC, no
+constant-current LED driver IC. Two octal inverting buffers (**74HCT240**, VCC=+5 V)
+do the inversion and the 3.3 V→5 V level shift in one part each — HCT has TTL
+input thresholds (VIH=2 V) so it reliably reads the FPGA's 3.3 V LVCMOS outputs
+while running on a 5 V supply and outputting 0/5 V. One 74HCT240 (U6) drives the
+8 **AO3401A P-MOS** high-side row switches (source→+5 V, drain→chip `ER{i}`
+anode, gate→U6 output; P-MOS ON when gate=0 V → Vgs=−5 V); because U6 inverts,
+an active-HIGH `emitter_rows{i}` turns the row ON. The other 74HCT240 (U7) drives
+the 8 **AO3400A N-MOS** low-side column sinks (source→GND, drain←set-R←chip
+`EC{i}` cathode, gate→U7 output; N-MOS ON when gate=HIGH); because U7 inverts,
+an active-LOW `emitter_cols{i}` turns the column ON, and idle `cols=0xFF` drives
+all gates LOW → all columns OFF. Both `/OE` tied to GND (always enabled).
+
+A per-column **220 Ω set resistor** (R1–R8) limits the current:
 
 ```
-R_set = (Vdrive − Vpixel) / I_pixel
+R_set = (Vdrive − Vpixel) / I_pixel = (5 − 2.8) / 10 mA ≈ 220 Ω
 ```
 
-e.g. Vdrive = 5 V, Vpixel ≈ 2.8 V (green CQD LED), I_pixel = 10 mA → R_set ≈
-220 Ω. For higher compliance (8 V) and 20 mA, R_set ≈ 260 Ω. The exact value
-depends on the chosen driver topology (constant-current sink, transistor array,
-or dedicated LED driver IC) and must be designed for the CQD pixel Vf, **not**
-copied from the old VCSEL math ((3.3−2.0)/5 mA ≈ 270 Ω does not apply here).
+Pixel path when firing (row r, col c): +5 V → Q(r) P-MOS → chip ER(r) anode →
+pixel → chip EC(c) cathode → R(c) 220 Ω → Q(8+c) N-MOS → GND, ~9 mA at ~2.2 V
+headroom. The exact value is sized for the CQD pixel Vf, **not** copied from the
+old VCSEL math ((3.3−2.0)/5 mA ≈ 270 Ω does not apply here).
 
 Because only one pixel is addressed at a time, the peak emitter-driver supply
-current is one pixel's current (~2–20 mA). The 4–8 V emitter rail should be a
-separate regulated rail (not the 3.3 V FPGA rail) to keep emitter switching noise
-out of the detector analog front-end. The emitter driver lives on the chip
-module; the 8+8 enables (`emitter_rows`/`emitter_cols`) plus the emitter supply
-(+7V_EMIT) and ground cross the J11 board-to-board connector from the main board.
+current is one pixel's current (~9 mA) — trivial for the +5 V rail, so the
+crossbar runs directly on REG4's +5 V with no separate boost rail. The emitter
+driver lives on the chip module; the 8+8 enables (`emitter_rows`/`emitter_cols`,
+3.3 V) plus +5 V and ground cross the J11 board-to-board connector from the main
+board, and the driver's 0/5 V outputs switch the chip pads locally on the module
+(keeping emitter switching noise off the J1 digital lines).
 
 ---
 
@@ -412,11 +427,14 @@ The chip has an **8×8 graphene/MoS₂ photodetector array** — one electrode p
 qubit site — integrated with SU-8/PDMS waveguides. Readout is fully on-chip and
 electrical; there is no camera, no lens, and no imaging.
 
-- **Detector bias.** Each electrode is reverse-biased 0.1–1 V (supplied over
-  the `DET_BIAS` line of J11; a future MCP4921 DAC on the main board will set
-  it — the bias-control protocol is pending). Under the site's
-  photoluminescence (NV PL ≈ 637–800 nm) it produces a small photocurrent
-  (~nA–µA).
+- **Detector bias — photovoltaic / zero-bias TIA.** The graphene/MoS₂
+  electrodes are read at zero external bias (photovoltaic mode): the TIA
+  (ADA4530-1 electrometer) holds the selected electrode at virtual ground and
+  converts its short-circuit photocurrent directly to voltage. This gives the
+  lowest dark current and best SNR for the nA–µA photocurrents expected under
+  the site's photoluminescence (NV PL ≈ 637–800 nm), and needs no bias DAC. The
+  `DET_BIAS` line of J11 is a **reserved spare** (unconnected on the module) in
+  case a future reverse-bias variant wants it — it is not driven in this build.
 - **650 nm long-pass filter (F2).** Sits between the host PL and the detector
   array, blocking the ~520–540 nm green CQD pump while passing the NV⁻ red/near-IR
   PL, improving readout SNR.
@@ -510,9 +528,10 @@ electrical; there is no camera, no lens, and no imaging.
   photodetector bias rail separately.
 - **XADC**: dedicated 100 nF NP0 + 10 µF on VCCADC/VREFP, kept away from digital
   switching.
-- **Emitter driver (module)**: 100 nF per row/column line at the J11 connector;
-  bulk 10 µF on the +7V_EMIT emitter rail entering the driver. Keep emitter
-  switching return currents off the detector analog ground.
+- **Emitter driver (module)**: 100 nF (C8/C9) at each 74HCT240 VCC pin + 10 µF
+  bulk (C10) on the +5 V emitter rail. Keep the emitter switching return
+  currents off the detector analog ground (route the crossbar's GND return
+  separately to the J1 GND pins, not through the TIA ground island).
 
 ---
 
@@ -522,7 +541,7 @@ electrical; there is no camera, no lens, and no imaging.
 |-------|-----------------|-------|
 | 1 (top)  | Signal + RF + detector analog    | 50 Ω microstrip RF, component pads, critical signals; TIA output guarded |
 | 2        | GND (solid)    | Continuous reference plane for RF and signals; no splits under RF or detector analog |
-| 3        | POWER          | 3.3 V / 1.8 V / 1.0 V / 5.0 V / emitter-rail pours, split by rail; plane per rail |
+| 3        | POWER          | 3.3 V / 1.8 V / 1.0 V / 5.0 V pours, split by rail; plane per rail |
 | 4 (bottom)| Signal + GND  | Routing, control signals; ground pour for return continuity |
 
 Recommended 1.6 mm FR4 stackup (approximate dielectric thicknesses):
@@ -531,10 +550,10 @@ top — 18 µm Cu — 0.21 mm prepreg — L2 Cu (GND) — 1.0 mm core — L3 Cu 
 signal width near 0.30–0.35 mm (verify with an impedance solver).
 
 **Plane rules.** Keep layer 2 (GND) solid under all RF, clock, and detector
-analog traces. Route 3.3 V/1.8 V/1.0 V/5.0 V/emitter on layer 3 as separate
+analog traces. Route 3.3 V/1.8 V/1.0 V/5.0 V on layer 3 as separate
 pours; do not let the 1.0 V core plane overlap unrelated digital return paths,
-and do not let the emitter-rail return overlap the detector analog ground. Place
-decoupling vias to the correct rail plane directly at each cap.
+and do not let the +5 V emitter-crossbar return overlap the detector analog
+ground. Place decoupling vias to the correct rail plane directly at each cap.
 
 > **Current build vs. full-routing target.** The committed main board is the
 > 4-layer stack above (DRC-clean, copper-plane foundation + 30 GND stitching
@@ -564,8 +583,8 @@ decoupling vias to the correct rail plane directly at each cap.
 | **Detector TIA output → XADC aux** | top | shortest, over solid GND, ground guard ring, away from all digital + emitter |
 | `det_mux_sel[5:0]`       | top      | slow control to MUX, SLOW slew, away from TIA output |
 | `mod_sync` (1 kHz)       | top      | slow, away from analog |
-| `emitter_rows[7:0]` / `emitter_cols[7:0]` | top | FAST/8 mA, short to J11, optional 22 Ω series, away from detector analog |
-| Emitter-driver 4–8 V rail + return | L3 + pour | separate rail; return isolated from detector analog ground |
+| `emitter_rows[7:0]` / `emitter_cols[7:0]` | top | 3.3 V FPGA logic enables to J11 → on-module 74HCT240; short, optional 22 Ω series, away from detector analog |
+| Emitter crossbar +5 V / GND return (module) | module L2/L3 | +5 V from J11; GND return isolated from the detector analog ground island |
 | Detector bias (0.1–1 V)  | top/L3   | clean, well-decoupled, separate from digital rails |
 | Power rails (1.0/1.8/3.3/5.0) | L3 + pours | star at regulators, decoupling vias at each cap, wide pours |
 | GND                      | L2 (solid) + vias | continuous, no splits under RF/clock/detector analog; via stitching |
@@ -805,34 +824,45 @@ On-module parts (all real, datasheet-pinned — no invented symbols):
 - **ADA4530-1** electrometer TIA (SOIC-8) with **Rf 1 MΩ + Cf 1.5 pF** feedback;
   `TIA_OUT` crosses J1 back to the Artix-7 XADC `VauxP0`.
 - **QSSC_Chip** — the quantum die, 80 pads (DET0–63 → DET_IN0–63, ER0–7 →
-  emitter_rows0–7, EC0–7 → emitter_cols0–7); a datasheet-authored 80-pin
-  symbol + an inline 80-pad footprint (8×8 detector grid at 0.5 mm pitch,
-  16 emitter pads on the periphery) generated headlessly.
+  `emitter_anode0–7`, EC0–7 → `emitter_cathode0–7`); a datasheet-authored
+  80-pin symbol + an inline 80-pad footprint (8×8 detector grid at 0.5 mm
+  pitch, 16 emitter pads on the periphery) generated headlessly. The ER/EC
+  pads no longer pass straight through J1 — the emitter driver (below) is
+  inserted between J1 and the chip pads.
+- **Emitter driver — discrete MOSFET crossbar on +5 V (29 parts).** 2×
+  **74HCT240** (TSSOP-20, datasheet-authored `qssc:74HCT240`) invert + level
+  shift the 8 `emitter_rows`/8 `emitter_cols` from J1 to 0/5 V gate drive;
+  8× **AO3401A** P-MOS high-side row switches (SOT-23, `qssc:AO3401A`);
+  8× **AO3400A** N-MOS low-side column sinks (SOT-23, `qssc:AO3400A`);
+  8× 220 Ω set resistors (R1–R8, 0603); 3 decoupling (C8/C9 100 nF at each
+  74HCT240 VCC, C10 10 µF bulk on +5 V). Pixel path: +5 V → P-MOS → chip
+  ER anode → pixel → chip EC cathode → 220 Ω → N-MOS → GND, ~9 mA/pixel,
+  one pixel at a time. Idle `rows=0x00 cols=0xFF` → all MOSFETs OFF. §7.
 - **10 k NTC thermistor divider** → `THRM` sense line back to the FPGA.
-- Per-IC 100 nF decoupling + 10 µF bulk; `PWR_FLAG` on +3V3 / +5V / +7V_EMIT /
-  GND so the connector-fed power rails are ERC-driven. Each `PWR_FLAG` also
-  carries a real **thru-hole `TestPoint_Loop_D1.80mm`** footprint, so the four
-  power rails are probeable along the left edge — and the plated +3V3 pad is
-  what stitches the In2.Cu +3V3 plane to all layers (without a plated +3V3
-  hole the solid +3V3 pour is an isolated-copper fill).
+- Per-IC 100 nF decoupling + 10 µF bulk; `PWR_FLAG` on +3V3 / +5V / GND so the
+  connector-fed power rails are ERC-driven (no +7V_EMIT — the emitter runs on
+  +5 V). Each `PWR_FLAG` also carries a real **thru-hole
+  `TestPoint_Loop_D1.80mm`** footprint, so the power rails are probeable along
+  the left edge — and the plated +3V3 pad is what stitches the In2.Cu +3V3
+  plane to all layers (without a plated +3V3 hole the solid +3V3 pour is an
+  isolated-copper fill).
 - **Copper-plane foundation (headless, by `route_qssc_pcb.py` via
   `QSSC_PCB_PATH=…chip_module.kicad_pcb`):** solid **In1.Cu GND** plane,
   solid **In2.Cu +3V3** plane, **F.Cu + B.Cu GND flood pours**, and **30 GND
   stitching vias** on a 10 mm pad/signal-clearance-checked grid — the 64 analog
   detector lines and the TIA sit over a continuous ground reference.
 
-Status: `kicad-cli sch erc` → **0 errors** (26 warnings, the same tolerated
+Status: `kicad-cli sch erc` → **0 errors** (53 warnings, the same tolerated
 classes as the main board — off-grid authored pins, NC pins, single-pin
-passthrough nets `mod_sync`/`DET_BIAS` reserved for the not-yet-placed emitter
-driver / bias DAC); `kicad-cli pcb drc --severity-error --severity-warning` →
-**0 violations, 0 unconnected, 0 footprint errors** (incl. after the plane +
-stitching pass — the +3V3 TestPoint keeps the power pour non-isolated). 97
-nets (incl. all 64 DET_IN, 8+8 emitter rows/cols, 6 mux selects). The CQD
-emitter high-voltage driver (TLC5955) + per-pixel set resistors + Peltier drive
-land in a follow-up batch; the +7V_EMIT rail is brought across and flagged
-now. **Note:** the +7V_EMIT boost must NOT use TPS61023 (its max output is
-5.5 V) — a ≥7 V-capable part such as TPS61040 (up to 28 V) is required once
-the emitter driver topology and exact rail voltage are fixed.
+passthrough nets `mod_sync`/`DET_BIAS` reserved as module spares);
+`kicad-cli pcb drc` → **0 violations, 0 unconnected, 0 footprint errors**
+(the 29-part emitter crossbar is placed in the right zone x[62,84] clear of the
+ADG732 QFN-48 + J1 + MUX/TIA/chip; incl. after the plane + stitching pass — the
++3V3 TestPoint keeps the power pour non-isolated). The CQD emitter driver is
+**placed** — the discrete MOSFET crossbar on +5 V (2× 74HCT240 + 8× AO3401A +
+8× AO3400A + 8× 220 Ω + 3 decoupling, §7) — so there is no TLC5955, no R1–R64,
+no +7V_EMIT boost rail, and no MCP4921 bias DAC (the TIA is photovoltaic /
+zero-bias, §8). The module board is widened to 85×50 mm to fit the driver.
 
 ---
 

@@ -10,10 +10,16 @@ On-module front-end:
     channels 0..31 (U1) and sel5=1 reads 32..63 (U2).
   - ADA4530-1 electrometer TIA (Rf 1 MOhm, Cf 1.5 pF) -> TIA_OUT crosses the
     connector back to the Artix-7 XADC.
-  - The CQD emitter 8x8 matrix rows/cols (ER0..7 / EC0..7) pass straight
-    through J1 to the FPGA; the emitter high-voltage driver + per-pixel set
-    resistors land in a follow-up batch (the +7V_EMIT rail is brought across
-    and flagged now).
+  - CQD emitter 8x8 driver: a discrete MOSFET crossbar on +5V (no boost, no
+    TLC5955, no per-pixel R1..R64) sits between J1 and the chip ER/EC pads.
+    2x 74HCT240 (octal inverting buffer, VCC=+5V, TTL inputs read the FPGA's
+    3.3V one-hot enables and output 0/5V) drive 8x AO3401A P-MOS high-side row
+    switches (anode -> +5V) and 8x AO3400A N-MOS low-side column sinks
+    (cathode -> GND via 8x 220R set resistors). One pixel lights at a time, as
+    emitter_array.v drives it. The emitter_runs/cols enables cross J1; the
+    chip ER/EC pads are re-netted to emitter_anode/cathode so the driver is in
+    the path. The TIA is photovoltaic (zero bias) -- DET_BIAS crosses J1 as a
+    reserved spare, no MCP4921 DAC.
   - A 10 k NTC thermistor divider gives a THRM sense line back to the FPGA.
 
 Only digital selects, the one TIA analog output, detector bias, the
@@ -166,8 +172,8 @@ def chip_net_map():
     for i in range(64):
         m[f"DET{i}"] = f"DET_IN{i}"
     for i in range(8):
-        m[f"ER{i}"] = f"emitter_rows{i}"
-        m[f"EC{i}"] = f"emitter_cols{i}"
+        m[f"ER{i}"] = f"emitter_anode{i}"     # <- P-MOS drain (high-side switch to +5V)
+        m[f"EC{i}"] = f"emitter_cathode{i}"   # <- set R -> N-MOS drain (low-side sink to GND)
     return m
 
 
@@ -233,6 +239,93 @@ def chip_footprint():
 
 
 # --------------------------------------------------------------------------
+# Emitter driver: 74HCT240 octal inverting buffer + AO3401A/AO3400A MOSFETs.
+# Datasheet pinouts (verified against the installed KiCad symbols 74xx:74HCT240
+# and Transistor_FET:AO3401A/AO3400A, which mirror the AOS/Nexperia datasheets).
+# --------------------------------------------------------------------------
+def hct240_pin_list():
+    """74HCT240 20-pin octal inverting 3-state buffer (Nexperia pinout).
+
+    HCT input thresholds (VIH=2V, VIL=0.8V) read the FPGA's 3.3V LVCMOS33
+    outputs reliably at VCC=+5V; outputs swing 0/5V -- so one IC does both the
+    logic inversion and the 3.3V->5V level shift the MOSFET gates need. Used
+    twice: U6 inverts active-high emitter_rows -> P-MOS gates (low=on); U7
+    inverts active-low emitter_cols -> N-MOS gates (high=on). /OE tied low.
+    Pin numbers/names per Nexperia 74HC/HCT240 datasheet."""
+    left = [("1", "1OE", "input"), ("2", "1A0", "input"), ("4", "1A1", "input"),
+            ("6", "1A2", "input"), ("8", "1A3", "input"),
+            ("19", "2OE", "input"), ("17", "2A0", "input"), ("15", "2A1", "input"),
+            ("13", "2A2", "input"), ("11", "2A3", "input")]
+    right = [("18", "1Y0", "output"), ("16", "1Y1", "output"), ("14", "1Y2", "output"),
+             ("12", "1Y3", "output"), ("3", "2Y0", "output"), ("5", "2Y1", "output"),
+             ("7", "2Y2", "output"), ("9", "2Y3", "output")]
+    pins = []
+    yL = 2.54 * (len(left) - 1) / 2  # 11.43
+    for i, (num, nm, et) in enumerate(left):
+        pins.append(dict(number=num, name=nm, etype=et, x=-10.16,
+                         y=round(yL - i * 2.54, 2), rot=0, length=2.54))
+    yR = 2.54 * (len(right) - 1) / 2  # 8.89
+    for i, (num, nm, et) in enumerate(right):
+        pins.append(dict(number=num, name=nm, etype=et, x=10.16,
+                         y=round(yR - i * 2.54, 2), rot=180, length=2.54))
+    pins.append(dict(number="20", name="VCC", etype="power_in",
+                     x=0, y=-10.16, rot=90, length=2.54))
+    pins.append(dict(number="10", name="GND", etype="power_in",
+                     x=0, y=10.16, rot=270, length=2.54))
+    return pins
+
+
+def mosfet_pin_list():
+    """AO3401A (P-channel) / AO3400A (N-channel), SOT-23-3.
+
+    AOS pinout (verified vs KiCad Transistor_FET:AO3401A extends TP0610T and
+    AO3400A extends BSS138): pin 1=G (gate), 2=S (source), 3=D (drain). The
+    SOT-23 footprint pads are numbered 1/2/3 to match, so symbol pin number ==
+    footprint pad number with no remap."""
+    return [
+        dict(number="1", name="G", etype="input", x=-5.08, y=0, rot=0, length=2.54),
+        dict(number="3", name="D", etype="passive", x=2.54, y=-3.81, rot=90, length=2.54),
+        dict(number="2", name="S", etype="passive", x=2.54, y=3.81, rot=270, length=2.54),
+    ]
+
+
+def _hct240_row_pins():
+    """U6: invert active-high emitter_rows[7:0] -> P-MOS row gates row_gate[7:0].
+
+    emitter_rows[i]=HIGH (FPGA one-hot anode enable) -> 74HCT240 output LOW ->
+    P-MOS gate LOW -> P-MOS ON (Vgs=-5V, anode tied to +5V). Idle rows=0x00 ->
+    all outputs HIGH -> all P-MOS off. /1OE,/2OE tied to GND (always enabled)."""
+    p = {"1": "GND", "19": "GND", "20": "+5V", "10": "GND"}
+    for i, pin in enumerate(["2", "4", "6", "8"]):       # 1A0..1A3
+        p[pin] = f"emitter_rows{i}"
+    for i, pin in enumerate(["17", "15", "13", "11"]):   # 2A0..2A3
+        p[pin] = f"emitter_rows{i + 4}"
+    for i, pin in enumerate(["18", "16", "14", "12"]):   # 1Y0..1Y3
+        p[pin] = f"row_gate{i}"
+    for i, pin in enumerate(["3", "5", "7", "9"]):       # 2Y0..2Y3
+        p[pin] = f"row_gate{i + 4}"
+    return p
+
+
+def _hct240_col_pins():
+    """U7: invert active-low emitter_cols[7:0] -> N-MOS col gates col_gate[7:0].
+
+    emitter_cols[j]=LOW (FPGA one-hot cathode enable) -> 74HCT240 output HIGH ->
+    N-MOS gate HIGH -> N-MOS ON (cathode sunk to GND via the set R). Idle
+    cols=0xFF -> all outputs LOW -> all N-MOS off."""
+    p = {"1": "GND", "19": "GND", "20": "+5V", "10": "GND"}
+    for i, pin in enumerate(["2", "4", "6", "8"]):
+        p[pin] = f"emitter_cols{i}"
+    for i, pin in enumerate(["17", "15", "13", "11"]):
+        p[pin] = f"emitter_cols{i + 4}"
+    for i, pin in enumerate(["18", "16", "14", "12"]):
+        p[pin] = f"col_gate{i}"
+    for i, pin in enumerate(["3", "5", "7", "9"]):
+        p[pin] = f"col_gate{i + 4}"
+    return p
+
+
+# --------------------------------------------------------------------------
 # Module symbol set + monkeypatch of gen_qssc_kicad
 # --------------------------------------------------------------------------
 _FP_CHIP = None  # built lazily (after g imported)
@@ -250,10 +343,10 @@ _ORIG_LOAD_FP = g.load_footprint_mod
 def module_authored_symbols():
     """Full symbol set the module schematic embeds in lib_symbols."""
     syms = []
-    # power symbols (module uses +3V3, +5V, +7V_EMIT, GND; keep +1V8/+1V0/+5V_RF
-    # too so the shared lib is consistent -- they cost nothing and are unused)
-    g.POWER_PINS["+7V_EMIT"] = ("power_in", 90)
-    for n in ["+3V3", "+1V8", "+1V0", "+5V", "+5V_RF", "+7V_EMIT", "GND"]:
+    # power symbols (module uses +3V3, +5V, GND; keep +1V8/+1V0/+5V_RF too so
+    # the shared lib is consistent -- they cost nothing and are unused). The
+    # emitter runs on +5V (no +7V_EMIT boost rail).
+    for n in ["+3V3", "+1V8", "+1V0", "+5V", "+5V_RF", "GND"]:
         syms.append(g.power_symbol_def(n))
     syms.append(g.PWR_FLAG_def())
     # ADG732 (datasheet-authored 48-pin symbol, real LFCSP-48 footprint)
@@ -262,6 +355,15 @@ def module_authored_symbols():
     # QSSC die (datasheet-authored 80-pad symbol, inline footprint)
     syms.append(g.custom_symbol_def("qssc", "QSSC_Chip", "U", chip_pin_list(),
                                     (-21.0, -24.0, 21.0, 24.0), value="QSSC_Chip"))
+    # Emitter driver (datasheet-authored, real KiCad footprints):
+    # 74HCT240 octal inverting buffer (gate driver + 3.3V->5V shift, TSSOP-20)
+    syms.append(g.custom_symbol_def("qssc", "74HCT240", "U", hct240_pin_list(),
+                                    (-7.62, -12.7, 7.62, 12.7), value="74HCT240"))
+    # AO3401A P-MOS / AO3400A N-MOS, SOT-23-3 (pin 1=G, 2=S, 3=D)
+    syms.append(g.custom_symbol_def("qssc", "AO3401A", "Q", mosfet_pin_list(),
+                                    (-3.81, -3.81, 3.81, 3.81), value="AO3401A"))
+    syms.append(g.custom_symbol_def("qssc", "AO3400A", "Q", mosfet_pin_list(),
+                                    (-3.81, -3.81, 3.81, 3.81), value="AO3400A"))
     # replicated standard symbols the module reuses
     syms.append(g.replicated_symbol("qssc", "ADA4530-1", "U",
                                     g.std_pins("Amplifier_Operational", "ADA4530-1"),
@@ -282,7 +384,7 @@ def module_authored_symbols():
 
 
 def module_build_pincoords():
-    """Same as g.build_pincoords but the power list includes +7V_EMIT."""
+    """Same as g.build_pincoords (power list = +3V3/+1V8/+1V0/+5V/+5V_RF/GND)."""
     for s in module_authored_symbols():
         lib_id = s[1][1]
         coords = {}
@@ -295,14 +397,13 @@ def module_build_pincoords():
                         num = [c for c in sub if isinstance(c, list) and c[0] == ("atom", "number")][0]
                         coords[num[1][1]] = (float(at[1][1]), float(at[2][1]), int(at[3][1]))
         g._PINCOORDS[lib_id] = coords
-    for n in ["+3V3", "+1V8", "+1V0", "+5V", "+5V_RF", "+7V_EMIT", "GND", "PWR_FLAG"]:
+    for n in ["+3V3", "+1V8", "+1V0", "+5V", "+5V_RF", "GND", "PWR_FLAG"]:
         g._PINCOORDS[f"power:{n}"] = {"1": (0.0, 0.0, 90 if n != "GND" else 270)}
 
 
 # net-class sets: extend the analog set with the module's detector nets
 g.ANALOG_NETS = g.ANALOG_NETS | {f"DET_IN{i}" for i in range(64)} | {
     "TIA_IN", "TIA_REF", "MUX_EN2", "DET_BIAS", "THRM"}
-g.POWER_NETS = g.POWER_NETS | {"+7V_EMIT"}
 
 
 # --------------------------------------------------------------------------
@@ -325,7 +426,7 @@ def _j1_pins():
     p["53"] = "THRM"
     p["55"] = "+3V3"
     p["57"] = "+5V"
-    p["59"] = "+7V_EMIT"
+    p["59"] = "GND"          # was +7V_EMIT; emitter now runs on +5V (pin 57) -- extra return
     for i in range(1, 61):
         if i % 2 == 0:
             p[str(i)] = "GND"
@@ -387,8 +488,9 @@ def build_module_components():
     _addm("TH1", "qssc:R", "10k NTC", "Resistor_SMD:R_0603_1608Metric",
           (132, 40), 0, {"1": "THRM", "2": "GND"}, (8, 40, 0))
 
-    # Decoupling: 100n per IC VCC (U1,U2,U3,U4) + 100n on +5V and +7V_EMIT +
-    # 10uF bulk on +3V3.  C5/C6 kept clear of the J1 NPTH holes (x 26.5 / 43.5).
+    # Decoupling: 100n per IC VCC (U1,U2,U3,U4) + 100n on +5V + 10uF bulk on
+    # +3V3.  C5 kept clear of the J1 NPTH holes (x 26.5 / 43.5).  The emitter
+    # driver (U6/U7 on +5V) gets its own local decoupling below (C8/C9/C10).
     _addm("C1", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
           (120, 70), 0, {"1": "+3V3", "2": "GND"}, (14, 27, 0))   # U1
     _addm("C2", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
@@ -399,27 +501,84 @@ def build_module_components():
           (200, 40), 0, {"1": "+3V3", "2": "GND"}, (52, 10, 0))    # U4
     _addm("C5", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
           (150, 40), 0, {"1": "+5V", "2": "GND"}, (22, 40, 0))
-    _addm("C6", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
-          (190, 40), 0, {"1": "+7V_EMIT", "2": "GND"}, (48, 40, 0))
     _addm("C7", "qssc:C", "10uF", "Capacitor_SMD:C_0805_2012Metric",
           (170, 70), 0, {"1": "+3V3", "2": "GND"}, (20, 30, 0))   # +3V3 bulk
+
+    # ---- CQD emitter 8x8 driver: discrete MOSFET crossbar on +5V -------------
+    # U6/U7 = 74HCT240 octal inverting buffers (VCC=+5V, TTL inputs read the
+    # FPGA's 3.3V one-hot enables, outputs swing 0/5V).  U6 drives the 8 P-MOS
+    # high-side row gates (active-high rows -> inverted -> P-MOS on at gate=0V);
+    # U7 drives the 8 N-MOS low-side column gates (active-low cols -> inverted ->
+    # N-MOS on at gate=5V).  See _hct240_row_pins/_hct240_col_pins + the RTL
+    # contract in fpga/rtl/emitter_array.v (rows active-high, cols active-low,
+    # one pixel at a time, idle rows=0x00 cols=0xFF).  Placed in the right
+    # zone x[62,84] of the 85x50 module, clear of U2 (ADG732 QFN-48 courtyard
+    # ends ~x60.5 y[16,24]) and J1/MUX/TIA/chip on the left.
+    _addm("U6", "qssc:74HCT240", "74HCT240",
+          "Package_SO:TSSOP-20_4.4x6.5mm_P0.65mm",
+          (250, 60), 0, _hct240_row_pins(), (68, 8, 0))
+    _addm("U7", "qssc:74HCT240", "74HCT240",
+          "Package_SO:TSSOP-20_4.4x6.5mm_P0.65mm",
+          (290, 60), 0, _hct240_col_pins(), (68, 22, 0))
+    # U6/U7 decoupling + +5V emitter-rail bulk.  Column at x=62 sits between
+    # U2's right courtyard edge (~x60.5) and U6/U7's left edge (~x64.5).
+    _addm("C8", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
+          (260, 48), 0, {"1": "+5V", "2": "GND"}, (62, 8, 0))    # U6 VCC
+    _addm("C9", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
+          (300, 48), 0, {"1": "+5V", "2": "GND"}, (62, 22, 0))   # U7 VCC
+    _addm("C10", "qssc:C", "10uF", "Capacitor_SMD:C_0805_2012Metric",
+          (280, 48), 0, {"1": "+5V", "2": "GND"}, (62, 15, 0))   # +5V emitter bulk
+
+    # Q1-Q8: AO3401A P-MOS high-side row switches.  G=row_gate{i}, S=+5V,
+    # D=emitter_anode{i} (to chip ER{i}).  4x2 grid in the lower-right zone.
+    _SOT23 = "Package_TO_SOT_SMD:SOT-23_Handsoldering"
+    for i in range(8):
+        gx = 64 + (i % 2) * 6           # x = 64, 70
+        gy = 30 + (i // 2) * 5          # y = 30, 35, 40, 45
+        sx = 250 + (i % 2) * 20
+        sy = 80 + (i // 2) * 12
+        _addm(f"Q{i+1}", "qssc:AO3401A", "AO3401A", _SOT23,
+              (sx, sy), 0,
+              {"1": f"row_gate{i}", "2": "+5V", "3": f"emitter_anode{i}"},
+              (gx, gy, 0))
+    # Q9-Q16: AO3400A N-MOS low-side column sinks.  G=col_gate{i}, S=GND,
+    # D=col_sink{i} (to set R).  4x2 grid in the far-right zone.
+    for i in range(8):
+        gx = 76 + (i % 2) * 6           # x = 76, 82 (6mm pitch clears Q1-Q8)
+        gy = 30 + (i // 2) * 5          # y = 30, 35, 40, 45
+        sx = 250 + (i % 2) * 20
+        sy = 110 + (i // 2) * 12
+        _addm(f"Q{i+9}", "qssc:AO3400A", "AO3400A", _SOT23,
+              (sx, sy), 0,
+              {"1": f"col_gate{i}", "2": "GND", "3": f"col_sink{i}"},
+              (gx, gy, 0))
+    # R1-R8: 220R per-column set resistors, emitter_cathode{i} <-> col_sink{i}.
+    # Mid-right strip (x 72..81, y 13/16) between U6 (y~10.5) and U7 (y~19.5).
+    for i in range(8):
+        rx = 72 + (i % 4) * 3           # x = 72, 75, 78, 81
+        ry = 13 + (i // 4) * 3          # y = 13, 16
+        sx = 250 + (i % 4) * 10
+        sy = 140 + (i // 4) * 8
+        _addm(f"R{i+1}", "qssc:R", "220R", "Resistor_SMD:R_0603_1608Metric",
+              (sx, sy), 0,
+              {"1": f"emitter_cathode{i}", "2": f"col_sink{i}"},
+              (rx, ry, 0))
 
     # PWR_FLAG on every rail so the connector-fed power_in pins are "driven".
     # Each PWR_FLAG also carries a real thru-hole TestPoint footprint (wire-loop
     # bead, TestPoint_Loop_D1.80mm Drill1.0mm) so the module has probeable +3V3 /
-    # +5V / +7V_EMIT / GND points along the left edge.  The +3V3 one is what
-    # stitches the In2.Cu +3V3 plane to all layers (its plated barrel connects
-    # the SMD-only +3V3 rail to the power plane -- without it the +3V3 zone is
-    # an isolated_copper fill).  Courtyard is a r=1.8 mm circle; at 5 mm y-pitch
-    # (4/9/14/19) the four never overlap (3.6 < 5) and the x=6 column clears the
-    # board edge (x=0) and every other part.
+    # +5V / GND points along the left edge.  The +3V3 one is what stitches the
+    # In2.Cu +3V3 plane to all layers (its plated barrel connects the SMD-only
+    # +3V3 rail to the power plane -- without it the +3V3 zone is an
+    # isolated_copper fill).  Courtyard is a r=1.8 mm circle; at 5 mm y-pitch
+    # (4/9/14/19) the three never overlap (3.6 < 5) and the x=6 column clears the
+    # board edge (x=0) and every other part.  (No +7V_EMIT flag -- that rail is
+    # gone; the emitter runs on +5V, already flagged by #FLG2.)
     _TP = "TestPoint:TestPoint_Loop_D1.80mm_Drill1.0mm_Beaded"
     _addm("#FLG1", "power:PWR_FLAG", "PWR_FLAG", _TP, (100, 30), 0,
           {"1": "+3V3"}, (6, 4, 0))
     _addm("#FLG2", "power:PWR_FLAG", "PWR_FLAG", _TP, (100, 40), 0,
           {"1": "+5V"}, (6, 9, 0))
-    _addm("#FLG3", "power:PWR_FLAG", "PWR_FLAG", _TP, (100, 50), 0,
-          {"1": "+7V_EMIT"}, (6, 14, 0))
     _addm("#FLG4", "power:PWR_FLAG", "PWR_FLAG", _TP, (100, 60), 0,
           {"1": "GND"}, (6, 19, 0))
 
@@ -434,7 +593,7 @@ def main():
     g.authored_symbols = module_authored_symbols
     g.build_pincoords = module_build_pincoords
     g.load_footprint_mod = _chip_fp_load
-    g.BOARD_W, g.BOARD_H = 70, 50
+    g.BOARD_W, g.BOARD_H = 85, 50  # widened from 70 to fit the emitter driver
 
     build_module_components()
     module_build_pincoords()

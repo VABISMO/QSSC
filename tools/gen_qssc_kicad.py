@@ -607,8 +607,9 @@ add("J3", "qssc:Conn_Coaxial", "SMA", "Connector_Coaxial:SMA_Amphenol_132289_Edg
     420, 150, pins={"1": "J3_SIG", "2": "GND"})
 
 # Board-to-board chip-module connector J11 (Samtec LSHM-130, 2x30 0.5 mm).
-# The swappable chip MODULE (ADG732 64:1 MUX + ADA4530-1 TIA + TLC5955 emitter
-# driver + R1-R64 + Peltier) mates here. Only digital selects, the one TIA
+# The swappable chip MODULE (ADG732 64:1 MUX + ADA4530-1 TIA + discrete MOSFET
+# emitter crossbar: 2x 74HCT240 + 8x AO3401A P-MOS + 8x AO3400A N-MOS + 8x 220R,
+# on +5V, no boost, no DAC + NTC) mates here. Only digital selects, the one TIA
 # analog output back to the XADC, detector bias, modulation reference, and
 # power rails cross -- the 64 detector electrodes stay on the module. Per
 # column: top pad (odd) = signal/power, bottom pad (even) = GND (signal-GND
@@ -627,7 +628,7 @@ J11P["51"] = "DET_BIAS"                     # col 26 : detector bias (future DAC
 J11P["53"] = "THRM"                         # col 27 : module thermistor sense
 J11P["55"] = "+3V3"                         # col 28 : module logic rail
 J11P["57"] = "+5V"                          # col 29 : module power rail
-J11P["59"] = "+7V_EMIT"                    # col 30 : emitter driver high-voltage rail
+J11P["59"] = "GND"                         # col 30 : was +7V_EMIT; emitter runs on +5V (pin 57) -> extra GND return
 for i in range(1, 61):                      # all even pads = GND (return per signal)
     if i % 2 == 0:
         J11P[str(i)] = "GND"
