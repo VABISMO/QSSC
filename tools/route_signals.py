@@ -504,6 +504,13 @@ def _bga_fanout(board, x0, y0, routed, fps=None):
                  if fp.GetReference() == BGA_REF), None)
     if fpga is None:
         return {}, {}, {}
+    # Only the FPGA BGA (CPG236, 238 pads) gets HDI via-in-pad fanout. On the
+    # chip module, U1 is the ADG732 (a 49-pad QFN-48, not a BGA) -- a via-in-pad
+    # on a QFN pad is a fabrication defect (solder wicks through the unplugged
+    # via, starving the joint), so skip fanout there. Guard on pad count:
+    # < 100 pads is not the FPGA BGA.
+    if len(list(fpga.Pads())) < 100:
+        return {}, {}, {}
     by_row = {}
     for p in list(fpga.Pads()):
         nm = p.GetNetname()
@@ -532,7 +539,7 @@ def _bga_fanout(board, x0, y0, routed, fps=None):
             vip_net.setdefault(p.GetNetname(), set()).add((ix, iy, B_CU))
             vip_net[p.GetNetname()] |= cells
             pad_vip[(int(x), int(y))] = cells
-            vip_vias[p.GetNetname()] = v
+            vip_vias.setdefault(p.GetNetname(), []).append(v)
     return vip_net, pad_vip, vip_vias
 
 
@@ -632,16 +639,21 @@ def build(board) -> dict:
         for net, reason in sorted(diag.items()):
             print(f"  DEBUG {net}: {reason}")
 
-    # Remove via-in-pad vias on nets that did NOT route (or were excluded): a
+    # Remove via-in-pad vias on nets that were ROUTED-ATTEMPTED but FAILED: a
     # via-in-pad whose net never escaped dangles on B.Cu (via_dangling warning).
-    # Removing them leaves the ball as a plain unrouted F.Cu SMD (honest) and
-    # keeps the DRC report free of dangling-via warnings. done nets keep theirs
-    # (the escape track uses the via on B.Cu).
-    done_set = set(done)
-    for net, v in vip_vias.items():
-        if net not in done_set:
-            board.Remove(v)
-            bga_vias -= 1
+    # PLANE nets (GND/+3V3 -- skipped from line routing at line 566) KEEP their
+    # via-in-pads: those vias are through-hole, so they reach the In1.Cu GND /
+    # In2.Cu +3V3 plane (added by route_qssc_pcb) and are connected on 2 layers
+    # -- NOT dangling. Removing only the FAILED-net via-in-pads leaves the
+    # power balls connected to their planes and the failed balls as honest
+    # unrouted F.Cu SMDs, and keeps the DRC report free of dangling-via
+    # warnings. Done nets keep theirs (the escape track uses the via on B.Cu).
+    fail_set = set(fail)
+    for net, vs in vip_vias.items():
+        if net in fail_set:
+            for v in vs:
+                board.Remove(v)
+            bga_vias -= len(vs)
     return {"routed": done, "unrouted": fail, "single": single, "tracks": nt,
             "vias": nv, "bga_fanout_vias": bga_vias, "excluded": sorted(EXCLUDE_NETS)}
 

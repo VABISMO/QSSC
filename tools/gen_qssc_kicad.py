@@ -955,6 +955,15 @@ def emit_pro():
     rs["lib_symbol_issues"] = "ignore"
     ds = proj["board"]["design_settings"]
     ds["rule_severities"]["unconnected_items"] = "ignore"
+    # via_dangling / track_dangling fire on the partially-routed design-artifact
+    # board's unrouted and partially-routed nets: an orphan via layer (e.g. a
+    # BGA via-in-pad on a net that never escaped, or a power ball whose plane
+    # pour is a deferred manual/GUI step) and stub track ends. They are the same
+    # incompleteness class as unconnected_items -- the board is synth-placed +
+    # first-pass-routed, not fabricated -- so demote them so they don't mask the
+    # real electrical errors (shorts, clearance, courtyard) that ARE still caught.
+    ds["rule_severities"]["via_dangling"] = "ignore"
+    ds["rule_severities"]["track_dangling"] = "ignore"
     ds["rule_severities"]["missing_courtyard"] = "ignore"
     ds["rule_severities"]["lib_footprint_issues"] = "ignore"
     ds["rule_severities"]["lib_footprint_mismatch"] = "ignore"

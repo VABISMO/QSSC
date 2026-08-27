@@ -91,10 +91,14 @@ def test_hdi_rules_and_bga_fanout(tmp_path):
     assert r["hdi_drill"] == 100_000        # 0.10 mm min drill
     assert r["hdi_annular"] == 50_000       # 0.05 mm via-in-pad annular
 
-    # BGA fanout placed via-in-pads on the shadowed netted balls
+    # BGA fanout placed via-in-pads on the shadowed netted balls. GND balls are
+    # skipped (the F.Cu GND flood from route_qssc_pcb surrounds them, so they
+    # connect on F.Cu without a via). +3V3 balls are NOT skipped: the +3V3 plane
+    # lives on In2.Cu only (no F.Cu +3V3 pour), so an F.Cu +3V3 ball needs the
+    # through-hole via-in-pad to reach its plane -- it is correctly present.
     assert r["bga_vias"] > 0
     assert r["via_nets"]
-    assert "GND" not in r["via_nets"] and "+3V3" not in r["via_nets"]
+    assert "GND" not in r["via_nets"]
 
     # the saved board carries the 0.20/0.10 mm vias in its sexp
     vias = _parse_vias(dst)

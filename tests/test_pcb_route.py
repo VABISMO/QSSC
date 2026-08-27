@@ -51,8 +51,12 @@ def _parse(path: Path) -> dict:
                      nm.group(1) if nm else None))
     vias = re.split(r"(?m)^\t\(via\b", t)[1:]
     via_nets = {re.search(r"\(net (\d+)\)", b).group(1) for b in vias}
+    # Resolve the GND netcode from the `(net N "GND")` declaration rather than
+    # hardcoding it: regenerating the board (adding/removing nets, e.g. the
+    # +7V_EMIT elimination) shifts every netcode, so a literal "13" is brittle.
+    gnd = re.search(r'\(net (\d+) "GND"\)', t)
     return {"zones": sorted(zones), "via_count": len(vias),
-            "via_nets": sorted(via_nets)}
+            "via_nets": sorted(via_nets), "gnd_net": gnd.group(1) if gnd else None}
 
 
 def test_copper_plane_foundation(tmp_path):
@@ -78,7 +82,8 @@ def test_copper_plane_foundation(tmp_path):
     # we assert GND stitching is present and dominates, not that it is the
     # only net. ---
     assert r1["via_count"] > 50
-    assert "13" in r1["via_nets"]
+    assert r1["gnd_net"] is not None
+    assert r1["gnd_net"] in r1["via_nets"]
 
     # --- idempotent: a second run reproduces the same structure ---
     _run_router(dst)

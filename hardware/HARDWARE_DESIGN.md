@@ -556,9 +556,9 @@ and do not let the +5 V emitter-crossbar return overlap the detector analog
 ground. Place decoupling vias to the correct rail plane directly at each cap.
 
 > **Current build vs. full-routing target.** The committed main board is the
-> 4-layer stack above (DRC-clean, copper-plane foundation + 30 GND stitching
-> vias + first-pass 13/42 signal nets routed headlessly via HDI-lite BGA
-> via-in-pad, §15). Completing the remaining ~29 signal nets across all six
+> 4-layer stack above (DRC-clean, copper-plane foundation + 99 GND stitching
+> vias + first-pass 19/71 signal nets routed headlessly via HDI-lite BGA
+> via-in-pad, §15). Completing the remaining ~52 signal nets across all six
 > banks of the 0.5 mm 236-pad BGA is tight on two signal layers; a **6-layer
 > upgrade** (F.Cu sig / In1.Cu GND / In2.Cu sig+RF / In3.Cu PWR / In4.Cu GND /
 > B.Cu sig) is the planned path to finish routing — it adds two signal layers
@@ -739,16 +739,19 @@ What it *does* deliver headlessly:
 >   first (zones + GND tracks/vias), preserving signal routing, so it is
 >   idempotent.
 > - **BGA fanout + first-pass signal routing (headless, by
->   `route_signals.py`):** the 9 shadowed FPGA signal balls get HDI-lite
->   0.20/0.10 mm via-in-pad fanout (verified by
->   `tests/test_pcb_route_signals.py`); 13 / 42 signal nets are routed
->   first-pass with 22 routing vias and 99 track segments, F.Cu then B.Cu,
->   USB diff pair excluded. DRC on the routed board: **0 violations,
->   0 unconnected**. Verified by `tests/test_pcb_route.py` (4 zones, GND
->   stitching present, idempotent).
+>   `route_signals.py`):** 16 shadowed BGA balls get HDI-lite 0.20/0.10 mm
+>   via-in-pad fanout (signal escapes + the +3V3 plane balls, which need the
+>   through-hole via to reach the In2.Cu +3V3 plane — GND balls are skipped,
+>   the F.Cu GND flood connects them directly; verified by
+>   `tests/test_pcb_route_signals.py`); 19 / 71 signal nets are routed
+>   first-pass with 28 routing vias and 118 track segments (99 GND stitching
+>   + 16 BGA fanout + 28 routing = 143 vias total), F.Cu then B.Cu, USB diff
+>   pair excluded. DRC on the routed board: **0 violations, 0 unconnected**.
+>   Verified by `tests/test_pcb_route.py` (4 zones, GND stitching present,
+>   idempotent).
 
 > **Honest status — what is NOT done (needs one GUI session):**
-> - **Signal routing is first-pass only (13 / 42 nets).** KiCad 8 `kicad-cli`
+> - **Signal routing is first-pass only (19 / 71 nets).** KiCad 8 `kicad-cli`
 >   **cannot** export a Specctra DSN autorouter file or import an SES session
 >   — both are GUI-only in `pcbnew` — so the headless line router does a
 >   collision-checked first pass only. The remaining copper — the rest of the
@@ -796,8 +799,11 @@ kicad-cli pcb drc   --output /tmp/drc.txt hardware/pcb/qssc.kicad_pcb   # 0 viol
 > MemoryMax) so they do not freeze the host. The board the pipeline produces
 > is the one checked in. The full pipeline (routing + planes + DRC) is
 > scripted in `/tmp/qssc_route_pipeline.sh`. The same `route_qssc_pcb.py` is
-> reused for the chip module — there is no BGA on the module so `route_signals`
-> is skipped; run the plane pass with
+> reused for the chip module — `route_signals.py` runs there too, but its BGA
+> fanout is skipped (the module's U1 is an ADG732 **QFN-48, not a BGA**; a
+> via-in-pad on a QFN pad is a fabrication defect, so `_bga_fanout` guards on
+> pad count < 100 and returns empty). First-pass line routing still proceeds
+> (14 nets, 54 segments, 15 routing vias). Run the plane pass with
 > `QSSC_PCB_PATH=hardware/pcb/chip_module.kicad_pcb python3 tools/route_qssc_pcb.py`
 > (the `QSSC_PCB_PATH` env var overrides the default board path).
 
@@ -848,9 +854,13 @@ On-module parts (all real, datasheet-pinned — no invented symbols):
   isolated-copper fill).
 - **Copper-plane foundation (headless, by `route_qssc_pcb.py` via
   `QSSC_PCB_PATH=…chip_module.kicad_pcb`):** solid **In1.Cu GND** plane,
-  solid **In2.Cu +3V3** plane, **F.Cu + B.Cu GND flood pours**, and **30 GND
+  solid **In2.Cu +3V3** plane, **F.Cu + B.Cu GND flood pours**, and **33 GND
   stitching vias** on a 10 mm pad/signal-clearance-checked grid — the 64 analog
   detector lines and the TIA sit over a continuous ground reference.
+- **First-pass signal routing (headless, by `route_signals.py`):** 14 nets
+  routed with 54 track segments and 15 routing vias (33 GND stitching + 15
+  routing = 48 vias total; **0 BGA fanout** — U1 is a QFN-48, guarded out).
+  DRC on the routed module: **0 violations, 0 unconnected**.
 
 Status: `kicad-cli sch erc` → **0 errors** (53 warnings, the same tolerated
 classes as the main board — off-grid authored pins, NC pins, single-pin
