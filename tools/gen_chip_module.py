@@ -178,60 +178,71 @@ def chip_net_map():
 
 
 def chip_footprint():
-    """Inline (footprint ...) sexp for the QSSC die: 80 pads on F.Cu.
+    """Inline (footprint ...) sexp for the QSSC die: 80 pads on F.Cu, arranged
+    as a PERIMETER ring (wire-bond style) -- NOT a flip-chip area array.
 
-    64 detector pads in an 8x8 grid (0.5 mm pitch, 0.15 mm square) centred at
-    (0,0); 16 emitter pads around the die periphery.  Pad names match the
-    symbol pin numbers so fp_net_pads can net every pad.  The emitter pads sit
-    OUTSIDE the detector grid (y = +/-2.4 mm vs the grid's +/-1.75 mm) so the
-    two never short."""
+    The die is wire-bonded: its 64 graphene detector electrodes + 8 row/8 col
+    emitter electrodes are each routed (on the die's own top metal) to a pad on
+    the die edge, then wire-bonded to these PCB perimeter pads.  A perimeter
+    ring (vs the earlier 8x8 area array) is the realistic attach for a bare
+    quantum die AND -- crucially -- every pad escapes OUTWARD on F.Cu, so the
+    64 detector nets route to the two MUX with standard 0.45 mm vias (no HDI
+    microvias needed).  The 8x8 area array's 36 interior pads could not escape
+    between 0.5 mm-pitch pads with a 0.45 mm via (0.02 mm clearance, impossible).
+
+    80 pads, 0.5 mm pitch, 21 pads/side with the 4 corners counted once (4x21
+    - 4 = 80), spanning +/-5 mm.  Pad names match the symbol pin numbers so
+    fp_net_pads can net every pad.  Net-to-edge assignment puts DET0..31 on the
+    die's left/top half (-> U1 MUX on the left) and DET32..63 on the right half
+    (-> U2 MUX on the right), with ER/EC on the bottom edge (-> emitter driver
+    on the right) -- short, clean routes."""
     A, S, L = g.A, g.S, g.L
     u = g.u
+
+    def pad(name, x, y):
+        return L(A("pad"), S(name), A("smd"), A("rect"),
+                 L(A("at"), A(round(x, 3)), A(round(y, 3))),
+                 L(A("size"), A(0.15), A(0.15)),
+                 L(A("layers"), S("F.Cu"), S("F.Paste"), S("F.Mask")))
+
     pads = []
-    # 8x8 detector grid, 0.5 mm pitch, centred -> spans +/-1.75 mm
     pitch = 0.5
-    half = 3.5 * pitch  # 1.75 (8 pads, 7 intervals)
-    for r in range(8):
-        for c in range(8):
-            idx = r * 8 + c
-            x = round(-half + c * pitch, 3)
-            y = round(-half + r * pitch, 3)
-            pads.append(L(A("pad"), S(f"DET{idx}"), A("smd"), A("rect"),
-                         L(A("at"), A(x), A(y)),
-                         L(A("size"), A(0.15), A(0.15)),
-                         L(A("layers"), S("F.Cu"), S("F.Paste"), S("F.Mask"))))
-    # emitter pads on the periphery, well outside the +/-1.75 mm detector grid
-    ep = 2.4
-    for i in range(8):
-        e = round(-half + i * pitch, 3)
-        # ER0..ER7 along the top edge
-        pads.append(L(A("pad"), S(f"ER{i}"), A("smd"), A("rect"),
-                     L(A("at"), A(e), A(-ep)),
-                     L(A("size"), A(0.15), A(0.15)),
-                     L(A("layers"), S("F.Cu"), S("F.Paste"), S("F.Mask"))))
-        # EC0..EC7 along the bottom edge
-        pads.append(L(A("pad"), S(f"EC{i}"), A("smd"), A("rect"),
-                     L(A("at"), A(e), A(ep)),
-                     L(A("size"), A(0.15), A(0.15)),
-                     L(A("layers"), S("F.Cu"), S("F.Paste"), S("F.Mask"))))
+    ext = 5.0  # perimeter ring at +/-5 mm (21 pads/side, corners shared)
+    # Clockwise from the top-left corner.  Each side: 21 pads at -5..+5; sides
+    # 2/3 skip their first (already-placed corner) pad; side 4 skips both ends.
+    # Top edge (21): DET19..DET39  (DET19-31 -> U1 left, DET32-39 -> U2 right)
+    for i in range(21):
+        pads.append(pad(f"DET{19 + i}", -ext + i * pitch, -ext))
+    # Right edge (20, skip top-right corner): DET40..DET59 (-> U2 right)
+    for j in range(1, 21):
+        pads.append(pad(f"DET{39 + j}", ext, -ext + j * pitch))
+    # Bottom edge (20, skip bottom-right corner): DET60..63, ER0..7, EC0..7
+    bot_names = [f"DET{i}" for i in range(60, 64)] + \
+                [f"ER{i}" for i in range(8)] + [f"EC{i}" for i in range(8)]
+    for k, nm in enumerate(bot_names):
+        pads.append(pad(nm, ext - (k + 1) * pitch, ext))
+    # Left edge (19, skip both corners): DET0..DET18 (-> U1 left)
+    for m in range(1, 20):
+        pads.append(pad(f"DET{m - 1}", -ext, ext - m * pitch))
+
     fp = L(A("footprint"), S("qssc:QSSC_Chip"),
             L(A("layer"), S("F.Cu")),
             L(A("version"), A(20240108)),
             L(A("generator"), S("gen_chip_module")),
             L(A("generator_version"), S("8.0")),
-            L(A("descr"), S("QSSC quantum die: 64 graphene detector electrodes + 8x8 CQD emitter matrix")),
+            L(A("descr"), S("QSSC quantum die: 64 graphene detector + 8x8 CQD emitter; perimeter wire-bond pads (0.5 mm pitch)")),
             L(A("attr"), A("smd")),
             L(A("property"), S("Reference"), S("U"),
-              L(A("at"), A(0), A(-3.2), A(0)),
+              L(A("at"), A(0), A(-5.8), A(0)),
               L(A("effects"), L(A("font"), L(A("size"), A(0.6), A(0.6))))),
             L(A("property"), S("Value"), S("QSSC_Chip"),
-              L(A("at"), A(0), A(3.2), A(0)),
+              L(A("at"), A(0), A(5.8), A(0)),
               L(A("effects"), L(A("font"), L(A("size"), A(0.6), A(0.6))))),
-            # die outline on F.Fab + courtyard (encompass the +/-2.4 mm emitters)
-            L(A("fp_rect"), L(A("start"), A(-2.6), A(-2.6)), L(A("end"), A(2.6), A(2.6)),
+            # die outline on F.Fab + courtyard (encompass the +/-5 mm pad ring)
+            L(A("fp_rect"), L(A("start"), A(-5.2), A(-5.2)), L(A("end"), A(5.2), A(5.2)),
               L(A("stroke"), L(A("width"), A(0.05)), L(A("type"), A("solid"))),
               L(A("fill"), A("none")), L(A("layer"), S("F.Fab")), L(A("uuid"), S(u()))),
-            L(A("fp_rect"), L(A("start"), A(-2.9), A(-2.9)), L(A("end"), A(2.9), A(2.9)),
+            L(A("fp_rect"), L(A("start"), A(-5.5), A(-5.5)), L(A("end"), A(5.5), A(5.5)),
               L(A("stroke"), L(A("width"), A(0.05)), L(A("type"), A("solid"))),
               L(A("fill"), A("none")), L(A("layer"), S("F.CrtYd")), L(A("uuid"), S(u()))),
             *pads)
@@ -594,6 +605,12 @@ def main():
     g.build_pincoords = module_build_pincoords
     g.load_footprint_mod = _chip_fp_load
     g.BOARD_W, g.BOARD_H = 85, 50  # widened from 70 to fit the emitter driver
+    # 6-layer stackup: 4 signal layers (F.Cu/In3.Cu/In4.Cu/B.Cu) + 2 planes
+    # (In1.Cu GND, In2.Cu +3V3). The dense 132-net module (64-line die fan-out
+    # + 8x8 emitter crossbar + MUX selects + TIA) cannot autoroute cleanly on
+    # 2 signal layers; the two extra inner signal layers let Freerouting route
+    # it headlessly. ~$2-5/board extra at JLCPCB -- the real fix, user-approved.
+    g.EXTRA_INNER_LAYERS = [(3, "In3.Cu", "signal"), (4, "In4.Cu", "signal")]
 
     build_module_components()
     module_build_pincoords()

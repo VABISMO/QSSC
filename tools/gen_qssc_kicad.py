@@ -869,11 +869,15 @@ def emit_pcb():
         fp = fp_net_pads(fp, c["pins"], net_index)
         footprints.append(fp)
 
-    # 4-layer stackup
+    # 4-layer stackup by default; EXTRA_INNER_LAYERS (set by gen_chip_module
+    # for the dense 132-net module) inserts In3.Cu/In4.Cu signal layers between
+    # In2.Cu and B.Cu for a 6-layer stackup (4 signal + 2 plane).
+    extra_layer_sexps = [L(A(idx), S(name), A(typ)) for idx, name, typ in EXTRA_INNER_LAYERS]
     layers = L(A("layers"),
                L(A(0), S("F.Cu"), A("signal")),
                L(A(1), S("In1.Cu"), A("signal"), S("GND")),
                L(A(2), S("In2.Cu"), A("power"), S("PWR")),
+               *extra_layer_sexps,
                L(A(31), S("B.Cu"), A("signal")),
                L(A(32), S("B.Adhes"), A("user"), S("B.Adhesive")),
                L(A(33), S("F.Adhes"), A("user"), S("F.Adhesive")),
@@ -1032,6 +1036,14 @@ def emit_pro():
 # PCB placement plan (mm) — assigns pcb_x/pcb_y to each component
 # --------------------------------------------------------------------------
 BOARD_W, BOARD_H = 130, 85
+
+# Extra inner copper layers to insert into the stackup (between In2.Cu and
+# B.Cu). Empty by default -> the MAIN control board stays 4-layer (its
+# verified first-pass routing + planes are untouched). The chip MODULE sets
+# this to [In3.Cu, In4.Cu] (signal) for a 6-layer stackup: 4 signal layers
+# (F.Cu/In3.Cu/In4.Cu/B.Cu) + 2 planes (In1.Cu GND, In2.Cu +3V3), so the
+# dense 132-net module autoroutes cleanly. Each entry: (index, name, type).
+EXTRA_INNER_LAYERS = []
 
 
 def assign_pcb_positions():

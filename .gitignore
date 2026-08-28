@@ -118,3 +118,4 @@ parser.out
 hardware/pcb/*erc*.txt
 hardware/pcb/*drc*.txt
 hardware/pcb/t*.kicad_sch
+/tools/bin/
