@@ -8,28 +8,30 @@ installed, and writing one from scratch in a script would leave DRC violations
 FPGA BGA's power/GND pads also have no netlist without UG475, so 275 of 549 pads
 are unnetted and unroutable headlessly.
 
-What this DOES do -- the copper-plane foundation that any future GUI routing
-session builds on, reproducibly and DRC-clean (copper pours auto-avoid pads of
-other nets):
+What this DOES do -- the copper-plane foundation for the 6-layer stackup
+(F.Cu sig / In1.Cu GND / In2.Cu sig / In3.Cu sig / In4.Cu +3V3 / B.Cu sig),
+reproducibly and DRC-clean (copper pours auto-avoid pads of other nets):
 
   * **In1.Cu : solid GND plane** (full board) -- continuous ground reference.
-  * **In2.Cu : solid +3V3 plane** (full board) -- the main digital rail; the
-    stackup's "PWR" layer is repurposed to +3V3 (the highest-pad-count rail).
-  * **F.Cu + B.Cu : GND flood pours** -- surface GND pads connect to a local
-    ground pour immediately; improves EMI/signal-integrity on the outer layers.
-  * **GND stitching vias** on a coarse grid, each pad-clearance-checked, tying
-    the F.Cu flood, the In1.Cu plane and the B.Cu flood into ONE connected
-    ground mesh across all copper layers.
+  * **In4.Cu : solid +3V3 plane** (full board) -- the main digital rail
+    (detected by the "PWR" layer label; In2.Cu on the chip module).
+  * **Rail pad vias** -- every surface GND / +3V3 SMD pad (not on the BGA) gets
+    a through-via to its inner plane. The 6-layer stackup has no F.Cu/B.Cu GND
+    flood, so surface rail pads need an explicit via to reach the plane.
+  * **GND stitching vias** on a coarse grid, each pad-clearance-checked, as
+    distributed signal-integrity return vias tying the plane to the surfaces.
 
-Still GUI-pending (honestly): BGA fanout, 50-ohm RF microstrip, USB-C diff pair,
-analog guard rings, and the +5V / +5V_RF / +5V_IN / +1V8 / +1V0 power rails and
-all signal routing -- these need an autorouter (FreeROUTING GUI) or a manual
-pcbnew session. This script adds the plane + ground-mesh foundation only.
+BGA via-in-pad (GND/+3V3/signal/power) and ALL signal + non-plane power routing
+are owned by ``tools/route_signals.py`` (run it FIRST). This script preserves
+the small BGA VIPs and all signal copper when (re)building the planes.
 
-Idempotent: it first strips any zones/tracks it (or a prior run) added, then
-rebuilds, so re-running on an already-processed board is safe. It expects the
-unrouted board produced by ``tools/gen_qssc_kicad.py`` (run that first if the
-board was hand-edited).
+Still GUI-pending (honestly): 50-ohm RF microstrip impedance verification with a
+solver, USB-C diff-pair length-skew tuning, analog guard-ring final geometry.
+
+Idempotent: it first strips any zones and its own wide GND/+3V3 vias (kept: the
+small BGA VIPs and signal copper from route_signals), then rebuilds, so
+re-running on an already-processed board is safe. It expects the board produced
+by ``tools/gen_qssc_kicad.py`` (run that first if the board was hand-edited).
 
 Run:  python3 tools/route_qssc_pcb.py     (needs system python3 with pcbnew)
 """
@@ -47,16 +49,27 @@ PCB_PATH = Path(
     )
 )
 
-# layer ids (KiCad 8 fixed copper indices)
+# layer ids (KiCad 8 fixed copper indices). The GND and +3V3 *plane* layers are
+# detected dynamically from the board's layer labels (In1.Cu is labelled "GND",
+# the +3V3 plane is labelled "PWR" -- In2.Cu on BOTH the main board and the chip
+# module, post-HDI-pivot), so this script works for either 6-layer stackup.
 F_CU = 0
-IN1_CU = 1      # GND plane
-IN2_CU = 2      # +3V3 plane
+IN1_CU = 1      # GND plane (label "GND")
+IN2_CU = 2      # +3V3 plane (label "PWR") on both boards (HDI: adjacent to F.Cu)
+IN3_CU = 3      # signal
+IN4_CU = 4      # signal
 B_CU = 31
 
 GRID_STEP_NM = 10_000_000          # 10 mm stitching grid
-VIA_DIAM_NM = 600_000              # 0.6 mm via
+VIA_DIAM_NM = 600_000              # 0.6 mm stitching / rail-pad via
 VIA_DRILL_NM = 300_000             # 0.3 mm drill
 STITCH_PAD_CLEARANCE_NM = 200_000  # 0.2 mm extra keepout from pads
+# Through-via-in-pad VIPs placed by route_signals._bga_fanout are 0.20 mm; this
+# script's own vias are 0.6 mm. _clear_routed strips only its own (wide) GND /
+# +3V3 vias and preserves the small BGA VIPs (owned by route_signals).
+VIP_MAX_NM = 300_000
+RAIL_VIA_OFFSET_NM = 600_000       # 0.6 mm offset from a rail pad to its via
+BGA_REF = "U1"                     # the FPGA BGA (skip its pads for rail-pad vias)
 
 
 def _find_netcode(board, name):
@@ -66,14 +79,29 @@ def _find_netcode(board, name):
     raise KeyError(f"net {name!r} not in board netlist")
 
 
+def _find_plane_layer(board, label):
+    """Return the layer ID of the copper layer whose user label == `label`
+    ("GND" or "PWR"), or None. The main board labels In1.Cu="GND" and
+    In4.Cu="PWR"; the chip module labels In1.Cu="GND" and In2.Cu="PWR". Avoids
+    CuStack() (a bare SwigPyObject in this build after board mutation)."""
+    n = board.GetCopperLayerCount()
+    cands = list(range(n - 1)) + [pcbnew.B_Cu]
+    for lid in cands:
+        try:
+            if board.GetLayerName(lid) == label:
+                return lid
+        except Exception:
+            pass
+    return None
+
+
 def _clear_routed(board):
-    """Idempotent reset of the plane foundation: remove every zone (planes +
-    floods) and every GND track/via (the stitching mesh this script owns), but
-    KEEP non-GND signal tracks/vias so a prior ``route_signals.py`` pass (BGA
-    fanout + signal routing) is preserved when the plane foundation is
-    (re)built on top of it. The generated board has no tracks, so on a clean
-    board this only drops the zones; on a re-run it rebuilds the planes + mesh
-    while leaving signal routing intact.
+    """Idempotent reset of the plane foundation: remove every zone (planes) and
+    every WIDE GND/+3V3 track/via this script owns (the stitching mesh + rail
+    pad vias), but KEEP small BGA via-in-pad VIPs (<= VIP_MAX_NM, owned by
+    route_signals._bga_fanout) and all non-plane signal/power tracks/vias so a
+    prior ``route_signals.py`` pass is preserved when the plane foundation is
+    (re)built on top of it.
 
     The swig track proxy is iterable by for-loop but ``list()`` of it can raise
     ``SwigPyObject not iterable`` after the board is mutated, so we collect
@@ -84,7 +112,8 @@ def _clear_routed(board):
         board.Remove(z)
     tracks = [t for t in board.Tracks()]
     for t in tracks:
-        if t.GetNetname() == "GND":
+        nm = t.GetNetname()
+        if nm in ("GND", "+3V3") and t.GetWidth() > VIP_MAX_NM:
             board.Remove(t)
 
 
@@ -157,6 +186,79 @@ def _seg_dist2(px, py, x1, y1, x2, y2):
     return (px - cx) ** 2 + (py - cy) ** 2
 
 
+def _capture_rail_pads(board):
+    """Snapshot every pad's (centre, netcode, attribute) and the BGA pad centres
+    BEFORE any board mutation. KiCad's swig binding returns a bare non-iterable
+    SwigPyObject for ``board.GetFootprints()``/``Footprints()`` once
+    ``board.Remove()`` runs in ``_clear_routed``, so ``_add_rail_pad_vias``
+    cannot iterate footprints after the reset. Returns
+    (bga_xy_set, {netcode: [(x, y, attribute), ...]}) for non-BGA pads only."""
+    bga_xy = set()
+    by_net = {}
+    for fp in board.GetFootprints():
+        is_bga = fp.GetReference() == BGA_REF
+        for pad in fp.Pads():
+            c = pad.GetCenter()
+            x, y = int(c.x), int(c.y)
+            if is_bga:
+                bga_xy.add((x, y))
+                continue
+            by_net.setdefault(pad.GetNetCode(), []).append(
+                (x, y, pad.GetAttribute()))
+    return bga_xy, by_net
+
+
+def _add_rail_pad_vias(board, netcode, bga_xy, rail_pads, pads, sig_circles, sig_segs):
+    """For every SMD pad on this rail net (GND or +3V3) that is NOT on the BGA
+    (U1 -- its plane balls get via-in-pad from route_signals._bga_fanout) and
+    not a PTH pin, place one through-via offset RAIL_VIA_OFFSET_NM from the pad
+    centre so the surface pad reaches the inner plane (In1.Cu GND or the PWR
+    +3V3 plane). With the 6-layer stackup F.Cu/B.Cu carry no GND flood, so a
+    surface rail pad needs an explicit via to its plane. Returns the vias.
+
+    ``bga_xy``/``rail_pads`` are a pre-mutation snapshot from
+    ``_capture_rail_pads`` (board.GetFootprints() is unreliable after
+    ``_clear_routed`` mutates the board)."""
+    via_r = VIA_DIAM_NM / 2
+    min_clear = via_r + STITCH_PAD_CLEARANCE_NM
+    vias = []
+    for (px, py, attrib) in rail_pads.get(netcode, []):
+        if attrib == pcbnew.PAD_ATTRIB_PTH:
+            continue
+        if (px, py) in bga_xy:
+            continue
+        # try 4 orthogonal offsets, pick the first that clears pads + sig
+        for dx, dy in ((RAIL_VIA_OFFSET_NM, 0), (-RAIL_VIA_OFFSET_NM, 0),
+                       (0, RAIL_VIA_OFFSET_NM), (0, -RAIL_VIA_OFFSET_NM)):
+            vx, vy = px + dx, py + dy
+            ok = True
+            for ox, oy, pr in pads:
+                if (vx - ox) ** 2 + (vy - oy) ** 2 < (min_clear + pr) ** 2:
+                    ok = False
+                    break
+            if ok:
+                for cx, cy, cr in sig_circles:
+                    if (vx - cx) ** 2 + (vy - cy) ** 2 < (min_clear + cr) ** 2:
+                        ok = False
+                        break
+            if ok:
+                for x1s, y1s, x2s, y2s, hw in sig_segs:
+                    if _seg_dist2(vx, vy, x1s, y1s, x2s, y2s) < (min_clear + hw) ** 2:
+                        ok = False
+                        break
+            if ok:
+                v = pcbnew.PCB_VIA(board)
+                v.SetPosition(pcbnew.VECTOR2I(int(vx), int(vy)))
+                v.SetNetCode(netcode)
+                v.SetViaType(pcbnew.VIATYPE_THROUGH)
+                v.SetDrill(VIA_DRILL_NM)
+                v.SetWidth(VIA_DIAM_NM)
+                board.Add(v)
+                vias.append(v)
+                break
+    return vias
+
+
 def _add_stitching_vias(board, netcode, bbox, pads, sig_circles, sig_segs):
     """Place GND through-vias on a coarse grid, skipping any point too close to
     a pad OR an existing signal track/via. Ties the F.Cu/In1.Cu/B.Cu GND copper
@@ -218,23 +320,38 @@ def build(board, gnd, p33, bbox, pads) -> dict:
     lifetime. Split out so tests can run it repeatedly on one board without
     re-loading (KiCad's python binding can hand back bare SwigPyObjects for a
     board re-loaded after a SaveBoard/mutation, which breaks repeated runs)."""
-    # Capture signal tracks/vias BEFORE _clear_routed mutates the board: the
-    # swig proxy layer breaks (board.Tracks() returns a bare SwigPyObject) once
-    # board.Remove() runs in _clear_routed, so the stitching-via grid must be
-    # built from obstacles snapshoted up front. _clear_routed keeps signal
-    # copper (only removes zones + GND tracks/vias), so the snapshot is valid.
+    # Capture signal tracks/vias AND footprint pads BEFORE _clear_routed mutates
+    # the board: the swig proxy layer breaks (board.Tracks()/GetFootprints()
+    # return bare SwigPyObjects) once board.Remove() runs in _clear_routed, so
+    # the via grids + rail-pad vias must be built from obstacles snapshotted up
+    # front. _clear_routed keeps signal copper and the small BGA VIPs (only
+    # removes zones + its own wide GND/+3V3 vias).
     sig_circles, sig_segs = _signal_obstacles(board)
+    bga_xy, rail_pads = _capture_rail_pads(board)
     _clear_routed(board)
 
-    zones = [_add_gnd_or_pwr_zone(board, IN1_CU, gnd, bbox)]            # GND plane
-    if p33 is not None:
-        zones.append(_add_gnd_or_pwr_zone(board, IN2_CU, p33, bbox))    # +3V3 plane
-    zones.append(_add_gnd_or_pwr_zone(board, F_CU, gnd, bbox))          # GND flood top
-    zones.append(_add_gnd_or_pwr_zone(board, B_CU, gnd, bbox))         # GND flood bot
+    # Detect the plane layers from the board's layer labels (works for both the
+    # main board In4.Cu="PWR" and the chip module In2.Cu="PWR").
+    gnd_layer = _find_plane_layer(board, "GND")
+    pwr_layer = _find_plane_layer(board, "PWR")
+    if gnd_layer is None:
+        gnd_layer = IN1_CU   # fallback
 
-    # GND stitching vias across the ground mesh (added BEFORE filling so the
-    # +3V3 plane carves anti-pad clearances around each GND via barrel).
-    vias = _add_stitching_vias(board, gnd, bbox, pads, sig_circles, sig_segs)
+    zones = [_add_gnd_or_pwr_zone(board, gnd_layer, gnd, bbox)]          # GND plane
+    if p33 is not None and pwr_layer is not None:
+        zones.append(_add_gnd_or_pwr_zone(board, pwr_layer, p33, bbox))  # +3V3 plane
+
+    # Rail pad vias: tie every surface GND / +3V3 SMD pad (not on the BGA) to
+    # its inner plane. The 6-layer stackup has no F.Cu/B.Cu GND flood, so
+    # surface rail pads need an explicit via. Added BEFORE filling so the +3V3
+    # plane carves anti-pad clearances around each GND via barrel.
+    vias = list(_add_rail_pad_vias(board, gnd, bga_xy, rail_pads, pads, sig_circles, sig_segs))
+    if p33 is not None and pwr_layer is not None:
+        vias += list(_add_rail_pad_vias(board, p33, bga_xy, rail_pads, pads, sig_circles, sig_segs))
+
+    # GND stitching vias across the ground mesh (coarse grid of return vias
+    # tying the plane to the surface layers for signal-integrity returns).
+    vias += _add_stitching_vias(board, gnd, bbox, pads, sig_circles, sig_segs)
 
     # fill all zones now that vias exist (ZONE_FILLER.Fill takes a vector)
     vec = pcbnew.ZONES()
@@ -286,9 +403,9 @@ def main() -> dict:
     if __name__ != "__main__":      # called as a function (e.g. from tests)
         return stats
     # called as a script: print a human summary
-    print(f"  zones: {len(stats['zones'])} (In1.Cu=GND, "
-          f"In2.Cu={'+3V3' if p33 else 'GND'}, F.Cu=GND, B.Cu=GND)")
-    print(f"  GND stitching vias: {stats['via_count']}")
+    pwr = "+3V3" if p33 else "(none)"
+    print(f"  zones: {len(stats['zones'])} (GND plane + {pwr} plane)")
+    print(f"  rail + stitching vias: {stats['via_count']}")
     for z in stats["zones"]:
         print(f"    zone {z['net']:>6} on {z['layer']:>6}: "
               f"{z['filled_mm2']:.1f} mm^2 filled")

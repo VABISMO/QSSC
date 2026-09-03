@@ -4,7 +4,7 @@
 Outputs (relative to repo root):
   hardware/pcb/qssc.kicad_sch   - ERC-clean flat schematic (nets by label + power syms)
   hardware/pcb/qssc.kicad_pcb   - DRC-clean, placed + netted 4-layer board
-  hardware/pcb/qssc-lib.kicad_sym - custom symbol library (FPGA, HMC441, AMS1117, +5V_RF)
+  hardware/pcb/qssc-lib.kicad_sym - custom symbol library (FPGA, GVA-84, AMS1117, +5V_RF)
   hardware/pcb/qssc.kicad_pro   - project with net classes + design rules
 
 KiCad 8 `kicad-cli` cannot export Specctra DSN or import SES (GUI-only), so the
@@ -224,7 +224,7 @@ _FPGA_CFG_NET = {
 }
 # user-IO signals that are FPGA inputs (the rest are outputs); all drawn as
 # bidirectional so ERC stays lenient on unused-direction pins.
-_FPGA_INPUT_NETS = {"clk_100mhz", "reset", "rx", "TCK", "TMS", "TDI",
+_FPGA_INPUT_NETS = {"clk_100mhz", "reset", "UART_RX", "TCK", "TMS", "TDI",
                     "ADF_MUXOUT", "TIA_OUT", "CONF_INIT", "CONF_PROG"}
 
 
@@ -239,8 +239,18 @@ def fpga_net_map():
     boot, and the board's I/O."""
     m = {}
     s = _FPGA_MAP
+    # RTL port names (from the ballmap, generated off fpga/constraints.xdc) that
+    # differ from the board net name used by the peripheral on the same net.
+    # Without these aliases the FPGA ball and the peripheral sit on TWO
+    # separately-named one-pin nets -> an ERC-silent disconnect (each net
+    # dangles with a single endpoint) that the headless generator bypasses.
+    NET_ALIAS = {
+        "refclk_out": "refclk_25m",   # FPGA 25 MHz out (A14) -> ADF4351 REFIN (pin 29)
+        "tx": "UART_TX",              # FPGA TX (P18) -> FT232 RXD (pin 5, net UART_TX)
+        "rx": "UART_RX",              # FPGA RX (P17) <- FT232 TXD (pin 1, net UART_RX)
+    }
     for net, ball in s["signals"].items():
-        m[ball] = net
+        m[ball] = NET_ALIAS.get(net, net)
     for cat, balls in s["power"].items():
         net = _FPGA_PWR_NET[cat] if cat in _FPGA_PWR_NET else "+3V3"  # VCCO_*
         for b in balls:
@@ -249,7 +259,13 @@ def fpga_net_map():
         m[ball] = _FPGA_CFG_NET[name]
     for name, ball in s["jtag"].items():
         m[ball] = name
-    m[s["xadc"]["VP"]] = "TIA_OUT"
+    # XADC VP sees TIA_ADC, NOT TIA_OUT directly: the ADA4530-1 TIA runs on +5V
+    # with a 2.5V mid-supply reference, so TIA_OUT sits at ~2.5V and swings 0-5V,
+    # but the Artix-7 XADC analog inputs (Vp/Vn/Vaux) are spec'd 0-1V (abs max
+    # VCCADC+0.3 ~= 2.1V).  A direct wire would overdrive/clamp the XADC.  R84/R85
+    # form a 5.7:1 divider (TIA_OUT -> TIA_ADC) so 0-5V -> 0-0.88V, and C66 is the
+    # anti-alias cap.  See HARDWARE_DESIGN.md §15C (chip<->FPGA interface physics).
+    m[s["xadc"]["VP"]] = "TIA_ADC"
     m[s["xadc"]["VN"]] = "GND"
     return m
 
@@ -298,15 +314,22 @@ def fpga_pin_list():
     return pins
 
 
-# ---- HMC441 custom symbol (5 logical pins; 16-pad QFN pad map TBD) --------
-HMC441_PINS = [
-    dict(number="VCC", name="VCC", etype="power_in", x=0, y=-7.62, rot=90),
-    dict(number="GND", name="GND", etype="power_in", x=0, y=7.62, rot=270),
-    dict(number="RF_IN", name="RF_IN", etype="passive", x=-7.62, y=2.54, rot=0),
-    dict(number="RF_OUT", name="RF_OUT", etype="passive", x=7.62, y=2.54, rot=180),
-    dict(number="VGG", name="VGG", etype="passive", x=-7.62, y=-2.54, rot=0),
+# ---- GVA-84+ RF MMIC amp (Mini-Circuits, SOT-89, self-biased +5V) ----------
+# Replaces the HMC441LP3E (6.5-13.5 GHz -- wrong band for the 2.87/3.46 GHz
+# ODMR target, AND its custom symbol used logical pin numbers VCC/GND/RF_IN/...
+# that never mapped to the QFN-16 footprint's numeric pads 1-16, so the amp was
+# completely unnetted on the board).  The GVA-84+ is DC-7 GHz, +18.4 dB @2 GHz,
+# +20.6 dBm P1dB, self-biased from +5V via an RF choke to pin 3 -- no VGG pin.
+# SOT-89 pinout per Mini-Circuits datasheet (case DF782):
+#   1 = RFIN (DC-blocked), 2 = GND, 3 = RFOUT & DC-IN (DC-blocked), 4 = GND paddle.
+# The KiCad `SOT-89-3` footprint exposes pads 1/2/3; pad 2 is the large centre
+# pad that doubles as the GND paddle (pin 4), so a 3-pin symbol maps 1:1.
+GVA84_PINS = [
+    dict(number="1", name="RFIN", etype="input", x=-7.62, y=0, rot=0),
+    dict(number="2", name="GND", etype="power_in", x=0, y=7.62, rot=270),
+    dict(number="3", name="RFOUT", etype="output", x=7.62, y=0, rot=180),
 ]
-HMC441_NETS = {"VCC": "+5V_RF", "GND": "GND", "RF_IN": "RF_IN", "RF_OUT": "RF_AMP_OUT", "VGG": "VGG"}
+GVA84_NETS = {"1": "RF_IN", "2": "GND", "3": "RF_AMP_OUT"}
 
 
 # ---- AMS1117 custom (3 pins, avoids system-lib `extends`) -----------------
@@ -364,9 +387,9 @@ def authored_symbols():
         dict(number="7", name="HOLD_D3", etype="bidirectional", x=7.62, y=2.54, rot=180),
         dict(number="8", name="VCC", etype="power_in", x=0, y=-7.62, rot=90),
     ], (-5.08, -5.08, 5.08, 5.08), value="W25Q128JVSIQ"))
-    # HMC441
-    syms.append(custom_symbol_def("qssc", "HMC441LP3E", "U", HMC441_PINS,
-                                  (-5.08, -5.08, 5.08, 5.08), value="HMC441LP3E"))
+    # GVA-84+ RF MMIC amp (replaces HMC441 -- see GVA84_PINS docstring)
+    syms.append(custom_symbol_def("qssc", "GVA-84", "U", GVA84_PINS,
+                                  (-5.08, -5.08, 5.08, 5.08), value="GVA-84+"))
     # AMS1117 family (3 pins each, simple horizontal body) -- 1.8/3.3/5.0 only;
     # the 1.0 V rail uses the real AP2127K-1.0 (AMS1117 has no 1.0 V option).
     for v in ["AMS1117-1.8", "AMS1117-3.3", "AMS1117-5.0"]:
@@ -455,7 +478,7 @@ def replicated_symbol(lib, name, refpref, stdpinlist, value=None):
 
 # Map lib_id -> symbol name in our authored lib
 SYM_NAME = {
-    "qssc:XC7A35T_CPG236": "XC7A35T_CPG236", "qssc:HMC441LP3E": "HMC441LP3E",
+    "qssc:XC7A35T_CPG236": "XC7A35T_CPG236", "qssc:GVA-84": "GVA-84+",
     "qssc:AP2127K-1.0": "AP2127K-1.0", "qssc:AMS1117-1.8": "AMS1117-1.8",
     "qssc:AMS1117-3.3": "AMS1117-3.3", "qssc:AMS1117-5.0": "AMS1117-5.0",
     "qssc:FT232RL": "FT232RL", "qssc:ADF4351": "ADF4351", "qssc:ADA4530-1": "ADA4530-1",
@@ -539,8 +562,23 @@ add("C43", "qssc:C", "10uF", "Capacitor_SMD:C_0805_2012Metric",
     92, 78, pins={"1": "+1V0", "2": "GND"})
 add("C44", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
     80, 78, pins={"1": "+1V0", "2": "GND"})
-add("REG4", "qssc:AMS1117-5.0", "AMS1117-5.0", "Package_TO_SOT_SMD:SOT-223-3_TabPin2",
-    80, 90, pins={"1": "GND", "2": "+5V_RF", "3": "+5V"})
+# REG4 was an AMS1117-5.0 LDO from +5V -> +5V_RF, but the AMS1117 needs ~6.5 V
+# in for a 5.0 V out -- fed from the 5 V barrel rail it sat permanently in
+# dropout and delivered ~3.7-4 V to the RF amp (needs 4.8-5.2 V). The +5V
+# rail is already regulated 5 V, so +5V_RF needs NO regulation -- only a ferrite
+# bead + pi filter to keep the RF section's noise off the main +5V rail (and vice
+# versa). FB1 is a 600-ohm@100MHz bead; C45/C46 buffer the +5V side, C47/C48 the
+# +5V_RF side (10uF bulk + 100nF HF each).
+add("FB1", "qssc:L", "600Ω@100MHz", "Inductor_SMD:L_0603_1608Metric",
+    80, 90, pins={"1": "+5V", "2": "+5V_RF"})
+add("C45", "qssc:C", "10uF", "Capacitor_SMD:C_0805_2012Metric",
+    68, 90, pins={"1": "+5V", "2": "GND"})
+add("C46", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
+    68, 98, pins={"1": "+5V", "2": "GND"})
+add("C47", "qssc:C", "10uF", "Capacitor_SMD:C_0805_2012Metric",
+    92, 90, pins={"1": "+5V_RF", "2": "GND"})
+add("C48", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
+    92, 98, pins={"1": "+5V_RF", "2": "GND"})
 add("R70", "qssc:R", "330", "Resistor_SMD:R_0603_1608Metric",
     110, 30, pins={"1": "+3V3", "2": "LED_ANODE"})
 add("LED1", "qssc:LED", "Green", "LED_SMD:LED_0603_1608Metric",
@@ -572,35 +610,57 @@ add("Y1", "qssc:ASE_osc", "100MHz TCXO", "Oscillator:Oscillator_SMD_Abracon_ASE-
     200, 30, pins={"1": "+3V3", "2": "GND", "3": "clk_100mhz", "4": "+3V3"})
 
 # USB-UART
+# FT232 USBDP/USBDM (pins 15/16) -> USB_DP_F/USB_DM_F -> R78/R79 27R series
+# damping -> USB_DP/USB_DM (ESD diodes D1/D2 + USB-C).  Series R dampens the
+# USB edge reflections; ESD stays on the connector side (correct clamp point).
 add("J1", "qssc:FT232RL", "FT232RL", "Package_SO:SSOP-28_5.3x10.2mm_P0.65mm",
-    300, 70, pins={"1": "UART_RX", "5": "UART_TX", "15": "USB_DP", "16": "USB_DM",
+    300, 70, pins={"1": "UART_RX", "5": "UART_TX", "15": "USB_DP_F", "16": "USB_DM_F",
                    "4": "+3V3", "17": "3V3OUT", "20": "+3V3", "7": "GND", "18": "GND",
                    "21": "GND", "25": "GND", "19": "+3V3", "26": "GND"})
+# USB-C VBUS is on its own VBUS_USB net; D_USB (Schottky, below) passes
+# USB -> +5V_IN only, blocking the barrel wall adapter from back-feeding +5V
+# into the USB host.  Barrel stays direct so the +5V rail keeps the full 5.0 V
+# the GVA-84+ RF amp needs (4.8-5.2 V abs max); only USB-only power (config,
+# no RF) takes the Schottky drop.
 add("J10", "qssc:USB_C_Receptacle", "USB-C", "Connector_USB:USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal",
-    360, 70, pins={"A4": "+5V_IN", "A9": "+5V_IN", "B4": "+5V_IN", "B9": "+5V_IN",
+    360, 70, pins={"A4": "VBUS_USB", "A9": "VBUS_USB", "B4": "VBUS_USB", "B9": "VBUS_USB",
                    "A1": "GND", "A12": "GND", "B1": "GND", "B12": "GND",
                    "A6": "USB_DP", "B6": "USB_DP", "A7": "USB_DM", "B7": "USB_DM",
                    "A5": "CC1", "B5": "CC2", "A8": "GND", "B8": "GND", "S1": "GND"})
 add("R71", "qssc:R", "5.1k", "Resistor_SMD:R_0603_1608Metric", 360, 100, pins={"1": "CC1", "2": "GND"})
 add("R72", "qssc:R", "5.1k", "Resistor_SMD:R_0603_1608Metric", 360, 110, pins={"1": "CC2", "2": "GND"})
 
-# ADF4351 PLL + loop filter + HMC441 RF amp + SMA
+# ADF4351 PLL + loop filter + GVA-84+ RF amp + SMA
 add("U3", "qssc:ADF4351", "ADF4351BCPZ", "Package_DFN_QFN:QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm",
     300, 150, pins={"1": "SPI_CLK", "2": "SPI_DATA", "3": "SPI_LE", "4": "+3V3",
                     "6": "+3V3", "7": "LF_CP", "9": "GND", "10": "+3V3", "11": "GND",
-                    "12": "RF_OUT", "16": "+3V3", "17": "+3V3", "18": "GND", "21": "GND",
-                    "22": "RSET", "23": "GND", "27": "GND", "28": "+3V3", "29": "refclk_25m",
-                    "30": "ADF_MUXOUT", "31": "GND", "32": "+3V3", "33": "GND", "8": "GND"})
+                    "12": "RF_OUT", "16": "+3V3", "17": "+3V3", "18": "GND", "20": "LF_OUT",
+                    "21": "GND", "22": "RSET", "23": "GND", "24": "VREF", "26": "+3V3",
+                    "27": "GND", "28": "+3V3", "29": "refclk_25m", "30": "ADF_MUXOUT",
+                    "31": "GND", "32": "+3V3", "33": "GND", "8": "GND"})
+# ADF4351 pin-tie rationale (verified vs ADI ADF4351 datasheet, 32-lead LFCSP):
+#   pin 20 VTUNE  -> LF_OUT  (loop-filter output drives the VCO tuning input;
+#                             WITHOUT this the PLL loop is open and VCO freq drifts)
+#   pin 26 PDB_RF -> +3V3    (RF power-down is active-LOW: LOW mutes the RF outs,
+#                             so tie HIGH to keep the 2.87/3.46 GHz RF enabled)
+#   pin 24 VREF   -> VREF    (internal reference node -- needs a DECOUPLING cap to
+#                             GND, NOT a direct tie; a direct GND tie shorts the
+#                             internal reference. Decoupled by C36 below.)
+#   pin  5 SW     -> NC      (fast-lock switch I/O; fast-lock unused, leave open)
+#   pin 29 REFIN  -> refclk_25m (FPGA 25 MHz out on ball A14, aliased in fpga_net_map)
 add("R67", "qssc:R", "1k", "Resistor_SMD:R_0603_1608Metric", 250, 175, pins={"1": "LF_CP", "2": "LF_MID"})
 add("C31", "qssc:C", "220p", "Capacitor_SMD:C_0603_1608Metric", 240, 175, pins={"1": "LF_CP", "2": "GND"})
 add("C32", "qssc:C", "10n", "Capacitor_SMD:C_0603_1608Metric", 260, 190, pins={"1": "LF_MID", "2": "GND"})
 add("R68", "qssc:R", "2.2k", "Resistor_SMD:R_0603_1608Metric", 270, 175, pins={"1": "LF_MID", "2": "LF_OUT"})
 add("C33", "qssc:C", "220p", "Capacitor_SMD:C_0603_1608Metric", 285, 190, pins={"1": "LF_OUT", "2": "GND"})
 add("R73", "qssc:R", "4.7k", "Resistor_SMD:R_0603_1608Metric", 300, 175, pins={"1": "RSET", "2": "GND"})
+add("C36", "qssc:C", "100n", "Capacitor_SMD:C_0603_1608Metric", 315, 175,
+    pins={"1": "VREF", "2": "GND"})  # ADF4351 pin 24 VREF decoupling (internal ref node)
 add("C34", "qssc:C", "100p", "Capacitor_SMD:C_0603_1608Metric", 330, 150, pins={"1": "RF_OUT", "2": "RF_IN"})
-add("U5", "qssc:HMC441LP3E", "HMC441LP3E", "Package_DFN_QFN:QFN-16-1EP_3x3mm_P0.5mm_EP1.45x1.45mm",
-    360, 150, pins=HMC441_NETS)
-add("R69", "qssc:R", "10", "Resistor_SMD:R_0805_2012Metric", 360, 130, pins={"1": "+5V_RF", "2": "VGG"})
+add("U5", "qssc:GVA-84", "GVA-84+", "Package_TO_SOT_SMD:SOT-89-3",
+    360, 150, pins=GVA84_NETS)
+# GVA-84+ is self-biased: +5V_RF feeds pin 3 (RFOUT/DC-IN) through the L2 RF
+# choke -- no VGG gate-bias resistor (the old HMC441 needed R69; removed).
 add("L2", "qssc:L", "100nH", "Inductor_SMD:L_0603_1608Metric", 360, 175, pins={"1": "+5V_RF", "2": "RF_AMP_OUT"})
 add("C35", "qssc:C", "100p", "Capacitor_SMD:C_0603_1608Metric", 390, 150, pins={"1": "RF_AMP_OUT", "2": "J3_SIG"})
 add("J3", "qssc:Conn_Coaxial", "SMA", "Connector_Coaxial:SMA_Amphenol_132289_EdgeMount",
@@ -636,12 +696,19 @@ add("J11", "qssc:Conn_02x30_Odd_Even", "Samtec LSHM-130",
     "Connector_Samtec:Samtec_LSHM-130-xx.x-x-DV-N_2x30_P0.50mm_Vertical",
     90, 150, pins=J11P)
 
-# mw_gate drives the RF switch on THIS board (ADF4351 -> HMC441 -> SMA), so it
+# mw_gate drives the RF switch on THIS board (ADF4351 -> GVA-84+ -> SMA), so it
 # stays local (does not cross to the module): J8 header to the off-board switch.
 add("J8", "qssc:Conn_01x02", "MW_GATE", "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical",
     260, 110, pins={"1": "mw_gate", "2": "GND"})
 
 # Reset button + JTAG (mw_gate J8 header is defined above with J11)
+# Reset button: drives the FPGA's active-high fabric "reset" net (top_level.v
+# input `reset`, async-asserted, 2-flop synchronized to clk_100mhz).  Pressing
+# ties `reset` to +3V3 (assert).  BUGFIX 2026-09: the original button had NO
+# pull-down, so `reset` FLOATED when released -> the fabric sat in an
+# indeterminate reset state.  R83 (10k pull-down to GND, added below) defines
+# the released state (reset=0); C68 (100nF to GND) debounces.  Pressed ->
+# reset=3V3 (strong drive overrides the 10k); released -> pulled low + RC-filtered.
 add("J7", "qssc:SW_Push", "RESET", "Button_Switch_THT:SW_PUSH_6mm_H5mm",
     60, 70, pins={"1": "+3V3", "2": "reset"})
 add("J9", "qssc:Conn_02x05", "JTAG", "Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical",
@@ -671,10 +738,104 @@ for i, (net, ref) in enumerate(_esd):
 add("#FLG1", "power:PWR_FLAG", "PWR_FLAG", "", 45, 30, pins={"1": "+5V_IN"})
 add("#FLG2", "power:PWR_FLAG", "PWR_FLAG", "", 70, 30, pins={"1": "+5V"})
 add("#FLG3", "power:PWR_FLAG", "PWR_FLAG", "", 45, 45, pins={"1": "GND"})
+# +5V_RF is now driven through FB1 (a passive ferrite bead) from +5V, not by a
+# regulator power_out pin, so ERC cannot see a driver -> flag it.
+add("#FLG5", "power:PWR_FLAG", "PWR_FLAG", "", 95, 90, pins={"1": "+5V_RF"})
 # VREFP/VREFN: the Artix-7 XADC reference. When the internal 1.25 V reference
 # is used, VREFP is bypassed to GND (C40) and VREFN tied to GND; the pin is a
 # power input driven by the on-chip reference, which ERC cannot see -> flag it.
 add("#FLG4", "power:PWR_FLAG", "PWR_FLAG", "", 45, 60, pins={"1": "VREFP"})
+
+# ==========================================================================
+# Production-hardening pass 2026-09: missing decoupling, pull-ups, protection.
+# Every active IC now has LOCAL decoupling; the reset button is fixed (above);
+# the USB host is protected from barrel backfeed; AMS1117s get stability bulk;
+# the FPGA gets per-rail 4.7uF bulk (UG393); the ADF4351 gets per-supply 100nF;
+# JTAG gets pull resistors.  PCB positions are in assign_pcb_positions() below.
+# Full rationale + BOM/supplier parts: HARDWARE_DESIGN.md §16 + BOM.csv.
+# ==========================================================================
+# USB-C VBUS backfeed protection + VBUS bulk.
+add("D_USB", "qssc:D", "SS14 Schottky", "Diode_SMD:D_SMA",
+    300, 220, pins={"1": "VBUS_USB", "2": "+5V_IN"})   # anode=VBUS_USB cathode=+5V_IN
+add("#FLG6", "power:PWR_FLAG", "PWR_FLAG", "", 300, 232, pins={"1": "VBUS_USB"})
+add("C84", "qssc:C", "4.7uF", "Capacitor_SMD:C_0805_2012Metric",
+    312, 220, pins={"1": "VBUS_USB", "2": "GND"})
+# USB_DP/DM series damping (27R) between FT232 and the ESD/connector side.
+add("R78", "qssc:R", "27R", "Resistor_SMD:R_0603_1608Metric",
+    330, 220, pins={"1": "USB_DP_F", "2": "USB_DP"})
+add("R79", "qssc:R", "27R", "Resistor_SMD:R_0603_1608Metric",
+    342, 220, pins={"1": "USB_DM_F", "2": "USB_DM"})
+# AMS1117 output stability bulk (22uF MLCC) + shared input bulk.  AMS1117 can
+# oscillate with only a low-ESR ceramic; 22uF guarantees stability.  REG3
+# (AP2127K) is ceramic-stable and already decoupled (C41-C44).
+add("C49", "qssc:C", "22uF", "Capacitor_SMD:C_0805_2012Metric",
+    330, 240, pins={"1": "+3V3", "2": "GND"})   # REG1 +3V3 output bulk
+add("C50", "qssc:C", "22uF", "Capacitor_SMD:C_0805_2012Metric",
+    342, 240, pins={"1": "+1V8", "2": "GND"})   # REG2 +1V8 output bulk
+add("C51", "qssc:C", "10uF", "Capacitor_SMD:C_0805_2012Metric",
+    354, 240, pins={"1": "+5V", "2": "GND"})    # REG1/REG2 input bulk
+# FPGA per-rail 4.7uF bulk (UG393 Artix-7 decoupling): the round-robin C1-C20
+# 100nF is the HF local decoupling; these are the missing per-rail LF bulk.
+add("C52", "qssc:C", "4.7uF", "Capacitor_SMD:C_0805_2012Metric",
+    330, 256, pins={"1": "+1V0", "2": "GND"})
+add("C53", "qssc:C", "4.7uF", "Capacitor_SMD:C_0805_2012Metric",
+    342, 256, pins={"1": "+1V8", "2": "GND"})
+add("C54", "qssc:C", "4.7uF", "Capacitor_SMD:C_0805_2012Metric",
+    354, 256, pins={"1": "+3V3", "2": "GND"})
+# FT232 decoupling: 3V3OUT (pin17) needs 100nF per datasheet (was missing); VCC
+# (pin20) local 100nF; 4.7uF rail bulk.
+add("C55", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
+    330, 272, pins={"1": "3V3OUT", "2": "GND"})
+add("C56", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
+    342, 272, pins={"1": "+3V3", "2": "GND"})
+add("C57", "qssc:C", "4.7uF", "Capacitor_SMD:C_0805_2012Metric",
+    354, 272, pins={"1": "+3V3", "2": "GND"})
+# TCXO + config flash Vdd/VCC local decoupling.
+add("C58", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
+    330, 288, pins={"1": "+3V3", "2": "GND"})   # Y1 pin4 Vdd
+add("C59", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
+    342, 288, pins={"1": "+3V3", "2": "GND"})   # U8 pin8 VCC
+# ADF4351 per-supply decoupling: AVDD(10)/DVDD(28)/SDVDD(32)/Vp(6)/VVCO(16,17)
+# each get a local 100nF to GND -- critical for low phase noise / ref spurs.
+add("C60", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
+    330, 304, pins={"1": "+3V3", "2": "GND"})   # AVDD
+add("C61", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
+    342, 304, pins={"1": "+3V3", "2": "GND"})   # DVDD
+add("C62", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
+    354, 304, pins={"1": "+3V3", "2": "GND"})   # SDVDD
+add("C63", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
+    330, 316, pins={"1": "+3V3", "2": "GND"})   # Vp
+add("C64", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
+    342, 316, pins={"1": "+3V3", "2": "GND"})   # VVCO
+add("C65", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
+    354, 316, pins={"1": "+3V3", "2": "GND"})   # VVCO
+# JTAG pull resistors (TCK pull-down, TMS/TDI pull-up) -- defines the JTAG
+# state when the header is open and dampens floating-clock edges.
+add("R80", "qssc:R", "4.7k", "Resistor_SMD:R_0603_1608Metric",
+    330, 332, pins={"1": "TCK", "2": "GND"})
+add("R81", "qssc:R", "4.7k", "Resistor_SMD:R_0603_1608Metric",
+    342, 332, pins={"1": "TMS", "2": "+3V3"})
+add("R82", "qssc:R", "4.7k", "Resistor_SMD:R_0603_1608Metric",
+    354, 332, pins={"1": "TDI", "2": "+3V3"})
+# Reset-button pull-down + debounce on the active-high fabric "reset" net:
+# R83 holds reset=0 when J7 is released (fixes the original floating-reset
+# bug); C68 + R83 form an RC debounce (10k x 100nF = 1 ms) on the release edge.
+add("R83", "qssc:R", "10k", "Resistor_SMD:R_0603_1608Metric",
+    330, 348, pins={"1": "reset", "2": "GND"})
+add("C68", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
+    342, 348, pins={"1": "reset", "2": "GND"})
+# TIA_OUT -> XADC level-shift divider (see fpga_net_map XADC note + §15C).
+# R84/R85 = 47k/10k = 5.7:1 -> TIA_OUT 0-5V maps to TIA_ADC 0-0.88V (inside the
+# XADC 0-1V window at every operating point, no clamp needed).  57k load is
+# comfortable for the ADA4530-1 electrometer output.  C66 anti-alias (47k||10k
+# = 8.25k x 100nF -> 193 kHz, well above the 1 kHz lock-in).  Placed next to J11
+# (pcb 24,64) where TIA_OUT enters the main board.
+add("R84", "qssc:R", "47k", "Resistor_SMD:R_0603_1608Metric",
+    354, 348, pins={"1": "TIA_OUT", "2": "TIA_ADC"})
+add("R85", "qssc:R", "10k", "Resistor_SMD:R_0603_1608Metric",
+    366, 348, pins={"1": "TIA_ADC", "2": "GND"})
+add("C66", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
+    378, 348, pins={"1": "TIA_ADC", "2": "GND"})
 
 
 # --------------------------------------------------------------------------
@@ -682,10 +843,11 @@ add("#FLG4", "power:PWR_FLAG", "PWR_FLAG", "", 45, 60, pins={"1": "VREFP"})
 # --------------------------------------------------------------------------
 RF_NETS = {"RF_OUT", "RF_OUT_N", "RF_IN", "RF_AMP_OUT", "J3_SIG", "LF_CP", "LF_MID",
            "LF_OUT", "CPout", "VTUNE", "refclk_25m"}
-USB_NETS = {"USB_DP", "USB_DM"}
-ANALOG_NETS = {"TIA_OUT", "TIA_OUT_N", "DET_IN", "DET_BIAS", "VREFP", "VREFN", "TIA_REF",
+USB_NETS = {"USB_DP", "USB_DM", "USB_DP_F", "USB_DM_F"}
+ANALOG_NETS = {"TIA_OUT", "TIA_ADC", "TIA_OUT_N", "DET_IN", "DET_BIAS", "VREFP", "VREFN", "TIA_REF",
                "VauxP0", "VauxN0"}
-POWER_NETS = {"+3V3", "+1V8", "+1V0", "+5V", "+5V_RF", "+5V_IN", "GND", "3V3OUT"}
+POWER_NETS = {"+3V3", "+1V8", "+1V0", "+5V", "+5V_RF", "+5V_IN", "+5V_TIA", "GND",
+              "3V3OUT", "VBUS_USB"}
 
 
 def net_class(net):
@@ -869,16 +1031,21 @@ def emit_pcb():
         fp = fp_net_pads(fp, c["pins"], net_index)
         footprints.append(fp)
 
-    # 4-layer stackup by default; EXTRA_INNER_LAYERS (set by gen_chip_module
-    # for the dense 132-net module) inserts In3.Cu/In4.Cu signal layers between
-    # In2.Cu and B.Cu for a 6-layer stackup (4 signal + 2 plane).
-    extra_layer_sexps = [L(A(idx), S(name), A(typ)) for idx, name, typ in EXTRA_INNER_LAYERS]
+    # 6-layer HDI stackup (F.Cu sig / In1.Cu GND / In2.Cu +3V3 / In3.Cu sig /
+    # In4.Cu sig / B.Cu sig). In1.Cu/In2.Cu are the GND/+3V3 planes adjacent to
+    # F.Cu so the FPGA's 117 power balls tie to them with microvias / short
+    # blind vias that do NOT reach In3.Cu/In4.Cu/B.Cu -- those pad-free inner
+    # signal layers stay clear for the 0.5mm-pitch BGA signal escapes. The chip
+    # MODULE uses the same stackup (In2.Cu = +3V3). Each entry:
+    # (kicad_id, name, type, user_label_or_None).
+    copper = []
+    for idx, name, typ, label in LAYER_STACK:
+        if label is not None:
+            copper.append(L(A(idx), S(name), A(typ), S(label)))
+        else:
+            copper.append(L(A(idx), S(name), A(typ)))
     layers = L(A("layers"),
-               L(A(0), S("F.Cu"), A("signal")),
-               L(A(1), S("In1.Cu"), A("signal"), S("GND")),
-               L(A(2), S("In2.Cu"), A("power"), S("PWR")),
-               *extra_layer_sexps,
-               L(A(31), S("B.Cu"), A("signal")),
+               *copper,
                L(A(32), S("B.Adhes"), A("user"), S("B.Adhesive")),
                L(A(33), S("F.Adhes"), A("user"), S("F.Adhesive")),
                L(A(34), S("B.Paste"), A("user")),
@@ -918,6 +1085,23 @@ def emit_pcb():
                 L(A("useauxorigin"), A("no")),
                 L(A("psnegative"), A("no")),
                 L(A("psa4output"), A("no"))))
+
+    # Explicit (stackup) dielectric/copper block, inserted as the FIRST child
+    # of (setup ...) — KiCad's PCB parser token is `stackup` (no underscore).
+    # Documents the HDI controlled-impedance intent: 0.15 mm prepreg F.Cu->In1
+    # GND -> single-dielectric microvia for GND balls AND ~50ohm microstrip at
+    # ~0.30 mm track width (RF netclass). DRC does not enforce impedance; this
+    # is fab/impedance guidance. Omitted when STACK_UP is empty (the chip module
+    # clears it).
+    if STACK_UP:
+        su_children = [A("stackup")]
+        for name, typ, thk, mat in STACK_UP:
+            layer_items = [A("layer"), S(name), L(A("type"), S(typ)),
+                           L(A("thickness"), A(thk))]
+            if mat is not None:
+                layer_items.append(L(A("material"), S(mat)))
+            su_children.append(L(*layer_items))
+        setup.insert(1, L(*su_children))
 
     pcb = L(A("kicad_pcb"),
              L(A("version"), A(20240108)),
@@ -997,29 +1181,29 @@ def emit_pro():
     # footprint (QFN-32 0.5 mm pitch, USB-C, SSOP-28).  A larger per-class
     # clearance (e.g. 0.30 for Power) is therefore unsatisfiable: the QFN pad gap
     # is ~0.25 mm, so every Power/RF pad next to a Default pad inside the ADF4351
-    # or HMC441 flags a clearance violation that no placement can fix.  The
+    # or GVA-84+ flags a clearance violation that no placement can fix.  The
     # impedance intent for RF/USB/Power is instead carried by the per-class
     # track_width (0.30/0.20/0.50 mm) and is enforced during copper routing (one
     # GUI pcbnew session), not by a pad-clearance rule.  See HARDWARE_DESIGN.md
     # §10/§15.
     nc.append({"bus_width": 12, "clearance": 0.15, "diff_pair_gap": 0.25, "diff_pair_via_gap": 0.25,
-               "diff_pair_width": 0.2, "line_style": 0, "microvia_diameter": 0.3, "microvia_drill": 0.1,
+               "diff_pair_width": 0.2, "line_style": 0, "microvia_diameter": 0.2, "microvia_drill": 0.1,
                "name": "Default", "pcb_color": "rgba(0, 0, 0, 0.000)", "schematic_color": "rgba(0, 0, 0, 0.000)",
                "track_width": 0.2, "via_diameter": 0.6, "via_drill": 0.3, "wire_width": 6})
     nc.append({"bus_width": 12, "clearance": 0.15, "diff_pair_gap": 0.25, "diff_pair_via_gap": 0.25,
-               "diff_pair_width": 0.2, "line_style": 0, "microvia_diameter": 0.3, "microvia_drill": 0.1,
+               "diff_pair_width": 0.2, "line_style": 0, "microvia_diameter": 0.2, "microvia_drill": 0.1,
                "name": "RF", "pcb_color": "rgba(255, 0, 0, 0.000)", "schematic_color": "rgba(0, 0, 0, 0.000)",
                "track_width": 0.3, "via_diameter": 0.6, "via_drill": 0.3, "wire_width": 6})
     nc.append({"bus_width": 12, "clearance": 0.15, "diff_pair_gap": 0.25, "diff_pair_via_gap": 0.25,
-               "diff_pair_width": 0.2, "line_style": 0, "microvia_diameter": 0.3, "microvia_drill": 0.1,
+               "diff_pair_width": 0.2, "line_style": 0, "microvia_diameter": 0.2, "microvia_drill": 0.1,
                "name": "Power", "pcb_color": "rgba(0, 0, 255, 0.000)", "schematic_color": "rgba(0, 0, 0, 0.000)",
                "track_width": 0.5, "via_diameter": 0.6, "via_drill": 0.3, "wire_width": 6})
     nc.append({"bus_width": 12, "clearance": 0.15, "diff_pair_gap": 0.25, "diff_pair_via_gap": 0.25,
-               "diff_pair_width": 0.2, "line_style": 0, "microvia_diameter": 0.3, "microvia_drill": 0.1,
+               "diff_pair_width": 0.2, "line_style": 0, "microvia_diameter": 0.2, "microvia_drill": 0.1,
                "name": "USB", "pcb_color": "rgba(0, 255, 0, 0.000)", "schematic_color": "rgba(0, 0, 0, 0.000)",
                "track_width": 0.2, "via_diameter": 0.6, "via_drill": 0.3, "wire_width": 6})
     nc.append({"bus_width": 12, "clearance": 0.15, "diff_pair_gap": 0.25, "diff_pair_via_gap": 0.25,
-               "diff_pair_width": 0.2, "line_style": 0, "microvia_diameter": 0.3, "microvia_drill": 0.1,
+               "diff_pair_width": 0.2, "line_style": 0, "microvia_diameter": 0.2, "microvia_drill": 0.1,
                "name": "Analog", "pcb_color": "rgba(255, 255, 0, 0.000)", "schematic_color": "rgba(0, 0, 0, 0.000)",
                "track_width": 0.2, "via_diameter": 0.6, "via_drill": 0.3, "wire_width": 6})
     # netclass patterns: assign nets by prefix
@@ -1037,19 +1221,52 @@ def emit_pro():
 # --------------------------------------------------------------------------
 BOARD_W, BOARD_H = 130, 85
 
-# Extra inner copper layers to insert into the stackup (between In2.Cu and
-# B.Cu). Empty by default -> the MAIN control board stays 4-layer (its
-# verified first-pass routing + planes are untouched). The chip MODULE sets
-# this to [In3.Cu, In4.Cu] (signal) for a 6-layer stackup: 4 signal layers
-# (F.Cu/In3.Cu/In4.Cu/B.Cu) + 2 planes (In1.Cu GND, In2.Cu +3V3), so the
-# dense 132-net module autoroutes cleanly. Each entry: (index, name, type).
-EXTRA_INNER_LAYERS = []
+# Copper layer stack for the MAIN control board (6-layer HDI). Each entry:
+# (kicad_layer_id, name, type, user_label_or_None). Stackup:
+#   F.Cu  sig | In1.Cu GND | In2.Cu +3V3 | In3.Cu sig | In4.Cu sig | B.Cu sig
+# The two planes (In1 GND, In2 +3V3) are ADJACENT to F.Cu so the 117 FPGA power
+# balls tie to them with SINGLE-dielectric microvias / short blind vias that do
+# NOT reach In3.Cu/In4.Cu/B.Cu -- those inner signal layers stay clear for BGA
+# signal escapes. (A through-via on every power ball -- the original "HDI-lite"
+# plan -- blocked the inner layers solid at 0.5 mm pitch: 117 barrels overlap.)
+# The chip MODULE uses the SAME stackup (In2.Cu = +3V3), so its monkeypatch is
+# now a no-op identity but kept for explicitness.
+LAYER_STACK = [
+    (0,  "F.Cu",   "signal", None),
+    (1,  "In1.Cu", "signal", "GND"),
+    (2,  "In2.Cu", "power",  "PWR"),
+    (3,  "In3.Cu", "signal", None),
+    (4,  "In4.Cu", "signal", None),
+    (31, "B.Cu",   "signal", None),
+]
+
+# Explicit dielectric/copper (stack_up) block for the MAIN board: 6-layer 1.6mm
+# FR4 HDI. Thin 0.15 mm prepreg F.Cu->In1.Cu (GND) gives a single-dielectric
+# microvia for the 74 GND balls AND ~50ohm microstrip at ~0.30 mm track width
+# (RF netclass) over the GND plane. The 0.15 mm dielectric 2 (In1->In2) lets the
+# ~30 +3V3 balls use a 2-layer blind via F.Cu->In2 (anti-pad in the GND plane).
+# In3.Cu/In4.Cu/B.Cu are the pad-free inner signal escape layers. Each entry:
+# (layer_name, type, thickness_mm, material). Empty -> (stack_up) block omitted
+# (the chip module clears it).
+STACK_UP = [
+    ("F.Cu",         "copper",  0.035,  None),
+    ("dielectric 1", "prepreg", 0.15,   "FR4"),
+    ("In1.Cu",       "copper",  0.0175, None),
+    ("dielectric 2", "prepreg", 0.15,   "FR4"),
+    ("In2.Cu",       "copper",  0.0175, None),
+    ("dielectric 3", "core",    0.50,   "FR4"),
+    ("In3.Cu",       "copper",  0.0175, None),
+    ("dielectric 4", "prepreg", 0.26,   "FR4"),
+    ("In4.Cu",       "copper",  0.0175, None),
+    ("dielectric 5", "core",    0.40,   "FR4"),
+    ("B.Cu",         "copper",  0.035,  None),
+]
 
 
 def assign_pcb_positions():
     # Fixed IC/connector placements (mm) on a 130x85 board, spaced for DRC.
     # Layout zones:
-    #   top-left      power (barrel jack, fuse, 4x AMS1117, LED)
+    #   top-left      power (barrel jack, fuse, 3x AMS1117 + AP2127K + FB1 bead, LED)
     #   center        FPGA + TCXO + decoupling cap banks
     #   right         RF chain (ADF4351 -> HMC441 -> SMA) + loop-filter passives
     #   bottom-center USB (FT232 + USB-C edge mount)
@@ -1063,9 +1280,11 @@ def assign_pcb_positions():
     fixed = {
         # power (top-left)
         "J2": (10, 10, 180), "F1": (24, 10, 0), "R70": (20, 16, 0), "LED1": (26, 16, 0),
-        "REG1": (34, 14, 0), "REG2": (34, 26, 0), "REG3": (34, 38, 0), "REG4": (34, 50, 0),
+        "REG1": (34, 14, 0), "REG2": (34, 26, 0), "REG3": (34, 38, 0), "FB1": (34, 50, 0),
         # REG3 (AP2127K-1.0) decoupling, around (34,38), clear of FPGA keepout x<61.5
         "C42": (28, 36, 0), "C41": (40, 34, 0), "C43": (40, 42, 0), "C44": (28, 42, 0),
+        # FB1 (ferrite bead) +5V -> +5V_RF pi filter, around (34,50)
+        "C45": (28, 50, 0), "C46": (28, 56, 0), "C47": (40, 50, 0), "C48": (40, 56, 0),
         # FPGA (center)
         "U1": (70, 45, 0), "Y1": (70, 25, 0),
         # config flash + pull-ups + XADC VREFP decoupling (bottom-right, clear of the
@@ -1076,18 +1295,46 @@ def assign_pcb_positions():
         "J1": (76, 62, 0), "J10": (70, 80, 180), "R71": (70, 72, 0), "R72": (74, 72, 0),
         "J8": (82, 52, 0),
         # RF chain (right): U3 ADF4351 at (92,30) needs ~7x7mm clear zone
-        # x[88,96] y[26,34]; U5 HMC441 at (104,40) needs ~5x5 zone x[101,107] y[37,43].
-        "U3": (92, 30, 0), "U5": (104, 40, 0), "J3": (127, 40, 0),
+        # x[88,96] y[26,34]; U5 GVA-84+ (SOT-89-3, courtyard extends ~5.5 mm
+        # left of origin) at (106,40) -- 106 not 104 so its courtyard clears C34
+        # (right edge 100.0) on the left and C36 (left edge 106.9) on the right.
+        "U3": (92, 30, 0), "U5": (106, 40, 0), "J3": (127, 40, 0),
         "R67": (84, 26, 0), "C31": (84, 30, 0), "R68": (84, 34, 0),
         "C32": (100, 26, 0), "C33": (100, 30, 0), "R73": (100, 34, 0),
-        "C34": (100, 40, 0), "C35": (110, 34, 0), "R69": (110, 40, 0), "L2": (110, 46, 0),
+        "C34": (100, 40, 0), "C35": (110, 34, 0), "C36": (110, 40, 0), "L2": (110, 46, 0),
         # chip-module B2B connector J11 (Samtec LSHM-130, ~17x7.6 mm) lower-left,
-        # below the REG3/REG4 + C41-C44 cluster (y 34-53) and clear of J7 (10,40);
+        # below the REG3/FB1 + C41-C48 cluster (y 34-58) and clear of J7 (10,40);
         # the module mates along this edge.  Earlier (30,45) overlapped the
         # REG/C-dec cluster courtyards and shorted emitter_cols pads into the
         # +1V0/+1V8/GND decoupling pads that sat under it.
         "J11": (24, 64, 0),
         "J7": (10, 40, 0), "J9": (10, 26, 0),
+        # ---- production-hardening pass 2026-09 (see add() block + §16) ----
+        # USB VBUS Schottky + bulk (near J10, left of the USB-C body x[65,75])
+        "D_USB": (62, 70, 0), "C84": (58, 66, 0),
+        # USB DP/DM series damping (right of the FT232, below J8)
+        "R78": (82, 60, 0), "R79": (86, 60, 0),
+        # AMS1117 stability bulk + input bulk (clear of the SOT-223 courtyards
+        # x[29.5,38.5]: 22uF output caps at x42, input bulk at x28)
+        "C49": (40, 20, 0), "C50": (42, 28, 0), "C51": (28, 20, 0),
+        # FPGA per-rail 4.7uF bulk (left of the BGA keepout x61.5, y in [40,52])
+        "C52": (58, 40, 0), "C53": (58, 46, 0), "C54": (58, 52, 0),
+        # FT232 decoupling (column x68: clear of J1 courtyard x[70,82] and D_USB x[58,67])
+        "C55": (68, 60, 0), "C56": (68, 64, 0), "C57": (68, 56, 0),
+        # TCXO + W25Q128 Vdd/VCC decoupling
+        "C58": (76, 22, 0), "C59": (90, 62, 0),
+        # ADF4351 per-supply 100nF (around U3 keepout x[88,96] y[26,34]: above & below)
+        "C60": (84, 22, 0), "C61": (88, 22, 0), "C62": (96, 22, 0), "C63": (100, 22, 0),
+        "C64": (88, 38, 0), "C65": (96, 38, 0),
+        # JTAG pulls (right of J9 header x[5,15])
+        "R80": (16, 22, 0), "R81": (16, 26, 0), "R82": (16, 30, 0),
+        # USB DP/DM series damping (below J1, above J10 courtyard y[73,80])
+        "R78": (78, 72, 0), "R79": (82, 72, 0),
+        # Reset pull-down + debounce cap (J7 SW_PUSH pads reach x16.5, courtyard x18 -> x24)
+        "R83": (24, 40, 0), "C68": (24, 44, 0),
+        # TIA_OUT -> XADC divider (near J11 at 24,64; TIA_OUT enters on J11 pin47).
+        # y60 sits above J11's courtyard y[62,66] and clear of its NPTH hole (32.5,63.15).
+        "R84": (34, 60, 0), "R85": (38, 60, 0), "C66": (42, 60, 0),
     }
     for c in COMPONENTS:
         if c["ref"] in fixed:

@@ -190,24 +190,27 @@ def chip_footprint():
     microvias needed).  The 8x8 area array's 36 interior pads could not escape
     between 0.5 mm-pitch pads with a 0.45 mm via (0.02 mm clearance, impossible).
 
-    80 pads, 0.5 mm pitch, 21 pads/side with the 4 corners counted once (4x21
-    - 4 = 80), spanning +/-5 mm.  Pad names match the symbol pin numbers so
-    fp_net_pads can net every pad.  Net-to-edge assignment puts DET0..31 on the
-    die's left/top half (-> U1 MUX on the left) and DET32..63 on the right half
-    (-> U2 MUX on the right), with ER/EC on the bottom edge (-> emitter driver
-    on the right) -- short, clean routes."""
+    80 pads, 1.0 mm pitch, 21 pads/side with the 4 corners counted once (4x21
+    - 4 = 80), spanning +/-10 mm (20x20 mm die, user-decided 2026-09).  Pad names
+    match the symbol pin numbers so fp_net_pads can net every pad.  Net-to-edge
+    assignment puts DET0..31 on the die's left/top half (-> U1 MUX on the left)
+    and DET32..63 on the right half (-> U2 MUX on the right), with ER/EC on the
+    bottom edge (-> emitter driver on the right) -- short, clean routes.  The
+    1.0 mm pitch (vs the earlier 0.5 mm) is a comfortable wire-bond pitch and
+    doubles the die area (4x) for the 8x8 electrode array -- user chose 20 mm
+    over 10 mm (see HARDWARE_DESIGN.md §chip)."""
     A, S, L = g.A, g.S, g.L
     u = g.u
 
     def pad(name, x, y):
         return L(A("pad"), S(name), A("smd"), A("rect"),
                  L(A("at"), A(round(x, 3)), A(round(y, 3))),
-                 L(A("size"), A(0.15), A(0.15)),
+                 L(A("size"), A(0.30), A(0.30)),
                  L(A("layers"), S("F.Cu"), S("F.Paste"), S("F.Mask")))
 
     pads = []
-    pitch = 0.5
-    ext = 5.0  # perimeter ring at +/-5 mm (21 pads/side, corners shared)
+    pitch = 1.0
+    ext = 10.0  # perimeter ring at +/-10 mm (20x20 mm die, 21 pads/side)
     # Clockwise from the top-left corner.  Each side: 21 pads at -5..+5; sides
     # 2/3 skip their first (already-placed corner) pad; side 4 skips both ends.
     # Top edge (21): DET19..DET39  (DET19-31 -> U1 left, DET32-39 -> U2 right)
@@ -230,19 +233,19 @@ def chip_footprint():
             L(A("version"), A(20240108)),
             L(A("generator"), S("gen_chip_module")),
             L(A("generator_version"), S("8.0")),
-            L(A("descr"), S("QSSC quantum die: 64 graphene detector + 8x8 CQD emitter; perimeter wire-bond pads (0.5 mm pitch)")),
+            L(A("descr"), S("QSSC quantum die: 64 graphene detector + 8x8 CQD emitter; 20x20 mm, perimeter wire-bond pads (1.0 mm pitch)")),
             L(A("attr"), A("smd")),
             L(A("property"), S("Reference"), S("U"),
-              L(A("at"), A(0), A(-5.8), A(0)),
-              L(A("effects"), L(A("font"), L(A("size"), A(0.6), A(0.6))))),
+              L(A("at"), A(0), A(-11), A(0)),
+              L(A("effects"), L(A("font"), L(A("size"), A(0.8), A(0.8))))),
             L(A("property"), S("Value"), S("QSSC_Chip"),
-              L(A("at"), A(0), A(5.8), A(0)),
-              L(A("effects"), L(A("font"), L(A("size"), A(0.6), A(0.6))))),
-            # die outline on F.Fab + courtyard (encompass the +/-5 mm pad ring)
-            L(A("fp_rect"), L(A("start"), A(-5.2), A(-5.2)), L(A("end"), A(5.2), A(5.2)),
+              L(A("at"), A(0), A(11), A(0)),
+              L(A("effects"), L(A("font"), L(A("size"), A(0.8), A(0.8))))),
+            # die outline on F.Fab + courtyard (encompass the +/-10 mm pad ring)
+            L(A("fp_rect"), L(A("start"), A(-10.2), A(-10.2)), L(A("end"), A(10.2), A(10.2)),
               L(A("stroke"), L(A("width"), A(0.05)), L(A("type"), A("solid"))),
               L(A("fill"), A("none")), L(A("layer"), S("F.Fab")), L(A("uuid"), S(u()))),
-            L(A("fp_rect"), L(A("start"), A(-5.5), A(-5.5)), L(A("end"), A(5.5), A(5.5)),
+            L(A("fp_rect"), L(A("start"), A(-10.5), A(-10.5)), L(A("end"), A(10.5), A(10.5)),
               L(A("stroke"), L(A("width"), A(0.05)), L(A("type"), A("solid"))),
               L(A("fill"), A("none")), L(A("layer"), S("F.CrtYd")), L(A("uuid"), S(u()))),
             *pads)
@@ -385,8 +388,8 @@ def module_authored_symbols():
     syms.append(g.replicated_symbol("qssc", "Conn_02x30_Odd_Even", "J",
                                     g.std_pins("Connector_Generic", "Conn_02x30_Odd_Even"),
                                     value="Samtec LSHM-130"))
-    # passives R, C
-    for nm, refp in [("R", "R"), ("C", "C")]:
+    # passives R, C, L (L for the TIA +5V isolation ferrite FB1)
+    for nm, refp in [("R", "R"), ("C", "C"), ("L", "L")]:
         p1 = dict(number="1", name="~", etype="passive", x=0, y=3.81, rot=270, length=1.27)
         p2 = dict(number="2", name="~", etype="passive", x=0, y=-3.81, rot=90, length=1.27)
         syms.append(g.custom_symbol_def("qssc", nm, refp, [p1, p2],
@@ -476,12 +479,39 @@ def build_module_components():
           (220, 40), 0, {"2": "det_mux_sel5", "4": "MUX_EN2",
                          "5": "+3V3", "3": "GND"}, (56, 10, 0))
 
-    # U3 -- ADA4530-1 TIA.  +IN=TIA_REF, -IN=TIA_IN, OUT=TIA_OUT, V+=+3V3, V-=GND.
+    # U3 -- ADA4530-1 electrometer TIA.  SOIC-8 pinout (per ADI datasheet /
+    # KiCad Amplifier_Operational::ADA4530-1): 1=+IN, 2=IN_GUARD, 3=IC(NC),
+    # 4=V-, 5=V+, 6=OUT, 7=IN_GUARD, 8=-IN.
+    #   +IN (1) = TIA_REF reference; -IN (8) = TIA_IN summing node; OUT (6) =
+    #   TIA_OUT.  V+ (5) = +5V -- CRITICAL: the ADA4530-1 minimum supply is 5 V
+    #   (single 5-16 V or dual +/-2.5-8 V); the prior +3V3 was below the min and
+    #   out of spec (the electrometer would not bias).  V- (4) = GND.
+    #   Guard pins 2 & 7 surround the fA-leakage -IN node; they must be driven at
+    #   the SAME potential as -IN by a LOW-impedance source.  In a TIA, -IN sits
+    #   at virtual ground = +IN = TIA_REF, so tie both guards to TIA_REF (not to
+    #   the sensitive -IN node itself, not floating).  Pin 3 (IC) is an internal
+    #   connection -- leave NC.
     _addm("U3", "qssc:ADA4530-1", "ADA4530-1",
           "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm",
           (170, 90), 0,
-          {"1": "TIA_REF", "8": "TIA_IN", "6": "TIA_OUT", "5": "+3V3", "4": "GND"},
+          {"1": "TIA_REF", "8": "TIA_IN", "6": "TIA_OUT", "5": "+5V_TIA",
+           "4": "GND", "2": "TIA_REF", "7": "TIA_REF"},
           (35, 30, 0))
+
+    # TIA_REF mid-supply reference generator.  +IN (and the guard pins) need a
+    # DEFINED, low-noise potential -- the prior net was floating on both boards
+    # (J1 pin 49 crosses it but nothing drove it), so the TIA had no bias point.
+    # A 10k//10k divider from +5V gives 2.5 V (single-supply mid-rail, lets
+    # TIA_OUT swing bipolar around 2.5 V, within the 0-3.3 V XADC range); the
+    # ADA4530-1 +IN bias is fA-level so the 5k divider impedance costs no DC
+    # error, and C11 bypasses AC.  Kept local to U3 (electrometer reference must
+    # stay on the module, not cross the mezzanine).
+    _addm("R10", "qssc:R", "10k", "Resistor_SMD:R_0603_1608Metric",
+          (158, 88), 0, {"1": "+5V_TIA", "2": "TIA_REF"}, (28, 30, 0))
+    _addm("R11", "qssc:R", "10k", "Resistor_SMD:R_0603_1608Metric",
+          (158, 96), 0, {"1": "TIA_REF", "2": "GND"}, (28, 34, 0))
+    _addm("C11", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
+          (164, 90), 0, {"1": "TIA_REF", "2": "GND"}, (25, 30, 0))
 
     # TIA feedback: Rf 1M + Cf 1.5p across TIA_IN -- TIA_OUT
     _addm("Rf", "qssc:R", "1M", "Resistor_SMD:R_0603_1608Metric",
@@ -489,9 +519,10 @@ def build_module_components():
     _addm("Cf", "qssc:C", "1.5p", "Capacitor_SMD:C_0603_1608Metric",
           (182, 100), 0, {"1": "TIA_IN", "2": "TIA_OUT"}, (31, 36, 0))
 
-    # QSSC die -- 80 pads, centred above the TIA
+    # QSSC die -- 80 pads, 20x20 mm (±10 mm).  Centred at pcb (35,15) so the die
+    # (y[5,25]) sits above the TIA (y~30) and below the top edge (5 mm margin).
     _addm("U5", "qssc:QSSC_Chip", "QSSC_Chip", "qssc:QSSC_Chip",
-          (170, 120), 0, chip_net_map(), (35, 18, 0))
+          (170, 120), 0, chip_net_map(), (35, 15, 0))
 
     # Thermistor divider: +3V3 -> R_THM -> THRM -> NTC -> GND (sense line to J1)
     _addm("R_THM", "qssc:R", "10k", "Resistor_SMD:R_0603_1608Metric",
@@ -507,7 +538,7 @@ def build_module_components():
     _addm("C2", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
           (220, 70), 0, {"1": "+3V3", "2": "GND"}, (56, 27, 0))   # U2
     _addm("C3", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
-          (170, 80), 0, {"1": "+3V3", "2": "GND"}, (35, 36, 0))    # U3
+          (170, 80), 0, {"1": "+5V", "2": "GND"}, (35, 36, 0))    # U3 V+ decoupling (+5V)
     _addm("C4", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
           (200, 40), 0, {"1": "+3V3", "2": "GND"}, (52, 10, 0))    # U4
     _addm("C5", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
@@ -593,6 +624,48 @@ def build_module_components():
     _addm("#FLG4", "power:PWR_FLAG", "PWR_FLAG", _TP, (100, 60), 0,
           {"1": "GND"}, (6, 19, 0))
 
+    # ---- production-hardening pass 2026-09 (see HARDWARE_DESIGN.md §16) ------
+    # TIA +5V isolation: the emitter driver (8x MOSFET switching) injects noise
+    # into +5V; the ADA4530-1 is a fA electrometer.  FB1 (ferrite) + C85/C86 give
+    # the TIA and the R10 ref divider a clean local +5V_TIA branch.  Placed in the
+    # free pocket x[44,50] y[30,34] (between U3's courtyard edge x39 and U2's x52),
+    # clear of the chip courtyard (x[24.5,45.5] y[4.5,25.5]) and J1 (x44 y41+).
+    _addm("FB1", "qssc:L", "600Ω@100MHz", "Inductor_SMD:L_0603_1608Metric",
+          (160, 84), 0, {"1": "+5V", "2": "+5V_TIA"}, (44, 30, 0))
+    _addm("C85", "qssc:C", "10uF", "Capacitor_SMD:C_0805_2012Metric",
+          (166, 84), 0, {"1": "+5V_TIA", "2": "GND"}, (50, 30, 0))
+    _addm("C86", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
+          (172, 84), 0, {"1": "+5V_TIA", "2": "GND"}, (44, 34, 0))
+    # PWR_FLAG on +5V_TIA: FB1 is a passive ferrite so ERC does not propagate the
+    # +5V driver through it -> the isolated rail needs its own "driven" flag.
+    _addm("#FLG3", "power:PWR_FLAG", "PWR_FLAG", _TP, (160, 80), 0,
+          {"1": "+5V_TIA"}, (50, 34, 0))
+    # TIA_REF LF bulk (C11 100nF is the HF bypass; 1uF lowers the ref noise floor
+    # for the fA-leakage measurement).
+    _addm("C87", "qssc:C", "1uF", "Capacitor_SMD:C_0603_1608Metric",
+          (150, 92), 0, {"1": "TIA_REF", "2": "GND"}, (22, 34, 0))
+    # Thermistor sense filter (THRM -> GND).
+    _addm("C88", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
+          (126, 44), 0, {"1": "THRM", "2": "GND"}, (12, 40, 0))
+    # MOSFET gate pull resistors -- define the OFF state during power-up, before
+    # the 74HCT240 outputs are alive (otherwise a floating gate can spuriously
+    # fire an emitter pixel).  P-MOS row gates pull UP to +5V = OFF; N-MOS col
+    # gates pull DOWN to GND = OFF.  100k is easily overridden by the 74HCT240
+    # active drive once it powers up.  Placed in the bottom strip y[49,54] as two
+    # rows (row-pulls y50, col-pulls y53) at 3.2 mm x-pitch: clear of the MOSFET
+    # grid (courtyard reaches y~47.5), J1 (x44 y41+), and each other (0603 pad
+    # span 2.35 mm < 3.2 mm pitch -> no pad/courtyard overlap between columns).
+    for i in range(8):
+        _addm(f"R{88+i}", "qssc:R", "100k", "Resistor_SMD:R_0603_1608Metric",
+              (300, 160 + i * 8), 0,
+              {"1": f"row_gate{i}", "2": "+5V"},
+              (48 + i * 3.2, 50, 0))    # P-MOS gate pull-up
+    for i in range(8):
+        _addm(f"R{96+i}", "qssc:R", "100k", "Resistor_SMD:R_0603_1608Metric",
+              (320, 160 + i * 8), 0,
+              {"1": f"col_gate{i}", "2": "GND"},
+              (48 + i * 3.2, 53, 0))    # N-MOS gate pull-down
+
 
 # --------------------------------------------------------------------------
 # Emit
@@ -604,13 +677,23 @@ def main():
     g.authored_symbols = module_authored_symbols
     g.build_pincoords = module_build_pincoords
     g.load_footprint_mod = _chip_fp_load
-    g.BOARD_W, g.BOARD_H = 85, 50  # widened from 70 to fit the emitter driver
+    g.BOARD_W, g.BOARD_H = 85, 55  # 20x20 mm die + emitter driver + gate pulls
     # 6-layer stackup: 4 signal layers (F.Cu/In3.Cu/In4.Cu/B.Cu) + 2 planes
     # (In1.Cu GND, In2.Cu +3V3). The dense 132-net module (64-line die fan-out
     # + 8x8 emitter crossbar + MUX selects + TIA) cannot autoroute cleanly on
     # 2 signal layers; the two extra inner signal layers let Freerouting route
     # it headlessly. ~$2-5/board extra at JLCPCB -- the real fix, user-approved.
-    g.EXTRA_INNER_LAYERS = [(3, "In3.Cu", "signal"), (4, "In4.Cu", "signal")]
+    # The module's plane is In2.Cu (+3V3); In3/In4 are the pad-free signal
+    # layers. Overrides the main board's LAYER_STACK (In2 sig / In4 +3V3).
+    g.LAYER_STACK = [
+        (0,  "F.Cu",   "signal", None),
+        (1,  "In1.Cu", "signal", "GND"),
+        (2,  "In2.Cu", "power",  "PWR"),
+        (3,  "In3.Cu", "signal", None),
+        (4,  "In4.Cu", "signal", None),
+        (31, "B.Cu",   "signal", None),
+    ]
+    g.STACK_UP = []  # no controlled-impedance intent on the analog module
 
     build_module_components()
     module_build_pincoords()

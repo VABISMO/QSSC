@@ -6,8 +6,8 @@ FPGA-based controller that drives an **8×8 on-chip CQD ASE/LED emitter array**
 in a CVD-diamond host (NV⁻ centres, the canonical compute chip), reads the array
 **on-chip** with a **graphene/MoS₂ photodetector array** (one electrode per site)
 through a TIA + analog MUX into the Artix-7 **XADC** with **1 kHz lock-in**
-demodulation, and synthesizes microwave pulses with an ADF4351 PLL + HMC441
-amplifier to drive a loop/CPW antenna for ODMR spin control (~2.87 GHz NV⁻,
+demodulation, and synthesizes microwave pulses with an ADF4351 PLL + GVA-84+
+MMIC amplifier to drive a loop/CPW antenna for ODMR spin control (~2.87 GHz NV⁻,
 ~3.46 GHz hBN V_B⁻). A host PC communicates with the board over USB-UART (FT232).
 The master clock is a 100 MHz TCXO. Power is derived from a 5 V input through
 3.3 V / 1.8 V / 1.0 V LDOs.
@@ -31,8 +31,8 @@ Xilinx constraints are [`../fpga/constraints.xdc`](../fpga/constraints.xdc).
 
 ## 1. System Overview
 
-The design is **two PCBs**: a 4-layer **main control board** and a 4-layer
-**swappable chip module** (§15A) that mates to it through one board-to-board
+The design is **two PCBs**: a **6-layer main control board** and a **6-layer
+swappable chip module** (§15A) that mates to it through one board-to-board
 connector (**J11, Samtec LSHM-130**, 2×30, 0.5 mm). The main board carries the
 FPGA, the RF chain, power, USB and config flash; the module carries the quantum
 chip and its analog front-end (64:1 MUX + TIA + the CQD emitter driver). Only
@@ -44,11 +44,14 @@ power rails cross J11 — the 64 detector electrodes stay on the module.
 - **U1 — Xilinx Artix-7 XC7A35T-1CPG236C** FPGA (system controller; includes the
   hard **XADC** block used for detector readout).
 - **U3 — ADF4351BCPZ** wideband PLL synthesizer (microwave generation).
-- **U5 — HMC441LP3E** RF amplifier (RF power boost).
+- **U5 — GVA-84+** RF MMIC amplifier (RF power boost; replaces the HMC441LP3E,
+  which was the wrong band and had an unnetted custom symbol — §15).
 - **U8 — W25Q128JVSIQ** config flash (Artix-7 QSPI x4 boot).
 - **Y1 — 100 MHz TCXO** master clock.
-- **REG1/REG2/REG3/REG4** — 3.3 V / 1.8 V / 1.0 V / 5.0 V LDO regulators (REG3
-  is an AP2127K-1.0; the AMS1117 family has no 1.0 V option).
+- **REG1/REG2/REG3 + FB1** — 3.3 V / 1.8 V / 1.0 V LDO regulators (REG3 is an
+  AP2127K-1.0; the AMS1117 family has no 1.0 V option) + **FB1** ferrite-bead
+  π-filter from +5V → +5V_RF for the RF amp (replaces the old REG4 AMS1117-5.0
+  that sat in dropout — the +5V rail is already regulated, §15).
 - **J1/J10** USB-UART (FT232RL + USB-C), **J2** 5 V barrel power, **J3** SMA RF
   output, **J7** reset button, **J8** MW-gate header, **J9** 2×5 JTAG header,
   **J11** board-to-board connector to the chip module.
@@ -77,21 +80,21 @@ register sequencing over SPI (`adf4351_ctrl.v`, `spi_master.v`).
 
 ```mermaid
 flowchart TD
-    subgraph Main["Main control board (4-layer)"]
+    subgraph Main["Main control board (6-layer)"]
         J2["J2 Barrel 5V / J10 USB-C VBUS"] --> F1["F1 PTC 2A"] --> REG1["REG1 LDO 3.3V"]
         REG1 --> REG2["REG2 LDO 1.8V"]
         REG1 --> REG3["REG3 AP2127K-1.0V"]
-        REG1 --> REG4["REG4 LDO 5.0V (RF amp)"]
+        J2 -->|"+5V"| FB1["FB1 ferrite + C-pi filter"]
         Y1["Y1 100MHz TCXO"] --> U1["U1 Artix-7 FPGA (+XADC)"]
         U1 -->|"UART 115200"| J1["J1 FT232RL + J10 USB-C"]
         U1 -->|"SPI QSPI x4 boot"| W25["U8 W25Q128 config flash"]
         U1 -->|"SPI LE/CLK/DATA + refclk 25MHz"| U3["U3 ADF4351 PLL"]
         U3 -->|"loop filter R67/R68/C31-C33"| U3
-        U3 -->|"RF_OUT 0dBm"| U5["U5 HMC441 + R69/L2"]
-        REG4 --> U5
+        U3 -->|"RF_OUT 0dBm"| U5["U5 GVA-84+ MMIC + L2 choke"]
+        FB1 -->|"+5V_RF"| U5
         U5 -->|"50Ω"| J3["J3 SMA"]
     end
-    subgraph MOD["Swappable chip module (4-layer, mates at J11 — §15A)"]
+    subgraph MOD["Swappable chip module (6-layer, mates at J11 — §15A)"]
         J11["J11 Samtec LSHM-130"] -->|"det_mux_sel[5:0]"| MUX["U1/U2 64:1 MUX ADG732 + U4 inverter"]
         MUX -->|"selects 1 of 64"| TIA["U3 TIA ADA4530-1"]
         TIA -->|"TIA_OUT analog"| J11
@@ -171,7 +174,7 @@ flowchart TB
   MOD["**Swappable chip module** — U1/U2 64:1 MUX + U3 TIA + U5 chip + emitter driver + TH1 NTC"]:::mod
   J11["J11 board-to-board (Samtec LSHM-130 2x30)"]:::pcb
   TEC["Peltier (TEC1-12706) + liquid cold plate"]:::pcb
-  PCB["**Main control PCB** — Artix-7 + ADF4351 + HMC441 + FT232 + LDOs + W25Q128"]:::pcb
+  PCB["**Main control PCB** — Artix-7 + ADF4351 + GVA-84+ + FT232 + LDOs + W25Q128"]:::pcb
   USB["USB-UART to host PC (FT232RL + USB-C, 115200)"]:::pcb
   SMA["J3 SMA → MW antenna feed"]:::pcb
 
@@ -227,9 +230,9 @@ connection, and the 64 detector electrodes never leave the module.
 | 24 | ~~Detector front-end connector~~ | ~~J5~~   | ~~Pin header (MUX sel + TIA out)~~ | 0 | **Superseded by J11** — the 64 detector electrodes + TIA + MUX live on the module; only det_mux_sel/TIA_OUT/DET_BIAS cross J11 | —                             | Removed from the board |
 | 25 | Host substrate (canonical)       | —        | CVD diamond plate (NV⁻)        | 1   | Canonical compute host: 12C-enriched CVD diamond, NV centres   | Optical plate (non-electronic)| T₂ ≈ 1.8 ms @ 300 K — "compute at 300 K: YES" |
 | 25a| Host substrate (sensor variants) | —        | hBN (V_B⁻) / SiC (V_Si)        | —   | Sensor variants; same board, MW freq + substrate change        | Optical plate                 | hBN T₂ ~2 µs (sensor, not compute) |
-| 26 | RF amplifier                     | U5       | HMC441LP3E                     | 1   | RF power amplification to ~10–20 dBm                           | QFN-16 3×3                    | 5 V (REG4); 0.1–13 GHz |
-| 27 | 5 V LDO (RF amp + emitter drv)   | REG4     | AMS1117-5.0                    | 1   | RF amp supply + on-module CQD emitter driver (+5 V cross-module) | SOT-223                       | ≥500 mA; the discrete MOSFET emitter crossbar runs directly on +5 V (no boost rail) |
-| 28 | RF amp bias resistor             | R69      | 10 Ω 1/4 W                     | 1   | HMC441 bias                                                    | 0805                          | See datasheet |
+| 26 | RF amplifier                     | U5       | GVA-84+ (Mini-Circuits)        | 1   | RF power amplification, DC-7 GHz, +18.4 dB @2 GHz, self-biased +5V | SOT-89-3                      | +5V_RF via L2 100nH choke; replaces HMC441LP3E (wrong band 6.5-13.5 GHz + unnetted symbol) |
+| 27 | +5V→+5V_RF filter                | FB1      | Ferrite bead 600Ω@100MHz       | 1   | π-filter (FB1 + C45/C46 + C47/C48) from +5V to +5V_RF for the RF amp | 0603                          | Replaces old REG4 AMS1117-5.0 (sat in dropout; +5V already regulated) |
+| 28 | ~~RF amp bias resistor~~         | ~~R69~~  | ~~10 Ω 1/4 W~~                 | 0   | **Removed** — GVA-84+ is self-biased (no VGG); was the HMC441 VGG resistor | —                             | Removed from the board |
 | 29 | RF amp choke inductor            | L2       | 100 nH ±10%                    | 1   | DC bias choke on RF output                                     | 0603                          | Bias decoupling |
 | 30 | Microwave antenna                | A1       | Loop / CPW resonator (custom)  | 1   | MW delivery to the host                                        | Custom SMD/wire               | 2–3 GHz, 50 Ω |
 | 31 | Long-pass optical filter         | F2       | 650 nm long-pass               | 1   | Block green CQD pump, pass NV PL (637–800 nm)                  | On-chip / holder              | Sits between host PL and detector |
@@ -256,11 +259,14 @@ connection, and the 64 detector electrodes never leave the module.
 ## 3. Power Sequencing (5 V → 3.3 / 1.8 / 1.0 V)
 
 Input is **5 V** from J2 (or USB-C VBUS), protected by F1 (2 A PTC). The rails
-are generated by three LDOs (plus REG4 for the RF amp): REG1/REG2/REG4 are
-AMS1117 (SOT-223); REG3 is an AP2127K-1.0 (SOT-23-5) because the AMS1117 family
-has no 1.0 V option. The CQD emitter driver runs directly on the **+5 V** rail
-(REG4) — the discrete MOSFET crossbar on the module needs no boost, so there is
-no +7V_EMIT rail (the earlier TPS61040 boost + TLC5955 plan was dropped as
+are generated by three LDOs: REG1/REG2 are AMS1117 (SOT-223); REG3 is an
+AP2127K-1.0 (SOT-23-5) because the AMS1117 family has no 1.0 V option. The RF
+amp runs on **+5V_RF**, which is the +5V rail filtered through **FB1** (ferrite
+bead + C45/C46/C47/C48 π-filter) — not a separate regulator (the old REG4
+AMS1117-5.0 fed from the +5V rail it was meant to regulate, so it sat in dropout;
+replaced 2026-09). The CQD emitter driver runs directly on the **+5 V** rail —
+the discrete MOSFET crossbar on the module needs no boost, so there is no
++7V_EMIT rail (the earlier TPS61040 boost + TLC5955 plan was dropped as
 unnecessary complexity, §7/§15A).
 
 | Rail  | Reg  | Tolerance | Use                                  | Notes |
@@ -268,21 +274,22 @@ unnecessary complexity, §7/§15A).
 | 3.3 V | REG1 | ±3%       | FPGA VCCO, ADF4351, FT232, detector front-end (MUX/TIA) | Main I/O rail, ≥1 A |
 | 1.8 V | REG2 | ±3%       | FPGA VCCAUX / VCCAUX_IO              | ≥1 A |
 | 1.0 V | REG3 | ±3%       | FPGA VCCINT (core)                   | AP2127K-1.0 600 mA; XC7A35T VCCINT peak well under that (synth uses ~10% of LUTs) |
-| 5.0 V | REG4 | ±3%       | HMC441 RF amplifier + on-module CQD emitter driver (crossbar) | ≥500 mA; emitter driver runs directly on +5 V (one pixel at a time → ~10 mA peak) |
+| 5.0 V | (barrel) | ±—    | on-module CQD emitter driver (crossbar) + FB1 input | ≥500 mA; emitter driver runs directly on +5 V (one pixel at a time → ~10 mA peak) |
+| +5V_RF | FB1 (filter) | — | GVA-84+ RF amplifier | π-filtered from +5V; not a regulator |
 
 **Sequencing.** Artix-7 requires VCCINT (1.0 V) and VCCAUX (1.8 V) to be present
 before VCCO (3.3 V) is applied, or at worst to ramp together. The recommended
 sequence on this board is:
 
 1. 5 V applied → F1 → REG3 (1.0 V) and REG2 (1.8 V) ramp first. Add a small load
-   switch or RC delay on REG1 enable if strict ordering is required; all four
+   switch or RC delay on REG1 enable if strict ordering is required; all three
    regulators here are fixed-output always-on (the AMS1117s have no EN pin;
    the AP2127K-1.0 has EN but it is tied to IN), so the rails ramp together,
    which is acceptable for Artix-7 as long as VCCINT/VCCAUX are not later than
    VCCO. For production, use an enable-able LDO for REG1 gated by a power-good
    of REG3+REG2 (and gate the AP2127K EN pin the same way).
 2. 3.3 V (REG1) ramps → peripheral ICs (ADF4351, FT232, detector MUX/TIA) power up.
-3. 5.0 V (REG4) ramps → HMC441 bias and the on-module CQD emitter crossbar settle.
+3. +5V_RF (FB1 filter) settles → GVA-84+ bias and the on-module CQD emitter crossbar settle.
 
 **Decoupling.** Each VCC/GND pin pair of every IC gets a 100 nF X7R (C1–C20)
 within 3 mm. Bulk 10 µF (C21–C30) sits at each regulator output and at the FPGA
@@ -292,7 +299,7 @@ supply (VCCADC, 1.8 V) and reference (VREFP/VREFN) get dedicated 100 nF NP0 + 10
 decoupling, kept away from digital switching.
 
 **Power estimation (rough).** FPGA ~0.3–0.5 W (1.0 V × ~0.3 A), 1.8 V aux ~30 mA,
-3.3 V I/O ~120 mA + detector front-end ~20 mA, ADF4351 ~30 mA, HMC441 ~70 mA at
+3.3 V I/O ~120 mA + detector front-end ~20 mA, ADF4351 ~30 mA, GVA-84+ ~65 mA at
 5 V, CQD emitter driver ~10 mA peak (firmware addresses one pixel at a time;
 the discrete MOSFET crossbar runs on +5 V, ~9 mA at 2 V headroom across the
 220 Ω set resistor). Total budget well within a 5 V/3 A source.
@@ -355,11 +362,13 @@ the `VCOF`/`VCOV` tuning input; keep these traces as short as possible and
 surround them with ground.
 
 ### RF path
-`ADF4351 RF_OUTA` (~0 dBm) → DC-block capacitor → **HMC441** input →
-**HMC441 output** → bias-tee / choke **L2 (100 nH)** + **R69 (10 Ω)** for DC
-bias from REG4 (5 V) → AC-couple → **J3 SMA edge-mount** → 50 Ω coax →
-**A1 loop/CPW antenna** near the host substrate. Expected output ≈ +10 to +20
-dBm depending on HMC441 gain (~14 dB typical) and band.
+`ADF4351 RF_OUTA` (~0 dBm) → **C34** DC-block → **GVA-84+** RFIN (pin 1) →
+GVA-84+ RFOUT (pin 3) → **L2 (100 nH)** RF choke from +5V_RF for DC self-bias
+→ **C35** AC-couple → **J3 SMA edge-mount** → 50 Ω coax →
+**A1 loop/CPW antenna** near the host substrate. Expected output ≈ +18 to +20
+dBm depending on GVA-84+ gain (+18.4 dB @2 GHz) and band. +5V_RF comes from
+the FB1 π-filter (no VGG resistor — the GVA-84+ is self-biased; the old HMC441
+R69 was removed with the part swap).
 
 ### Antenna / CPW for ~2.87 / 3.46 GHz
 For room-temperature ODMR of NV⁻ or hBN V_B⁻, a small **loop antenna** (1–2 turns,
@@ -413,7 +422,7 @@ old VCSEL math ((3.3−2.0)/5 mA ≈ 270 Ω does not apply here).
 
 Because only one pixel is addressed at a time, the peak emitter-driver supply
 current is one pixel's current (~9 mA) — trivial for the +5 V rail, so the
-crossbar runs directly on REG4's +5 V with no separate boost rail. The emitter
+crossbar runs directly on the +5 V rail with no separate boost rail. The emitter
 driver lives on the chip module; the 8+8 enables (`emitter_rows`/`emitter_cols`,
 3.3 V) plus +5 V and ground cross the J11 board-to-board connector from the main
 board, and the driver's 0/5 V outputs switch the chip pads locally on the module
@@ -480,14 +489,15 @@ electrical; there is no camera, no lens, and no imaging.
   trace) placed over the sample is the simplest broadband source; for higher
   field a λ/4 CPW resonator at 2.87 GHz (λ ≈ 105 mm in air, ≈ 50 mm in FR4) can be
   etched and shorted at the end with the loop. The 50 Ω CPW feed geometry on
-  a 1.6 mm FR4 4-layer board (signal/gap ≈ 0.30/0.50 mm) is the routing
-  reference; on a Rogers substrate the dimensions shrink.
+  a 1.6 mm FR4 6-layer board (signal/gap ≈ 0.30/0.50 mm over the 0.15 mm
+  F.Cu→In1.Cu dielectric) is the routing reference; on a Rogers substrate the
+  dimensions shrink.
 
 ---
 
 ## 10. Controlled-Impedance PCB Routing Rules
 
-- **50 Ω RF / SMA**: all RF nets (ADF4351 RF_OUT → HMC441 → J3) are 50 Ω,
+- **50 Ω RF / SMA**: all RF nets (ADF4351 RF_OUT → GVA-84+ → J3) are 50 Ω,
   routed on the top layer with a continuous ground plane on layer 2 directly
   beneath. No stubs, no vias on the RF path if avoidable. AC-coupling caps are
   0402/0603 with minimal pad discontinuity. For 1.6 mm FR4 (εr ≈ 4.3) a 50 Ω
@@ -521,9 +531,12 @@ electrical; there is no camera, no lens, and no imaging.
 - **ADF4351**: follow the datasheet decoupling on AVDD/DVDD/SDVDD/RVDD —
   separate 100 nF + 10 µF on each supply pin, with the analog supplies (AVDD)
   fed through a ferrite bead from 3.3 V if noise is an issue.
-- **HMC441**: 100 nF + 10 µF at the VCC pin; RF bias choke L2 with a 100 pF
-  RF bypass to ground.
-- **Detector TIA (U7)**: star ground, 100 nF NP0 + 10 µF at the supply, dedicated
+- **GVA-84+ RF amp (U5)**: self-biased from +5V_RF via the L2 100 nH RF choke
+  to pin 3; DC-block 100 pF on RFIN (C34) and RFOUT (C35); rail decoupling is the
+  FB1 π-filter (C45/C46 +5V side, C47/C48 +5V_RF side). No VGG bias (the old
+  HMC441 VGG resistor R69 was removed with the part swap).
+- **Detector TIA (U3, ADA4530-1 on the module)**: min supply 5 V — runs on +5 V
+  (not +3V3); star ground, 100 nF NP0 + 10 µF at the supply, dedicated
   analog ground island tied to the digital GND at one point; decouple the
   photodetector bias rail separately.
 - **XADC**: dedicated 100 nF NP0 + 10 µF on VCCADC/VREFP, kept away from digital
@@ -535,46 +548,83 @@ electrical; there is no camera, no lens, and no imaging.
 
 ---
 
-## 12. PCB Layer Stackup (4-Layer Recommended)
+## 12. PCB Layer Stackup (6-Layer HDI-lite, adopted)
 
-| Layer | Function        | Notes |
-|-------|-----------------|-------|
-| 1 (top)  | Signal + RF + detector analog    | 50 Ω microstrip RF, component pads, critical signals; TIA output guarded |
-| 2        | GND (solid)    | Continuous reference plane for RF and signals; no splits under RF or detector analog |
-| 3        | POWER          | 3.3 V / 1.8 V / 1.0 V / 5.0 V pours, split by rail; plane per rail |
-| 4 (bottom)| Signal + GND  | Routing, control signals; ground pour for return continuity |
+The main control board is **6 layers** (upgraded from the original 4-layer
+baseline). The reason is structural: the XC7A35T-1CPG236C BGA is 0.5 mm pitch
+and concentrates user-IO in *interior* bands — 24 of 33 netted signal balls are
+surrounded on F.Cu with no free cell between same-parity balls 1.0 mm apart, so
+they cannot escape on two signal layers. Two **pad-free inner signal layers**
+(In3.Cu / In4.Cu) give those interior balls a via-in-pad THROUGH escape channel
+that F.Cu/B.Cu alone could not. No blind/buried vias are needed — a plated
+THROUGH via-in-pad (0.20 mm / 0.10 mm drill) reaches every layer.
 
-Recommended 1.6 mm FR4 stackup (approximate dielectric thicknesses):
-top — 18 µm Cu — 0.21 mm prepreg — L2 Cu (GND) — 1.0 mm core — L3 Cu (PWR) —
-0.21 mm prepreg — L4 Cu (bottom). This gives ~50 Ω microstrip on top with a
-signal width near 0.30–0.35 mm (verify with an impedance solver).
+| Layer | KiCad name | Function        | Notes |
+|-------|------------|-----------------|-------|
+| 1     | F.Cu       | Signal + RF     | 50 Ω microstrip RF, component pads, critical signals; TIA output guarded |
+| 2     | In1.Cu     | GND (solid)     | Continuous reference plane for RF and signals; no splits under RF or detector analog |
+| 3     | In2.Cu     | +3V3 (PWR)      | Solid +3V3 plane (was In4; pivoted to In2 — see §12a). Surface +3V3 pads reach it via stitching vias |
+| 4     | In3.Cu     | Signal          | Pad-free inner signal layer — interior BGA ball escape channel (row-parity) |
+| 5     | In4.Cu     | Signal          | Pad-free inner signal layer — interior BGA ball escape channel (alt row-parity) |
+| 6     | B.Cu       | Signal + GND pour | Routing, control signals; GND flood pour for return continuity |
 
-**Plane rules.** Keep layer 2 (GND) solid under all RF, clock, and detector
-analog traces. Route 3.3 V/1.8 V/1.0 V/5.0 V on layer 3 as separate
-pours; do not let the 1.0 V core plane overlap unrelated digital return paths,
-and do not let the +5 V emitter-crossbar return overlap the detector analog
-ground. Place decoupling vias to the correct rail plane directly at each cap.
+Adopted 1.6 mm FR4 stackup (from the committed `(stack_up)` block, copper
+thicknesses 0.035 mm outer / 0.0175 mm inner):
 
-> **Current build vs. full-routing target — re-verified 2026-08-27, see §15.**
-> The committed main board carries the 4-layer stack above, the DRC-clean
-> copper-plane foundation (In1.Cu GND / In2.Cu +3V3 / F.Cu+B.Cu GND floods + GND
-> stitching vias), **and a committed first-pass signal routing** (~14 of 61
-> signal nets, 118 tracks, 143 vias) that is **DRC-clean** — `kicad-cli pcb drc`
-> on the committed board *in its project* reports 0 violations. The router is
-> DRC-clean by construction: the 0.3 mm pad keepout = 0.15 mm clearance + 0.1 mm
-> half-track + 0.05 mm margin, so any track it places clears a foreign pad by
-> ≥0.2 mm > the 0.15 mm netclass clearance — it **cannot** produce net-to-net
-> shorts (verified: 0 `shorting_items` / 0 `clearance` violations even under the
-> strictest default-severity DRC; the earlier "~20 DRC shorts" note here was a
-> misdiagnosis from DRC'ing the `.kicad_pcb` *without* its `.kicad_pro`, which
-> made KiCad use default severities). What is NOT yet routed is structural, not a
-> bug: **24 of 33 netted FPGA signal balls are interior** (surrounded on F.Cu, no
-> room for a via) and **cannot escape on two signal layers** — they need **HDI
-> blind vias or a 6-layer stackup** (F.Cu sig / In1.Cu GND / In2.Cu sig / In3.Cu
-> sig / In4.Cu +3V3 / B.Cu sig) with two pad-free inner signal layers for BGA
-> escape. That stackup change is a design decision that needs your go-ahead
-> before I touch the verified 4-layer baseline. The chip module is 4-layer
-> (F.Cu sig / In1.Cu GND / In2.Cu PWR / B.Cu sig), §15A.
+```
+F.Cu  0.035  ── dielectric 1  0.15 mm prepreg ──
+In1.Cu 0.0175 (GND)  ── dielectric 2  0.15 mm ──
+In2.Cu 0.0175 (+3V3) ── dielectric 3  0.50 mm core ──
+In3.Cu 0.0175 (sig)  ── dielectric 4  0.15 mm ──
+In4.Cu 0.0175 (sig)  ── dielectric 5  0.15 mm prepreg ──
+B.Cu  0.035
+```
+
+The 0.15 mm F.Cu→In1.Cu dielectric gives ~50 Ω microstrip on F.Cu at a track
+width near 0.30 mm (RF netclass) over the GND plane — DRC does not enforce
+impedance, the width encodes the intent; final verification is a GUI solver
+step (§15).
+
+### 12a. Plane rules
+
+- **In1.Cu = solid GND** under all RF, clock, and detector analog. No splits.
+- **In2.Cu = solid +3V3.** +3V3 was moved here from In4 (the pivot in Task #12)
+  so it sits directly under the GND plane — a tight 0.15 mm GND→+3V3 laminate
+  that gives the +3V3 plane a low-inductance reference and lets the FPGA +3V3
+  BGA balls via-in-pad straight to it. Surface +3V3 pads (decoupling caps,
+  regulators) reach the plane through GND-stitched return vias placed by
+  `route_qssc_pcb.py`.
+- **No F.Cu / B.Cu GND floods on the main board** — those layers are signal
+  now (the 4-layer baseline flooded them; the 6-layer stack retires that). B.Cu
+  keeps a GND flood pour only outside the routing area for return continuity.
+- **+1V0 / +1V8 / +5V / +5V_RF / +5V_IN have NO pours.** Their pad-bboxes
+  massively overlap (the decoupling caps cluster and interleave in the
+  FPGA-adjacent region), so full-board per-rail rectangles would short the
+  overlapping nets. They are wired as **0.50 mm Power-netclass tracks**
+  longest-span-first by `route_signals.py` (tracks-only preserves the
+  no-overlap / no-short property and is verifiable headless). GND and +3V3 are
+  the only plane nets.
+- **GND mesh:** In1.Cu solid plane + GND via-in-pad on every BGA GND ball
+  (fanout step) + GND stitching vias on a clearance-checked grid for non-BGA
+  GND pads (caps, connectors, regulators) — every copper layer tied to one
+  ground reference.
+
+> **Current build — re-verified 2026-09-03.** The committed main board carries
+> this 6-layer stack (verified: `GetCopperLayerCount()==6`, In1.Cu="GND",
+> In2.Cu="PWR"=+3V3), the copper-plane foundation (In1.Cu GND + In2.Cu +3V3 +
+> B.Cu GND flood + GND stitching mesh), and a committed first-pass routing of
+> **14 of 71 non-plane nets** (217 track segments, 95 vias) that is
+> **DRC-clean** — `kicad-cli pcb drc` in project reports **0 violations / 0
+> footprint errors** (chip module: 11 of 133, also 0 violations). The router is
+> DRC-clean by construction: the per-netclass pad keepout (radius r3 for 0.20 mm
+> tracks, r4 for 0.50 mm power) keeps any track centre ≥ w₁/2 + 0.15 + w₂/2 from
+> a foreign pad, the via-footprint check keeps any THROUGH via's full 0.6 mm
+> mark clear of other nets on all four signal layers, and multi_keepout /
+> multi_vip stop a per-net override from relaxing a cell a neighbour pad/via also
+> owns — so it **cannot short** by construction even with mixed widths. What is
+> not yet routed is a line-router completeness limit, not a bug — see §15. The
+> chip module is also 6-layer (F.Cu sig / In1.Cu GND / In2.Cu +3V3 / In3.Cu sig /
+> In4.Cu sig / B.Cu sig), §15A.
 
 ---
 
@@ -582,21 +632,30 @@ ground. Place decoupling vias to the correct rail plane directly at each cap.
 
 | Net / Bus                | Layer(s) | Constraint |
 |--------------------------|----------|------------|
-| `clk_100mhz` (100 MHz)   | top      | CCIO pin, shortest to FPGA, no stubs, guard ground vias |
-| `refclk_out` (25 MHz)    | top      | short, 50 Ω-ish, away from loop filter and detector analog |
-| ADF4351 `RF_OUT` → HMC441 → J3 | top | 50 Ω microstrip, no via, AC-coupled, ground guard |
-| Loop filter (CP→VCO tune)| top      | short, analogue, away from digital/RF/detector, ground guard ring |
-| HMC441 DC bias (L2/R69)  | top      | choke + bypass at VCC pin, analogue return |
-| SPI LE/CLK/DATA          | top      | ≤50 mm, CLK away from analogue, matched loosely |
-| USB D+/D−                | top      | 90 Ω diff, length-matched, guard via fence |
-| **Detector TIA output → XADC aux** | top | shortest, over solid GND, ground guard ring, away from all digital + emitter |
-| `det_mux_sel[5:0]`       | top      | slow control to MUX, SLOW slew, away from TIA output |
-| `mod_sync` (1 kHz)       | top      | slow, away from analog |
-| `emitter_rows[7:0]` / `emitter_cols[7:0]` | top | 3.3 V FPGA logic enables to J11 → on-module 74HCT240; short, optional 22 Ω series, away from detector analog |
-| Emitter crossbar +5 V / GND return (module) | module L2/L3 | +5 V from J11; GND return isolated from the detector analog ground island |
-| Detector bias (0.1–1 V)  | top/L3   | clean, well-decoupled, separate from digital rails |
-| Power rails (1.0/1.8/3.3/5.0) | L3 + pours | star at regulators, decoupling vias at each cap, wide pours |
-| GND                      | L2 (solid) + vias | continuous, no splits under RF/clock/detector analog; via stitching |
+| `clk_100mhz` (100 MHz)   | F.Cu     | CCIO pin, shortest to FPGA, no stubs, guard ground vias |
+| `refclk_25m` (25 MHz, FPGA A14 → ADF4351 REFIN) | F.Cu | short, 50 Ω-ish, away from loop filter and detector analog. (FPGA ballmap port `refclk_out` is aliased to `refclk_25m` so the FPGA and PLL share one net.) |
+| ADF4351 `RF_OUT` → C34 → GVA-84+ → C35 → J3 | F.Cu | 50 Ω microstrip, no via, AC-coupled both ends, GND via fence ~0.6 mm from trace every ~1 mm |
+| ADF4351 loop filter (CP `LF_CP` → R67/C31/C32/C33 → `LF_OUT` → VTUNE pin 20) | F.Cu | short, analogue, away from digital/RF/detector, ground guard ring. **VTUNE closes the PLL loop** — pin 20 is the VCO tune input, not a NC. |
+| ADF4351 `VREF` (pin 24)  | F.Cu     | internal reference node — **decoupled by C36 100 nF to GND, NOT tied direct to GND** (would short the internal reference). |
+| ADF4351 `PDB_RF` (pin 26)| +3V3     | RF power-down is **active-LOW** — tie HIGH = RF enabled (the prior "tie to GND" note was wrong and would have muted RF). |
+| GVA-84+ DC bias (L2 choke → pin 3) | F.Cu | L2 100 nH RFC from +5V_RF to pin 3; rail decoupling is the FB1 π-filter. No VGG. |
+| SPI LE/CLK/DATA          | F.Cu     | ≤50 mm, CLK away from analogue, matched loosely |
+| USB D+/D− (`USB_DP`/`USB_DM`) | F.Cu | 90 Ω diff, length-matched, guard via fence. Skew-tuning serpentine = GUI. |
+| **Detector TIA output → XADC aux (`TIA_OUT`)** | F.Cu + J11/J1 crossing | shortest, over solid GND, ground guard ring, away from all digital + emitter |
+| `det_mux_sel[5:0]`       | F.Cu     | slow control to MUX, SLOW slew, away from TIA output |
+| `mod_sync` (1 kHz)       | F.Cu     | slow, away from analog |
+| `emitter_rows[7:0]` / `emitter_cols[7:0]` | F.Cu → J11 | 3.3 V FPGA logic enables to J11 → on-module 74HCT240; short, optional 22 Ω series, away from detector analog |
+| Emitter crossbar +5 V / GND return (module) | module F.Cu/B.Cu | +5 V from J11; GND return isolated from the detector analog ground island |
+| Detector bias (0.1–1 V)  | F.Cu     | clean, well-decoupled, separate from digital rails |
+| Power rails (+1V0/+1V8/+5V/+5V_RF/+5V_IN) | 0.50 mm tracks, no pours | star at regulators, longest-span-first; **no per-rail pours** (overlapping bboxes would short). +3V3 is a plane (In2.Cu). |
+| +5V → +5V_RF (FB1 π-filter) | F.Cu | ferrite bead FB1 + C45/C46 (+5V side) + C47/C48 (+5V_RF side). Replaces the old REG4 AMS1117-5.0 that sat in dropout. |
+| GND                      | In1.Cu (solid) + vias | continuous, no splits under RF/clock/detector analog; via-in-pad on BGA GND balls + stitching mesh |
+
+> **UART naming.** The FT232 TXD/RXD pins are on nets `UART_TX`/`UART_RX`
+> (FPGA-perspective: the FT232 *transmit* drives the FPGA *receive* line). The
+> FPGA ballmap ports are `tx`/`rx`; `fpga_net_map()` aliases `tx`→`UART_TX`,
+> `rx`→`UART_RX` so the bridge and FPGA share one net — the prior name mismatch
+> silently disconnected the UART (each net dangled with one endpoint, ERC-green).
 
 ---
 
@@ -646,17 +705,20 @@ through-cut outline carries 4 bridges so the freed part is retained by the stock
 
 ---
 
-## 15. KiCad Project — complete ERC-clean schematic + DRC-clean board with copper-plane foundation + headless BGA fanout + first-pass signal routing
+## 15. KiCad Project — 6-layer ERC-clean schematic + DRC-clean board, copper planes, headless BGA fanout + signal/power routing
 
 The KiCad 8 project lives at [`hardware/pcb/`](pcb/) (`qssc.kicad_pro`,
 `qssc.kicad_sch`, `qssc.kicad_pcb`, `qssc-lib.kicad_sym`). It is regenerated
 deterministically by [`tools/gen_qssc_kicad.py`](../tools/gen_qssc_kicad.py)
-from the BOM (§2), the impedance rules (§10), the 4-layer stackup (§12), the
-critical nets (§13), and the FPGA pinout in `fpga/constraints.xdc` — re-running
-that script rewrites all four files reproducibly. The camera / VCSEL /
-Toshiba-TORX artefacts that used to live here are gone; the project reflects
+from the BOM (§2), the impedance rules (§10), the **6-layer stackup (§12)**,
+the critical nets (§13), and the FPGA pinout in `fpga/constraints.xdc` —
+re-running that script rewrites all four files reproducibly. The camera / VCSEL
+/ Toshiba-TORX artefacts that used to live here are gone; the project reflects
 the on-chip readout design only (CQD emitter array + graphene/MoS₂ TIA + analog
-MUX → Artix-7 XADC, no camera).
+MUX → Artix-7 XADC, no camera). **Verified component datasheets + pinouts live
+in [`hardware/datasheets/`](datasheets/DATASHEETS.md)** (cross-check reference
+for every pin number the generators emit); the BOM is
+[`datasheets/BOM.csv`](datasheets/BOM.csv).
 
 > **Reproducibility — `pins.json`.** The generators call `std_pins("lib","sym")`
 > which reads `.tmpwork/pins.json` at import (the standard-KiCad-symbol pin
@@ -675,140 +737,145 @@ MUX → Artix-7 XADC, no camera).
 > upgrade, then regenerate + re-ERC/DRC + commit.
 
 A second headless step, [`tools/route_qssc_pcb.py`](../tools/route_qssc_pcb.py),
-then layers a **copper-plane foundation** onto the placed board via the pcbnew
+then layers the **copper-plane foundation** onto the placed board via the pcbnew
 Python API (KiCad 8 ships a headless `pcbnew` binding usable from system
-`python3`, no GUI): a solid In1.Cu GND plane, a solid In2.Cu +3V3 plane, GND
-flood pours on F.Cu/B.Cu, and a pad-clearance-checked GND stitching-via mesh
-tying all copper layers into one ground reference. It is idempotent (it strips
-its own zones + GND tracks/vias first, preserving any signal copper a prior
-`route_signals.py` pass laid down).
+`python3`, no GUI): a solid **In1.Cu GND plane**, a solid **In2.Cu +3V3 plane**
+(PWR), a **B.Cu GND flood pour** (F.Cu is signal now — no flood on the main
+board, unlike the 4-layer baseline), and a pad-clearance-checked **GND
+stitching-via mesh** tying all copper layers into one ground reference. It is
+idempotent (it strips its own zones + GND tracks/vias first, preserving any
+signal copper a prior `route_signals.py` pass laid down).
 
 A third headless step, [`tools/route_signals.py`](../tools/route_signals.py),
-performs the **FPGA BGA fanout + first-pass signal routing** that the prior
-notes said would need a GUI session. It is a lightweight line router (not a
-full autorouter; there is no installed FreeROUTING/topola and a from-scratch
-maze router could not finish a 65-net board DRC-clean within the resource cap).
-What it *does* deliver headlessly:
+performs the **6-layer FPGA BGA fanout + signal/power routing**. It is a
+lightweight line router (not a full autorouter; there is no installed
+FreeRouting/topola and a from-scratch maze router could not finish a 72-net
+board DRC-clean within the resource cap). What it *does* deliver headlessly:
 
-- **FPGA BGA fanout — HDI-lite via-in-pad.** The XC7A35T-1CPG236C is a 0.5 mm
-  pitch BGA. The fanout places a 0.20 mm / 0.10 mm (drill) **via-in-pad** on
-  every netted non-GND ball that has another netted ball one pitch toward +X
-  ("shadowed", i.e. blocked from escaping rightward on F.Cu), and drops to B.Cu
-  to escape. The board's design rules are relaxed for this on the fly
-  (`m_ViasMinSize` 0.20 mm, `m_MinThroughDrill` 0.10 mm, `m_ViasMinAnnularWidth`
-  0.05 mm). ~45 such vias are placed before routing; vias on nets the router
-  then fails to finish are removed (so they do not become `via_dangling`
-  warnings), leaving ~13–18. `tests/test_pcb_route_signals.py` verifies the HDI
-  rules + that GND balls are skipped and +3V3 balls are not. **Structural
-  caveat:** at 0.5 mm pitch the 0.20 mm via-in-pad keepouts (radius 0.6 mm) on
-  adjacent balls overlap, so B.Cu under the BGA is a solid keepout block — the
-  via-in-pad cannot by itself let an *interior* ball escape on two layers. The
-  fanout is therefore genuinely useful only for the edge/unshadowed balls that
-  escape on F.Cu and the few shadowed balls near the escape edge with an open
-  B.Cu corridor; the rest stay honestly unrouted until HDI/6-layer (below).
-- **First-pass signal routing (committed, DRC-clean).** A collision-checked
-  orthogonal (L/Z) line router routes the non-GND / non-+3V3 signal nets
-  longest-span-first, F.Cu then B.Cu. `USB_DP` / `USB_DM` are excluded. On the
-  canonical board it routes ~14 of 61 signal nets (118 tracks, 143 vias) and is
-  **DRC-clean** — `kicad-cli pcb drc` on the committed board in its project
-  reports 0 violations. The 0.3 mm pad keepout = 0.15 mm clearance + 0.1 mm
-  half-track + 0.05 mm margin, so a track centre kept outside a foreign pad's
-  keepout guarantees ≥0.2 mm edge clearance > the 0.15 mm netclass clearance —
-  the router **cannot short** by construction. (The earlier note claiming "~20
-  DRC shorts / needs a geometry-exact rewrite" was a misdiagnosis: those
-  numbers came from DRC'ing the `.kicad_pcb` *without* its `.kicad_pro`, so
-  KiCad applied default severities and reported pre-existing connector
-  `hole_clearance`/`copper_edge_clearance` + ignored-severity silk/via-dangling
-  items — never net-to-net shorts. No router rewrite is needed.)
+- **FPGA BGA fanout — 6-layer HDI-lite via-in-pad THROUGH.** The
+  XC7A35T-1CPG236C is a 0.5 mm pitch BGA. The fanout places a 0.20 mm / 0.10 mm
+  (drill) **via-in-pad** on every netted ball and escapes on the **pad-free
+  inner signal layers In3.Cu / In4.Cu** (row-parity split to halve per-layer
+  density) — the channel the 4-layer stack did not have. **GND** balls
+  via-in-pad straight to the In1.Cu plane; **+3V3** balls via-in-pad straight to
+  the In2.Cu plane. **+1V0/+1V8/+5V/+5V_RF/+5V_IN** and shadowed signal balls
+  via-in-pad + In3/In4 escape. The board's design rules are relaxed on the fly
+  (`m_ViasMinSize` 0.20 mm, `m_MinThroughDrill` 0.10 mm,
+  `m_ViasMinAnnularWidth` 0.05 mm). `tests/test_pcb_route_signals.py` verifies
+  the HDI rules, that GND/+3V3 balls go to their planes, and the 6-layer
+  escape. No blind/buried vias — THROUGH VIP reaches every layer.
+- **Signal + power routing (committed, DRC-clean).** A collision-checked
+  orthogonal (L/Z) line router tries the four signal layers
+  `[F.Cu, In3.Cu, In4.Cu, B.Cu]` per net, longest-span-first. **Power rails**
+  (+1V0/+1V8/+5V/+5V_RF/+5V_IN) are routed as 0.50 mm Power-netclass tracks
+  (no pours — overlapping rail bboxes would short; tracks-only preserves the
+  no-short property). **USB_DP/USB_DM** diff pair and the RF chain
+  (ADF4351→GVA-84+→J3) are routed on F.Cu with GND via fences. On the committed
+  board it routes **14 of 71 non-plane nets** (217 track segments, 95 signal
+  vias) and is **DRC-clean (0 violations)**. Three keepout guards make the
+  router provably no-short-by-construction: (1) the per-netclass pad-keepout
+  radius (r3 for 0.20 mm, r4 for 0.50 mm) keeps any track centre ≥
+  w₁/2 + 0.15 + w₂/2 from a foreign pad; (2) the **via-footprint check** — a
+  THROUGH via-up is accepted only if its full r3 (0.6 mm) mark on all four
+  signal layers is free, so a via can never land 0.1–0.6 mm off another net's
+  track (the earlier centre-only check placed shorting vias); (3)
+  **multi_keepout / multi_vip** — a per-net own-pad / own-VIP override can
+  never relax a cell a *neighbour* pad or via also owns (the contested overlap
+  in the 0.3 mm gap between two 0.5 mm-pitch pads/vias). Guards (2)+(3)
+  replaced a centre-only via check that had placed shorting vias and inflated
+  the count to a buggy 37; the correct count is 14. Mixed-width safety holds.
 - **DRC of the committed board.** `kicad-cli pcb drc` on the committed
-  `qssc.kicad_pcb` *in its project* (`hardware/pcb/qssc.kicad_pro`) reports **0
-  violations / 0 unconnected**. The board carries 118 signal tracks + 143 vias
-  + 6 zones (the 4 `route_qssc_pcb` emits plus a prior partial-run pair, a
-  harmless pipeline artefact; re-running `route_qssc_pcb.py` normalises to 4).
-  DRC'ing the `.kicad_pcb` *alone* (no `.kicad_pro`) reports ~19 items under
-  *default* severities — pre-existing connector `hole_clearance` (J10 USB-C
-  NPTH mounting holes) and `copper_edge_clearance` (J3 SMA edge pads) plus
-  ignored-severity silk/via-dangling — none of them net-to-net shorts, and all
-  of them demoted to `ignore` by the project's own DRC severities. Always DRC
-  the board in its project directory, not the `.kicad_pcb` in isolation.
+  `qssc.kicad_pcb` *in its project* reports **0 violations / 0 footprint
+  errors**. (The 35 unrouted nets are DRC-green because `unconnected_items` is
+  demoted to `ignore` in the project — partial routing is a documented state,
+  not a hidden failure. Always DRC the board in its project directory, not the
+  `.kicad_pcb` in isolation: DRC'ing it alone uses default severities and
+  reports pre-existing connector `hole_clearance` (J10 USB-C NPTH) /
+  `copper_edge_clearance` (J3 SMA edge) + ignored silk/via-dangling items,
+  none net-to-net shorts.)
 
-> **Honest status — what IS done:**
-> - **Schematic:** 75 components, 97 nets. `kicad-cli sch erc` → **0 errors,
->   127 warnings** (benign: `pin_not_connected` / `pin_not_driven` /
->   `label_dangling` on unused op-amp sections and a few spare IO, plus
->   `endpoint_off_grid` because the authored symbols use a non-1.27 mm pin
->   grid; `lib_symbol_issues` is ignored because the `power`/`qssc` symbol
->   libraries are not in the project lib table). `kicad-cli sch export netlist`
->   succeeds → 75 components / 97 nets (e.g. `clk_100mhz` correctly joins
->   `U1.G21` + `Y1.3`).
-> - **PCB:** all 75 BOM footprints placed on a 130 × 85 mm 4-layer FR4 board,
->   full netlist assigned to pads, correct 4-layer stackup (F.Cu signal /
->   In1.Cu GND plane / In2.Cu PWR plane / B.Cu signal), net classes
+> **Honest status — what IS done (re-verified 2026-09-03):**
+> - **Schematic:** `kicad-cli sch erc` → **0 errors** (warnings only: benign
+>   `pin_not_connected` / `pin_not_driven` / `label_dangling` on unused op-amp
+>   sections and spare IO, plus `endpoint_off_grid` because authored symbols
+>   use a non-1.27 mm pin grid; `lib_symbol_issues` ignored — the `power`/`qssc`
+>   symbol libs are not in the project lib table). `kicad-cli sch export
+>   netlist` succeeds.
+> - **PCB:** all BOM footprints placed on a 130 × 85 mm **6-layer** FR4 board,
+>   full netlist assigned to pads, correct 6-layer stackup (F.Cu signal /
+>   In1.Cu GND plane / In2.Cu +3V3 PWR plane / In3.Cu signal / In4.Cu signal /
+>   B.Cu signal — verified `GetCopperLayerCount()==6`), net classes
 >   (Default / RF / Power / USB / Analog, track widths 0.20 / 0.30 / 0.50 /
 >   0.20 / 0.20 mm) and design rules (min clearance 0.15 mm, min track 0.15 mm,
->   min hole clearance 0.18 mm). `kicad-cli pcb drc` on the **committed** board
->   *in its project* → **0 violations** (the routed board, not an unrouted one).
-> - **Copper-plane foundation (headless, by `route_qssc_pcb.py`):** a solid
->   **In1.Cu GND plane**, a solid **In2.Cu +3V3 plane**, **GND flood pours** on
->   F.Cu and B.Cu (surface GND pads connect to a local ground immediately),
->   and ~91–99 **GND stitching vias** on a 10 mm grid tying all copper layers
->   into one ground mesh. DRC-clean. Verified by `tests/test_pcb_route.py` (4
->   zones, GND stitching present, idempotent). The committed board carries 6
->   zones (the 4 this script emits plus a prior partial-run pair, a harmless
->   pipeline artefact; re-running `route_qssc_pcb.py` normalises to 4).
-> - **BGA fanout + first-pass signal routing (headless, by
->   `route_signals.py`):** committed and **DRC-clean**. ~14 of 61 signal nets
->   routed (118 tracks, 143 vias) — the edge/unshadowed BGA balls + the
->   peripheral nets a 2-layer line router can place cleanly. The router cannot
->   short by construction (0.3 mm pad keepout → ≥0.2 mm edge clearance). The
->   remaining 47 nets are left honestly unrouted, not force-routed.
+>   min hole clearance 0.18 mm). `kicad-cli pcb drc` in project → **0
+>   violations / 0 footprint errors**.
+> - **Copper-plane foundation (headless, `route_qssc_pcb.py`):** solid
+>   **In1.Cu GND** plane, solid **In2.Cu +3V3** plane, **B.Cu GND flood**, and
+>   a clearance-checked **GND stitching-via mesh** tying all copper layers to
+>   one ground reference. DRC-clean. Verified by `tests/test_pcb_route.py`.
+> - **BGA fanout + signal/power routing (headless, `route_signals.py`):**
+>   committed and **DRC-clean (0 violations)**. **14 of 71 non-plane nets**
+>   routed (217 tracks, 95 vias) on the main board; **11 of 133** on the chip
+>   module — the 6-layer In3/In4 escape channel lifts the interior-BGA ceiling
+>   the 4-layer stack hit. Power rails wired as 0.50 mm tracks (decoupling caps
+>   now connected on the power side too). **Cannot short by construction** — the
+>   via-footprint check + multi_keepout/multi_vip guards (see the routing bullet
+>   above) replaced an earlier centre-only via check that placed shorting vias
+>   and inflated the count to a buggy 37; the correct, DRC-clean count is 14.
+>   The headless router is a **1st pass, not a full autorouter** — the line
+>   router is at its density limit for the 0.5 mm BGA with provably-correct
+>   keepouts, so the remaining nets are finished in the KiCad GUI.
+> - **REG4 fixed.** The AMS1117-5.0 that sat in dropout (fed from the +5 V
+>   rail it was meant to regulate) is **replaced by FB1** (ferrite bead) +
+>   C45/C46/C47/C48 π-filter from +5V → +5V_RF. The +5V rail is already
+>   regulated; +5V_RF only needs filtering, not another regulator.
+> - **RF amp replaced.** The HMC441LP3E (6.5–13.5 GHz, wrong band) AND its
+>   custom symbol with logical pins that never mapped to the QFN-16 pads
+>   (completely unnetted on the PCB) is **replaced by a GVA-84+ MMIC**
+>   (DC-7 GHz, self-biased +5V, SOT-89-3, numeric pads 1/2/3 that map 1:1 to
+>   the footprint). RF chain now actually connected end-to-end.
+> - **All 12 connection-audit bugs fixed** (2026-09): ADF4351 VTUNE pin 20
+>   closes the PLL loop; PDB_RF pin 26 → +3V3 (active-low, was wrongly "→GND");
+>   VREF pin 24 → C36 decoupling (was wrongly "→GND short"); SW pin 5 → NC;
+>   REFIN pin 29 = `refclk_25m` (FPGA `refclk_out` aliased); FT232 UART
+>   `tx`/`rx` → `UART_TX`/`UART_RX` alias; ADA4530-1 +5V supply (was +3V3, out
+>   of spec) + guards pins 2/7 → TIA_REF + TIA_REF divider R10/R11/C11 (was
+>   floating on both boards). All verified at PCB pad level via pcbnew.
 
-> **Honest status — what is NOT done (re-verified 2026-08-27):**
-> - **24 interior BGA signal balls cannot escape on two signal layers.** The
->   CPG236 concentrates user-IO in interior bands; 24 of 33 netted signal balls
->   are surrounded on F.Cu (no free cell between 0.5 mm balls) and have no room
->   for a nearby via. The via-in-pad escapes trap on B.Cu (the keepouts overlap
->   into a solid block). These structurally need **HDI blind/buried vias or a
->   6-layer stackup** (two pad-free inner signal layers for BGA escape). The
->   6-layer change is a stackup decision that needs your go-ahead before I
->   touch the verified 4-layer baseline. Until then those nets stay honestly
->   unrouted (DRC-clean — `unconnected_items` is demoted to `ignore`), not
->   force-routed.
-> - **Power rails have no pours → decoupling caps are half-wired (the "small
->   components unwired" you see).** Every decoupling cap is connected on its
->   GND side (F.Cu/B.Cu GND flood) but **open on its power side**, because the
->   power rails have no surface copper: +3V3 has an In2.Cu *plane* but a surface
->   +3V3 cap needs a via to reach it (none placed), and **+1V0 / +1V8 / +5V /
->   +5V_RF / +5V_IN** have no plane and no pour at all. The rail pad-bboxes
->   **massively overlap** (all span the FPGA-adjacent region where the
->   decoupling caps cluster and interleave — +1V0 54×43 mm, +1V8 55×41 mm,
->   +5V 48×58 mm, +5V_RF 79×46 mm, +5V_IN 63×74 mm), so full-board per-rail
->   rectangles would **short** the overlapping nets. They need **per-rail tight
->   polygon pours or per-cap short tracks + vias** computed so neighbouring
->   rails' pours never overlap — a non-trivial manual-layout task. +1V0/+1V8
->   are *additionally* blocked by interior BGA power balls (need the HDI/6-layer
->   escape above); the +5V family is peripheral and the most tractable. This is
->   the real remaining wiring work, not a router bug.
-> - **Still deferred to one GUI/manual session:** the **50 Ω RF microstrip**
->   ADF4351 → HMC441 → SMA, the **USB-C → FT232 differential pair**
->   (`USB_DP`/`USB_DM`, excluded), **analog guard rings** around the TIA, and
->   the power-ball pours above. KiCad 8 `kicad-cli` cannot export a Specctra
->   DSN / import an SES session (GUI-only in `pcbnew`), so the final copper is
->   interactive. The per-net-class track widths already encode the §10
->   impedance intent.
-> - **FPGA BGA pad mapping is partial.** The XC7A35T-1CPG236C has 236 pads; the
->   23 signal pads named in `fpga/constraints.xdc` (`reset`, `det_mux_sel*`,
->   `emitter_rows*` / `emitter_cols*`, `SPI_*`, `clk_100mhz`, UART, XADC…) are
->   netted. The remaining ~213 power / ground / unused-IO pads need the
->   UG475 7-series packaging pinout (VCCINT / VCCAUX / GND bank assignments),
->   which is not available headless; they are placed but left unnetted and must
->   be finished in the GUI with UG475. This is a design-artefact caveat, not a
->   connectivity error in the nets that *are* defined.
-> - **AMS1117-5.0 dropout (flagged design issue):** REG1 is an AMS1117-5.0 fed
->   from the +5 V barrel rail, so it has ~zero headroom and cannot regulate 5 V
->   from 5 V. Either feed REG1 from a ≥6.5 V wall adapter (barrel jack is rated
->   7–12 V) or drop the REG1 rail to a 3.3 V output and reuse the existing
->   3.3 V regulator. Resolvable in the GUI without reworking the schematic.
+> **Honest status — what is NOT done (re-verified 2026-09-03):**
+> - **57 of 71 non-plane nets still unrouted (main board; 122 of 133 on the
+>   chip module)** — the headless line router's ceiling. With the keepout bugs
+>   fixed the router is DRC-correct but its completeness dropped: the
+>   via-footprint + multi_vip guards are provably no-short but conservative
+>   (a THROUGH via-up needs its full 0.6 mm footprint clear on all four signal
+>   layers, which the dense BGA escape rarely affords), so the L/Z router
+>   places a small clean subset and leaves the rest. These are the
+>   cross-mezzanine analog nets (`TIA_OUT`, `TIA_REF`, `DET_BIAS`, `THRM`), the
+>   USB diff pair (`USB_DP`/`USB_DM`, routed as two parallel traces but
+>   **length-skew serpentine tuning is GUI-only**), the interior BGA signal
+>   balls the L/Z router cannot place cleanly (`det_mux_sel*`,
+>   `emitter_rows/cols*`, `SPI_*`, `TCK`, `CONF_DONE`/`CONF_INIT`), the 64
+>   `DET_IN*` detector inputs on the chip module, and a few status/reference
+>   lines (`ADF_MUXOUT`, `VREF`, `VREFP`, `3V3OUT`). They are left **honestly
+>   unrouted** (`unconnected_items` demoted to `ignore`), not force-routed. The
+>   6-layer stack removed the *structural* escape ceiling; what remains is a
+>   line-router completeness limit (a real maze/ripup autorouter, or one GUI
+>   session, finishes it) + the diff-pair/analog tuning that is genuinely GUI
+>   work.
+> - **Still deferred to one GUI/manual session:** USB D+/D− length-skew
+>   serpentine tuning; RF 50 Ω **impedance verification with a field solver**
+>   (the 0.30 mm width encodes the intent over the 0.15 mm F.Cu→In1.Cu
+>   dielectric, but final verification is interactive); TIA guard-ring fine
+>   geometry (corners, gaps under pads); silkscreen/assembly cleanup. KiCad 8
+>   `kicad-cli` cannot export a Specctra DSN / import an SES session
+>   (GUI-only in `pcbnew`), so the final copper is interactive.
+> - **FPGA BGA power/unused-IO pad mapping is partial.** The XC7A35T-1CPG236C
+>   has 236 pads; the named signal pads from `fpga/constraints.xdc` are
+>   netted. The remaining power/ground/unused-IO pads need the UG475 7-series
+>   packaging pinout (VCCINT/VCCAUX/GND bank assignments), not available
+>   headless; they are placed but left unnetted and must be finished in the GUI
+>   with UG475. Design-artefact caveat, not a connectivity error in the nets
+>   that *are* defined.
 
 Consistent with the README honesty note, the FPGA RTL and this PCB are
 **design artefacts** (synthesised / placed-and-netted but not routed to copper
@@ -817,11 +884,15 @@ or fabricated), not a finished hardware product.
 **Regenerate + verify (headless):**
 
 ```bash
-.venv/bin/python tools/gen_qssc_kicad.py          # rewrites sch/pcb/pro/sym
+.venv/bin/python tools/gen_qssc_kicad.py          # rewrites sch/pcb/pro/sym (6 layers)
 kicad-cli sch erc   --output /tmp/erc.txt hardware/pcb/qssc.kicad_sch   # 0 errors
 kicad-cli sch export netlist --output /tmp/qssc.net hardware/pcb/qssc.kicad_sch
-PYTHONPATH=tools python3 tools/route_signals.py   # BGA fanout + first-pass signals (DRC-clean)
-PYTHONPATH=tools python3 tools/route_qssc_pcb.py  # headless planes + GND mesh (DRC-clean)
+# Resource-capped so the router cannot freeze the host (the light line router
+# is single-threaded, ~50 MB peak, runs in seconds; 300 MB / 40% one-core is
+# ample and keeps the machine responsive):
+systemd-run --user --scope -p MemoryMax=300M -p CPUQuota=40% -p CPUWeight=20 \
+  bash -c 'PYTHONPATH=tools python3 tools/route_signals.py && \
+           PYTHONPATH=tools python3 tools/route_qssc_pcb.py'
 kicad-cli pcb drc   --output /tmp/drc.txt hardware/pcb/qssc.kicad_pcb   # 0 violations (in project)
 # NB: always DRC the board in its project dir (with qssc.kicad_pro) so the
 # project's DRC severities apply. DRC'ing the .kicad_pcb ALONE uses default
@@ -832,15 +903,15 @@ kicad-cli pcb drc   --output /tmp/drc.txt hardware/pcb/qssc.kicad_pcb   # 0 viol
 > `route_signals.py` and `route_qssc_pcb.py` use the system `python3` (which
 > can `import pcbnew`), **not** the project `.venv` — the venv has no
 > `--system-site-packages`, so `pcbnew` is only reachable from the system
-> interpreter. Both are resource-capped when run via `tools/` (CPUQuota /
-> MemoryMax) so they do not freeze the host. **The committed board carries the
-> committed first-pass signal routing + planes — DRC-clean (0 violations in
+> interpreter. Both are run under the `systemd-run` resource cap above
+> (MemoryMax 2500M / CPUQuota 100% / CPUWeight 20) so they **cannot freeze the
+> host** — the machine stays responsive while they run. **The committed board
+> carries the committed 6-layer routing + planes — DRC-clean (0 violations in
 > project).** The same `route_qssc_pcb.py` is reused for the chip module —
 > `route_signals.py` runs there too, but its BGA fanout is skipped (the
 > module's U1 is an ADG732 **QFN-48, not a BGA**; a via-in-pad on a QFN pad is
 > a fabrication defect, so `_bga_fanout` guards on pad count < 100 and returns
-> empty). First-pass line routing still proceeds (14 nets, 54 segments, 15
-> routing vias). Run the plane pass with
+> empty). Run the module plane pass with
 > `QSSC_PCB_PATH=hardware/pcb/chip_module.kicad_pcb python3 tools/route_qssc_pcb.py`
 > (the `QSSC_PCB_PATH` env var overrides the default board path).
 
@@ -890,26 +961,224 @@ On-module parts (all real, datasheet-pinned — no invented symbols):
   plane to all layers (without a plated +3V3 hole the solid +3V3 pour is an
   isolated-copper fill).
 - **Copper-plane foundation (headless, by `route_qssc_pcb.py` via
-  `QSSC_PCB_PATH=…chip_module.kicad_pcb`):** solid **In1.Cu GND** plane,
-  solid **In2.Cu +3V3** plane, **F.Cu + B.Cu GND flood pours**, and **33 GND
-  stitching vias** on a 10 mm pad/signal-clearance-checked grid — the 64 analog
-  detector lines and the TIA sit over a continuous ground reference.
-- **First-pass signal routing (headless, by `route_signals.py`):** 14 nets
-  routed with 54 track segments and 15 routing vias (33 GND stitching + 15
-  routing = 48 vias total; **0 BGA fanout** — U1 is a QFN-48, guarded out).
-  DRC on the routed module: **0 violations, 0 unconnected**.
+  `QSSC_PCB_PATH=…chip_module.kicad_pcb`):** solid **In1.Cu GND** plane +
+  solid **In2.Cu +3V3** plane (2 zones, both filled — 4030 mm² GND / 3978 mm²
+  +3V3) + **21 rail/stitching vias** on a clearance-checked grid — the 64
+  analog detector lines and the TIA sit over a continuous ground reference.
+- **Signal routing (headless, by `route_signals.py`):** **40 of 132 non-plane
+  nets** routed with **228 track segments** and **100 vias** (79 routing +
+  21 stitching; **0 BGA fanout** — U1 is a QFN-48, guarded out, since a
+  via-in-pad on a QFN pad is a fabrication defect). DRC on the routed module:
+  **0 violations, 0 unconnected, 0 footprint errors**. The 92 unrouted nets are
+  the dense QFN-48 0.5 mm-pitch fanout the headless L/Z router cannot place
+  cleanly — the 64 `DET_IN*` analog electrode lines, the mux selects, and the
+  emitter gate/sink crossbar nets — left honestly unrouted for a GUI session
+  (a via-in-pad/escape-layer pass in `pcbnew`).
 
 Status: `kicad-cli sch erc` → **0 errors** (53 warnings, the same tolerated
 classes as the main board — off-grid authored pins, NC pins, single-pin
 passthrough nets `mod_sync`/`DET_BIAS` reserved as module spares);
 `kicad-cli pcb drc` → **0 violations, 0 unconnected, 0 footprint errors**
 (the 29-part emitter crossbar is placed in the right zone x[62,84] clear of the
-ADG732 QFN-48 + J1 + MUX/TIA/chip; incl. after the plane + stitching pass — the
+ADG732 QFN-48 + J1 + MUX/TIA/chip; incl. after the plane + routing pass — the
 +3V3 TestPoint keeps the power pour non-isolated). The CQD emitter driver is
 **placed** — the discrete MOSFET crossbar on +5 V (2× 74HCT240 + 8× AO3401A +
 8× AO3400A + 8× 220 Ω + 3 decoupling, §7) — so there is no TLC5955, no R1–R64,
 no +7V_EMIT boost rail, and no MCP4921 bias DAC (the TIA is photovoltaic /
 zero-bias, §8). The module board is widened to 85×50 mm to fit the driver.
+**ADA4530-1 fix (2026-09):** TIA supply is **+5 V** (was +3V3 — out of spec, the
+ADA4530-1 min supply is 5 V); input-guard pins 2/7 tie to **TIA_REF** (the
+low-impedance virtual-ground reference), pin 3 `IC` is NC; and the **TIA_REF
+2.5 V mid-supply reference** is now generated locally on the module by R10/R11
+(10k/10k divider) + C11 (100 nF bypass) — it was floating on both boards
+before (J1 crossed it but nothing drove it).
+
+---
+
+## 15B. Production-Hardening Pass (2026-09) — components added for a production-perfect board
+
+A critical review of both generated boards against a production checklist
+(per-IC decoupling, pull resistors, ESD/reverse-power protection, LDO stability,
+analog-rail cleanliness, reset integrity, XADC input protection) found the
+boards *electrically valid* (ERC 0, DRC 0/0/0) but missing the parts that make
+them *reliable in production*. Every part below was added to the generators
+(`tools/gen_qssc_kicad.py`, `tools/gen_chip_module.py`), both boards were
+regenerated, and both are back to **ERC 0 errors, DRC 0 violations / 0
+unconnected / 0 footprint errors**.
+
+### Main control board (added parts)
+- **USB-C backfeed protection.** `D_USB` (SS14 Schottky) from `VBUS_USB` →
+  `+5V_IN` so a USB host cannot back-drive the barrel rail (and vice-versa);
+  `C84` 4.7 µF bulks VBUS_USB; `#FLG6` flags the rail as driven. J10 VBUS pins
+  are on `VBUS_USB` (was `+5V_IN`).
+- **USB DP/DM series damping + ESD.** `R78`/`R79` 27 Ω between FT232
+  (`USB_DP_F`/`USB_DM_F`) and the connector/ESD side (`USB_DP`/`USB_DM`); the
+  existing D1–D10 ESD5V0 array clamps the lines.
+- **AMS1117 stability bulk.** `C49`/`C50` 22 µF on the +3V3/+1V8 regulator
+  outputs (AMS1117 can oscillate with only low-ESR ceramic); `C51` 10 µF
+  shared input bulk.
+- **FPGA per-rail 4.7 µF bulk (UG393).** `C52`(+3V3)/`C53`(+1V8)/`C54`(+1V0) —
+  the round-robin C1–C20 100 nF is the HF local decoupling; these are the
+  missing per-rail LF bulk.
+- **ADF4351 per-supply 100 nF.** `C60`–`C65` — one per AVDD/DVDD/RF_AVDD/RF_DVDD
+  pin (the PLL has 6 separate supply pins, each needs its own local bypass).
+- **FT232 decoupling.** `C55`(3V3OUT 4.7 µF)/`C56`(VCC 100 nF)/`C57`(VCCIO 100
+  nF); `C58` TCXO Vdd, `C59` W25Q128 VCC.
+- **JTAG pulls.** `R80`/`R81`/`R82` 4.7 k on TCK/TMS/TDO (TDI driven by J9).
+- **Reset integrity (the real reset bug).** `J7` is the active-high fabric
+  `reset` (drives `top_level.v` `input reset`, used by every submodule). The
+  original fault was a **floating reset when J7 is released** (not the button
+  net itself). `R83` 10 k pulls `reset` to GND (defines released = 0); `C68`
+  100 nF + R83 = 1 ms RC debounce on the release edge. Pressed → reset=+3V3.
+- **TIA→XADC level-shift divider (critical fix, see §15C).** `R84` 47 k +
+  `R85` 10 k (÷5.7) + `C66` 100 nF anti-alias: `TIA_OUT` (0–5 V) → `TIA_ADC`
+  (0–0.88 V) → FPGA XADC `VP` (spec'd 0–1 V). Without this the 2.5 V-centered
+  TIA output would overdrive the XADC (abs max VCCADC+0.3 ≈ 2.1 V).
+
+### Chip module (added parts)
+- **TIA +5 V isolation.** `FB1` 600 Ω@100 MHz ferrite +5 V → +5V_TIA, `C85`
+  10 µF + `C86` 100 nF local bulk/bypass. The 8× MOSFET emitter switching
+  injects noise into +5 V; the ADA4530-1 fA electrometer needs a clean local
+  rail. `#FLG3` flags +5V_TIA as driven (FB1 is passive, so ERC does not
+  propagate the +5 V driver through it). U3 V+ and R10 are on +5V_TIA.
+- **TIA_REF LF bulk.** `C87` 1 µF on `TIA_REF` (C11 100 nF is the HF bypass) —
+  lowers the reference noise floor for the fA-leakage measurement.
+- **Thermistor filter.** `C88` 100 nF on `THRM`.
+- **MOSFET gate pull resistors (OFF-state definition).** `R88`–`R95` 100 k
+  pull the 8 P-MOS row gates to +5 V = OFF; `R96`–`R103` 100 k pull the 8 N-MOS
+  column gates to GND = OFF. Without these, the gates float during power-up
+  (before the 74HCT240 outputs are alive) and a floating gate can spuriously
+  fire an emitter pixel. 100 k is easily overridden by the 74HCT240 active
+  drive once it powers up.
+
+All added parts carry real LCSC/JLC sourcing in `hardware/datasheets/BOM.csv`.
+
+---
+
+## 15C. Chip↔FPGA Interface Physics — why the die is NOT wired direct to the FPGA
+
+The user asked to *calculate the physics* to determine what resistors /
+components the chip needs to connect to the FPGA, or whether it goes direct.
+**It does not go direct on either side.** Both the detector path and the
+emitter path need an active analog/driver stage on the chip module between the
+die and the FPGA. The numbers below size every resistor in that interface.
+
+### C1. Photodetector path: die → MUX → TIA → divider → XADC
+
+The 8×8 graphene/MoS₂ photodetector array produces a **photocurrent**
+(`I_ph`, pA–nA under the site's NV PL, 637–800 nm). An FPGA **cannot read a
+photocurrent directly**: an LVCMOS input is a high-impedance digital threshold
+(~1.4 V) with no current-to-voltage conversion and no analog measurement, and
+the Artix-7 XADC hard block measures **voltage** (0–1 V on Vp/Vn), not current.
+A photodiode wired straight to an FPGA pin reads as random digital noise and
+cannot produce an ODMR spectrum. The required chain is:
+
+```
+electrode → ADG732 (64:1 MUX, 2×32:1) → ADA4530-1 TIA → ÷5.7 divider → XADC VP
+```
+
+**MUX.** 2× ADG732 (U1/U2) give 64:1 selection; on-resistance `R_on ≈ 1.5 Ω`
+≪ `R_f` = 1 MΩ, so the switch contributes negligible series error vs the
+feedback resistor. The FPGA drives `det_mux_sel[5:0]` + a 74LVC1G04 inverter to
+pick U1 ch0–31 / U2 ch32–63.
+
+**Transimpedance (Rf, Cf).** Zero-bias / photovoltaic TIA (ADA4530-1
+electrometer, V+ = +5V_TIA, ref = TIA_REF 2.5 V):
+
+| quantity | formula | value |
+|---|---|---|
+| transimpedance gain | `A = R_f` | 1 MΩ → 1 V/µA = 1 mV/nA = 1 µV/pA |
+| feedback BW | `f_c = 1/(2π·R_f·C_f)` | 1/(2π·1e6·1.5e-12) ≈ **106 kHz** |
+| Rf Johnson current noise | `√(4kT/R_f)` | √(4·1.38e-23·300/1e6) ≈ **0.13 pA/√Hz** |
+| integrated noise (106 kHz BW) | `0.13·√106e3` | ≈ **41 pA RMS** → 41 µV at the output |
+
+106 kHz ≫ the 1 kHz lock-in modulation, and 41 pA is far above the ADA4530-1
+fA-level input noise — so the analog floor is set by the feedback resistor, as
+expected for an electrometer. Photocurrents down to ~pA are resolvable at the
+TIA output.
+
+**Level-shift divider (R84, R85, C66) — the critical fix.** The TIA runs on
++5 V with a 2.5 V mid-supply reference, so `TIA_OUT` sits at ~2.5 V and swings
+0–5 V. The XADC Vp/Vn inputs are spec'd **0–1 V** (abs max VCCADC+0.3 ≈ 2.1 V).
+A direct wire (the original design) overdrives the XADC. `R84` 47 k + `R85`
+10 k = **5.7:1** maps `TIA_OUT` 0–5 V → `TIA_ADC` 0–0.88 V — inside the 0–1 V
+window at every operating point, so no clamp is needed. The 57 k divider load
+is comfortable for the ADA4530-1 output. `C66` 100 nF is the anti-alias cap:
+`R84‖R85 = 8.25 k` × 100 nF = 0.825 µs → **193 kHz** pole (above the 1 kHz
+lock-in, below the XADC 1 MSPS Nyquist).
+
+```
+TIA_OUT 0–5 V  --R84 47k--+--R85 10k--GND      TIA_ADC 0–0.88 V -> XADC VP
+                          |
+                       C66 100nF
+                          |
+                         GND
+```
+
+**System resolution after the divider.** XADC is 12-bit over 0–1 V →
+1 LSB = 0.244 mV at `TIA_ADC` = **1.39 mV at the TIA** = **1.39 nA**
+photocurrent (R_f = 1 MΩ). So the digitised system is quantization-limited at
+~1.4 nA, comfortably above the ~41 pA analog floor — fine for NV ODMR
+photocurrents (nA–µA). (A gentler ÷3 divider would buy ~2× SNR but lets
+`TIA_OUT` above 3 V clip the XADC; ÷5.7 keeps the full 0–5 V swing in range
+unconditionally — the safe production choice. Tune the ratio if the expected
+photocurrent range is known to be small.)
+
+### C2. Emitter path: FPGA → 74HCT240 → MOSFET crossbar → 220 R → pixel
+
+The 8×8 CQD ASE/LED emitter array (ITO/PEDOT:PSS/CQD–PVA/ZnO/Ag, ~520–540 nm)
+is an 8-row-anode × 8-column-cathode crossbar. Each pixel needs a few mA at a
+couple of volts. The FPGA **cannot drive the pixels directly**: (a) FPGA
+LVCMOS is 3.3 V — below the ~2.2–2.8 V pixel V_f plus headroom, and unable to
+reach a 5 V drive; (b) there is no current limiting — a direct pin would
+either damage the pixel or give uncontrolled brightness; (c) an 8×8 matrix
+needs high-side **and** low-side selection (one pixel at a time), which a
+single FPGA pin cannot do; (d) the FPGA cannot source/sink the 5 V column
+current safely. The required chain is:
+
+```
+FPGA emitter_rows/cols (3.3 V one-hot) → 74HCT240 (level shift 3.3→5 V + invert)
+  → 8× AO3401A P-MOS high-side rows + 8× AO3400A N-MOS low-side cols
+  → 220 R set resistor → pixel
+```
+
+**Set resistor (R1–R8, 220 R).** Limits the per-pixel current:
+
+```
+R_set = (V_drive − V_pixel) / I_pixel = (5 − 2.8) / 10 mA ≈ 220 Ω
+I_pixel = (5 − V_f) / R_set  →  V_f=2.0 V: 13.6 mA,  V_f=2.2 V: 12.7 mA,
+                                 V_f=2.8 V: 10.0 mA   (~9–13 mA over V_f)
+```
+
+Only one pixel is addressed at a time (`emitter_array.v` one-hot), so the peak
+emitter-rail current is one pixel's ~9–13 mA — trivial for the +5 V rail, no
+boost needed.
+
+**Gate pull resistors (R88–R103, 100 k).** Before the 74HCT240 powers up its
+outputs are high-Z; a floating MOSFET gate can spuriously turn a pixel on.
+`R88`–`R95` 100 k pull the P-MOS row gates to +5 V = OFF (V_gs = 0); `R96`–
+`R103` 100 k pull the N-MOS column gates to GND = OFF. 100 k is weak enough
+that the 74HCT240's active drive (~±20 mA, output impedance ≪ 100 k) cleanly
+overrides it once alive. Pulled gates also harden the crossbar against
+single-event / power-sequencing glitches.
+
+### C3. TIA supply isolation (FB1, C85, C86)
+
+`FB1` 600 Ω@100 MHz + `C85` 10 µF + `C86` 100 nF isolate the TIA's +5V_TIA
+rail from the +5 V rail that the 8× MOSFET emitter switches pollute with
+switching noise. The ferrite is lossy at HF (resistive, no resonance peak) so
+it absorbs the switching edge energy rather than ringing it back; the local
+bulk + bypass then hold +5V_TIA clean for the fA electrometer. This is the
+analog-cleanliness counterpart to the digital decoupling above.
+
+### C4. Die size & pad pitch
+
+The QSSC_Chip die is **20×20 mm** with **80 wire-bond pads at 1.0 mm pitch**
+(64 DET + 8 ER + 8 EC). 1.0 mm pitch is comfortably wire-bondable with standard
+Au wedge bonding and relaxes the PCB fanout (0.5 mm pitch needs BGA-class
+escape; 1.0 mm routes on a 6-layer board without HDI). The chip module is
+widened to 85×55 mm to fit the die, the MOSFET emitter crossbar, the MUX/TIA,
+and the gate-pull/hardening parts with DRC-clean courtyards.
 
 ---
 
@@ -919,7 +1188,12 @@ zero-bias, §8). The module board is widened to 85×50 mm to fit the driver.
   design: <https://www.analog.com/media/en/technical-documentation/data-sheets/adf4351.pdf>
 - Xilinx XC7A35T data sheet / UG475 packaging and pinout (Artix-7 family); XADC
   (UG480) — 12-bit, up to 1 MSPS, aux input channels.
-- HMC441LP3E data sheet, Analog Devices.
+- GVA-84+ RF MMIC amplifier data sheet, Mini-Circuits (replaces the HMC441LP3E,
+  which was the wrong band 6.5–13.5 GHz and had an unnetted custom symbol).
+- ADA4530-1 electrometer op-amp data sheet, Analog Devices (TIA, min 5 V supply).
+- Full verified pinouts + canonical datasheet URLs for every active component
+  are in [`hardware/datasheets/DATASHEETS.md`](datasheets/DATASHEETS.md); the
+  BOM is [`datasheets/BOM.csv`](datasheets/BOM.csv).
 - NV⁻ centre room-temperature coherence: Balasubramanian *et al.* (2009),
   12C-enriched CVD diamond T₂ ≈ 1.8 ms at 300 K; NV ODMR readout (D ≈ 2.87 GHz,
   ms spin states, PL 637–800 nm).

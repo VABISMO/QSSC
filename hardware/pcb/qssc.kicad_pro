@@ -248,7 +248,7 @@
         "diff_pair_via_gap": 0.25,
         "diff_pair_width": 0.2,
         "line_style": 0,
-        "microvia_diameter": 0.3,
+        "microvia_diameter": 0.2,
         "microvia_drill": 0.1,
         "name": "Default",
         "pcb_color": "rgba(0, 0, 0, 0.000)",
@@ -265,7 +265,7 @@
         "diff_pair_via_gap": 0.25,
         "diff_pair_width": 0.2,
         "line_style": 0,
-        "microvia_diameter": 0.3,
+        "microvia_diameter": 0.2,
         "microvia_drill": 0.1,
         "name": "Analog",
         "pcb_color": "rgba(255, 255, 0, 0.000)",
@@ -282,7 +282,7 @@
         "diff_pair_via_gap": 0.25,
         "diff_pair_width": 0.2,
         "line_style": 0,
-        "microvia_diameter": 0.3,
+        "microvia_diameter": 0.2,
         "microvia_drill": 0.1,
         "name": "Power",
         "pcb_color": "rgba(0, 0, 255, 0.000)",
@@ -299,7 +299,7 @@
         "diff_pair_via_gap": 0.25,
         "diff_pair_width": 0.2,
         "line_style": 0,
-        "microvia_diameter": 0.3,
+        "microvia_diameter": 0.2,
         "microvia_drill": 0.1,
         "name": "RF",
         "pcb_color": "rgba(255, 0, 0, 0.000)",
@@ -316,7 +316,7 @@
         "diff_pair_via_gap": 0.25,
         "diff_pair_width": 0.2,
         "line_style": 0,
-        "microvia_diameter": 0.3,
+        "microvia_diameter": 0.2,
         "microvia_drill": 0.1,
         "name": "USB",
         "pcb_color": "rgba(0, 255, 0, 0.000)",
@@ -399,6 +399,10 @@
       },
       {
         "netclass": "Analog",
+        "pattern": "TIA_ADC"
+      },
+      {
+        "netclass": "Analog",
         "pattern": "TIA_OUT"
       },
       {
@@ -411,7 +415,19 @@
       },
       {
         "netclass": "USB",
+        "pattern": "USB_DM_F"
+      },
+      {
+        "netclass": "USB",
         "pattern": "USB_DP"
+      },
+      {
+        "netclass": "USB",
+        "pattern": "USB_DP_F"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "VBUS_USB"
       },
       {
         "netclass": "Analog",

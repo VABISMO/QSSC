@@ -12,8 +12,10 @@ router is pointed at a TEMPORARY copy of the board via ``QSSC_PCB_PATH`` so the
 committed ``qssc.kicad_pcb`` is never mutated by the test.
 
 Verification parses the saved ``.kicad_pcb`` sexp (no pcbnew) for:
-  * 4 zones: GND plane on In1.Cu, +3V3 plane on In2.Cu, GND floods on F.Cu/B.Cu
-  * > 0 GND stitching vias, every one netted GND (net code 13)
+  * 2 zones: GND plane on In1.Cu, +3V3 plane on In2.Cu (PWR). The 6-layer HDI
+    stackup has NO F.Cu/B.Cu GND floods -- those are signal layers now -- so the
+    only planes are the two inner reference planes.
+  * > 0 GND stitching vias, every one netted GND
   * idempotency: a second subprocess run reproduces the same counts/structure
 """
 from __future__ import annotations
@@ -66,21 +68,19 @@ def test_copper_plane_foundation(tmp_path):
     _run_router(dst)
     r1 = _parse(dst)
 
-    # --- 4 zones on the right layers/nets ---
-    assert len(r1["zones"]) == 4
+    # --- 2 inner planes on the right layers/nets (6-layer HDI stackup: no
+    # F.Cu/B.Cu GND floods -- those are signal layers). ---
+    assert len(r1["zones"]) == 2
     assert r1["zones"] == sorted([
-        ("F.Cu", "GND"),       # GND flood top
         ("In1.Cu", "GND"),     # GND plane
-        ("In2.Cu", "+3V3"),    # +3V3 plane
-        ("B.Cu", "GND"),       # GND flood bottom
+        ("In2.Cu", "+3V3"),    # +3V3 plane (PWR layer)
     ])
 
-    # --- GND stitching vias present (net code 13 = GND). The canonical board
-    # now also carries signal routing vias from a prior ``route_signals.py``
-    # pass, which ``_clear_routed`` deliberately PRESERVES (only zones + GND
-    # tracks/vias are rebuilt). So via_nets is GND plus the routed signal nets;
-    # we assert GND stitching is present and dominates, not that it is the
-    # only net. ---
+    # --- GND stitching vias present. The canonical board now also carries
+    # signal routing vias from a prior ``route_signals.py`` pass, which
+    # ``_clear_routed`` deliberately PRESERVES (only zones + its own wide
+    # GND/+3V3 vias are rebuilt). So via_nets is GND plus the routed signal
+    # nets; we assert GND stitching is present, not that it is the only net. ---
     assert r1["via_count"] > 50
     assert r1["gnd_net"] is not None
     assert r1["gnd_net"] in r1["via_nets"]
