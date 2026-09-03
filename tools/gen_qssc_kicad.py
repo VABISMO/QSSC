@@ -225,7 +225,7 @@ _FPGA_CFG_NET = {
 # user-IO signals that are FPGA inputs (the rest are outputs); all drawn as
 # bidirectional so ERC stays lenient on unused-direction pins.
 _FPGA_INPUT_NETS = {"clk_100mhz", "reset", "UART_RX", "TCK", "TMS", "TDI",
-                    "ADF_MUXOUT", "TIA_OUT", "CONF_INIT", "CONF_PROG"}
+                    "ADF_MUXOUT", "CONF_INIT", "CONF_PROG"}
 
 
 def fpga_net_map():
@@ -259,14 +259,10 @@ def fpga_net_map():
         m[ball] = _FPGA_CFG_NET[name]
     for name, ball in s["jtag"].items():
         m[ball] = name
-    # XADC VP sees TIA_ADC, NOT TIA_OUT directly: the ADA4530-1 TIA runs on +5V
-    # with a 2.5V mid-supply reference, so TIA_OUT sits at ~2.5V and swings 0-5V,
-    # but the Artix-7 XADC analog inputs (Vp/Vn/Vaux) are spec'd 0-1V (abs max
-    # VCCADC+0.3 ~= 2.1V).  A direct wire would overdrive/clamp the XADC.  R84/R85
-    # form a 5.7:1 divider (TIA_OUT -> TIA_ADC) so 0-5V -> 0-0.88V, and C66 is the
-    # anti-alias cap.  See HARDWARE_DESIGN.md §15C (chip<->FPGA interface physics).
-    m[s["xadc"]["VP"]] = "TIA_ADC"
-    m[s["xadc"]["VN"]] = "GND"
+    # The XADC VP/VN balls are LEFT NC: the single-board pivot replaces the
+    # TIA/XADC analog chain with 64 parallel digital counters (comparator ->
+    # LVCMOS GPIO).  The XADC is unused on the merged board.  (VREFP/VREFN stay
+    # netted for the on-chip reference bypass -- those are separate pads.)
     return m
 
 
@@ -311,6 +307,161 @@ def fpga_pin_list():
     for i, (num, name, et) in enumerate(bot):
         pins.append(dict(number=num, name=name, etype=et, x=round(xB + i * sp, 2),
                          y=10.16, rot=270, length=2.54))
+    return pins
+
+
+# ---- QSSC_Chip -- the merged-board quantum die (128 pads) -------------------
+# Bare die mounted face-up and wire-bonded outward to PCB perimeter pads (NOT a
+# flip-chip area array).  The 2026-09 single-board pivot merges the old chip
+# module onto THIS board and makes every channel PARALLEL: 64 detector pads
+# DET0..DET63 on the TOP edge (-> the TIA/comparator front-end above the die) and
+# 64 emitter pads EM0..EM63 on the BOTTOM edge (-> the P-MOS driver below the
+# die).  Two opposite-edge rows let all 128 nets escape outward on F.Cu -- no
+# MUX, no 8x8 matrix, no Samtec mezzanine.  Symbol pin NUMBER == footprint pad
+# name (DET0..DET63 / EM0..EM63) so fp_net_pads nets every pad by name.
+def chip_pin_list():
+    """Schematic pins for the 128-pad die: 64 DET on the top edge, 64 EM on the
+    bottom edge.  1.0 mm SYMBOL pitch (independent of the 0.30 mm PCB pad pitch
+    -- the symbol is just the schematic representation)."""
+    pins = []
+    sp = 1.0
+    x0 = -sp * 63 / 2                       # 64 pins centered -> -31.5..+31.5
+    for i in range(64):
+        pins.append(dict(number=f"DET{i}", name=f"DET{i}", etype="passive",
+                         x=round(x0 + i * sp, 2), y=-12.7, rot=90, length=2.54))
+    for i in range(64):
+        pins.append(dict(number=f"EM{i}", name=f"EM{i}", etype="passive",
+                         x=round(x0 + i * sp, 2), y=12.7, rot=270, length=2.54))
+    return pins
+
+
+def chip_net_map():
+    """{pad_name: net} for the 128-pad die -- one net per channel, all parallel.
+    DET{i} -> DET_IN{i}  (analog input to the TIA/comparator front-end, Phase 1b)
+    EM{i}  -> emitter_anode{i}  (P-MOS high-side driver drain, Phase 1b)."""
+    m = {}
+    for i in range(64):
+        m[f"DET{i}"] = f"DET_IN{i}"
+        m[f"EM{i}"] = f"emitter_anode{i}"
+    return m
+
+
+def chip_footprint():
+    """Inline (footprint ...) sexp for the merged-board QSSC die: 128 perimeter
+    wire-bond pads on F.Cu.  20x20 mm die, 0.30 mm pad pitch, 0.15x0.30 mm pads
+    (0.15 mm gap == board min_clearance, so adjacent DIFFERENT-net pads pass DRC).
+    64 DET pads on the top edge (y=-10), 64 EM pads on the bottom edge (y=+10),
+    both centered x = -9.45..+9.45."""
+    def pad(name, x, y):
+        return L(A("pad"), S(name), A("smd"), A("rect"),
+                 L(A("at"), A(round(x, 3)), A(round(y, 3))),
+                 L(A("size"), A(0.15), A(0.30)),
+                 L(A("layers"), S("F.Cu"), S("F.Paste"), S("F.Mask")))
+    pads = []
+    pitch = 0.30
+    x0 = -pitch * 63 / 2                     # 64 pads centered -> -9.45..+9.45
+    for i in range(64):
+        pads.append(pad(f"DET{i}", x0 + i * pitch, -10.0))   # top edge
+    for i in range(64):
+        pads.append(pad(f"EM{i}", x0 + i * pitch, 10.0))     # bottom edge
+    return L(A("footprint"), S("qssc:QSSC_Chip"),
+             L(A("layer"), S("F.Cu")),
+             L(A("version"), A(20240108)),
+             L(A("generator"), S("gen_qssc_kicad")),
+             L(A("generator_version"), S("8.0")),
+             L(A("descr"), S("QSSC quantum die: 64 graphene detector + 64 CQD emitter; 20x20 mm, perimeter wire-bond pads (0.30 mm pitch)")),
+             L(A("attr"), A("smd")),
+             L(A("property"), S("Reference"), S("U"),
+               L(A("at"), A(0), A(-11), A(0)),
+               L(A("effects"), L(A("font"), L(A("size"), A(0.8), A(0.8))))),
+             L(A("property"), S("Value"), S("QSSC_Chip"),
+               L(A("at"), A(0), A(11), A(0)),
+               L(A("effects"), L(A("font"), L(A("size"), A(0.8), A(0.8))))),
+             L(A("fp_rect"), L(A("start"), A(-10.2), A(-10.2)), L(A("end"), A(10.2), A(10.2)),
+               L(A("stroke"), L(A("width"), A(0.05)), L(A("type"), A("solid"))),
+               L(A("fill"), A("none")), L(A("layer"), S("F.Fab")), L(A("uuid"), S(u()))),
+             L(A("fp_rect"), L(A("start"), A(-10.5), A(-10.5)), L(A("end"), A(10.5), A(10.5)),
+               L(A("stroke"), L(A("width"), A(0.05)), L(A("type"), A("solid"))),
+               L(A("fill"), A("none")), L(A("layer"), S("F.CrtYd")), L(A("uuid"), S(u()))),
+             *pads)
+
+
+# ---- Phase 1b front-end / driver symbol pinouts (datasheet, hand-authored) -
+def tlv9004_pin_list():
+    """TLV9004 quad CMOS op-amp, TSSOP-14 (TI). 1=OUTA 2=-INA 3=+INA 4=V+
+    5=+INB 6=-INB 7=OUTB 8=OUTC 9=-INC 10=+INC 11=V- 12=+IND 13=-IND 14=OUTD.
+    Used as the 64-ch TIA (1 IC = 4 detector channels), on +3V3."""
+    L = [("1", "OUTA", "output"), ("2", "INA-", "input"), ("3", "INA+", "input"),
+         ("7", "OUTB", "output"), ("6", "INB-", "input"), ("5", "INB+", "input"),
+         ("8", "OUTC", "output"), ("9", "INC-", "input"), ("10", "INC+", "input"),
+         ("14", "OUTD", "output"), ("13", "IND-", "input"), ("12", "IND+", "input")]
+    pins = []
+    yL = 2.54 * (len(L) - 1) / 2
+    for i, (n, nm, et) in enumerate(L):
+        pins.append(dict(number=n, name=nm, etype=et, x=-10.16,
+                         y=round(yL - i * 2.54, 2), rot=0, length=2.54))
+    pins.append(dict(number="4", name="V+", etype="power_in", x=0, y=-10.16, rot=90, length=2.54))
+    pins.append(dict(number="11", name="V-", etype="power_in", x=0, y=10.16, rot=270, length=2.54))
+    return pins
+
+
+def lmv339_pin_list():
+    """LMV339 quad comparator, SOIC-14 (TI). 1=OUTA 2=-INA 3=+INA 4=-INB 5=+INB
+    6=OUTB 7=GND 8=OUTC 9=-INC 10=+INC 11=OUTD 12=+IND 13=-IND 14=VCC.
+    Open-collector -> 10k pull-up to +3V3 -> DET_DIG (FPGA LVCMOS33)."""
+    L = [("1", "OUTA", "output"), ("2", "INA-", "input"), ("3", "INA+", "input"),
+         ("6", "OUTB", "output"), ("4", "INB-", "input"), ("5", "INB+", "input"),
+         ("8", "OUTC", "output"), ("9", "INC-", "input"), ("10", "INC+", "input"),
+         ("11", "OUTD", "output"), ("13", "IND-", "input"), ("12", "IND+", "input")]
+    pins = []
+    yL = 2.54 * (len(L) - 1) / 2
+    for i, (n, nm, et) in enumerate(L):
+        pins.append(dict(number=n, name=nm, etype=et, x=-10.16,
+                         y=round(yL - i * 2.54, 2), rot=0, length=2.54))
+    pins.append(dict(number="14", name="VCC", etype="power_in", x=0, y=-10.16, rot=90, length=2.54))
+    pins.append(dict(number="7", name="GND", etype="power_in", x=0, y=10.16, rot=270, length=2.54))
+    return pins
+
+
+def mcp4725_pin_list():
+    """MCP4725 12-bit I2C DAC, SOT-23-6 (Microchip). 1=VDD 2=GND 3=VOUT 4=SDA
+    5=SCL 6=ADDR. VOUT -> DET_THR (shared 64-comparator threshold)."""
+    return [dict(number="1", name="VDD", etype="power_in", x=-7.62, y=3.81, rot=0, length=2.54),
+            dict(number="2", name="GND", etype="power_in", x=-7.62, y=-3.81, rot=0, length=2.54),
+            dict(number="3", name="VOUT", etype="power_out", x=7.62, y=3.81, rot=180, length=2.54),
+            dict(number="4", name="SDA", etype="bidirectional", x=7.62, y=1.27, rot=180, length=2.54),
+            dict(number="5", name="SCL", etype="bidirectional", x=7.62, y=-1.27, rot=180, length=2.54),
+            dict(number="6", name="ADDR", etype="input", x=-7.62, y=1.27, rot=0, length=2.54)]
+
+
+def ao3401a_pin_list():
+    """AO3401A P-channel MOSFET, SOT-23 (AOS). 1=G 2=S 3=D. High-side emitter
+    switch: G=em_gate, S=+5V, D=em_drain -> 220R -> emitter_anode."""
+    return [dict(number="1", name="G", etype="input", x=-5.08, y=0, rot=0, length=2.54),
+            dict(number="2", name="S", etype="passive", x=2.54, y=3.81, rot=270, length=2.54),
+            dict(number="3", name="D",etype="passive", x=2.54, y=-3.81, rot=90, length=2.54)]
+
+
+def hct240_pin_list():
+    """74HCT240 octal inverting 3-state buffer, TSSOP-20 (Nexperia). 8 channels;
+    /1OE,/2OE tied low (always on). VCC=+5V level-shifts FPGA 3V3->5V."""
+    L = [("2", "1A0", "input"), ("4", "1A1", "input"), ("6", "1A2", "input"), ("8", "1A3", "input"),
+         ("17", "2A0", "input"), ("15", "2A1", "input"), ("13", "2A2", "input"), ("11", "2A3", "input")]
+    R = [("18", "1Y0", "output"), ("16", "1Y1", "output"), ("14", "1Y2", "output"), ("12", "1Y3", "output"),
+         ("3", "2Y0", "output"), ("5", "2Y1", "output"), ("7", "2Y2", "output"), ("9", "2Y3", "output")]
+    pins = []
+    yL = 2.54 * (len(L) - 1) / 2
+    for i, (n, nm, et) in enumerate(L):
+        pins.append(dict(number=n, name=nm, etype=et, x=-10.16,
+                         y=round(yL - i * 2.54, 2), rot=0, length=2.54))
+    yR = 2.54 * (len(R) - 1) / 2
+    for i, (n, nm, et) in enumerate(R):
+        pins.append(dict(number=n, name=nm, etype=et, x=10.16,
+                         y=round(yR - i * 2.54, 2), rot=180, length=2.54))
+    pins.append(dict(number="1", name="1OE", etype="input", x=-5.08, y=-10.16, rot=90, length=2.54))
+    pins.append(dict(number="19", name="2OE", etype="input", x=5.08, y=-10.16, rot=90, length=2.54))
+    pins.append(dict(number="20", name="VCC", etype="power_in", x=0, y=-10.16, rot=90, length=2.54))
+    pins.append(dict(number="10", name="GND", etype="power_in", x=0, y=10.16, rot=270, length=2.54))
     return pins
 
 
@@ -375,6 +526,22 @@ def authored_symbols():
     # Body box spans the 1.27 mm-pitched top/bottom pin rows (~+/-42 mm).
     syms.append(custom_symbol_def("qssc", "XC7A35T_CPG236", "U", fpga_pin_list(),
                                   (-44.45, -12.7, 44.45, 12.7), value="XC7A35T-1CPG236C"))
+    # QSSC_Chip -- the merged-board quantum die: 128 pads (64 DET top + 64 EM
+    # bottom), bare die perimeter wire-bonded to F.Cu.  Body spans the 64-wide pin
+    # rows; 1.0 mm symbol pitch.  Pin numbers == footprint pad names.
+    syms.append(custom_symbol_def("qssc", "QSSC_Chip", "U", chip_pin_list(),
+                                  (-34.0, -10.16, 34.0, 10.16), value="QSSC_Chip"))
+    # ---- Phase 1b front-end / driver IC symbols (hand-authored datasheet pinouts)
+    syms.append(custom_symbol_def("qssc", "TLV9004", "U", tlv9004_pin_list(),
+                                  (-7.62, -7.62, 7.62, 7.62), value="TLV9004"))
+    syms.append(custom_symbol_def("qssc", "LMV339", "U", lmv339_pin_list(),
+                                  (-7.62, -7.62, 7.62, 7.62), value="LMV339"))
+    syms.append(custom_symbol_def("qssc", "MCP4725", "U", mcp4725_pin_list(),
+                                  (-5.08, -5.08, 5.08, 5.08), value="MCP4725"))
+    syms.append(custom_symbol_def("qssc", "AO3401A", "Q", ao3401a_pin_list(),
+                                  (-5.08, -5.08, 5.08, 5.08), value="AO3401A"))
+    syms.append(custom_symbol_def("qssc", "74HCT240", "U", hct240_pin_list(),
+                                  (-7.62, -12.7, 7.62, 12.7), value="74HCT240"))
     # W25Q128 config flash (SOIC-8, datasheet pinout).  QSPI x4 boot to the FPGA
     # dedicated config balls D00..D03 / FCS_B / CCLK.
     syms.append(custom_symbol_def("qssc", "W25Q128JVS", "U", [
@@ -420,11 +587,6 @@ def authored_symbols():
                                   std_pins("Connector_Generic", "Conn_02x05_Odd_Even"), value=""))
     syms.append(replicated_symbol("qssc", "Conn_01x02", "J",
                                   std_pins("Connector_Generic", "Conn_01x02"), value=""))
-    # Board-to-board chip-module connector: Samtec LSHM-130 (2x30 0.5 mm, 60 pos)
-    # mates the swappable chip module (MUX + TIA + emitter driver + R1-R64).
-    syms.append(replicated_symbol("qssc", "Conn_02x30_Odd_Even", "J",
-                                  std_pins("Connector_Generic", "Conn_02x30_Odd_Even"),
-                                  value="Samtec LSHM-130"))
     syms.append(replicated_symbol("qssc", "SW_Push", "SW",
                                   std_pins("Switch", "SW_Push"), value="RESET"))
     syms.append(replicated_symbol("qssc", "USB_C_Receptacle", "J",
@@ -478,7 +640,8 @@ def replicated_symbol(lib, name, refpref, stdpinlist, value=None):
 
 # Map lib_id -> symbol name in our authored lib
 SYM_NAME = {
-    "qssc:XC7A35T_CPG236": "XC7A35T_CPG236", "qssc:GVA-84": "GVA-84+",
+    "qssc:XC7A35T_CPG236": "XC7A35T_CPG236", "qssc:QSSC_Chip": "QSSC_Chip",
+    "qssc:GVA-84": "GVA-84+",
     "qssc:AP2127K-1.0": "AP2127K-1.0", "qssc:AMS1117-1.8": "AMS1117-1.8",
     "qssc:AMS1117-3.3": "AMS1117-3.3", "qssc:AMS1117-5.0": "AMS1117-5.0",
     "qssc:FT232RL": "FT232RL", "qssc:ADF4351": "ADF4351", "qssc:ADA4530-1": "ADA4530-1",
@@ -486,10 +649,11 @@ SYM_NAME = {
     "qssc:ASE_osc": "ASE_osc", "qssc:Barrel_Jack": "Barrel_Jack",
     "qssc:Conn_Coaxial": "Conn_Coaxial", "qssc:Conn_02x08": "Conn_02x08",
     "qssc:Conn_02x05": "Conn_02x05", "qssc:Conn_01x02": "Conn_01x02",
-    "qssc:Conn_02x30_Odd_Even": "Conn_02x30_Odd_Even",
     "qssc:SW_Push": "SW_Push", "qssc:USB_C_Receptacle": "USB_C_Receptacle",
     "qssc:R": "R", "qssc:C": "C", "qssc:L": "L", "qssc:LED": "LED",
     "qssc:Polyfuse": "Polyfuse", "qssc:D": "D",
+    "qssc:TLV9004": "TLV9004", "qssc:LMV339": "LMV339", "qssc:MCP4725": "MCP4725",
+    "qssc:AO3401A": "AO3401A", "qssc:74HCT240": "74HCT240",
 }
 
 # authored pin coords lookup (lib_id -> {pin_number: (x,y,rot)})
@@ -666,35 +830,20 @@ add("C35", "qssc:C", "100p", "Capacitor_SMD:C_0603_1608Metric", 390, 150, pins={
 add("J3", "qssc:Conn_Coaxial", "SMA", "Connector_Coaxial:SMA_Amphenol_132289_EdgeMount",
     420, 150, pins={"1": "J3_SIG", "2": "GND"})
 
-# Board-to-board chip-module connector J11 (Samtec LSHM-130, 2x30 0.5 mm).
-# The swappable chip MODULE (ADG732 64:1 MUX + ADA4530-1 TIA + discrete MOSFET
-# emitter crossbar: 2x 74HCT240 + 8x AO3401A P-MOS + 8x AO3400A N-MOS + 8x 220R,
-# on +5V, no boost, no DAC + NTC) mates here. Only digital selects, the one TIA
-# analog output back to the XADC, detector bias, modulation reference, and
-# power rails cross -- the 64 detector electrodes stay on the module. Per
-# column: top pad (odd) = signal/power, bottom pad (even) = GND (signal-GND
-# pairing for the 0.5 mm-pitch mezzanine).
-J11P = {}
-for i in range(8):                          # cols 1-8 : emitter row anode-enables
-    J11P[str(1 + 2 * i)] = f"emitter_rows{i}"
-for i in range(8):                          # cols 9-16 : emitter col cathode-enables
-    J11P[str(17 + 2 * i)] = f"emitter_cols{i}"
-for i in range(6):                          # cols 17-22 : analog MUX select
-    J11P[str(33 + 2 * i)] = f"det_mux_sel{i}"
-J11P["45"] = "mod_sync"                     # col 23 : 1 kHz lock-in mod reference
-J11P["47"] = "TIA_OUT"                      # col 24 : TIA output -> FPGA XADC VauxP0
-J11P["49"] = "TIA_REF"                      # col 25 : TIA reference (module)
-J11P["51"] = "DET_BIAS"                     # col 26 : detector bias (future DAC)
-J11P["53"] = "THRM"                         # col 27 : module thermistor sense
-J11P["55"] = "+3V3"                         # col 28 : module logic rail
-J11P["57"] = "+5V"                          # col 29 : module power rail
-J11P["59"] = "GND"                         # col 30 : was +7V_EMIT; emitter runs on +5V (pin 57) -> extra GND return
-for i in range(1, 61):                      # all even pads = GND (return per signal)
-    if i % 2 == 0:
-        J11P[str(i)] = "GND"
-add("J11", "qssc:Conn_02x30_Odd_Even", "Samtec LSHM-130",
-    "Connector_Samtec:Samtec_LSHM-130-xx.x-x-DV-N_2x30_P0.50mm_Vertical",
-    90, 150, pins=J11P)
+# ==========================================================================
+# QSSC_Chip -- the merged-board quantum die (2026-09 single-board pivot).
+# The old two-board design mated a swappable chip MODULE here via a 60-pin
+# Samtec LSHM-130 (J11) carrying a 64:1 analog MUX, one TIA, and an 8x8
+# emitter crossbar.  That is GONE: the FPGA and the die are now on ONE board
+# and every channel is parallel.  The 128-pad bare die (64 DET top edge + 64 EM
+# bottom edge, 0.30 mm wire-bond pitch) is placed board-centre; its 64 DET_IN{i}
+# analog inputs fan UP to the TIA/comparator front-end and its 64 emitter_anode{i}
+# pads fan DOWN to the P-MOS driver (both added in Phase 1b).  In this Phase-1a
+# skeleton the 128 nets dangle at the die (ERC warnings, not errors) until the
+# front-end/driver are placed -- this step just shows the die placement.
+# ==========================================================================
+add("Uchip", "qssc:QSSC_Chip", "QSSC_Chip", "qssc:QSSC_Chip",
+    80, 55, pins=chip_net_map())
 
 # mw_gate drives the RF switch on THIS board (ADF4351 -> GVA-84+ -> SMA), so it
 # stays local (does not cross to the module): J8 header to the off-board switch.
@@ -824,18 +973,106 @@ add("R83", "qssc:R", "10k", "Resistor_SMD:R_0603_1608Metric",
     330, 348, pins={"1": "reset", "2": "GND"})
 add("C68", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
     342, 348, pins={"1": "reset", "2": "GND"})
-# TIA_OUT -> XADC level-shift divider (see fpga_net_map XADC note + §15C).
-# R84/R85 = 47k/10k = 5.7:1 -> TIA_OUT 0-5V maps to TIA_ADC 0-0.88V (inside the
-# XADC 0-1V window at every operating point, no clamp needed).  57k load is
-# comfortable for the ADA4530-1 electrometer output.  C66 anti-alias (47k||10k
-# = 8.25k x 100nF -> 193 kHz, well above the 1 kHz lock-in).  Placed next to J11
-# (pcb 24,64) where TIA_OUT enters the main board.
-add("R84", "qssc:R", "47k", "Resistor_SMD:R_0603_1608Metric",
-    354, 348, pins={"1": "TIA_OUT", "2": "TIA_ADC"})
-add("R85", "qssc:R", "10k", "Resistor_SMD:R_0603_1608Metric",
-    366, 348, pins={"1": "TIA_ADC", "2": "GND"})
-add("C66", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
-    378, 348, pins={"1": "TIA_ADC", "2": "GND"})
+# (The TIA_OUT -> XADC level-shift divider R84/R85/C66 is GONE: the single-board
+# pivot removes the TIA/XADC analog chain -- 64 parallel digital counters
+# replace it.  The XADC VP/VN balls are left NC; see fpga_net_map.)
+
+
+# --------------------------------------------------------------------------
+# Phase 1b -- 64-ch parallel detector front-end + 64-ch parallel emitter driver
+# --------------------------------------------------------------------------
+# Detector path (per channel i=0..63):  chip DET_IN{i} -> TLV9004 TIA (-IN,
+# +IN=DET_REF bias) -> DET_TIA{i} -> LMV339 comparator (+IN, -IN=DET_THR DAC)
+# -> open-collector OUT pulled to +3V3 -> DET_DIG{i} -> FPGA LVCMOS33 input.
+# Emitter path  (per channel i=0..63):  FPGA EM_DRV{i} -> 74HCT240 inverting
+# buffer (VCC=+5V, level-shifts) -> em_gate{i} -> AO3401A P-MOS gate; P-MOS
+# source=+5V, drain=em_drain{i} -> 220R -> emitter_anode{i} -> chip EM{i}.
+# 100k gate pull-up to +5V keeps the P-MOS off until the FPGA drives it.
+# All front-end runs on +3V3; the emitter driver on +5V (level-shifted from
+# the FPGA's 3V3 logic by the 74HCT240).
+def build_chip_frontend_and_driver():
+    # TLV9004 channel k -> (out, in-, in+) pin numbers (TSSOP-14 datasheet)
+    TIA_CH = {0: ("1", "2", "3"), 1: ("7", "6", "5"),
+              2: ("8", "9", "10"), 3: ("14", "13", "12")}
+    # LMV339 channel k -> (out, in-, in+) pin numbers (SOIC-14 datasheet)
+    CMP_CH = {0: ("1", "2", "3"), 1: ("6", "4", "5"),
+              2: ("8", "9", "10"), 3: ("11", "13", "12")}
+    # ---- 16x TLV9004 (TIA) + 16x LMV339 (comparator) ------------------------
+    for j in range(16):
+        tia = {"4": "+3V3", "11": "GND"}
+        cmp = {"14": "+3V3", "7": "GND"}
+        for k in range(4):
+            i = 4 * j + k
+            to, tm, tp = TIA_CH[k]
+            co, cm, cp = CMP_CH[k]
+            tia[tm] = f"DET_IN{i}"      # detector current -> inverting input
+            tia[tp] = "DET_REF"         # reference bias -> non-inverting input
+            tia[to] = f"DET_TIA{i}"     # TIA output
+            cmp[cp] = f"DET_TIA{i}"     # TIA out -> comparator +
+            cmp[cm] = "DET_THR"         # DAC threshold -> comparator -
+            cmp[co] = f"DET_DIG{i}"     # open-collector out -> DET_DIG
+        add(f"UT{j}", "qssc:TLV9004", "TLV9004",
+            "Package_SO:TSSOP-14_4.4x5mm_P0.65mm", 0, 0, pins=tia)
+        add(f"UC{j}", "qssc:LMV339", "LMV339",
+            "Package_SO:SOIC-14_3.9x8.7mm_P1.27mm", 0, 0, pins=cmp)
+    # ---- per-channel TIA feedback (Rf 1M || Cf 1p) + comparator pull-up 10k
+    for i in range(64):
+        add(f"Rf{i}", "qssc:R", "1M", "Resistor_SMD:R_0603_1608Metric", 0, 0,
+            pins={"1": f"DET_IN{i}", "2": f"DET_TIA{i}"})
+        add(f"Cf{i}", "qssc:C", "1pF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
+            pins={"1": f"DET_IN{i}", "2": f"DET_TIA{i}"})
+        add(f"Rpu{i}", "qssc:R", "10k", "Resistor_SMD:R_0603_1608Metric", 0, 0,
+            pins={"1": f"DET_DIG{i}", "2": "+3V3"})
+    # ---- threshold DAC (MCP4725) + I2C pull-ups + DET_REF bias divider ------
+    add("UDAC", "qssc:MCP4725", "MCP4725", "Package_TO_SOT_SMD:SOT-23-6", 0, 0,
+        pins={"1": "+3V3", "2": "GND", "3": "DET_THR", "4": "I2C_SDA",
+              "5": "I2C_SCL", "6": "GND"})
+    add("R_I2C_SDA", "qssc:R", "4.7k", "Resistor_SMD:R_0603_1608Metric", 0, 0,
+        pins={"1": "I2C_SDA", "2": "+3V3"})
+    add("R_I2C_SCL", "qssc:R", "4.7k", "Resistor_SMD:R_0603_1608Metric", 0, 0,
+        pins={"1": "I2C_SCL", "2": "+3V3"})
+    add("Rref1", "qssc:R", "10k", "Resistor_SMD:R_0603_1608Metric", 0, 0,
+        pins={"1": "+3V3", "2": "DET_REF"})
+    add("Rref2", "qssc:R", "10k", "Resistor_SMD:R_0603_1608Metric", 0, 0,
+        pins={"1": "DET_REF", "2": "GND"})
+    add("Cref", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
+        pins={"1": "DET_REF", "2": "GND"})
+    add("Cdac", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
+        pins={"1": "DET_THR", "2": "GND"})
+    # ---- per-IC decoupling (one 100nF each on the 32 front-end ICs) --------
+    for j in range(16):
+        add(f"Cut{j}", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
+            pins={"1": "+3V3", "2": "GND"})      # TLV9004 decoupling
+        add(f"Cuc{j}", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
+            pins={"1": "+3V3", "2": "GND"})      # LMV339 decoupling
+    # ---- 8x 74HCT240 (inverting buffer, VCC=+5V) ---------------------------
+    BUF_CH = {0: ("2", "18"), 1: ("4", "16"), 2: ("6", "14"), 3: ("8", "12"),
+              4: ("17", "3"), 5: ("15", "5"), 6: ("13", "7"), 7: ("11", "9")}
+    for j in range(8):
+        bp = {"1": "GND", "19": "GND", "20": "+5V", "10": "GND"}
+        for m in range(8):
+            i = 8 * j + m
+            inp, out = BUF_CH[m]
+            bp[inp] = f"EM_DRV{i}"      # FPGA -> buffer input
+            bp[out] = f"em_gate{i}"     # buffer output -> P-MOS gate
+        add(f"UB{j}", "qssc:74HCT240", "74HCT240",
+            "Package_SO:TSSOP-20_4.4x6.5mm_P0.65mm", 0, 0, pins=bp)
+    # ---- 64x AO3401A P-MOS high-side switch + 220R + 100k gate pull-up ------
+    for i in range(64):
+        add(f"Q{i}", "qssc:AO3401A", "AO3401A",
+            "Package_TO_SOT_SMD:SOT-23", 0, 0,
+            pins={"1": f"em_gate{i}", "2": "+5V", "3": f"em_drain{i}"})
+        add(f"Re{i}", "qssc:R", "220R", "Resistor_SMD:R_0603_1608Metric", 0, 0,
+            pins={"1": f"em_drain{i}", "2": f"emitter_anode{i}"})
+        add(f"Rg{i}", "qssc:R", "100k", "Resistor_SMD:R_0603_1608Metric", 0, 0,
+            pins={"1": f"em_gate{i}", "2": "+5V"})
+    # ---- per-buffer decoupling --------------------------------------------
+    for j in range(8):
+        add(f"Cub{j}", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
+            pins={"1": "+5V", "2": "GND"})
+
+
+build_chip_frontend_and_driver()
 
 
 # --------------------------------------------------------------------------
@@ -844,8 +1081,9 @@ add("C66", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
 RF_NETS = {"RF_OUT", "RF_OUT_N", "RF_IN", "RF_AMP_OUT", "J3_SIG", "LF_CP", "LF_MID",
            "LF_OUT", "CPout", "VTUNE", "refclk_25m"}
 USB_NETS = {"USB_DP", "USB_DM", "USB_DP_F", "USB_DM_F"}
-ANALOG_NETS = {"TIA_OUT", "TIA_ADC", "TIA_OUT_N", "DET_IN", "DET_BIAS", "VREFP", "VREFN", "TIA_REF",
-               "VauxP0", "VauxN0"}
+ANALOG_NETS = {"VREFP", "VREFN"}   # TIA/XADC/DET_BIAS analog nets removed in the
+                                   # single-board pivot; DET_IN{i}/emitter_anode{i}
+                                   # are Default for now (classed in Phase 4)
 POWER_NETS = {"+3V3", "+1V8", "+1V0", "+5V", "+5V_RF", "+5V_IN", "+5V_TIA", "GND",
               "3V3OUT", "VBUS_USB"}
 
@@ -938,7 +1176,7 @@ def emit_schematic():
             L(A("generator"), S("gen_qssc_kicad")),
             L(A("generator_version"), S("8.0")),
             L(A("uuid"), S(ROOT_UUID)),
-            L(A("paper"), S("A2")),
+            L(A("paper"), S("A1")),
             L(A("title_block"), L(A("title"), S("QSSC Control Board")), L(A("company"), S("QSSC"))),
             lib_symbols,
             *instances,
@@ -952,6 +1190,8 @@ def emit_schematic():
 # --------------------------------------------------------------------------
 def load_footprint_mod(fp_lib_id):
     """Read a .kicad_mod from the system lib, return parsed (footprint ...) list."""
+    if fp_lib_id == "qssc:QSSC_Chip":
+        return chip_footprint()             # the 128-pad quantum die (authored)
     lib, name = fp_lib_id.split(":", 1)
     p = Path(FP_LIB) / f"{lib}.pretty" / f"{name}.kicad_mod"
     return parse(p.read_text())
@@ -1219,7 +1459,10 @@ def emit_pro():
 # --------------------------------------------------------------------------
 # PCB placement plan (mm) — assigns pcb_x/pcb_y to each component
 # --------------------------------------------------------------------------
-BOARD_W, BOARD_H = 130, 85
+BOARD_W, BOARD_H = 210, 140   # widened 200->210 for Phase 1b: the 64-ch parallel
+                              # front-end (32 ICs + ~200 passives) + 64-ch driver
+                              # (8 buffers + 64 P-MOS + ~200 passives) need room. Die
+                              # centre, FPGA right, front-end band above, driver below.
 
 # Copper layer stack for the MAIN control board (6-layer HDI). Each entry:
 # (kicad_layer_id, name, type, user_label_or_None). Stackup:
@@ -1264,13 +1507,14 @@ STACK_UP = [
 
 
 def assign_pcb_positions():
-    # Fixed IC/connector placements (mm) on a 130x85 board, spaced for DRC.
-    # Layout zones:
-    #   top-left      power (barrel jack, fuse, 3x AMS1117 + AP2127K + FB1 bead, LED)
-    #   center        FPGA + TCXO + decoupling cap banks
-    #   right         RF chain (ADF4351 -> HMC441 -> SMA) + loop-filter passives
-    #   bottom-center USB (FT232 + USB-C edge mount)
-    #   left-center   analog TIA (ADA4530) + electrode/emitter headers
+    # Fixed IC/connector placements (mm) on the 160x110 MERGED single board.
+    # Layout zones (2026-09 single-board pivot):
+    #   centre        QSSC_Chip 128-pad die (20x20 mm, courtyard 69.5-90.5 x 44.5-65.5)
+    #   right         FPGA CPG236 (moved off-centre to clear the die) + config flash
+    #   top           power chain (left) + RF chain (ADF4351 -> GVA-84 -> SMA right edge)
+    #   bottom        USB (FT232 + USB-C bottom edge) + reset/JTAG (left edge)
+    #   above die     (reserved) 64-ch TIA/comparator front-end  (Phase 1b)
+    #   below die     (reserved) 64-ch P-MOS emitter driver       (Phase 1b)
     # Edge-mount connectors sit at the board edge by design:
     #   J2 barrel jack  -> left edge (rot 180, opening faces -x)
     #   J10 USB-C       -> bottom edge (rot 180, opening overhangs +y)
@@ -1281,60 +1525,51 @@ def assign_pcb_positions():
         # power (top-left)
         "J2": (10, 10, 180), "F1": (24, 10, 0), "R70": (20, 16, 0), "LED1": (26, 16, 0),
         "REG1": (34, 14, 0), "REG2": (34, 26, 0), "REG3": (34, 38, 0), "FB1": (34, 50, 0),
-        # REG3 (AP2127K-1.0) decoupling, around (34,38), clear of FPGA keepout x<61.5
+        # REG3 (AP2127K-1.0) decoupling, around (34,38)
         "C42": (28, 36, 0), "C41": (40, 34, 0), "C43": (40, 42, 0), "C44": (28, 42, 0),
         # FB1 (ferrite bead) +5V -> +5V_RF pi filter, around (34,50)
         "C45": (28, 50, 0), "C46": (28, 56, 0), "C47": (40, 50, 0), "C48": (40, 56, 0),
-        # FPGA (center)
-        "U1": (70, 45, 0), "Y1": (70, 25, 0),
-        # config flash + pull-ups + XADC VREFP decoupling (bottom-right, clear of the
-        # ~17 mm FPGA BGA keepout which spans x[61.5,78.5] y[36.5,53.5])
-        "U8": (94, 58, 0), "R75": (102, 54, 0), "R76": (102, 58, 0),
-        "R77": (102, 62, 0), "C40": (88, 54, 0),
-        # USB (bottom-center)
-        "J1": (76, 62, 0), "J10": (70, 80, 180), "R71": (70, 72, 0), "R72": (74, 72, 0),
-        "J8": (82, 52, 0),
-        # RF chain (right): U3 ADF4351 at (92,30) needs ~7x7mm clear zone
-        # x[88,96] y[26,34]; U5 GVA-84+ (SOT-89-3, courtyard extends ~5.5 mm
-        # left of origin) at (106,40) -- 106 not 104 so its courtyard clears C34
-        # (right edge 100.0) on the left and C36 (left edge 106.9) on the right.
-        "U3": (92, 30, 0), "U5": (106, 40, 0), "J3": (127, 40, 0),
+        # ---- quantum die (centre) + FPGA (moved right off the die) ----
+        "Uchip": (80, 55, 0),
+        # FPGA CPG236 (~17 mm BGA, courtyard x[119.5,136.5] y[46.5,63.5]) right of
+        # the die; ~29 mm gap for the 64 DET_DIG routes (Phase 4). TCXO above the die.
+        "U1": (128, 55, 0), "Y1": (70, 25, 0),
+        # config flash W25Q128 + pull-ups in the die<->FPGA gap (x106-118); C40
+        # VREFP decoupling just below-left of the FPGA.
+        "U8": (106, 58, 0), "R75": (114, 54, 0), "R76": (114, 58, 0),
+        "R77": (114, 62, 0), "C40": (118, 70, 0),
+        # USB (bottom): FT232 + USB-C bottom-edge + CC pulls.  FT232 moved off the
+        # die (was 76,62 -> inside the die courtyard) to below it.
+        "J1": (76, 90, 0), "J10": (74, 134, 180), "R71": (60, 100, 0), "R72": (64, 100, 0),
+        "J8": (150, 8, 0),
+        # RF chain (top-right): U3 ADF4351 + U5 GVA-84 -> J3 SMA right edge (moved
+        # to x204 for the wider 210 mm board; clear of the front-end which starts y=24).
+        "U3": (92, 30, 0), "U5": (106, 40, 0), "J3": (204, 12, 0),
         "R67": (84, 26, 0), "C31": (84, 30, 0), "R68": (84, 34, 0),
         "C32": (100, 26, 0), "C33": (100, 30, 0), "R73": (100, 34, 0),
         "C34": (100, 40, 0), "C35": (110, 34, 0), "C36": (110, 40, 0), "L2": (110, 46, 0),
-        # chip-module B2B connector J11 (Samtec LSHM-130, ~17x7.6 mm) lower-left,
-        # below the REG3/FB1 + C41-C48 cluster (y 34-58) and clear of J7 (10,40);
-        # the module mates along this edge.  Earlier (30,45) overlapped the
-        # REG/C-dec cluster courtyards and shorted emitter_cols pads into the
-        # +1V0/+1V8/GND decoupling pads that sat under it.
-        "J11": (24, 64, 0),
         "J7": (10, 40, 0), "J9": (10, 26, 0),
         # ---- production-hardening pass 2026-09 (see add() block + §16) ----
-        # USB VBUS Schottky + bulk (near J10, left of the USB-C body x[65,75])
-        "D_USB": (62, 70, 0), "C84": (58, 66, 0),
-        # USB DP/DM series damping (right of the FT232, below J8)
-        "R78": (82, 60, 0), "R79": (86, 60, 0),
+        # USB VBUS Schottky + bulk near the USB-C bottom edge (left of the die).
+        "D_USB": (66, 96, 0), "C84": (60, 92, 0),
+        # USB DP/DM series damping (right of the FT232, below the die)
+        "R78": (86, 84, 0), "R79": (90, 84, 0),
         # AMS1117 stability bulk + input bulk (clear of the SOT-223 courtyards
         # x[29.5,38.5]: 22uF output caps at x42, input bulk at x28)
         "C49": (40, 20, 0), "C50": (42, 28, 0), "C51": (28, 20, 0),
-        # FPGA per-rail 4.7uF bulk (left of the BGA keepout x61.5, y in [40,52])
+        # FPGA per-rail 4.7uF bulk (left of the BGA keepout x119.5, y in [40,52])
         "C52": (58, 40, 0), "C53": (58, 46, 0), "C54": (58, 52, 0),
-        # FT232 decoupling (column x68: clear of J1 courtyard x[70,82] and D_USB x[58,67])
-        "C55": (68, 60, 0), "C56": (68, 64, 0), "C57": (68, 56, 0),
-        # TCXO + W25Q128 Vdd/VCC decoupling
-        "C58": (76, 22, 0), "C59": (90, 62, 0),
+        # FT232 decoupling (column x62: clear of the die courtyard left x69.5)
+        "C55": (62, 60, 0), "C56": (62, 64, 0), "C57": (62, 56, 0),
+        # TCXO + W25Q128 Vdd/VCC decoupling (C59 moved off the die right edge)
+        "C58": (76, 22, 0), "C59": (100, 72, 0),
         # ADF4351 per-supply 100nF (around U3 keepout x[88,96] y[26,34]: above & below)
         "C60": (84, 22, 0), "C61": (88, 22, 0), "C62": (96, 22, 0), "C63": (100, 22, 0),
         "C64": (88, 38, 0), "C65": (96, 38, 0),
         # JTAG pulls (right of J9 header x[5,15])
         "R80": (16, 22, 0), "R81": (16, 26, 0), "R82": (16, 30, 0),
-        # USB DP/DM series damping (below J1, above J10 courtyard y[73,80])
-        "R78": (78, 72, 0), "R79": (82, 72, 0),
         # Reset pull-down + debounce cap (J7 SW_PUSH pads reach x16.5, courtyard x18 -> x24)
         "R83": (24, 40, 0), "C68": (24, 44, 0),
-        # TIA_OUT -> XADC divider (near J11 at 24,64; TIA_OUT enters on J11 pin47).
-        # y60 sits above J11's courtyard y[62,66] and clear of its NPTH hole (32.5,63.15).
-        "R84": (34, 60, 0), "R85": (38, 60, 0), "C66": (42, 60, 0),
     }
     for c in COMPONENTS:
         if c["ref"] in fixed:
@@ -1354,10 +1589,97 @@ def assign_pcb_positions():
             c["pcb_x"] = 50 + i * 4
             c["pcb_y"] = 16
             c["pcb_rot"] = 0
+        # ---- Phase 1b procedural grids (board widened to 210x140; the Phase
+        # 1a die@(80,55) + FPGA@(128,55) layout is kept unchanged).  All spacing
+        # is sized to the largest courtyard half-extent in each block so nothing
+        # overlaps: TSSOP-14 x+/-3.85/y+/-2.75, SOIC-14 x+/-3.7/y+/-4.58,
+        # TSSOP-20 x+/-3.85/y+/-3.5, SOT-23 x+/-1.92/y+/-1.7, 0603 ~+/-0.9.
+        # Front-end lives in the right zone x[144,200] (8 cols @ 8mm) stacked
+        # TIA -> TIA-decoupling -> comparator -> cmp-decoupling -> feedback ->
+        # pull-ups, with the threshold-DAC group on the far right edge x=205.
+        # Emitter driver lives below the die: 8x 74HCT240 in a row at y=80
+        # (left + right of the USB), 64 P-MOS below-left, 64 emitter/gate R
+        # below-right, each with its decoupling.
+        elif c["ref"].startswith("UT"):          # 16x TLV9004 TIA  (8 cols x 2 rows)
+            j = int(c["ref"][2:]); r, col = j // 8, j % 8
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 144 + col * 8, 24 + r * 8, 0
+        elif c["ref"].startswith("UC"):          # 16x LMV339 comparator (8 cols x 2 rows)
+            j = int(c["ref"][2:]); r, col = j // 8, j % 8
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 144 + col * 8, 46 + r * 14, 0
+        elif c["ref"].startswith("Cut"):         # 16x TLV9004 decoupling (8 cols x 2 rows)
+            j = int(c["ref"][3:]); r, col = j // 8, j % 8
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 144 + col * 8, 37 + r * 3, 0
+        elif c["ref"].startswith("Cuc"):          # 16x LMV339 decoupling (8 cols x 2 rows)
+            j = int(c["ref"][3:]); r, col = j // 8, j % 8
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 144 + col * 8, 66 + r * 3, 0
+        elif c["ref"].startswith("Rf"):           # 64x TIA feedback R (8 cols x 8 rows)
+            i = int(c["ref"][2:]); r, col = i // 8, i % 8
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 144 + col * 8, 74 + r * 3, 0
+        elif c["ref"].startswith("Cf"):           # 64x TIA feedback C (8 cols x 8 rows, +3mm x)
+            i = int(c["ref"][2:]); r, col = i // 8, i % 8
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 147 + col * 8, 74 + r * 3, 0
+        elif c["ref"].startswith("Rpu"):         # 64x comparator pull-up (8 cols x 8 rows)
+            i = int(c["ref"][3:]); r, col = i // 8, i % 8
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 144 + col * 8, 100 + r * 3, 0
+        elif c["ref"] == "UDAC":                  # MCP4725 threshold DAC (far-right edge)
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 205, 100, 0
+        elif c["ref"] == "R_I2C_SDA":
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 205, 104, 0
+        elif c["ref"] == "R_I2C_SCL":
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 205, 108, 0
+        elif c["ref"] == "Rref1":
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 205, 112, 0
+        elif c["ref"] == "Rref2":
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 205, 116, 0
+        elif c["ref"] == "Cref":
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 205, 120, 0
+        elif c["ref"] == "Cdac":
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 205, 124, 0
+        elif c["ref"].startswith("UB"):          # 8x 74HCT240 buffer (4 left + 4 right of USB)
+            j = int(c["ref"][2:])
+            xs = [10, 20, 30, 40, 100, 112, 124, 136]
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = xs[j], 80, 0
+        elif c["ref"].startswith("Q"):            # 64x AO3401A P-MOS (8 cols x 8 rows, left)
+            i = int(c["ref"][1:]); r, col = i // 8, i % 8
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 6 + col * 5.5, 92 + r * 5, 0
+        elif c["ref"].startswith("Re"):           # 64x 220R emitter R (8 cols x 8 rows, right)
+            i = int(c["ref"][2:]); r, col = i // 8, i % 8
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 97 + col * 5, 92 + r * 6, 0
+        elif c["ref"].startswith("Rg"):           # 64x 100k gate pull-up (same cols, +3mm y)
+            i = int(c["ref"][2:]); r, col = i // 8, i % 8
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 97 + col * 5, 95 + r * 6, 0
+        elif c["ref"].startswith("Cub"):          # 8x 74HCT240 decoupling (under each buffer)
+            j = int(c["ref"][3:])
+            xs = [10, 20, 30, 40, 100, 112, 124, 136]
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = xs[j], 85, 0
         else:
             c.setdefault("pcb_x", 50)
             c.setdefault("pcb_y", 50)
             c.setdefault("pcb_rot", 0)
+
+
+def assign_sch_positions():
+    """Schematic (x,y) for the Phase 1b front-end + driver symbols.  They were
+    add()-ed at (0,0); left there, every symbol stacks at the origin and its pin
+    labels land on coincident points -- KiCad then merges those points into one
+    net (verified: 19k 'Output+Output' ERC errors).  Grid them out on the A1
+    sheet right of the existing (x<350) schematic content.  Spacing > 2x the
+    symbol pin reach (~10mm) so no two distinct nets share a pin endpoint."""
+    pre = ("UT", "UC", "UB", "UDAC", "Q", "Rf", "Cf", "Rpu", "Re", "Rg",
+           "Cut", "Cuc", "Cub", "Cdac", "Cref", "Rref1", "Rref2", "R_I2C_SDA",
+           "R_I2C_SCL")
+    new = [c for c in COMPONENTS if c["ref"] == "UDAC" or c["ref"] == "Rref1"
+           or c["ref"] == "Rref2" or c["ref"] == "Cdac" or c["ref"] == "Cref"
+           or c["ref"] == "R_I2C_SDA" or c["ref"] == "R_I2C_SCL"
+           or any(c["ref"].startswith(p) and c["ref"][len(p):].isdigit()
+                  for p in ("UT", "UC", "UB", "Q", "Rf", "Cf", "Rpu", "Re",
+                            "Rg", "Cut", "Cuc", "Cub"))]
+    cols, step_x, step_y = 19, 22.0, 20.0
+    for idx, c in enumerate(new):
+        r, col = idx // cols, idx % cols
+        c["x"] = 420 + col * step_x        # clear right of existing x[20,410]
+        c["y"] = 20 + r * step_y
+        c["rot"] = 0
 
 
 def main():
@@ -1365,6 +1687,7 @@ def main():
     (ROOT / ".tmpwork").mkdir(exist_ok=True)
     build_pincoords()
     assign_pcb_positions()
+    assign_sch_positions()
 
     # custom symbol library file
     lib_syms = authored_symbols()

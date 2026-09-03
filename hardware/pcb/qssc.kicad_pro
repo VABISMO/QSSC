@@ -123,8 +123,8 @@
         "min_text_thickness": 0.08,
         "min_through_hole_diameter": 0.1,
         "min_track_width": 0.15,
-        "min_via_annular_width": 0.05,
-        "min_via_diameter": 0.2,
+        "min_via_annular_width": 0.1,
+        "min_via_diameter": 0.45,
         "solder_mask_to_copper_clearance": 0.0,
         "use_height_for_length_calcs": true
       },
@@ -267,10 +267,10 @@
         "line_style": 0,
         "microvia_diameter": 0.2,
         "microvia_drill": 0.1,
-        "name": "Analog",
-        "pcb_color": "rgba(255, 255, 0, 0.000)",
+        "name": "RF",
+        "pcb_color": "rgba(255, 0, 0, 0.000)",
         "schematic_color": "rgba(0, 0, 0, 0.000)",
-        "track_width": 0.2,
+        "track_width": 0.3,
         "via_diameter": 0.6,
         "via_drill": 0.3,
         "wire_width": 6
@@ -301,10 +301,10 @@
         "line_style": 0,
         "microvia_diameter": 0.2,
         "microvia_drill": 0.1,
-        "name": "RF",
-        "pcb_color": "rgba(255, 0, 0, 0.000)",
+        "name": "USB",
+        "pcb_color": "rgba(0, 255, 0, 0.000)",
         "schematic_color": "rgba(0, 0, 0, 0.000)",
-        "track_width": 0.3,
+        "track_width": 0.2,
         "via_diameter": 0.6,
         "via_drill": 0.3,
         "wire_width": 6
@@ -318,8 +318,8 @@
         "line_style": 0,
         "microvia_diameter": 0.2,
         "microvia_drill": 0.1,
-        "name": "USB",
-        "pcb_color": "rgba(0, 255, 0, 0.000)",
+        "name": "Analog",
+        "pcb_color": "rgba(255, 255, 0, 0.000)",
         "schematic_color": "rgba(0, 0, 0, 0.000)",
         "track_width": 0.2,
         "via_diameter": 0.6,
@@ -362,10 +362,6 @@
         "pattern": "3V3OUT"
       },
       {
-        "netclass": "Analog",
-        "pattern": "DET_BIAS"
-      },
-      {
         "netclass": "Power",
         "pattern": "GND"
       },
@@ -396,18 +392,6 @@
       {
         "netclass": "RF",
         "pattern": "RF_OUT"
-      },
-      {
-        "netclass": "Analog",
-        "pattern": "TIA_ADC"
-      },
-      {
-        "netclass": "Analog",
-        "pattern": "TIA_OUT"
-      },
-      {
-        "netclass": "Analog",
-        "pattern": "TIA_REF"
       },
       {
         "netclass": "USB",
