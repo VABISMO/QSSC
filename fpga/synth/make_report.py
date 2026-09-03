@@ -3,7 +3,7 @@
 
 Reads the yosys log (the `stat` block + warning/latch/blackbox lines) and writes
 a concise summary: Xilinx cell counts (LUT/FF/CARRY/BRAM/DSP/IO) vs the
-XC7A35T-1CPG236C capacity, plus any inferred-latch / width / blackbox warnings.
+XC7A35T-1CSG324C capacity, plus any inferred-latch / width / blackbox warnings.
 
 Usage: make_report.py <yosys.log> <out.md>
 No external dependencies (stdlib only).
@@ -14,15 +14,16 @@ import re
 import sys
 from pathlib import Path
 
-# XC7A35T-1CPG236C capacity (Artix-7 35T, speed -1, CPG236 BGA).
-# Source: DS181 (Artix-7 data sheet) + UG475 package table.
+# XC7A35T-1CSG324C capacity (Artix-7 35T, speed -1, CSG324 0.8 mm BGA).
+# The die capacity is the same across packages; only the user-IO count changes
+# (CSG324 has 250 user I/O). Source: DS181 (Artix-7 data sheet) + UG475.
 CAPACITY = {
     "LUT": 20_800,        # 6-input LUTs (slice logic)
     "FF": 41_600,         # flip-flops (2 per LUT pair)
     "CARRY4": 5_200,      # one carry chain per 2 slices (approx, for context)
     "BRAM36": 50,         # 36Kb block RAM blocks (100 x 18Kb)
     "DSP48": 90,          # DSP48E1 slices
-    "IO": 250,            # user I/O + clock capable (CPG236 ball-limited)
+    "IO": 250,            # user I/O + clock capable (CSG324)
     "BUFG": 32,           # global clock buffers
 }
 
@@ -121,12 +122,12 @@ def main(log_path: str, out_path: str) -> int:
 
     lines = []
     lines.append("# QSSC FPGA — yosys synthesis report\n")
-    lines.append(f"- **Target:** Xilinx Artix-7 XC7A35T-1CPG236C (QSSC control FPGA)")
+    lines.append(f"- **Target:** Xilinx Artix-7 XC7A35T-1CSG324C (QSSC single-board control FPGA)")
     lines.append(f"- **Flow:** `yosys synth_xilinx -family xc7` (synthesis only, **no P&R / no timing**)")
     lines.append(f"- **Top module:** `top_level`")
     lines.append(f"- **Status:** {'COMPLETE' if complete else 'INCOMPLETE — see log'}\n")
 
-    lines.append("## Resource usage vs XC7A35T-1CPG236C capacity\n")
+    lines.append("## Resource usage vs XC7A35T-1CSG324C capacity\n")
     lines.append("| Resource | Used | Available | Utilisation |")
     lines.append("|---|---:|---:|---:|")
     for key, label in [("LUT", "LUT (6-input)"), ("FF", "Flip-flop"), ("CARRY4", "CARRY4"),
@@ -172,8 +173,10 @@ def main(log_path: str, out_path: str) -> int:
                  "clock-tree insertion, or bitstream generation. Those require Xilinx Vivado, which is "
                  "not available in this environment. The iverilog testbench (`fpga/sim`) covers "
                  "**functional** correctness; this yosys pass covers **synthesizability + resource fit**.")
-    lines.append("- The XADC is modelled behaviourally (`xadc_behavioral` stub) — on silicon it is the "
-                 "fixed-package Artix-7 hard block, instantiated via the Xilinx XADC wizard in Vivado.\n")
+    lines.append("- The 64 detector channels are read fully in parallel: each `det_in[i]` LVCMOS input "
+                 "feeds a 16-bit fabric counter (no analog MUX, no XADC). A MCP4725 DAC sets the "
+                 "board comparator threshold over I2C (`SET_THRESHOLD`); the 64 emitters are driven "
+                 "individually (`emitter_en[63:0]`, no 8x8 matrix).\n")
 
     Path(out_path).write_text("\n".join(lines))
     # exit non-zero only on hard failure (incomplete or blackboxes), not on warnings.
