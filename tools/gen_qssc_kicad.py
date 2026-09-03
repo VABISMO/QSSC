@@ -195,19 +195,23 @@ def custom_symbol_def(lib, name, refpref, pins, body, value=None):
     return sym
 
 
-# ---- FPGA XC7A35T-1CPG236C real pinout (datasheet-correct) ----------------
-# The full CPG236 ballout (238 pads) is loaded from .tmpwork/fpga_cpg236_map.json,
+# ---- FPGA XC7A35T-1CSG324C real pinout (datasheet-correct) ----------------
+# The full CSG324 ballout (324 pads) is loaded from .tmpwork/fpga_csg324_map.json,
 # which is generated from the official KiCad symbol
-# FPGA_Xilinx_Artix7:XC7A35T-CPG236 (every pad named).  This REPLACES the earlier
-# hand-authored pin table: that table assigned signals to balls that do not
-# exist on the CPG236 (G21, F16, E16, K16, M16, N16, P16, R16, T16, J16 -- the
-# XDC header wrongly said "CSG236 0.8 mm"; the real part is CPG236 0.5 mm) or to
-# dedicated power pads (M17/R17 = VCCO_14, C18 = VCCO_16) or to the dedicated
-# QSPI config-data balls (D18/D19/G18/F18 = D00..D03), which conflict with the
-# ADF4351 SPI that previously occupied them.  All 32 user-IO signals have been
-# re-routed to valid general-purpose IO balls; every power/ground/config/JTAG/
-# XADC pad is netted.  See the audit in HARDWARE_DESIGN.md §15.
-_FPGA_MAP = json.loads((ROOT / ".tmpwork" / "fpga_cpg236_map.json").read_text())
+# FPGA_Xilinx_Artix7:XC7A35T-CSG324 (every pad named, DS181/UG475).  CSG324
+# supersedes the CPG236 (238 pads, ~125 user IO): the parallel 64-ch readout
+# (64 DET_DIG inputs) + 64-ch emitter drive (64 EM_DRV outputs) + ~13 control
+# nets need ~141 user IO, which exceeds the CPG236.  CSG324 has 215 user IO.
+# The 128 parallel nets are side-assigned by the ballmap generator:
+#   * 64 DET_DIG  -> right-edge balls (high column) toward the comparator
+#                    front-end at board x>=144 (right of the FPGA)
+#   * 64 EM_DRV   -> bottom-edge balls (high row) toward the 74HCT240 buffers
+#                    + P-MOS drivers below the die (board y>=80)
+#   * control     -> remaining IO; clk_100mhz + refclk_25m on MRCC balls.
+# The old det_mux_sel*/emitter_rows*/emitter_cols* signals are gone (no MUX,
+# no row/col matrix in the parallel architecture).  Every power/ground/config/
+# JTAG pad is netted; spare IO is left NC (correct for unused BGA IO).
+_FPGA_MAP = json.loads((ROOT / ".tmpwork" / "fpga_csg324_map.json").read_text())
 
 # net per power/analog category
 _FPGA_PWR_NET = {
@@ -231,12 +235,14 @@ _FPGA_INPUT_NETS = {"clk_100mhz", "reset", "UART_RX", "TCK", "TMS", "TDI",
 def fpga_net_map():
     """{ball_name: net} for every FPGA pad that carries a net.
 
-    All power/ground/config/JTAG/XADC pads plus the 32 used user-IO signals are
-    netted.  Spare general-purpose IO balls are intentionally LEFT OUT (no net =
-    NC), which is correct practice for unused BGA IO (the pad is still soldered
-    for mechanical integrity, just carries no signal).  This nets ~140 of the
-    238 CPG236 pads -- all the ones that matter for power integrity, config
-    boot, and the board's I/O."""
+    All power/ground/config/JTAG pads plus the 141 used user-IO signals (64
+    DET_DIG inputs + 64 EM_DRV outputs + 13 control) are netted.  Spare
+    general-purpose IO balls are intentionally LEFT OUT (no net = NC), which
+    is correct practice for unused BGA IO (the pad is still soldered for
+    mechanical integrity, just carries no signal).  XADC VP/VN stay NC -- the
+    single-board pivot replaced the TIA/XADC analog chain with 64 parallel
+    digital counters.  This nets ~258 of the 324 CSG324 pads -- all the ones
+    that matter for power integrity, config boot, and the board's I/O."""
     m = {}
     s = _FPGA_MAP
     # RTL port names (from the ballmap, generated off fpga/constraints.xdc) that
@@ -277,7 +283,10 @@ def fpga_pin_list():
             top.append((ball, net, "power_in"))
         elif net == "GND":
             bot.append((ball, net, "power_in"))
-        elif net in _FPGA_INPUT_NETS:
+        elif net in _FPGA_INPUT_NETS or net.startswith("DET_DIG"):
+            # detector photon-count inputs (DET_DIG0..63) sit on the LEFT
+            # column alongside the other FPGA inputs; emitter drivers
+            # (EM_DRV0..63) and control fall through to the RIGHT column.
             left.append((ball, net, "bidirectional"))
         else:
             right.append((ball, net, "bidirectional"))
@@ -522,10 +531,12 @@ def authored_symbols():
     for n in ["+3V3", "+1V8", "+1V0", "+5V", "+5V_RF", "GND"]:
         syms.append(power_symbol_def(n))
     syms.append(PWR_FLAG_def())
-    # FPGA -- real 238-pad CPG236 pinout (power/ground/config/JTAG/XADC + 32 IO).
-    # Body box spans the 1.27 mm-pitched top/bottom pin rows (~+/-42 mm).
-    syms.append(custom_symbol_def("qssc", "XC7A35T_CPG236", "U", fpga_pin_list(),
-                                  (-44.45, -12.7, 44.45, 12.7), value="XC7A35T-1CPG236C"))
+    # FPGA -- real 324-pad CSG324 pinout (power/ground/config/JTAG + 141 IO:
+    # 64 DET_DIG inputs + 64 EM_DRV outputs + 13 control).  Body box spans the
+    # 1.27 mm-pitched pin columns; the left/right columns now hold ~73/~80 pins
+    # (the 128 parallel nets), so the body is tall (~+/-55 mm).
+    syms.append(custom_symbol_def("qssc", "XC7A35T_CSG324", "U", fpga_pin_list(),
+                                  (-50.8, -55.0, 50.8, 55.0), value="XC7A35T-1CSG324C"))
     # QSSC_Chip -- the merged-board quantum die: 128 pads (64 DET top + 64 EM
     # bottom), bare die perimeter wire-bonded to F.Cu.  Body spans the 64-wide pin
     # rows; 1.0 mm symbol pitch.  Pin numbers == footprint pad names.
@@ -640,7 +651,7 @@ def replicated_symbol(lib, name, refpref, stdpinlist, value=None):
 
 # Map lib_id -> symbol name in our authored lib
 SYM_NAME = {
-    "qssc:XC7A35T_CPG236": "XC7A35T_CPG236", "qssc:QSSC_Chip": "QSSC_Chip",
+    "qssc:XC7A35T_CSG324": "XC7A35T_CSG324", "qssc:QSSC_Chip": "QSSC_Chip",
     "qssc:GVA-84": "GVA-84+",
     "qssc:AP2127K-1.0": "AP2127K-1.0", "qssc:AMS1117-1.8": "AMS1117-1.8",
     "qssc:AMS1117-3.3": "AMS1117-3.3", "qssc:AMS1117-5.0": "AMS1117-5.0",
@@ -748,8 +759,9 @@ add("R70", "qssc:R", "330", "Resistor_SMD:R_0603_1608Metric",
 add("LED1", "qssc:LED", "Green", "LED_SMD:LED_0603_1608Metric",
     110, 45, pins={"1": "GND", "2": "LED_ANODE"})
 
-# FPGA (center)
-add("U1", "qssc:XC7A35T_CPG236", "XC7A35T-1CPG236C", "Package_BGA:Xilinx_CPG236",
+# FPGA (center) -- XC7A35T-1CSG324C (324-ball 0.8 mm BGA).  PCB placement is
+# overridden to (128,55) in assign_pcb_positions() to clear the die courtyard.
+add("U1", "qssc:XC7A35T_CSG324", "XC7A35T-1CSG324C", "Package_BGA:Xilinx_CSG324",
     200, 70, pins=fpga_net_map())
 
 # Config flash W25Q128 (QSPI x4 boot).  FPGA dedicated config balls:
@@ -1510,7 +1522,7 @@ def assign_pcb_positions():
     # Fixed IC/connector placements (mm) on the 160x110 MERGED single board.
     # Layout zones (2026-09 single-board pivot):
     #   centre        QSSC_Chip 128-pad die (20x20 mm, courtyard 69.5-90.5 x 44.5-65.5)
-    #   right         FPGA CPG236 (moved off-centre to clear the die) + config flash
+    #   right         FPGA CSG324 (324-ball BGA, moved off-centre to clear the die) + config flash
     #   top           power chain (left) + RF chain (ADF4351 -> GVA-84 -> SMA right edge)
     #   bottom        USB (FT232 + USB-C bottom edge) + reset/JTAG (left edge)
     #   above die     (reserved) 64-ch TIA/comparator front-end  (Phase 1b)
@@ -1531,7 +1543,7 @@ def assign_pcb_positions():
         "C45": (28, 50, 0), "C46": (28, 56, 0), "C47": (40, 50, 0), "C48": (40, 56, 0),
         # ---- quantum die (centre) + FPGA (moved right off the die) ----
         "Uchip": (80, 55, 0),
-        # FPGA CPG236 (~17 mm BGA, courtyard x[119.5,136.5] y[46.5,63.5]) right of
+        # FPGA CSG324 (~17 mm BGA, courtyard x[119.5,136.5] y[46.5,63.5]) right of
         # the die; ~29 mm gap for the 64 DET_DIG routes (Phase 4). TCXO above the die.
         "U1": (128, 55, 0), "Y1": (70, 25, 0),
         # config flash W25Q128 + pull-ups in the die<->FPGA gap (x106-118); C40

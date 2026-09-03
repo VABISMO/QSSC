@@ -380,7 +380,7 @@
 			)
 		)
 	)
-	(symbol "qssc:XC7A35T_CPG236"
+	(symbol "qssc:XC7A35T_CSG324"
 		(pin_names
 			(offset 1.016)
 		)
@@ -388,15 +388,15 @@
 		(in_bom yes)
 		(on_board yes)
 		(property "Reference" "U"
-			(at 0 -15.239999999999998 0)
+			(at 0 -57.54 0)
 			(effects
 				(font
 					(size 1.27 1.27)
 				)
 			)
 		)
-		(property "Value" "XC7A35T-1CPG236C"
-			(at 0 15.239999999999998 0)
+		(property "Value" "XC7A35T-1CSG324C"
+			(at 0 57.54 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -412,10 +412,10 @@
 				(hide yes)
 			)
 		)
-		(symbol "XC7A35T_CPG236_0_1"
+		(symbol "XC7A35T_CSG324_0_1"
 			(rectangle
-				(start -44.45 -12.7)
-				(end 44.45 12.7)
+				(start -50.8 -55.0)
+				(end 50.8 55.0)
 				(stroke
 					(width 0.254)
 					(type default)
@@ -425,61 +425,7 @@
 				)
 			)
 			(pin bidirectional line
-				(at -50.8 5.08 0)
-				(length 2.54)
-				(name "clk_100mhz"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "A16"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin bidirectional line
-				(at -50.8 3.81 0)
-				(length 2.54)
-				(name "ADF_MUXOUT"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "B16"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin bidirectional line
-				(at -50.8 2.54 0)
-				(length 2.54)
-				(name "TCK"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "C8"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin bidirectional line
-				(at -50.8 1.27 0)
+				(at -50.8 45.72 0)
 				(length 2.54)
 				(name "reset"
 					(effects
@@ -488,7 +434,7 @@
 						)
 					)
 				)
-				(number "N17"
+				(number "A1"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -497,16 +443,16 @@
 				)
 			)
 			(pin bidirectional line
-				(at -50.8 0.0 0)
+				(at -50.8 44.45 0)
 				(length 2.54)
-				(name "UART_RX"
+				(name "DET_DIG61"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "P17"
+				(number "A11"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -515,16 +461,16 @@
 				)
 			)
 			(pin bidirectional line
-				(at -50.8 -1.27 0)
+				(at -50.8 43.18 0)
 				(length 2.54)
-				(name "CONF_INIT"
+				(name "DET_DIG50"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "U11"
+				(number "A13"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -533,63 +479,9 @@
 				)
 			)
 			(pin bidirectional line
-				(at -50.8 -2.54 0)
+				(at -50.8 41.91 0)
 				(length 2.54)
-				(name "CONF_PROG"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "V10"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin bidirectional line
-				(at -50.8 -3.81 0)
-				(length 2.54)
-				(name "TDI"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "W10"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin bidirectional line
-				(at -50.8 -5.08 0)
-				(length 2.54)
-				(name "TMS"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "W9"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin bidirectional line
-				(at 50.8 22.86 180)
-				(length 2.54)
-				(name "refclk_25m"
+				(name "DET_DIG41"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -605,9 +497,9 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 21.59 180)
+				(at -50.8 40.64 0)
 				(length 2.54)
-				(name "mod_sync"
+				(name "DET_DIG31"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -623,16 +515,16 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 20.32 180)
+				(at -50.8 39.37 0)
 				(length 2.54)
-				(name "mw_gate"
+				(name "DET_DIG20"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "A17"
+				(number "A16"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -641,9 +533,9 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 19.05 180)
+				(at -50.8 38.1 0)
 				(length 2.54)
-				(name "SPI_CLK"
+				(name "DET_DIG0"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -659,16 +551,16 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 17.78 180)
+				(at -50.8 36.83 0)
 				(length 2.54)
-				(name "SPI_DATA"
+				(name "clk_100mhz"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "B15"
+				(number "A8"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -677,9 +569,99 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 16.51 180)
+				(at -50.8 35.56 0)
 				(length 2.54)
-				(name "emitter_rows0"
+				(name "DET_DIG62"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "B11"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 34.29 0)
+				(length 2.54)
+				(name "DET_DIG58"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "B12"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 33.02 0)
+				(length 2.54)
+				(name "DET_DIG51"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "B13"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 31.75 0)
+				(length 2.54)
+				(name "DET_DIG42"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "B14"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 30.48 0)
+				(length 2.54)
+				(name "DET_DIG21"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "B16"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 29.21 0)
+				(length 2.54)
+				(name "DET_DIG10"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -695,9 +677,9 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 15.24 180)
+				(at -50.8 27.94 0)
 				(length 2.54)
-				(name "emitter_rows3"
+				(name "DET_DIG1"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -713,9 +695,27 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 13.97 180)
+				(at -50.8 26.67 0)
 				(length 2.54)
-				(name "SPI_CCLK"
+				(name "UART_RX"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "C1"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 25.4 0)
+				(length 2.54)
+				(name "DET_DIG63"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -731,9 +731,45 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 12.7 180)
+				(at -50.8 24.13 0)
 				(length 2.54)
-				(name "emitter_rows4"
+				(name "DET_DIG59"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "C12"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 22.86 0)
+				(length 2.54)
+				(name "DET_DIG43"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "C14"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 21.59 0)
+				(length 2.54)
+				(name "DET_DIG32"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -749,9 +785,9 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 11.43 180)
+				(at -50.8 20.32 0)
 				(length 2.54)
-				(name "emitter_rows6"
+				(name "DET_DIG22"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -767,9 +803,9 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 10.16 180)
+				(at -50.8 19.05 0)
 				(length 2.54)
-				(name "emitter_cols0"
+				(name "DET_DIG11"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -785,9 +821,81 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 8.89 180)
+				(at -50.8 17.78 0)
 				(length 2.54)
-				(name "SPI_LE"
+				(name "DET_DIG60"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "D12"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 16.51 0)
+				(length 2.54)
+				(name "DET_DIG52"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "D13"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 15.24 0)
+				(length 2.54)
+				(name "DET_DIG44"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "D14"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 13.97 0)
+				(length 2.54)
+				(name "DET_DIG33"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "D15"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 12.7 0)
+				(length 2.54)
+				(name "DET_DIG12"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -803,9 +911,9 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 7.62 180)
+				(at -50.8 11.43 0)
 				(length 2.54)
-				(name "SPI_D0"
+				(name "DET_DIG2"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -821,16 +929,16 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 6.35 180)
+				(at -50.8 10.16 0)
 				(length 2.54)
-				(name "SPI_D1"
+				(name "TCK"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "D19"
+				(number "E10"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -839,9 +947,189 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 5.08 180)
+				(at -50.8 8.89 0)
 				(length 2.54)
-				(name "SPI_D3"
+				(name "TDI"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "E11"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 7.62 0)
+				(length 2.54)
+				(name "TMS"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "E12"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 6.35 0)
+				(length 2.54)
+				(name "DET_DIG34"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "E15"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 5.08 0)
+				(length 2.54)
+				(name "DET_DIG23"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "E16"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 3.81 0)
+				(length 2.54)
+				(name "DET_DIG13"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "E17"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 2.54 0)
+				(length 2.54)
+				(name "DET_DIG3"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "E18"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 1.27 0)
+				(length 2.54)
+				(name "DET_DIG53"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "F13"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 0.0 0)
+				(length 2.54)
+				(name "DET_DIG45"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "F14"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 -1.27 0)
+				(length 2.54)
+				(name "DET_DIG35"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "F15"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 -2.54 0)
+				(length 2.54)
+				(name "DET_DIG24"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "F16"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 -3.81 0)
+				(length 2.54)
+				(name "DET_DIG4"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -857,9 +1145,63 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 3.81 180)
+				(at -50.8 -5.08 0)
 				(length 2.54)
-				(name "det_mux_sel4"
+				(name "DET_DIG54"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "G13"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 -6.35 0)
+				(length 2.54)
+				(name "DET_DIG46"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "G14"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 -7.62 0)
+				(length 2.54)
+				(name "DET_DIG25"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "G16"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 -8.89 0)
+				(length 2.54)
+				(name "DET_DIG14"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -875,9 +1217,9 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 2.54 180)
+				(at -50.8 -10.16 0)
 				(length 2.54)
-				(name "SPI_D2"
+				(name "DET_DIG5"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -893,16 +1235,16 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 1.27 180)
+				(at -50.8 -11.43 0)
 				(length 2.54)
-				(name "emitter_cols2"
+				(name "ADF_MUXOUT"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "G19"
+				(number "H1"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -911,9 +1253,63 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 0.0 180)
+				(at -50.8 -12.7 0)
 				(length 2.54)
-				(name "det_mux_sel2"
+				(name "DET_DIG47"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "H14"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 -13.97 0)
+				(length 2.54)
+				(name "DET_DIG36"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "H15"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 -15.24 0)
+				(length 2.54)
+				(name "DET_DIG26"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "H16"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 -16.51 0)
+				(length 2.54)
+				(name "DET_DIG15"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -929,16 +1325,16 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -1.27 180)
+				(at -50.8 -17.78 0)
 				(length 2.54)
-				(name "emitter_cols3"
+				(name "DET_DIG55"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "H19"
+				(number "J13"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -947,9 +1343,45 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -2.54 180)
+				(at -50.8 -19.05 0)
 				(length 2.54)
-				(name "det_mux_sel0"
+				(name "DET_DIG48"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "J14"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 -20.32 0)
+				(length 2.54)
+				(name "DET_DIG37"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "J15"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 -21.59 0)
+				(length 2.54)
+				(name "DET_DIG16"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -965,9 +1397,9 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -3.81 180)
+				(at -50.8 -22.86 0)
 				(length 2.54)
-				(name "emitter_cols5"
+				(name "DET_DIG6"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -983,16 +1415,16 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -5.08 180)
+				(at -50.8 -24.13 0)
 				(length 2.54)
-				(name "det_mux_sel1"
+				(name "DET_DIG56"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "J19"
+				(number "K13"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1001,16 +1433,16 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -6.35 180)
+				(at -50.8 -25.4 0)
 				(length 2.54)
-				(name "emitter_rows1"
+				(name "DET_DIG38"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "K17"
+				(number "K15"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1019,16 +1451,16 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -7.62 180)
+				(at -50.8 -26.67 0)
 				(length 2.54)
-				(name "emitter_cols1"
+				(name "DET_DIG27"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "K18"
+				(number "K16"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1037,16 +1469,16 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -8.89 180)
+				(at -50.8 -27.94 0)
 				(length 2.54)
-				(name "SPI_CS"
+				(name "DET_DIG39"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "K19"
+				(number "L15"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1055,16 +1487,16 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -10.16 180)
+				(at -50.8 -29.21 0)
 				(length 2.54)
-				(name "det_mux_sel3"
+				(name "DET_DIG28"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "L17"
+				(number "L16"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1073,9 +1505,9 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -11.43 180)
+				(at -50.8 -30.48 0)
 				(length 2.54)
-				(name "emitter_rows2"
+				(name "DET_DIG7"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1091,9 +1523,63 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -12.7 180)
+				(at -50.8 -31.75 0)
 				(length 2.54)
-				(name "emitter_rows5"
+				(name "DET_DIG57"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "M13"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 -33.02 0)
+				(length 2.54)
+				(name "DET_DIG29"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "M16"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 -34.29 0)
+				(length 2.54)
+				(name "DET_DIG17"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "M17"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 -35.56 0)
+				(length 2.54)
+				(name "DET_DIG8"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1109,16 +1595,16 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -13.97 180)
+				(at -50.8 -36.83 0)
 				(length 2.54)
-				(name "det_mux_sel5"
+				(name "DET_DIG49"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "M19"
+				(number "N14"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1127,16 +1613,16 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -15.24 180)
+				(at -50.8 -38.1 0)
 				(length 2.54)
-				(name "emitter_rows7"
+				(name "DET_DIG40"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "N18"
+				(number "N15"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1145,9 +1631,63 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -16.51 180)
+				(at -50.8 -39.37 0)
 				(length 2.54)
-				(name "UART_TX"
+				(name "DET_DIG30"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "N16"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 -40.64 0)
+				(length 2.54)
+				(name "DET_DIG18"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "N17"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 -41.91 0)
+				(length 2.54)
+				(name "DET_DIG19"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "P17"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 -43.18 0)
+				(length 2.54)
+				(name "DET_DIG9"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1163,9 +1703,603 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -17.78 180)
+				(at -50.8 -44.45 0)
 				(length 2.54)
-				(name "emitter_cols4"
+				(name "CONF_INIT"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "P7"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at -50.8 -45.72 0)
+				(length 2.54)
+				(name "CONF_PROG"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "P9"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 50.8 180)
+				(length 2.54)
+				(name "UART_TX"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "B1"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 49.53 180)
+				(length 2.54)
+				(name "refclk_25m"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "B8"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 48.26 180)
+				(length 2.54)
+				(name "SPI_CLK"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "E1"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 46.99 180)
+				(length 2.54)
+				(name "TDO"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "E13"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 45.72 180)
+				(length 2.54)
+				(name "SPI_CCLK"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "E9"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 44.45 180)
+				(length 2.54)
+				(name "SPI_DATA"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "F1"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 43.18 180)
+				(length 2.54)
+				(name "SPI_LE"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "G1"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 41.91 180)
+				(length 2.54)
+				(name "mod_sync"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "K1"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 40.64 180)
+				(length 2.54)
+				(name "SPI_D0"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "K17"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 39.37 180)
+				(length 2.54)
+				(name "SPI_D1"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "K18"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 38.1 180)
+				(length 2.54)
+				(name "mw_gate"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "L1"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 36.83 180)
+				(length 2.54)
+				(name "SPI_CS"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "L13"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 35.56 180)
+				(length 2.54)
+				(name "SPI_D2"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "L14"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 34.29 180)
+				(length 2.54)
+				(name "I2C_SDA"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "M1"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 33.02 180)
+				(length 2.54)
+				(name "SPI_D3"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "M14"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 31.75 180)
+				(length 2.54)
+				(name "I2C_SCL"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "N1"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 30.48 180)
+				(length 2.54)
+				(name "CONF_DONE"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "P10"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 29.21 180)
+				(length 2.54)
+				(name "EM_DRV62"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "P14"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 27.94 180)
+				(length 2.54)
+				(name "EM_DRV63"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "P15"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 26.67 180)
+				(length 2.54)
+				(name "EM_DRV58"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "P2"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 25.4 180)
+				(length 2.54)
+				(name "EM_DRV59"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "P3"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 24.13 180)
+				(length 2.54)
+				(name "EM_DRV60"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "P4"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 22.86 180)
+				(length 2.54)
+				(name "EM_DRV61"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "P5"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 21.59 180)
+				(length 2.54)
+				(name "EM_DRV43"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "R1"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 20.32 180)
+				(length 2.54)
+				(name "EM_DRV50"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "R10"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 19.05 180)
+				(length 2.54)
+				(name "EM_DRV51"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "R11"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 17.78 180)
+				(length 2.54)
+				(name "EM_DRV52"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "R12"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 16.51 180)
+				(length 2.54)
+				(name "EM_DRV53"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "R13"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 15.24 180)
+				(length 2.54)
+				(name "EM_DRV54"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "R15"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 13.97 180)
+				(length 2.54)
+				(name "EM_DRV55"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "R16"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 12.7 180)
+				(length 2.54)
+				(name "EM_DRV56"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "R17"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 11.43 180)
+				(length 2.54)
+				(name "EM_DRV57"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1181,16 +2315,16 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -19.05 180)
+				(at 50.8 10.16 180)
 				(length 2.54)
-				(name "emitter_cols6"
+				(name "EM_DRV44"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "T17"
+				(number "R2"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1199,9 +2333,225 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -20.32 180)
+				(at 50.8 8.89 180)
 				(length 2.54)
-				(name "emitter_cols7"
+				(name "EM_DRV45"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "R3"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 7.62 180)
+				(length 2.54)
+				(name "EM_DRV46"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "R5"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 6.35 180)
+				(length 2.54)
+				(name "EM_DRV47"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "R6"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 5.08 180)
+				(length 2.54)
+				(name "EM_DRV48"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "R7"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 3.81 180)
+				(length 2.54)
+				(name "EM_DRV49"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "R8"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 2.54 180)
+				(length 2.54)
+				(name "EM_DRV29"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "T1"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 1.27 180)
+				(length 2.54)
+				(name "EM_DRV36"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "T10"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 0.0 180)
+				(length 2.54)
+				(name "EM_DRV37"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "T11"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -1.27 180)
+				(length 2.54)
+				(name "EM_DRV38"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "T13"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -2.54 180)
+				(length 2.54)
+				(name "EM_DRV39"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "T14"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -3.81 180)
+				(length 2.54)
+				(name "EM_DRV40"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "T15"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -5.08 180)
+				(length 2.54)
+				(name "EM_DRV41"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "T16"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -6.35 180)
+				(length 2.54)
+				(name "EM_DRV42"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1217,9 +2567,153 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -21.59 180)
+				(at 50.8 -7.62 180)
 				(length 2.54)
-				(name "CONF_DONE"
+				(name "EM_DRV30"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "T3"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -8.89 180)
+				(length 2.54)
+				(name "EM_DRV31"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "T4"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -10.16 180)
+				(length 2.54)
+				(name "EM_DRV32"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "T5"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -11.43 180)
+				(length 2.54)
+				(name "EM_DRV33"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "T6"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -12.7 180)
+				(length 2.54)
+				(name "EM_DRV34"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "T8"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -13.97 180)
+				(length 2.54)
+				(name "EM_DRV35"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "T9"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -15.24 180)
+				(length 2.54)
+				(name "EM_DRV14"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "U1"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -16.51 180)
+				(length 2.54)
+				(name "EM_DRV22"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "U11"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -17.78 180)
+				(length 2.54)
+				(name "EM_DRV23"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1235,16 +2729,70 @@
 				)
 			)
 			(pin bidirectional line
+				(at 50.8 -19.05 180)
+				(length 2.54)
+				(name "EM_DRV24"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "U13"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -20.32 180)
+				(length 2.54)
+				(name "EM_DRV25"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "U14"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -21.59 180)
+				(length 2.54)
+				(name "EM_DRV26"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "U16"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
 				(at 50.8 -22.86 180)
 				(length 2.54)
-				(name "TDO"
+				(name "EM_DRV27"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "W8"
+				(number "U17"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1252,17 +2800,395 @@
 					)
 				)
 			)
-			(pin power_in line
-				(at -26.04 -10.16 90)
+			(pin bidirectional line
+				(at 50.8 -24.13 180)
 				(length 2.54)
-				(name "VREFP"
+				(name "EM_DRV28"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "B12"
+				(number "U18"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -25.4 180)
+				(length 2.54)
+				(name "EM_DRV15"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "U2"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -26.67 180)
+				(length 2.54)
+				(name "EM_DRV16"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "U3"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -27.94 180)
+				(length 2.54)
+				(name "EM_DRV17"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "U4"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -29.21 180)
+				(length 2.54)
+				(name "EM_DRV18"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "U6"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -30.48 180)
+				(length 2.54)
+				(name "EM_DRV19"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "U7"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -31.75 180)
+				(length 2.54)
+				(name "EM_DRV20"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "U8"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -33.02 180)
+				(length 2.54)
+				(name "EM_DRV21"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "U9"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -34.29 180)
+				(length 2.54)
+				(name "EM_DRV0"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "V1"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -35.56 180)
+				(length 2.54)
+				(name "EM_DRV7"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "V10"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -36.83 180)
+				(length 2.54)
+				(name "EM_DRV8"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "V11"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -38.1 180)
+				(length 2.54)
+				(name "EM_DRV9"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "V12"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -39.37 180)
+				(length 2.54)
+				(name "EM_DRV10"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "V14"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -40.64 180)
+				(length 2.54)
+				(name "EM_DRV11"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "V15"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -41.91 180)
+				(length 2.54)
+				(name "EM_DRV12"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "V16"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -43.18 180)
+				(length 2.54)
+				(name "EM_DRV13"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "V17"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -44.45 180)
+				(length 2.54)
+				(name "EM_DRV1"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "V2"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -45.72 180)
+				(length 2.54)
+				(name "EM_DRV2"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "V4"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -46.99 180)
+				(length 2.54)
+				(name "EM_DRV3"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "V5"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -48.26 180)
+				(length 2.54)
+				(name "EM_DRV4"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "V6"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -49.53 180)
+				(length 2.54)
+				(name "EM_DRV5"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "V7"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -50.8 180)
+				(length 2.54)
+				(name "EM_DRV6"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "V9"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1271,7 +3197,7 @@
 				)
 			)
 			(pin power_in line
-				(at -24.77 -10.16 90)
+				(at -31.75 -10.16 90)
 				(length 2.54)
 				(name "+3V3"
 					(effects
@@ -1280,7 +3206,7 @@
 						)
 					)
 				)
-				(number "B19"
+				(number "A17"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1289,9 +3215,45 @@
 				)
 			)
 			(pin power_in line
-				(at -23.5 -10.16 90)
+				(at -30.48 -10.16 90)
 				(length 2.54)
-				(name "+1V8"
+				(name "+3V3"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "A7"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at -29.21 -10.16 90)
+				(length 2.54)
+				(name "+3V3"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "B10"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at -27.94 -10.16 90)
+				(length 2.54)
+				(name "+3V3"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1307,7 +3269,7 @@
 				)
 			)
 			(pin power_in line
-				(at -22.23 -10.16 90)
+				(at -26.67 -10.16 90)
 				(length 2.54)
 				(name "+3V3"
 					(effects
@@ -1316,7 +3278,7 @@
 						)
 					)
 				)
-				(number "C14"
+				(number "C3"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1325,7 +3287,7 @@
 				)
 			)
 			(pin power_in line
-				(at -20.95 -10.16 90)
+				(at -25.4 -10.16 90)
 				(length 2.54)
 				(name "+3V3"
 					(effects
@@ -1334,7 +3296,7 @@
 						)
 					)
 				)
-				(number "C18"
+				(number "D16"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1343,7 +3305,7 @@
 				)
 			)
 			(pin power_in line
-				(at -19.69 -10.16 90)
+				(at -24.13 -10.16 90)
 				(length 2.54)
 				(name "+3V3"
 					(effects
@@ -1352,7 +3314,7 @@
 						)
 					)
 				)
-				(number "C9"
+				(number "D6"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1361,7 +3323,7 @@
 				)
 			)
 			(pin power_in line
-				(at -18.41 -10.16 90)
+				(at -22.86 -10.16 90)
 				(length 2.54)
 				(name "+3V3"
 					(effects
@@ -1370,7 +3332,7 @@
 						)
 					)
 				)
-				(number "F17"
+				(number "E8"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1379,7 +3341,7 @@
 				)
 			)
 			(pin power_in line
-				(at -17.14 -10.16 90)
+				(at -21.59 -10.16 90)
 				(length 2.54)
 				(name "+1V0"
 					(effects
@@ -1388,7 +3350,7 @@
 						)
 					)
 				)
-				(number "G10"
+				(number "F10"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1397,7 +3359,25 @@
 				)
 			)
 			(pin power_in line
-				(at -15.88 -10.16 90)
+				(at -20.32 -10.16 90)
+				(length 2.54)
+				(name "+1V8"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "F12"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at -19.05 -10.16 90)
 				(length 2.54)
 				(name "+3V3"
 					(effects
@@ -1406,7 +3386,7 @@
 						)
 					)
 				)
-				(number "G12"
+				(number "F2"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1415,27 +3395,117 @@
 				)
 			)
 			(pin power_in line
-				(at -14.61 -10.16 90)
-				(length 2.54)
-				(name "+3V3"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "G13"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -13.34 -10.16 90)
+				(at -17.78 -10.16 90)
 				(length 2.54)
 				(name "+1V0"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "F8"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at -16.51 -10.16 90)
+				(length 2.54)
+				(name "+1V0"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "G11"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at -15.24 -10.16 90)
+				(length 2.54)
+				(name "+3V3"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "G15"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at -13.97 -10.16 90)
+				(length 2.54)
+				(name "+3V3"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "G5"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at -12.7 -10.16 90)
+				(length 2.54)
+				(name "+1V0"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "G7"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at -11.43 -10.16 90)
+				(length 2.54)
+				(name "+1V0"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "G9"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at -10.16 -10.16 90)
+				(length 2.54)
+				(name "+1V8"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1451,7 +3521,7 @@
 				)
 			)
 			(pin power_in line
-				(at -12.06 -10.16 90)
+				(at -8.89 -10.16 90)
 				(length 2.54)
 				(name "+1V8"
 					(effects
@@ -1460,7 +3530,7 @@
 						)
 					)
 				)
-				(number "H13"
+				(number "H12"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1469,7 +3539,7 @@
 				)
 			)
 			(pin power_in line
-				(at -10.79 -10.16 90)
+				(at -7.62 -10.16 90)
 				(length 2.54)
 				(name "+3V3"
 					(effects
@@ -1478,7 +3548,7 @@
 						)
 					)
 				)
-				(number "H3"
+				(number "H18"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1487,7 +3557,7 @@
 				)
 			)
 			(pin power_in line
-				(at -9.52 -10.16 90)
+				(at -6.35 -10.16 90)
 				(length 2.54)
 				(name "+1V0"
 					(effects
@@ -1496,7 +3566,7 @@
 						)
 					)
 				)
-				(number "J10"
+				(number "H8"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1505,27 +3575,45 @@
 				)
 			)
 			(pin power_in line
-				(at -8.25 -10.16 90)
-				(length 2.54)
-				(name "+1V8"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "J13"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -6.98 -10.16 90)
+				(at -5.08 -10.16 90)
 				(length 2.54)
 				(name "+3V3"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "J1"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at -3.81 -10.16 90)
+				(length 2.54)
+				(name "+1V0"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "J11"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at -2.54 -10.16 90)
+				(length 2.54)
+				(name "+1V0"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1541,16 +3629,16 @@
 				)
 			)
 			(pin power_in line
-				(at -5.71 -10.16 90)
+				(at -1.27 -10.16 90)
 				(length 2.54)
-				(name "+3V3"
+				(name "VREFP"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "K1"
+				(number "K10"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1559,9 +3647,9 @@
 				)
 			)
 			(pin power_in line
-				(at -4.45 -10.16 90)
+				(at 0.0 -10.16 90)
 				(length 2.54)
-				(name "+3V3"
+				(name "+1V8"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1577,7 +3665,7 @@
 				)
 			)
 			(pin power_in line
-				(at -3.18 -10.16 90)
+				(at 1.27 -10.16 90)
 				(length 2.54)
 				(name "+3V3"
 					(effects
@@ -1586,7 +3674,7 @@
 						)
 					)
 				)
-				(number "K13"
+				(number "K14"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1595,7 +3683,7 @@
 				)
 			)
 			(pin power_in line
-				(at -1.91 -10.16 90)
+				(at 2.54 -10.16 90)
 				(length 2.54)
 				(name "+3V3"
 					(effects
@@ -1604,7 +3692,7 @@
 						)
 					)
 				)
-				(number "K7"
+				(number "K4"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1613,7 +3701,7 @@
 				)
 			)
 			(pin power_in line
-				(at -0.64 -10.16 90)
+				(at 3.81 -10.16 90)
 				(length 2.54)
 				(name "+1V0"
 					(effects
@@ -1622,7 +3710,7 @@
 						)
 					)
 				)
-				(number "L10"
+				(number "K8"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1631,16 +3719,16 @@
 				)
 			)
 			(pin power_in line
-				(at 0.64 -10.16 90)
+				(at 5.08 -10.16 90)
 				(length 2.54)
-				(name "+3V3"
+				(name "+1V0"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "L12"
+				(number "L11"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1649,7 +3737,7 @@
 				)
 			)
 			(pin power_in line
-				(at 1.91 -10.16 90)
+				(at 6.35 -10.16 90)
 				(length 2.54)
 				(name "+3V3"
 					(effects
@@ -1658,7 +3746,7 @@
 						)
 					)
 				)
-				(number "L13"
+				(number "L17"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1667,9 +3755,9 @@
 				)
 			)
 			(pin power_in line
-				(at 3.18 -10.16 90)
+				(at 7.62 -10.16 90)
 				(length 2.54)
-				(name "+3V3"
+				(name "+1V0"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1685,7 +3773,7 @@
 				)
 			)
 			(pin power_in line
-				(at 4.45 -10.16 90)
+				(at 8.89 -10.16 90)
 				(length 2.54)
 				(name "+1V0"
 					(effects
@@ -1703,27 +3791,9 @@
 				)
 			)
 			(pin power_in line
-				(at 5.71 -10.16 90)
+				(at 10.16 -10.16 90)
 				(length 2.54)
-				(name "+1V0"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "M11"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at 6.99 -10.16 90)
-				(length 2.54)
-				(name "+3V3"
+				(name "+1V8"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1739,45 +3809,9 @@
 				)
 			)
 			(pin power_in line
-				(at 8.25 -10.16 90)
+				(at 11.43 -10.16 90)
 				(length 2.54)
-				(name "+3V3"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "M17"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at 9.53 -10.16 90)
-				(length 2.54)
-				(name "+3V3"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "M7"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at 10.79 -10.16 90)
-				(length 2.54)
-				(name "+3V3"
+				(name "+1V0"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1793,25 +3827,7 @@
 				)
 			)
 			(pin power_in line
-				(at 12.07 -10.16 90)
-				(length 2.54)
-				(name "+1V0"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "N10"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at 13.33 -10.16 90)
+				(at 12.7 -10.16 90)
 				(length 2.54)
 				(name "+1V0"
 					(effects
@@ -1829,9 +3845,45 @@
 				)
 			)
 			(pin power_in line
-				(at 14.61 -10.16 90)
+				(at 13.97 -10.16 90)
 				(length 2.54)
 				(name "+3V3"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "N13"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at 15.24 -10.16 90)
+				(length 2.54)
+				(name "+3V3"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "N3"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at 16.51 -10.16 90)
+				(length 2.54)
+				(name "+1V0"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1847,16 +3899,16 @@
 				)
 			)
 			(pin power_in line
-				(at 15.88 -10.16 90)
+				(at 17.78 -10.16 90)
 				(length 2.54)
-				(name "+3V3"
+				(name "+1V0"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "N8"
+				(number "N9"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1865,7 +3917,7 @@
 				)
 			)
 			(pin power_in line
-				(at 17.14 -10.16 90)
+				(at 19.05 -10.16 90)
 				(length 2.54)
 				(name "+3V3"
 					(effects
@@ -1874,7 +3926,7 @@
 						)
 					)
 				)
-				(number "R1"
+				(number "P12"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1883,7 +3935,7 @@
 				)
 			)
 			(pin power_in line
-				(at 18.42 -10.16 90)
+				(at 20.32 -10.16 90)
 				(length 2.54)
 				(name "+3V3"
 					(effects
@@ -1892,7 +3944,7 @@
 						)
 					)
 				)
-				(number "R17"
+				(number "P16"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1901,7 +3953,7 @@
 				)
 			)
 			(pin power_in line
-				(at 19.68 -10.16 90)
+				(at 21.59 -10.16 90)
 				(length 2.54)
 				(name "+3V3"
 					(effects
@@ -1910,7 +3962,7 @@
 						)
 					)
 				)
-				(number "U13"
+				(number "P6"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1919,7 +3971,7 @@
 				)
 			)
 			(pin power_in line
-				(at 20.96 -10.16 90)
+				(at 22.86 -10.16 90)
 				(length 2.54)
 				(name "+3V3"
 					(effects
@@ -1928,7 +3980,7 @@
 						)
 					)
 				)
-				(number "V1"
+				(number "P8"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1937,7 +3989,7 @@
 				)
 			)
 			(pin power_in line
-				(at 22.22 -10.16 90)
+				(at 24.13 -10.16 90)
 				(length 2.54)
 				(name "+3V3"
 					(effects
@@ -1946,7 +3998,7 @@
 						)
 					)
 				)
-				(number "V11"
+				(number "R9"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1955,7 +4007,7 @@
 				)
 			)
 			(pin power_in line
-				(at 23.5 -10.16 90)
+				(at 25.4 -10.16 90)
 				(length 2.54)
 				(name "+3V3"
 					(effects
@@ -1964,7 +4016,7 @@
 						)
 					)
 				)
-				(number "V12"
+				(number "T12"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1973,7 +4025,7 @@
 				)
 			)
 			(pin power_in line
-				(at 24.76 -10.16 90)
+				(at 26.67 -10.16 90)
 				(length 2.54)
 				(name "+3V3"
 					(effects
@@ -1982,7 +4034,7 @@
 						)
 					)
 				)
-				(number "V6"
+				(number "T2"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1991,7 +4043,7 @@
 				)
 			)
 			(pin power_in line
-				(at 26.04 -10.16 90)
+				(at 27.94 -10.16 90)
 				(length 2.54)
 				(name "+3V3"
 					(effects
@@ -2000,7 +4052,7 @@
 						)
 					)
 				)
-				(number "V9"
+				(number "U15"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2009,7 +4061,61 @@
 				)
 			)
 			(pin power_in line
-				(at -48.9 10.16 270)
+				(at 29.21 -10.16 90)
+				(length 2.54)
+				(name "+3V3"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "U5"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at 30.48 -10.16 90)
+				(length 2.54)
+				(name "+3V3"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "V18"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at 31.75 -10.16 90)
+				(length 2.54)
+				(name "+3V3"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "V8"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at -31.75 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2018,7 +4124,7 @@
 						)
 					)
 				)
-				(number "A1"
+				(number "A12"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2027,61 +4133,7 @@
 				)
 			)
 			(pin power_in line
-				(at -47.62 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "A10"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -46.36 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "A13"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -45.09 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "A19"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -43.82 10.16 270)
+				(at -30.48 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2099,7 +4151,7 @@
 				)
 			)
 			(pin power_in line
-				(at -42.55 10.16 270)
+				(at -29.21 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2108,7 +4160,7 @@
 						)
 					)
 				)
-				(number "A3"
+				(number "B15"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2117,223 +4169,7 @@
 				)
 			)
 			(pin power_in line
-				(at -41.28 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "A4"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -40.01 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "A5"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -38.73 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "A6"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -37.47 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "A7"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -36.2 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "A8"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -34.93 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "A9"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -33.66 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "B1"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -32.39 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "B10"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -31.12 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "B14"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -29.85 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "B2"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -28.58 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "B3"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -27.31 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "B4"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -26.04 10.16 270)
+				(at -27.94 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2351,7 +4187,7 @@
 				)
 			)
 			(pin power_in line
-				(at -24.77 10.16 270)
+				(at -26.67 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2360,7 +4196,7 @@
 						)
 					)
 				)
-				(number "B6"
+				(number "C18"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2369,7 +4205,7 @@
 				)
 			)
 			(pin power_in line
-				(at -23.5 10.16 270)
+				(at -25.4 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2378,7 +4214,7 @@
 						)
 					)
 				)
-				(number "B7"
+				(number "C8"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2387,223 +4223,7 @@
 				)
 			)
 			(pin power_in line
-				(at -22.23 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "B8"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -20.96 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "B9"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -19.69 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "C1"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -18.42 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "C10"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -17.15 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "C12"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -15.88 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "C19"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -14.61 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "C2"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -13.34 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "C3"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -12.07 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "C4"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -10.8 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "C5"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -9.53 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "C6"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -8.26 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "C7"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at -6.98 10.16 270)
+				(at -24.13 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2621,7 +4241,7 @@
 				)
 			)
 			(pin power_in line
-				(at -5.72 10.16 270)
+				(at -22.86 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2630,7 +4250,7 @@
 						)
 					)
 				)
-				(number "D2"
+				(number "D11"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2639,7 +4259,7 @@
 				)
 			)
 			(pin power_in line
-				(at -4.45 10.16 270)
+				(at -21.59 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2648,7 +4268,7 @@
 						)
 					)
 				)
-				(number "D3"
+				(number "E14"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2657,7 +4277,7 @@
 				)
 			)
 			(pin power_in line
-				(at -3.18 10.16 270)
+				(at -20.32 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2666,7 +4286,7 @@
 						)
 					)
 				)
-				(number "E1"
+				(number "E4"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2675,7 +4295,7 @@
 				)
 			)
 			(pin power_in line
-				(at -1.91 10.16 270)
+				(at -19.05 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2684,7 +4304,7 @@
 						)
 					)
 				)
-				(number "E17"
+				(number "F11"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2693,7 +4313,7 @@
 				)
 			)
 			(pin power_in line
-				(at -0.64 10.16 270)
+				(at -17.78 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2702,7 +4322,7 @@
 						)
 					)
 				)
-				(number "E2"
+				(number "F17"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2711,7 +4331,7 @@
 				)
 			)
 			(pin power_in line
-				(at 0.63 10.16 270)
+				(at -16.51 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2720,7 +4340,7 @@
 						)
 					)
 				)
-				(number "E3"
+				(number "F7"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2729,7 +4349,7 @@
 				)
 			)
 			(pin power_in line
-				(at 1.9 10.16 270)
+				(at -15.24 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2738,7 +4358,7 @@
 						)
 					)
 				)
-				(number "F1"
+				(number "F9"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2747,7 +4367,7 @@
 				)
 			)
 			(pin power_in line
-				(at 3.17 10.16 270)
+				(at -13.97 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2756,7 +4376,7 @@
 						)
 					)
 				)
-				(number "F19"
+				(number "G10"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2765,7 +4385,7 @@
 				)
 			)
 			(pin power_in line
-				(at 4.45 10.16 270)
+				(at -12.7 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2774,7 +4394,7 @@
 						)
 					)
 				)
-				(number "F2"
+				(number "G12"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2783,79 +4403,7 @@
 				)
 			)
 			(pin power_in line
-				(at 5.71 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "F3"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at 6.98 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "G1"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at 8.25 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "G11"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at 9.52 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "G7"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at 10.79 10.16 270)
+				(at -11.43 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2873,25 +4421,7 @@
 				)
 			)
 			(pin power_in line
-				(at 12.06 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "G9"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at 13.34 10.16 270)
+				(at -10.16 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2909,7 +4439,7 @@
 				)
 			)
 			(pin power_in line
-				(at 14.6 10.16 270)
+				(at -8.89 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2918,7 +4448,7 @@
 						)
 					)
 				)
-				(number "H12"
+				(number "H13"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2927,7 +4457,7 @@
 				)
 			)
 			(pin power_in line
-				(at 15.87 10.16 270)
+				(at -7.62 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2936,7 +4466,7 @@
 						)
 					)
 				)
-				(number "H18"
+				(number "H3"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2945,7 +4475,7 @@
 				)
 			)
 			(pin power_in line
-				(at 17.15 10.16 270)
+				(at -6.35 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2963,25 +4493,7 @@
 				)
 			)
 			(pin power_in line
-				(at 18.41 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "H8"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at 19.68 10.16 270)
+				(at -5.08 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -2999,25 +4511,7 @@
 				)
 			)
 			(pin power_in line
-				(at 20.95 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "J11"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at 22.23 10.16 270)
+				(at -3.81 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -3035,7 +4529,43 @@
 				)
 			)
 			(pin power_in line
-				(at 23.49 10.16 270)
+				(at -2.54 10.16 270)
+				(length 2.54)
+				(name "GND"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "J16"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at -1.27 10.16 270)
+				(length 2.54)
+				(name "GND"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "J6"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at 0.0 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -3053,7 +4583,7 @@
 				)
 			)
 			(pin power_in line
-				(at 24.76 10.16 270)
+				(at 1.27 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -3071,7 +4601,7 @@
 				)
 			)
 			(pin power_in line
-				(at 26.04 10.16 270)
+				(at 2.54 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -3080,7 +4610,7 @@
 						)
 					)
 				)
-				(number "K8"
+				(number "K11"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -3089,7 +4619,7 @@
 				)
 			)
 			(pin power_in line
-				(at 27.3 10.16 270)
+				(at 3.81 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -3098,7 +4628,7 @@
 						)
 					)
 				)
-				(number "L11"
+				(number "K7"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -3107,7 +4637,7 @@
 				)
 			)
 			(pin power_in line
-				(at 28.57 10.16 270)
+				(at 5.08 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -3116,7 +4646,7 @@
 						)
 					)
 				)
-				(number "L19"
+				(number "L12"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -3125,7 +4655,25 @@
 				)
 			)
 			(pin power_in line
-				(at 29.84 10.16 270)
+				(at 6.35 10.16 270)
+				(length 2.54)
+				(name "GND"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "L2"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at 7.62 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -3143,7 +4691,7 @@
 				)
 			)
 			(pin power_in line
-				(at 31.12 10.16 270)
+				(at 8.89 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -3152,7 +4700,7 @@
 						)
 					)
 				)
-				(number "L9"
+				(number "M11"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -3161,7 +4709,7 @@
 				)
 			)
 			(pin power_in line
-				(at 32.38 10.16 270)
+				(at 10.16 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -3170,7 +4718,7 @@
 						)
 					)
 				)
-				(number "M13"
+				(number "M15"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -3179,7 +4727,43 @@
 				)
 			)
 			(pin power_in line
-				(at 33.65 10.16 270)
+				(at 11.43 10.16 270)
+				(length 2.54)
+				(name "GND"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "M5"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at 12.7 10.16 270)
+				(length 2.54)
+				(name "GND"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "M7"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at 13.97 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -3197,7 +4781,25 @@
 				)
 			)
 			(pin power_in line
-				(at 34.93 10.16 270)
+				(at 15.24 10.16 270)
+				(length 2.54)
+				(name "GND"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "N10"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at 16.51 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -3215,7 +4817,7 @@
 				)
 			)
 			(pin power_in line
-				(at 36.2 10.16 270)
+				(at 17.78 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -3224,7 +4826,7 @@
 						)
 					)
 				)
-				(number "N13"
+				(number "N18"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -3233,7 +4835,7 @@
 				)
 			)
 			(pin power_in line
-				(at 37.46 10.16 270)
+				(at 19.05 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -3242,7 +4844,7 @@
 						)
 					)
 				)
-				(number "N9"
+				(number "N8"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -3251,7 +4853,7 @@
 				)
 			)
 			(pin power_in line
-				(at 38.73 10.16 270)
+				(at 20.32 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -3260,7 +4862,7 @@
 						)
 					)
 				)
-				(number "P2"
+				(number "P1"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -3269,7 +4871,7 @@
 				)
 			)
 			(pin power_in line
-				(at 40.01 10.16 270)
+				(at 21.59 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -3278,7 +4880,7 @@
 						)
 					)
 				)
-				(number "T19"
+				(number "P11"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -3287,7 +4889,97 @@
 				)
 			)
 			(pin power_in line
-				(at 41.27 10.16 270)
+				(at 22.86 10.16 270)
+				(length 2.54)
+				(name "GND"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "P13"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at 24.13 10.16 270)
+				(length 2.54)
+				(name "GND"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "R14"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at 25.4 10.16 270)
+				(length 2.54)
+				(name "GND"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "R4"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at 26.67 10.16 270)
+				(length 2.54)
+				(name "GND"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "T17"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at 27.94 10.16 270)
+				(length 2.54)
+				(name "GND"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "T7"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin power_in line
+				(at 29.21 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -3305,7 +4997,7 @@
 				)
 			)
 			(pin power_in line
-				(at 42.54 10.16 270)
+				(at 30.48 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -3314,7 +5006,7 @@
 						)
 					)
 				)
-				(number "U6"
+				(number "V13"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -3323,7 +5015,7 @@
 				)
 			)
 			(pin power_in line
-				(at 43.82 10.16 270)
+				(at 31.75 10.16 270)
 				(length 2.54)
 				(name "GND"
 					(effects
@@ -3332,79 +5024,7 @@
 						)
 					)
 				)
-				(number "U9"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at 45.09 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "V18"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at 46.35 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "W1"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at 47.62 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "W11"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin power_in line
-				(at 48.9 10.16 270)
-				(length 2.54)
-				(name "GND"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "W12"
+				(number "V3"
 					(effects
 						(font
 							(size 1.27 1.27)
