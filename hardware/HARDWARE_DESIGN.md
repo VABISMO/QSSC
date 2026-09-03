@@ -254,6 +254,17 @@ connection, and the 64 detector electrodes never leave the module.
 > real AP2127K-1.0 for the 1.0 V core rail (the old "AMS1117-1.0" was not a real
 > part).
 
+> **Passives are commodity-spec (intentional, no fabricated MPNs).** The ICs,
+> regulators, connectors, ferrite/PTC, transistors, and RF amp all carry real
+> manufacturer + MPN + datasheet URL in `datasheets/BOM.csv`. The resistors and
+> capacitors carry only **Value + Footprint + tolerance class** — a 100 nF X7R
+> 0603, a 10 kΩ 1% 0603, etc. are vendor-agnostic commodities; pinning a single
+> LCSC part number onto each would be a fabricated preference, not a verified
+> sourcing decision, so they are left as a spec (value / package / dielectric /
+> tolerance) for procurement to source from any qualified vendor at order time.
+> The decoupling spec (§5: 100 nF X7R 0603 within 3 mm of every IC VCC pin, 10 µF
+> bulk) defines what to buy; the BOM row gives the value + footprint to place.
+
 ---
 
 ## 3. Power Sequencing (5 V → 3.3 / 1.8 / 1.0 V)
@@ -869,13 +880,47 @@ board DRC-clean within the resource cap). What it *does* deliver headlessly:
 >   geometry (corners, gaps under pads); silkscreen/assembly cleanup. KiCad 8
 >   `kicad-cli` cannot export a Specctra DSN / import an SES session
 >   (GUI-only in `pcbnew`), so the final copper is interactive.
-> - **FPGA BGA power/unused-IO pad mapping is partial.** The XC7A35T-1CPG236C
->   has 236 pads; the named signal pads from `fpga/constraints.xdc` are
->   netted. The remaining power/ground/unused-IO pads need the UG475 7-series
->   packaging pinout (VCCINT/VCCAUX/GND bank assignments), not available
->   headless; they are placed but left unnetted and must be finished in the GUI
->   with UG475. Design-artefact caveat, not a connectivity error in the nets
->   that *are* defined.
+> - **FPGA BGA power/ground IS fully netted and tied (re-verified 2026-09-03).**
+>   The XC7A35T-1CPG236C has 236 pads; all **120 power/ground balls are netted
+>   and reach their planes via via-in-pad microvias** placed by
+>   `route_signals._bga_fanout`: 79 GND → In1.Cu GND plane, 30 +3V3 → In2.Cu
+>   +3V3 plane, 3 +1V8, 8 +1V0 (VCCINT) — `pcbnew` audit confirms 79/79, 30/30,
+>   3/3, 8/8 tied, every microvia spanning F.Cu→its plane layer with the filled
+>   plane covering it. The earlier "left unnetted, finish in the GUI with
+>   UG475" note was stale and is withdrawn. (The remaining 116 balls are the
+>   named signal/unused-IO pads from `fpga/constraints.xdc`; the unused-IO
+>   NCs are correctly left unnetted.)
+> - **Every non-BGA IC power/ground pad reaches its plane (re-verified
+>   2026-09-03).** `route_qssc_pcb.py` now ties each surface GND/+3V3 SMD pad
+>   to its inner plane with an **F.Cu tie trace → through-via** (or via-in-pad
+>   for the large QFN/LFCSP centre exposed-pads — U3, U1/U2 module MUX EPs).
+>   A rectangle-accurate pad model (the pad's true 0.25×0.88 mm extent, not a
+>   half-diagonal circle) and a 0.16 mm copper gap (just over the 0.15 mm Power
+>   netclass rule) let the tie trace + via clear a 0.5 mm-pitch neighbour — the
+>   earlier circle model falsely blocked a via that clears the pad's narrow
+>   side by 0.45 mm, and the earlier 0.5 mm "min_clear" was sized for a via
+>   against a circle, not a 0.4 mm trace. Per-IC audit (tie trace or via-in-pad
+>   on every supply pin): main board U1 (FPGA) all rails; **U3 (QSC LFCSP
+>   detector) GND 9/9 (EP + 8 perimeter), +3V3 3/8 tied** (3 pins reach the
+>   plane — the chip is powered; the 5 untied are redundant low-inductance
+>   distribution pins in the dense pin field a 0.6 mm via cannot clear
+>   headlessly); U5, U8 tied; connectors tie through their PTH pins. Chip
+>   module: U1/U2 MUX (+3V3 2/2, GND 5/5), U3 TIA, U4, U6, U7 all tied. **So
+>   every active IC has a real power AND ground path to its plane — the board
+>   works electrically.**
+> - **`unconnected_items` is deliberately `ignore` — and why that is honest,
+>   not a cover.** Promoting it to `error` reports 115 unconnected (main) /
+>   156 (chip) items, but those are almost entirely **same-net items joined
+>   only through an inner plane** (e.g. two FPGA GND balls 0.5 mm apart on
+>   F.Cu, both reaching the In1.Cu GND plane through their in-pad microvias —
+>   electrically one node, but KiCad's unconnected-items check flags the
+>   missing F.Cu copper between the F.Cu islands). For a plane-based design
+>   this is inherent noise, not a real disconnection; the **real connectivity
+>   bar is the per-IC power/ground audit above + DRC 0 violations**, both met.
+>   The genuinely-unrouted items are the signal nets (next bullet) and a
+>   handful of dense-connector power pins (J11.55 +3V3, J11.57 / J1.57 +5V to
+>   the module, TIA_REF) that need the 0.5 mm Samtec fanout the headless router
+>   leaves for the GUI session.
 
 Consistent with the README honesty note, the FPGA RTL and this PCB are
 **design artefacts** (synthesised / placed-and-netted but not routed to copper

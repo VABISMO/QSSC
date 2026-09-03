@@ -934,18 +934,22 @@ def _route_power(board, nc, net, pads, rail_lay, master, own_keepout, routed,
     vr = _mark_radius_for_width(ROUTING_VIA_DIAM_NM)
     ties = []          # (x, y) rail-layer tie points, parallel to pads order
     tie_info = []      # (pad, (vx,vy)) for SMD pads; None for a BGA barrel tie
+    ties_pad_idx = []  # pads[i] index for each ties[] entry (skipped pads absent)
+    pad_centers = [(p.GetCenter().x, p.GetCenter().y) for p in pads]
     reserved = set()   # 2D cells already claimed by a chosen tie via (no stacking)
     skip_pad = 0
 
     # Phase A -- find a clean through-via tie for every SMD pad (place nothing).
     # BGA power balls are tied at their own barrel (already on rail_lay). A pad
-    # with no clean tie via is skipped (left to GUI), not added to `ties`.
-    for p in pads:
-        cx, cy = p.GetCenter().x, p.GetCenter().y
+    # with no clean tie via is skipped (left to the Phase-D daisy fallback, then
+    # GUI), not added to `ties`.
+    for i, p in enumerate(pads):
+        cx, cy = pad_centers[i]
         key = (int(cx), int(cy))
         if key in pad_vip and pad_vip[key][0] == rail_lay:
             ties.append((cx, cy))
             tie_info.append(None)
+            ties_pad_idx.append(i)
             continue
         via_pos = None
         for (vx, vy) in _via_candidates(p, x0, y0, via2d, master, own_keepout,
@@ -964,6 +968,7 @@ def _route_power(board, nc, net, pads, rail_lay, master, own_keepout, routed,
                 reserved.add((vix + dx, viy + dy))
         ties.append(via_pos)
         tie_info.append((p, via_pos))
+        ties_pad_idx.append(i)
     if len(ties) < 2:
         _FAIL_REASON = f"power {net}: fewer than 2 tieable pads"
         return (0, 0, skip_pad, 0)
@@ -1014,6 +1019,38 @@ def _route_power(board, nc, net, pads, rail_lay, master, own_keepout, routed,
         _emit_path(board, nc, path, rail_lay, x0, y0, routed,
                    width_nm, mark_r, allowed)
         nt += len(path) - 1
+
+    # Phase D -- daisy-chain fallback for pads the MST / tie-via skipped: a
+    # direct F.Cu L/Z from the straggler pad to the NEAREST already-connected
+    # pad of the same net (which already has its via to the rail) ties the
+    # straggler to the rail through its neighbour. No new via; the F.Cu track is
+    # the pad's own net (its own_keepout / allowed override passes its own pad +
+    # the target pad, both same-net), and _try_layer's _seg_clear keeps it off
+    # every other net, so it cannot short. Catches decoupling caps in the dense
+    # cap bank / a module-connector +5V pin whose own tie via did not fit (the
+    # via-footprint r3 check is conservative). Tried on F.Cu only (an SMD pad
+    # lives on F.Cu; a rail-layer track from it would not connect without a via,
+    # which is exactly what did not fit). Still-unconnected pads are left to GUI.
+    connected_idx = {ties_pad_idx[k] for k in used}
+    conn_centers = [pad_centers[k] for k in connected_idx]
+    for i in range(len(pads)):
+        if i in connected_idx:
+            continue
+        sx, sy = pad_centers[i]
+        # nearest connected pad first (a short F.Cu hop is most likely clean)
+        targets = sorted(conn_centers,
+                         key=lambda c: (c[0] - sx) ** 2 + (c[1] - sy) ** 2)
+        for (tx, ty) in targets:
+            if abs(tx - sx) < 1 and abs(ty - sy) < 1:
+                continue                  # same cell (stacked pads) -- skip
+            dpath = _try_layer(sx, sy, tx, ty, F_CU, kw, max_off=20)
+            if dpath is not None:
+                _emit_path(board, nc, dpath, F_CU, x0, y0, routed,
+                           width_nm, mark_r, allowed)
+                nt += len(dpath) - 1
+                connected_idx.add(i)
+                skip_pad -= 1
+                break
     _FAIL_REASON = "" if (nt or skip_pad or skip_edge) else f"power {net}: no edges"
     return (nt, nv, skip_pad, skip_edge)
 
