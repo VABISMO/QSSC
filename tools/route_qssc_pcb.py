@@ -4,7 +4,7 @@
 This is NOT an autorouter. A quality DRC-clean autoroute of a 65-net board with
 a 237-pad FPGA BGA cannot be produced headlessly: FreeRouting/topola are not
 installed, and writing one from scratch in a script would leave DRC violations
-(a "routed" board that fails DRC is *worse* than an honestly-unrouted one). The
+(a "routed" board that fails DRC is *worse* than an unrouted one). The
 FPGA's 120 power/ground balls ARE netted (79 GND, 30 +3V3, 3 +1V8, 8 +1V0) and
 reach their planes via via-in-pad microvias placed by route_signals._bga_fanout;
 the remaining ~116 balls are named signal / unused-IO pads from the XDC.
@@ -32,7 +32,7 @@ BGA via-in-pad (GND/+3V3/signal/power) and ALL signal + non-plane power routing
 are owned by ``tools/route_signals.py`` (run it FIRST). This script preserves
 the small BGA VIPs and all signal copper when (re)building the planes.
 
-Still GUI-pending (honestly): 50-ohm RF microstrip impedance verification with a
+Still GUI-pending: 50-ohm RF microstrip impedance verification with a
 solver, USB-C diff-pair length-skew tuning, analog guard-ring final geometry,
 and the dense 0.5 mm Samtec connector power-pin fanout (J11.55 +3V3, J11.57 /
 J1.57 +5V to the module, TIA_REF) the headless router leaves for the GUI.
@@ -878,7 +878,7 @@ def _tie_stragglers_to_rail(board, netcode, via_positions, obs_segs, obs_circles
     pad via its F.Cu stub), route a thin 0.2 mm B.Cu L-trace from the via to the
     nearest existing same-net rail copper so the pad joins the rail. B.Cu carries
     no SMD pads, so an L-path (two orthogonal segments) is usually clear; if both
-    L-orders are blocked the pad is left honestly to GUI. ``via_positions`` is
+    L-orders are blocked the pad is left to GUI. ``via_positions`` is
     the list of (vx, vy, nc) the rail-pad spiral appended to via_centers (the via
     OBJECTS' GetPosition() returns a bare SwigPyObject after board mutation).
     ``placed_vias`` is the full via_centers list (surviving + rail-pad +

@@ -344,12 +344,22 @@ def fpga_pin_list():
 # the contact pads carry NO paste).  Each face is its own footprint so the two
 # boards are independent: QSSC_Chip_EM on the main F.Cu, QSSC_Chip_DET on the
 # head B.Cu.  Symbol pin NUMBER == footprint pad name so fp_net_pads nets every
-# pad by name.  20x20 mm die, 0.30 mm perimeter pad pitch (ACF handles down to
-# ~0.1 mm); the 64 pads escape outward as dog-bone vias (route_signals._chip_fanout,
-# pad-layer-derived: F.Cu pads -> F.Cu stub + B.Cu via; B.Cu pads -> B.Cu stub +
-# F.Cu via).
-_PITCH = 0.30
-_X0 = -_PITCH * 63 / 2                       # 64 pads centered -> -9.45..+9.45
+# pad by name.  The optical die carries an 8x8 GRID of electrodes = 64 pads
+# evenly across the 20x20 mm (2x2 cm) face, ~2.5 mm pitch (user spec).  Each pad
+# escapes outward as a dog-bone via (route_signals._chip_fanout, pad-layer-
+# derived: F.Cu pads -> F.Cu stub + B.Cu via; B.Cu pads -> B.Cu stub + F.Cu via).
+GRID_N = 8                                    # 8x8 electrodes = 64 per face
+GRID_PITCH = 2.5                              # mm; 8 pads -> 7 intervals = 17.5 mm span
+GRID_HALF = GRID_PITCH * (GRID_N - 1) / 2     # 8.75 mm -> grid spans -8.75..+8.75
+
+def _chip_grid_xy(i):
+    """(x, y) in mm of electrode #i (0..63) on the 8x8 grid, row-major
+    (i = row*8 + col, row/col in 0..7), centered on the 20x20 mm die.
+    EM0/DET0 -> top-left (-8.75,-8.75); EM7 -> top-right (+8.75,-8.75);
+    EM63 -> bottom-right (+8.75,+8.75)."""
+    row, col = divmod(i, GRID_N)
+    return (round(-GRID_HALF + col * GRID_PITCH, 3),
+            round(-GRID_HALF + row * GRID_PITCH, 3))
 
 
 def chip_pin_list_em():
@@ -438,39 +448,40 @@ def _chip_fp_body(lib_id, value, descr, pads, layer="F.Cu"):
 
 def chip_footprint_em():
     """Footprint for the die BOTTOM (emitter) face on the MAIN board F.Cu: 64 EM
-    cathode pads on the bottom edge (y=+10) + EM_ANODE on the LEFT edge.  ACF
-    direct-contact pads (F.Cu + F.Mask, NO F.Paste -- the die is clamped
-    face-down, not soldered).  EM_ANODE is on the left edge (not the bottom EM
-    row) so its fanout via clears the 0.30 mm-pitch EM dog-bone via field."""
-    def pad(name, x, y, w=0.15, h=0.30):
+    cathode pads on an 8x8 grid across the 20x20 mm face (~2.5 mm pitch) +
+    EM_ANODE common-anode pad on the LEFT edge.  ACF direct-contact pads
+    (F.Cu + F.Mask, NO F.Paste -- the die is clamped face-down, not soldered).
+    EM_ANODE is on the left edge (clear of the 8x8 grid, whose leftmost column
+    is at x=-8.75) so its fanout via does not collide with the grid dog-bones."""
+    def pad(name, x, y, w=1.2, h=1.2):
         return L(A("pad"), S(name), A("smd"), A("rect"),
                  L(A("at"), A(round(x, 3)), A(round(y, 3))),
                  L(A("size"), A(w), A(h)),
                  L(A("layers"), S("F.Cu"), S("F.Mask")))
-    pads = [pad(f"EM{i}", _X0 + i * _PITCH, 10.0) for i in range(64)]
+    pads = [pad(f"EM{i}", *_chip_grid_xy(i)) for i in range(64)]
     pads.append(L(A("pad"), S("EM_ANODE"), A("smd"), A("rect"),
-                  L(A("at"), A(-10.0), A(0)),
-                  L(A("size"), A(0.30), A(1.0)),
+                  L(A("at"), A(-9.9), A(0)),
+                  L(A("size"), A(0.5), A(1.5)),
                   L(A("layers"), S("F.Cu"), S("F.Mask"))))
     return _chip_fp_body("qssc:QSSC_Chip_EM", "QSSC_Chip_EM",
-                         "QSSC die BOTTOM face: 64 CQD emitter cathodes + common anode; 20x20 mm ACF contact pads (0.30 mm pitch) on F.Cu",
+                         "QSSC die BOTTOM face: 64 CQD emitter cathodes on an 8x8 grid + common anode; 20x20 mm ACF contact pads (~2.5 mm pitch) on F.Cu",
                          pads, "F.Cu")
 
 
 def chip_footprint_det():
     """Footprint for the die TOP (detector) face on the DETECTOR HEAD B.Cu: 64
-    DET pads on the top edge (y=-10).  ACF direct-contact pads (B.Cu + B.Mask,
-    NO B.Paste -- the head is clamped face-down onto the die, not soldered).
-    Pads on B.Cu so the head's bottom face contacts the die's top face when the
-    two boards are stacked."""
-    def pad(name, x, y):
+    DET pads on an 8x8 grid across the 20x20 mm face (~2.5 mm pitch).  ACF
+    direct-contact pads (B.Cu + B.Mask, NO B.Paste -- the head is clamped
+    face-down onto the die, not soldered).  Pads on B.Cu so the head's bottom
+    face contacts the die's top face when the two boards are stacked."""
+    def pad(name, x, y, w=1.2, h=1.2):
         return L(A("pad"), S(name), A("smd"), A("rect"),
                  L(A("at"), A(round(x, 3)), A(round(y, 3))),
-                 L(A("size"), A(0.15), A(0.30)),
+                 L(A("size"), A(w), A(h)),
                  L(A("layers"), S("B.Cu"), S("B.Mask")))
-    pads = [pad(f"DET{i}", _X0 + i * _PITCH, -10.0) for i in range(64)]
+    pads = [pad(f"DET{i}", *_chip_grid_xy(i)) for i in range(64)]
     return _chip_fp_body("qssc:QSSC_Chip_DET", "QSSC_Chip_DET",
-                         "QSSC die TOP face: 64 graphene detector electrodes; 20x20 mm ACF contact pads on B.Cu (0.30 mm pitch)",
+                         "QSSC die TOP face: 64 graphene detector electrodes on an 8x8 grid; 20x20 mm ACF contact pads on B.Cu (~2.5 mm pitch)",
                          pads, "B.Cu")
 
 
@@ -506,21 +517,21 @@ SOCKET_MNT_POS = [(-SOCKET_MNT, -SOCKET_MNT), (+SOCKET_MNT, -SOCKET_MNT),
 def socket_footprint():
     """Ironwood SBT open-top spring-pin socket footprint for the die EMITTER
     (bottom) face on the MAIN board F.Cu.  65 solder pads (64 EM cathodes on the
-    bottom edge y=+10 + EM_ANODE on the LEFT edge) at the SAME 0.30 mm perimeter
-    positions as QSSC_Chip_EM (the SBT spring pins transfer 1:1 die-pad -> PCB
-    pad), but on F.Cu + F.Paste + F.Mask (soldered socket, not ACF contact).
-    ~25x25 mm body outline + 4 NPTH corner mount holes.  Pad NAMES == QSSC_Chip_EM
-    so chip_net_map_em() nets every pad identically and route_signals._chip_fanout
-    dog-bones them with the SAME escape geometry as the ACF footprint."""
-    def pad(name, x, y, w=0.15, h=0.30):
+    8x8 grid across the 20x20 mm face + EM_ANODE on the LEFT edge) at the SAME
+    ~2.5 mm grid positions as QSSC_Chip_EM (the SBT spring pins transfer 1:1
+    die-pad -> PCB pad), but on F.Cu + F.Paste + F.Mask (soldered socket, not
+    ACF contact).  ~25x25 mm body outline + 4 NPTH corner mount holes.  Pad
+    NAMES == QSSC_Chip_EM so chip_net_map_em() nets every pad identically and
+    route_signals._chip_fanout dog-bones them with the SAME escape geometry."""
+    def pad(name, x, y, w=1.2, h=1.2):
         return L(A("pad"), S(name), A("smd"), A("rect"),
                  L(A("at"), A(round(x, 3)), A(round(y, 3))),
                  L(A("size"), A(w), A(h)),
                  L(A("layers"), S("F.Cu"), S("F.Paste"), S("F.Mask")))
-    pads = [pad(f"EM{i}", _X0 + i * _PITCH, 10.0) for i in range(64)]
+    pads = [pad(f"EM{i}", *_chip_grid_xy(i)) for i in range(64)]
     pads.append(L(A("pad"), S("EM_ANODE"), A("smd"), A("rect"),
-                  L(A("at"), A(-10.0), A(0)),
-                  L(A("size"), A(0.30), A(1.0)),
+                  L(A("at"), A(-9.9), A(0)),
+                  L(A("size"), A(0.5), A(1.5)),
                   L(A("layers"), S("F.Cu"), S("F.Paste"), S("F.Mask"))))
     # 4 NPTH mount holes (solder-less hardware mount; no net, no symbol pin).
     for mx, my in SOCKET_MNT_POS:
@@ -535,7 +546,7 @@ def socket_footprint():
              L(A("version"), A(20240108)),
              L(A("generator"), S("gen_qssc_kicad")),
              L(A("generator_version"), S("8.0")),
-             L(A("descr"), S("Ironwood SBT open-top spring-pin socket for the 20x20 mm / 0.30 mm-pitch QSSC die emitter face; 64 EM cathode + EM_ANODE solder pads on F.Cu; 4 NPTH mount holes (custom part -- finalize hole drill/positions from the Ironwood quote drawing)")),
+             L(A("descr"), S("Ironwood SBT open-top spring-pin socket for the 20x20 mm / 2.5 mm-pitch (8x8 grid) QSSC die emitter face; 64 EM cathode + EM_ANODE solder pads on F.Cu; 4 NPTH mount holes (custom part -- finalize hole drill/positions from the Ironwood quote drawing)")),
              L(A("attr"), A("smd")),
              L(A("property"), S("Reference"), S("U"),
                L(A("at"), A(0), A(-cy), A(0)),
@@ -1100,6 +1111,12 @@ def build_main_board():
     # Power chain (left column)
     add("J2", "qssc:Barrel_Jack", "5V Barrel", "Connector_BarrelJack:BarrelJack_CUI_PJ-102AH_Horizontal",
         30, 30, pins={"1": "+5V_IN", "2": "GND"})
+    # +5V_IN input bulk decoupling: the barrel-jack input rail (J2.1 -> F1.1) had
+    # NO decoupling cap -- 4 loads (J2, F1, USB diode-OR D4, PWR_FLAG) and 0 caps.
+    # Per standard practice a 10 uF bulk cap at the barrel input absorbs source
+    # ripple / hot-plug transient before the polyfuse + regulators.
+    add("C_in", "qssc:C", "10uF", "Capacitor_SMD:C_0805_2012Metric",
+        43, 38, pins={"1": "+5V_IN", "2": "GND"})
     add("F1", "qssc:Polyfuse", "2A PTC", "Fuse:Fuse_1206_3216Metric",
         55, 30, pins={"1": "+5V_IN", "2": "+5V"})
     add("REG1", "qssc:AMS1117-3.3", "AMS1117-3.3", "Package_TO_SOT_SMD:SOT-223-3_TabPin2",
@@ -1223,7 +1240,14 @@ def build_main_board():
                         "21": "GND", "22": "RSET", "23": "GND", "24": "VREF", "26": "+3V3",
                         "27": "GND", "28": "+3V3", "29": "refclk_25m", "30": "ADF_MUXOUT",
                         "31": "GND", "32": "+3V3", "33": "GND", "8": "GND",
-                        "19": "ADF_TEMP"},
+                        "19": "ADF_TEMP",
+                        # The QFN-32-1EP footprint models the 3.45x3.45 mm exposed
+                        # pad as ONE named pad "33" (netted GND above) PLUS a 3x3
+                        # grid of 9 numberless "" sub-pads (paste/copper apertures
+                        # under the EP). Per ADF4351 datasheet the EP MUST be tied to
+                        # GND (thermal + electrical return); net the sub-pads GND too
+                        # so none of the EP copper floats. fp_net_pads matches "".
+                        "": "GND"},
         nc_pins=["5", "13", "14", "15", "25"])
     # ADF4351 pin-tie rationale (verified vs ADI ADF4351 datasheet, 32-lead LFCSP):
     #   pin 20 VTUNE  -> LF_OUT  (loop-filter output drives the VCO tuning input;
@@ -1488,6 +1512,11 @@ def build_detector_analog():
     # The AD7616 VCC is 5 V analog; isolating it from the main +5V rail with a
     # 600-ohm ferrite + bulk/HF decoupling keeps the ADC's sampling transients
     # off the digital +5V (and vice-versa).  VDRIVE is +3V3 (logic levels).
+    # Head +5V (from BTB J12 pins 17/18) feeds FB_A; it had NO decoupling (2
+    # loads, 0 caps). Add a 10 uF bulk cap on the +5V side of the ferrite as the
+    # LDO/feed decoupling per standard practice.
+    add("C_5V", "qssc:C", "10uF", "Capacitor_SMD:C_0805_2012Metric", 0, 0,
+        pins={"1": "+5V", "2": "GND"})
     add("FB_A", "qssc:L", "600Ω@100MHz", "Inductor_SMD:L_0603_1608Metric", 0, 0,
         pins={"1": "+5V", "2": "+5V_A"})
     add("C_Abulk", "qssc:C", "10uF", "Capacitor_SMD:C_0805_2012Metric", 0, 0,
@@ -1557,7 +1586,10 @@ def build_detector_analog():
         # (56) is the second serial output, unused in 1-wire mode (all data on
         # SDOA = pin 57).  All declared (no_connect) per datasheet.
         add(f"UAD{j}", "qssc:AD7616", "AD7616", AD7616_FP, 0, 0, pins=p,
-            nc_pins=["41", "42", "43", "44", "47", "48", "53", "54", "55", "56"])
+            nc_pins=["41", "42", "43", "44", "47", "48", "53", "54", "55", "56"]
+                 + ([] if j == 0 else ["67"]))
+        # j>0 BUSY (pin 67) is unused: BUSY is push-pull (no wire-OR), only chip0's
+        # BUSY is read by the FPGA, so chip1-3 BUSY is left NC per datasheet.
         # per-chip decoupling (datasheet ref/reg/supply caps):
         add(f"Cua{j}", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
             pins={"1": "+5V_A", "2": "GND"})              # VCC HF
@@ -1590,7 +1622,13 @@ def build_emitter_driver():
               "Mask4.11x4.36mm_ThermalVias")
     for j in range(3):
         pins = {"1": "GND", "2": "em_blank", "3": "em_sclk",
-                "30": "em_xlat", "31": f"em_iref{j}", "32": "+3V3", "33": "GND"}
+                "30": "em_xlat", "31": f"em_iref{j}", "32": "+3V3", "33": "GND",
+                # The HTSSOP-32-1EP_ThermalVias footprint models the EP as 38
+                # plated-thermal-via pads named "33" (netted GND above) PLUS 13
+                # numberless "" EP copper sub-pads. Per TLC5947 datasheet the EP
+                # (DAP) MUST be tied to GND (thermal + electrical); net the
+                # sub-pads GND so no EP copper floats. fp_net_pads matches "".
+                "": "GND"}
         # SIN: chip0 takes em_sin from the FPGA; chip1/2 take the prior chip SOUT.
         pins["4"] = "em_sin" if j == 0 else f"em_sout{j-1}"
         # SOUT: chip0/1 cascade to the next chip's SIN; chip2 SOUT left NC.
@@ -1637,6 +1675,10 @@ def build_detector_head():
     # +3V3 / +5V arrive through J12 (passive pins) -> flag so ERC sees a driver.
     add("#FLG10", "power:PWR_FLAG", "PWR_FLAG", "", 30, 12, pins={"1": "+3V3"})
     add("#FLG11", "power:PWR_FLAG", "PWR_FLAG", "", 34, 12, pins={"1": "+5V"})
+    # GND also arrives through J12 (passive pins) -> flag so the AD7616 / TLV9004
+    # power-input GND pins (V*GND, V-) see an external driver (else ERC
+    # power_pin_not_driven on every VGND pin). The main board sources GND.
+    add("#FLG12", "power:PWR_FLAG", "PWR_FLAG", "", 38, 12, pins={"1": "GND"})
     # +5V_A driven through FB_A (passive ferrite) from +5V -> flag (like +5V_RF).
     add("#FLG9", "power:PWR_FLAG", "PWR_FLAG", "", 80, 132, pins={"1": "+5V_A"})
 
@@ -2051,7 +2093,7 @@ def emit_pro():
     # the 0.5 mm-pitch CSG324 BGA and 0.30 mm-pitch QSSC_Chip dog-bone fanout, and
     # 0.40 mm / 0.20 mm drill routing vias for general signal escape. A 0.45 mm /
     # 0.10 mm floor (a non-HDI assumption) would flag every one of those as a
-    # via_diameter / annular_width violation. 0.20 mm / 0.05 mm is the honest HDI
+    # via_diameter / annular_width violation. 0.20 mm / 0.05 mm is the HDI
     # floor: the 0.40 mm routing vias clear it with margin, the 0.20 mm VIPs sit
     # exactly on it (KiCad uses >=), and the 0.05 mm annular is the via-in-pad
     # figure (the pad copper, not the via ring, provides the annular -- VIPs are
@@ -2223,6 +2265,11 @@ def assign_pcb_positions():
     fixed = {
         # power (top-left)
         "J2": (10, 10, 180), "F1": (24, 10, 0), "R70": (20, 16, 0), "LED1": (26, 16, 0),
+        # C_in = +5V_IN input bulk decoupling (10uF 0805) right at the barrel-jack
+        # input rail (J2.1 -> C_in -> F1).  Top-left, clear of the J2/F1/R70/LED1
+        # row (y=10/16) and of the default C1-30 cap grid (x>=50).  Without this it
+        # fell through to the (50,50) default and collided with C37.
+        "C_in": (46, 8, 0),
         "REG1": (34, 14, 0), "REG2": (34, 26, 0), "REG3": (34, 38, 0), "FB1": (34, 50, 0),
         # REG3 (AP2127K-1.0) decoupling, around (34,38)
         "C42": (28, 36, 0), "C41": (40, 34, 0), "C43": (40, 42, 0), "C44": (28, 42, 0),
@@ -2265,6 +2312,12 @@ def assign_pcb_positions():
         "R67": (84, 26, 0), "C31": (84, 30, 0), "R68": (84, 34, 0),
         "C32": (100, 26, 0), "C33": (100, 30, 0), "R73": (100, 34, 0),
         "C34": (100, 40, 0), "C35": (110, 34, 0), "C36": (110, 40, 0), "L2": (110, 46, 0),
+        # C37 = ADF4351 pin-19 TEMP decoupling (ADF_TEMP node); sits just below-right
+        # of U3 (clear of the QFN-32 keepout x[88.5,95.5] y[26.5,33.5] and of
+        # C33@(100,30)/C34@(100,40)/C35@(110,34)).  Without an explicit placement it
+        # fell through assign_pcb_positions()'s else-branch to the (50,50) default
+        # cell and collided with C_in -> DRC shorting_items +5V_IN/ADF_TEMP.
+        "C37": (104, 36, 0),
         "J7": (10, 40, 0), "J9": (10, 26, 0),
         # ---- production-hardening pass 2026-09 (see add() block + §16) ----
         # USB VBUS Schottky + bulk near the USB-C bottom edge (left of the die).
