@@ -263,10 +263,12 @@ class _Box:
 class _PadProxy:
     """Plain-python snapshot of one pad's geometry + net."""
     __slots__ = ("cx", "cy", "bx", "by", "bw", "bh",
-                 "netname", "netcode", "is_pth", "layer", "attrib", "has_hole")
+                 "netname", "netcode", "is_pth", "layer", "attrib", "has_hole",
+                 "cu_layers")
 
     def __init__(self, cx, cy, bx, by, bw, bh,
-                 netname, netcode, is_pth, layer, attrib, has_hole):
+                 netname, netcode, is_pth, layer, attrib, has_hole,
+                 cu_layers=None):
         self.cx = cx
         self.cy = cy
         self.bx = bx
@@ -279,6 +281,12 @@ class _PadProxy:
         self.layer = layer
         self.attrib = attrib
         self.has_hole = has_hole
+        # REAL copper layers the pad sits on (from GetLayerSet, filtered to
+        # copper 0..31). GetLayer() returns the FRONT canvas layer (0) for a pad
+        # on a FLIPPED (back-side) footprint, so it is WRONG for the head board's
+        # B.Cu die pads -- use cu_layers instead. Default [layer] for synthetic
+        # pads (via_pads) where the caller passes the intended single layer.
+        self.cu_layers = cu_layers if cu_layers is not None else [layer]
 
     def GetCenter(self):
         return _V(self.cx, self.cy)
@@ -338,6 +346,9 @@ def _capture_pads(board):
         for p in fp.Pads():
             pos = p.GetPosition()
             bb = p.GetBoundingBox()
+            # real copper layers from the layer set (GetLayer() is wrong for
+            # pads on a flipped/back-side footprint -- it returns F.Cu).
+            cu_layers = [L for L in p.GetLayerSet().Seq() if L <= 31]
             pads.append(_PadProxy(
                 cx=pos.x, cy=pos.y,
                 bx=bb.GetX(), by=bb.GetY(), bw=bb.GetWidth(), bh=bb.GetHeight(),
@@ -346,6 +357,7 @@ def _capture_pads(board):
                 layer=p.GetLayer(),
                 attrib=p.GetAttribute(),
                 has_hole=(p.GetDrillSize().x > 0),
+                cu_layers=cu_layers or [p.GetLayer()],
             ))
         fps.append(_FpProxy(fp.GetReference(), pads, fpos.x, fpos.y))
     return fps
@@ -363,6 +375,16 @@ def _pad_layers(pad):
     # anti-pads around the hole barrel, so they are not listed here.
     if pad.has_hole:
         return list(SIGNAL_LAYERS)
+    # SMD pad: its REAL copper layer(s) from the layer set. GetLayer() returns
+    # F.Cu for a pad on a flipped (back-side) footprint, so it would mark a
+    # B.Cu die pad as an F.Cu obstacle and leave B.Cu unguarded -> the router
+    # could lay a track straight through the die pad on B.Cu (a short). Use the
+    # captured cu_layers (defaults to [GetLayer()] for non-proxied pads).
+    cu = getattr(pad, "cu_layers", None)
+    if cu:
+        # restrict to the board's signal layers (a pad on an inner plane layer
+        # is not a signal-routing obstacle; the plane carves its own anti-pad).
+        return [L for L in cu if L in SIGNAL_LAYERS] or [pad.GetLayer()]
     return [pad.GetLayer()]
 
 
@@ -1369,7 +1391,18 @@ def _chip_fanout(board, x0, y0, routed, fps=None):
         nm = p.GetNetname()
         nc = p.GetNetCode()
         px, py = p.GetPosition().x, p.GetPosition().y
-        pad_lay = p.GetLayer()                      # F_CU (EM) or B_CU (DET)
+        # REAL pad copper layer from the layer set. p.GetLayer() returns F_CU
+        # for a pad on the head board's FLIPPED die footprint even though the
+        # pad sits on B.Cu -- using it would place the stub on F.Cu, leaving the
+        # B.Cu die pad floating. Pick the primary surface: F.Cu if present,
+        # else B.Cu, else the first copper layer.
+        cu = p.cu_layers
+        if F_CU in cu:
+            pad_lay = F_CU
+        elif B_CU in cu:
+            pad_lay = B_CU
+        else:
+            pad_lay = cu[0]
         esc_lay = B_CU if pad_lay == F_CU else F_CU  # opposite, clear surface
         # stub outward toward the nearest die edge (perpendicular to it).  For an
         # interior 8x8 pad this points toward the nearest side; the via lands in
@@ -1410,7 +1443,7 @@ def _chip_fanout(board, x0, y0, routed, fps=None):
         via_pads.setdefault(nm, []).append(_PadProxy(
             cx=vx, cy=vy, bx=vx - 100_000, by=vy - 100_000, bw=200_000, bh=200_000,
             netname=nm, netcode=nc, is_pth=False, layer=esc_lay,
-            attrib=pcbnew.PAD_ATTRIB_SMD, has_hole=False))
+            attrib=pcbnew.PAD_ATTRIB_SMD, has_hole=False, cu_layers=[esc_lay]))
 
     return chip_pad_centers, via_pads, vip_net, pad_vip, vip_vias
 
