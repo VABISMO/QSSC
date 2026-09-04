@@ -143,7 +143,6 @@ def is_power_name(n: str) -> bool:
 def main() -> None:
     pins = parse_pins()
     power = classify_power(pins)
-    xy = ball_xy()
 
     # 1. config / jtag / xadc — from the dedicated map above.
     config, jtag, xadc = {}, {}, {}

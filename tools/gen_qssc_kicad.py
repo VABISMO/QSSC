@@ -1787,9 +1787,6 @@ def assign_sch_positions():
     net (verified: 19k 'Output+Output' ERC errors).  Grid them out on the A1
     sheet right of the existing (x<350) schematic content.  Spacing > 2x the
     symbol pin reach (~10mm) so no two distinct nets share a pin endpoint."""
-    pre = ("UT", "UC", "UDAC", "Rf", "Cf", "Rpu",
-           "Cut", "Cuc", "Cdac", "Cref", "Rref1", "Rref2", "R_I2C_SDA",
-           "R_I2C_SCL", "UE", "Riref", "Cem")
     new = [c for c in COMPONENTS if c["ref"] == "UDAC" or c["ref"] == "Rref1"
            or c["ref"] == "Rref2" or c["ref"] == "Cdac" or c["ref"] == "Cref"
            or c["ref"] == "R_I2C_SDA" or c["ref"] == "R_I2C_SCL"

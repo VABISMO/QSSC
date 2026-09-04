@@ -658,7 +658,7 @@ def _route_pair(board, nc, net, a, b, master, own_keepout, routed, allowed,
         vip_a, vip_b = vip_b, vip_a
     ax, ay = a.GetCenter().x, a.GetCenter().y
     bx, by = b.GetCenter().x, b.GetCenter().y
-    F, B = F_CU, B_CU
+    F = F_CU
     kw = dict(x0=x0, y0=y0, master=master, own_keepout=own_keepout,
               routed=routed, allowed=allowed)
 
@@ -881,7 +881,6 @@ def _route_rf_fence(board, gnd_nc, rf_pads, x0, y0, master, routed, via2d):
     nv = 0
     OFF = 600_000          # 0.6 mm perpendicular offset from the trace
     PITCH = 1_000_000      # ~1 mm along-trace via spacing
-    vr = _mark_radius_for_width(ROUTING_VIA_DIAM_NM)
     for net, pads in rf_pads.items():
         if len(pads) < 2:
             continue
