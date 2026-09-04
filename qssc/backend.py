@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 import math
 import time
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence
 
 import numpy as np
 
