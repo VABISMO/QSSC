@@ -238,20 +238,21 @@ _FPGA_CFG_NET = {
 # user-IO signals that are FPGA inputs (the rest are outputs); all drawn as
 # bidirectional so ERC stays lenient on unused-direction pins.
 _FPGA_INPUT_NETS = {"clk_100mhz", "reset", "UART_RX", "TCK", "TMS", "TDI",
-                    "ADF_MUXOUT", "CONF_INIT", "CONF_PROG"}
+                    "ADF_MUXOUT", "CONF_INIT", "CONF_PROG",
+                    "adc_miso", "adc_busy"}
 
 
 def fpga_net_map():
     """{ball_name: net} for every FPGA pad that carries a net.
 
-    All power/ground/config/JTAG pads plus the 81 used user-IO signals (64
-    DET_DIG inputs + 4 em_SPI + 13 control) are netted.  Spare
-    general-purpose IO balls are intentionally LEFT OUT (no net = NC), which
-    is correct practice for unused BGA IO (the pad is still soldered for
-    mechanical integrity, just carries no signal).  XADC VP/VN stay NC -- the
-    single-board pivot replaced the TIA/XADC analog chain with 64 parallel
-    digital counters.  This nets ~258 of the 324 CSG324 pads -- all the ones
-    that matter for power integrity, config boot, and the board's I/O."""
+    All power/ground/config/JTAG pads plus the used user-IO signals (9-pin ADC
+    SPI bus + 4 em_SPI + 13 control) are netted.  Spare general-purpose IO
+    balls are intentionally LEFT OUT (no net = NC), which is correct practice
+    for unused BGA IO (the pad is still soldered for mechanical integrity, just
+    carries no signal).  XADC VP/VN stay NC -- the detector readout is now 4x
+    AD7616 parallel ADCs over SPI (true analog intensity), not the XADC.  This
+    nets ~204 of the 324 CSG324 pads -- all the ones that matter for power
+    integrity, config boot, and the board's I/O."""
     m = {}
     s = _FPGA_MAP
     # RTL port names (from the ballmap, generated off fpga/constraints.xdc) that
@@ -274,9 +275,9 @@ def fpga_net_map():
         m[ball] = _FPGA_CFG_NET[name]
     for name, ball in s["jtag"].items():
         m[ball] = name
-    # The XADC VP/VN balls are LEFT NC: the single-board pivot replaces the
-    # TIA/XADC analog chain with 64 parallel digital counters (comparator ->
-    # LVCMOS GPIO).  The XADC is unused on the merged board.  (VREFP/VREFN stay
+    # The XADC VP/VN balls are LEFT NC: the detector readout is now 4x AD7616
+    # parallel ADCs over a 9-pin SPI bus (true analog intensity readout), not
+    # the XADC.  The XADC is unused on the merged board.  (VREFP/VREFN stay
     # netted for the on-chip reference bypass -- those are separate pads.)
     return m
 
@@ -292,10 +293,10 @@ def fpga_pin_list():
             top.append((ball, net, "power_in"))
         elif net == "GND":
             bot.append((ball, net, "power_in"))
-        elif net in _FPGA_INPUT_NETS or net.startswith("DET_DIG"):
-            # detector photon-count inputs (DET_DIG0..63) sit on the LEFT
-            # column alongside the other FPGA inputs; the 4 TLC5947 em_SPI
-            # lines and control fall through to the RIGHT column.
+        elif net in _FPGA_INPUT_NETS or net.startswith("adc_"):
+            # ADC SPI bus (adc_convst/sclk/miso/busy/cs0..3/resetn) sits on
+            # the LEFT column alongside the other FPGA inputs; the 4 TLC5947
+            # em_SPI lines and control fall through to the RIGHT column.
             left.append((ball, net, "bidirectional"))
         else:
             right.append((ball, net, "bidirectional"))
@@ -332,7 +333,7 @@ def fpga_pin_list():
 # Bare die mounted face-up and wire-bonded outward to PCB perimeter pads (NOT a
 # flip-chip area array).  The 2026-09 single-board pivot merges the old chip
 # module onto THIS board and makes every channel PARALLEL: 64 detector pads
-# DET0..DET63 on the TOP edge (-> the TIA/comparator front-end above the die) and
+# DET0..DET63 on the TOP edge (-> the TIA/ADC front-end above the die) and
 # 64 emitter pads EM0..EM63 on the BOTTOM edge (-> the 3x TLC5947 constant-
 # current LED driver below the die).  Two opposite-edge rows let all 128 nets
 # escape outward on F.Cu -- no
@@ -366,7 +367,7 @@ def chip_pin_list():
 
 def chip_net_map():
     """{pad_name: net} for the die -- one net per channel, all parallel.
-    DET{i}     -> DET_IN{i}        (analog input to the TIA/comparator front-end)
+    DET{i}     -> DET_IN{i}        (analog input to the TIA/ADC front-end)
     EM{i}      -> emitter_cat{i}   (per-pixel cathode -> TLC5947 constant-current
                                     sink output; common-anode topology)
     EM_ANODE   -> +12V_EMIT        (the 64 emitters' shared anode rail -> the
@@ -517,6 +518,113 @@ def tlc5947_pin_list():
     return pins
 
 
+# ---- AD7616 16-ch 16-bit dual simultaneous-sampling ADC (ADI, LQFP-80) -------
+# Replaces the 16x LMV339 comparator + 64x pull-up + MCP4725 threshold DAC +
+# photon_counter_array readout with a true analog intensity readout: each
+# TLV9004 TIA output (DET_TIA{i}) drives one AD7616 analog input; the FPGA reads
+# the 64 16-bit intensity samples over SPI and does the lock-in demodulation
+# numerically.  4x AD7616 = 64 channels; a shared CONVST samples all 4 chips
+# together (dual simultaneous: 8 VA/VB pair-conversions per chip = 8 CONVST
+# pulses scan all 64 channels; the ~us skew across pairs is negligible vs the
+# 1 kHz mod_sync lock-in).  Pinout verified against the official KiCad
+# Analog_ADC:AD7616 symbol (datasheet-derived, AD7616 Rev. 0) and cross-checked
+# against the AD7616 datasheet serial-interface section:
+#   * serial mode:  SER/PAR (40) = HIGH;  SER1W (45) = LOW -> 1-wire, all data
+#     on SDOA (57), 32 SCLK per VAx+VBx pair (SDOB unused).
+#   * readout:  CONVST (68) rising -> BUSY (67) high; on BUSY falling, CS (63)
+#     low clocks the MSB out on SDOA, bits shift on SCLK (62) rising edges,
+#     CS high returns SDOA to Hi-Z.  Per-device CS lets 4 chips share one SDOA
+#     (no daisy-chain needed -- only the selected chip drives the line).
+#   * reference:  internal (REFSEL (35) = GND); REFCAP (31) + REFINOUT (33)
+#     decoupled to GND.  Range = +/-5 V bipolar via HARDWARE pin-strapping
+#     (HW_RNGSEL1 (38)=HIGH, HW_RNGSEL0 (39)=LOW -> HW mode +/-5 V, datasheet
+#     Table 8); HW mode prohibits register access, so SDI (55) is NC and no
+#     init config write is needed.  The 0..3.3 V TIA output fits +/-5 V with
+#     full resolution (~21.6k codes).
+#   * supplies:  VCC (5 V analog) on +5V_A (ferrite-isolated from +5V);
+#     VDRIVE (49) = +3V3 (logic).  All AGND/DGND/REGGND/REFGND + per-channel
+#     VGND pins -> GND.
+# 4 chips share CONVST/SCLK/MISO/RESETn; per-chip CS0..CS3; only chip0
+# BUSY is read (push-pull, cannot wire-OR) -- all 4 finish together.
+AD7616_FP = "Package_QFP:LQFP-80_14x14mm_P0.65mm"
+# (pin_number, pin_name, etype, side) -- side: L/R/T/B for the symbol layout.
+_AD7616_PINS = [
+    # analog inputs (16 SE channels): bank A (V0A..V7A) + bank B (V0B..V7B)
+    ("28", "V0A", "input", "L"), ("26", "V1A", "input", "L"),
+    ("24", "V2A", "input", "L"), ("22", "V3A", "input", "L"),
+    ("19", "V4A", "input", "L"), ("17", "V5A", "input", "L"),
+    ("14", "V6A", "input", "L"), ("12", "V7A", "input", "L"),
+    ("73", "V0B", "input", "L"), ("75", "V1B", "input", "L"),
+    ("77", "V2B", "input", "L"), ("79", "V3B", "input", "L"),
+    ("2", "V4B", "input", "L"), ("4", "V5B", "input", "L"),
+    ("7", "V6B", "input", "L"), ("9", "V7B", "input", "L"),
+    # serial / digital control
+    ("68", "CONVST", "input", "R"), ("67", "BUSY", "output", "R"),
+    ("62", "SCLK", "input", "R"), ("63", "CS", "input", "R"),
+    ("57", "SDOA", "output", "R"), ("56", "SDOB", "output", "R"),
+    ("55", "SDI", "input", "R"), ("36", "RESET", "input", "R"),
+    ("40", "SERPAR", "input", "R"), ("45", "SER1W", "input", "R"),
+    ("64", "CHSEL0", "input", "R"), ("65", "CHSEL1", "input", "R"),
+    ("66", "CHSEL2", "input", "R"), ("37", "SEQEN", "input", "R"),
+    ("39", "HWRNGSEL0", "input", "R"), ("38", "HWRNGSEL1", "input", "R"),
+    ("61", "BURST", "input", "R"), ("58", "OS0", "input", "R"),
+    ("59", "OS1", "input", "R"), ("60", "OS2", "input", "R"),
+    ("46", "CRCEN", "input", "R"),
+    ("41", "DB0", "bidirectional", "R"), ("42", "DB1", "bidirectional", "R"),
+    ("43", "DB2", "bidirectional", "R"), ("44", "DB3", "bidirectional", "R"),
+    ("47", "DB6", "bidirectional", "R"), ("48", "DB7", "bidirectional", "R"),
+    ("53", "DB8", "bidirectional", "R"), ("54", "DB9", "bidirectional", "R"),
+    # power / reference
+    ("6", "VCC", "power_in", "T"), ("15", "VCC", "power_in", "T"),
+    ("30", "VCC", "power_in", "T"), ("71", "VCC", "power_in", "T"),
+    ("49", "VDRIVE", "power_in", "T"), ("31", "REFCAP", "passive", "T"),
+    ("33", "REFINOUT", "input", "T"), ("35", "REFSEL", "input", "T"),
+    ("70", "REGCAP", "passive", "T"), ("52", "REGCAPD", "passive", "T"),
+    # grounds (per-channel VGND + AGND/DGND/REGGND/REFGND)
+    ("5", "AGND", "power_in", "B"), ("16", "AGND", "power_in", "B"),
+    ("29", "AGND", "power_in", "B"), ("72", "AGND", "power_in", "B"),
+    ("50", "DGND", "power_in", "B"), ("69", "REGGND", "power_in", "B"),
+    ("51", "REGGNDD", "power_in", "B"), ("32", "REFGND", "power_in", "B"),
+    ("34", "REFINOUTGND", "power_in", "B"),
+    ("27", "V0AGND", "power_in", "B"), ("25", "V1AGND", "power_in", "B"),
+    ("23", "V2AGND", "power_in", "B"), ("21", "V3AGND", "power_in", "B"),
+    ("20", "V4AGND", "power_in", "B"), ("18", "V5AGND", "power_in", "B"),
+    ("13", "V6AGND", "power_in", "B"), ("11", "V7AGND", "power_in", "B"),
+    ("74", "V0BGND", "power_in", "B"), ("76", "V1BGND", "power_in", "B"),
+    ("78", "V2BGND", "power_in", "B"), ("80", "V3BGND", "power_in", "B"),
+    ("1", "V4BGND", "power_in", "B"), ("3", "V5BGND", "power_in", "B"),
+    ("8", "V6BGND", "power_in", "B"), ("10", "V7BGND", "power_in", "B"),
+]
+
+
+def ad7616_pin_list():
+    """80-pin LQFP symbol: 16 analog inputs on the left, serial/digital control
+    on the right, power/reference on top, all grounds on the bottom.  Pin numbers
+    match the LQFP-80 footprint pads 1:1 (verified vs KiCad Analog_ADC:AD7616)."""
+    by = {"L": [], "R": [], "T": [], "B": []}
+    for num, name, et, side in _AD7616_PINS:
+        by[side].append((num, name, et))
+    pins = []
+    sp = 1.27
+    def col(side, x, rot):
+        lst = by[side]
+        y0 = sp * (len(lst) - 1) / 2
+        return [dict(number=n, name=nm, etype=et, x=x,
+                     y=round(y0 - i * sp, 2), rot=rot, length=2.54)
+                for i, (n, nm, et) in enumerate(lst)]
+    def row(side, y, rot):
+        lst = by[side]
+        x0 = -sp * (len(lst) - 1) / 2
+        return [dict(number=n, name=nm, etype=et, x=round(x0 + i * sp, 2),
+                     y=y, rot=rot, length=2.54)
+                for i, (n, nm, et) in enumerate(lst)]
+    pins += col("L", -25.4, 0)
+    pins += col("R", 25.4, 180)
+    pins += row("T", -25.4, 90)
+    pins += row("B", 25.4, 270)
+    return pins
+
+
 # ---- GVA-84+ RF MMIC amp (Mini-Circuits, SOT-89, self-biased +5V) ----------
 # Replaces the HMC441LP3E (6.5-13.5 GHz -- wrong band for the 2.87/3.46 GHz
 # ODMR target, AND its custom symbol used logical pin numbers VCC/GND/RF_IN/...
@@ -571,12 +679,12 @@ def authored_symbols():
     """All custom/minimal symbol definitions we embed in lib_symbols."""
     syms = []
     # power symbols
-    for n in ["+3V3", "+1V8", "+1V0", "+5V", "+5V_RF", "+12V_EMIT", "GND"]:
+    for n in ["+3V3", "+1V8", "+1V0", "+5V", "+5V_A", "+5V_RF", "+12V_EMIT", "GND"]:
         syms.append(power_symbol_def(n))
     syms.append(PWR_FLAG_def())
-    # FPGA -- real 324-pad CSG324 pinout (power/ground/config/JTAG + 81 IO:
-    # 64 DET_DIG inputs + 4 em_SPI + 13 control).  Body box spans the
-    # 1.27 mm-pitched pin columns; the left column holds the 64 DET_DIG inputs
+    # FPGA -- real 324-pad CSG324 pinout (power/ground/config/JTAG + ~26 IO:
+    # 9-pin ADC SPI bus + 4 em_SPI + 13 control).  Body box spans the
+    # 1.27 mm-pitched pin columns; the left column holds the adc_* bus
     # (+ other inputs), the right the 4 em_SPI + control, so the body is tall.
     syms.append(custom_symbol_def("qssc", "XC7A35T_CSG324", "U", fpga_pin_list(),
                                   (-50.8, -55.0, 50.8, 55.0), value="XC7A35T-1CSG324C"))
@@ -588,10 +696,13 @@ def authored_symbols():
     # ---- Phase 1b front-end / driver IC symbols (hand-authored datasheet pinouts)
     syms.append(custom_symbol_def("qssc", "TLV9004", "U", tlv9004_pin_list(),
                                   (-7.62, -7.62, 7.62, 7.62), value="TLV9004"))
-    syms.append(custom_symbol_def("qssc", "LMV339", "U", lmv339_pin_list(),
-                                  (-7.62, -7.62, 7.62, 7.62), value="LMV339"))
-    syms.append(custom_symbol_def("qssc", "MCP4725", "U", mcp4725_pin_list(),
-                                  (-5.08, -5.08, 5.08, 5.08), value="MCP4725"))
+    # AD7616 16-ch 16-bit dual simultaneous-sampling ADC (ADI, LQFP-80).  Replaces
+    # the old 16x LMV339 comparator + MCP4725 threshold DAC + photon-counter
+    # readout with a true parallel analog intensity readout: 4x AD7616 = 64 ch,
+    # each TLV9004 TIA output -> one ADC input, FPGA reads 64 16-bit samples over
+    # SPI.  See ad7616_pin_list() for the datasheet-verified interface.
+    syms.append(custom_symbol_def("qssc", "AD7616", "U", ad7616_pin_list(),
+                                  (-25.4, -25.4, 25.4, 25.4), value="AD7616"))
     # TLC5947 24-ch 12-bit PWM constant-current LED driver (HTSSOP-32, TI
     # SBVS114B). Replaces the old 8x 74HCT240 + 64x AO3401A P-MOS emitter driver
     # (208 parts -> 3 chips): 64 emitter cathodes sink into 3 daisy-chained
@@ -708,7 +819,7 @@ SYM_NAME = {
     "qssc:SW_Push": "SW_Push", "qssc:USB_C_Receptacle": "USB_C_Receptacle",
     "qssc:R": "R", "qssc:C": "C", "qssc:L": "L", "qssc:LED": "LED",
     "qssc:Polyfuse": "Polyfuse", "qssc:D": "D",
-    "qssc:TLV9004": "TLV9004", "qssc:LMV339": "LMV339", "qssc:MCP4725": "MCP4725",
+    "qssc:TLV9004": "TLV9004", "qssc:AD7616": "AD7616",
     "qssc:TLC5947": "TLC5947",
 }
 
@@ -732,7 +843,7 @@ def build_pincoords():
                         coords[num[1][1]] = (float(at[1][1]), float(at[2][1]), int(at[3][1]))
         _PINCOORDS[lib_id] = coords
     # power symbols: single pin "1" at (0,0)
-    for n in ["+3V3", "+1V8", "+1V0", "+5V", "+5V_RF", "+12V_EMIT", "GND",
+    for n in ["+3V3", "+1V8", "+1V0", "+5V", "+5V_A", "+5V_RF", "+12V_EMIT", "GND",
               "PWR_FLAG"]:
         _PINCOORDS[f"power:{n}"] = {"1": (0.0, 0.0, 90 if n != "GND" else 270)}
 
@@ -966,6 +1077,9 @@ add("#FLG3", "power:PWR_FLAG", "PWR_FLAG", "", 45, 45, pins={"1": "GND"})
 # +5V_RF is now driven through FB1 (a passive ferrite bead) from +5V, not by a
 # regulator power_out pin, so ERC cannot see a driver -> flag it.
 add("#FLG5", "power:PWR_FLAG", "PWR_FLAG", "", 95, 90, pins={"1": "+5V_RF"})
+# +5V_A is driven through FB_A (a passive ferrite bead) from +5V, not by a
+# regulator power_out pin, so ERC cannot see a driver -> flag it (like +5V_RF).
+add("#FLG9", "power:PWR_FLAG", "PWR_FLAG", "", 95, 100, pins={"1": "+5V_A"})
 # VREFP/VREFN: the Artix-7 XADC reference. When the internal 1.25 V reference
 # is used, VREFP is bypassed to GND (C40) and VREFN tied to GND; the pin is a
 # power input driven by the on-chip reference, which ERC cannot see -> flag it.
@@ -1050,78 +1164,149 @@ add("R83", "qssc:R", "10k", "Resistor_SMD:R_0603_1608Metric",
 add("C68", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
     342, 348, pins={"1": "reset", "2": "GND"})
 # (The TIA_OUT -> XADC level-shift divider R84/R85/C66 is GONE: the single-board
-# pivot removes the TIA/XADC analog chain -- 64 parallel digital counters
-# replace it.  The XADC VP/VN balls are left NC; see fpga_net_map.)
+# pivot removed the XADC; the 64 TIA outputs now feed 4x AD7616 parallel ADCs
+# (true analog intensity readout, not photon counting).  The XADC VP/VN balls
+# are left NC; see fpga_net_map.)
 
 
 # --------------------------------------------------------------------------
 # Phase 1b -- 64-ch parallel detector front-end + 64-ch parallel emitter driver
 # --------------------------------------------------------------------------
 # Detector path (per channel i=0..63):  chip DET_IN{i} -> TLV9004 TIA (-IN,
-# +IN=DET_REF bias) -> DET_TIA{i} -> LMV339 comparator (+IN, -IN=DET_THR DAC)
-# -> open-collector OUT pulled to +3V3 -> DET_DIG{i} -> FPGA LVCMOS33 input.
+# +IN=DET_REF=1.65 V bias) -> DET_TIA{i} (0..3.3 V analog intensity waveform)
+# -> AD7616 analog input.  4x AD7616 (16-ch 16-bit dual simultaneous-sampling
+# ADC, UAD0..3) digitize all 64 TIA outputs; the FPGA reads the 64 16-bit
+# samples over a 9-pin SPI bus (adc_convst/sclk/miso/busy/cs0..3/resetn)
+# and does the 1 kHz lock-in demodulation numerically in signal_processor.v.
+# This is a TRUE analog readout of the photoluminescence intensity -- the user
+# explicitly rejected photon counting ("yo krio la señal no un contador"): the
+# 16x LMV339 comparator + 64x pull-up + MCP4725 threshold DAC + 64 FPGA
+# photon-counter chain is GONE, replaced by 4 ADC chips (66 parts removed, 34
+# added; FPGA detector IO drops 64+2 -> 9 pins).
 # Emitter path:  FPGA 4-wire SPI (em_sclk/sin/xlat/blank) -> 3x TLC5947
 # daisy-chained constant-current LED driver (SIN->SOUT, 72 ch, 64 used).  Each
 # emitter cathode emitter_cat{i} sinks into a TLC5947 OUTn; the 64 emitters
 # share a common +12V_EMIT anode rail (chip EM_ANODE pad).  12-bit PWM grayscale per
 # channel -> any combination of emitters fires in parallel at independent
 # intensity (the old 64-GPIO + 74HCT240 + P-MOS one-at-a-time design is gone).
-# All front-end runs on +3V3; the TLC5947 logic (VCC) on +3V3, OUT sinks from +5V.
+# The TIAs run on +3V3; the TLC5947 logic (VCC) on +3V3, OUT sinks from +12V_EMIT.
+# The AD7616 analog VCC runs on +5V_A (a ferrite-isolated +5V rail) and VDRIVE on +3V3.
 def build_chip_frontend_and_driver():
     # TLV9004 channel k -> (out, in-, in+) pin numbers (TSSOP-14 datasheet)
     TIA_CH = {0: ("1", "2", "3"), 1: ("7", "6", "5"),
               2: ("8", "9", "10"), 3: ("14", "13", "12")}
-    # LMV339 channel k -> (out, in-, in+) pin numbers (SOIC-14 datasheet)
-    CMP_CH = {0: ("1", "2", "3"), 1: ("6", "4", "5"),
-              2: ("8", "9", "10"), 3: ("11", "13", "12")}
-    # ---- 16x TLV9004 (TIA) + 16x LMV339 (comparator) ------------------------
+    # ---- 16x TLV9004 (TIA): detector current -> voltage waveform -----------
     for j in range(16):
         tia = {"4": "+3V3", "11": "GND"}
-        cmp = {"14": "+3V3", "7": "GND"}
         for k in range(4):
             i = 4 * j + k
             to, tm, tp = TIA_CH[k]
-            co, cm, cp = CMP_CH[k]
             tia[tm] = f"DET_IN{i}"      # detector current -> inverting input
-            tia[tp] = "DET_REF"         # reference bias -> non-inverting input
-            tia[to] = f"DET_TIA{i}"     # TIA output
-            cmp[cp] = f"DET_TIA{i}"     # TIA out -> comparator +
-            cmp[cm] = "DET_THR"         # DAC threshold -> comparator -
-            cmp[co] = f"DET_DIG{i}"     # open-collector out -> DET_DIG
+            tia[tp] = "DET_REF"         # 1.65 V virtual-ground bias -> non-inv input
+            tia[to] = f"DET_TIA{i}"     # TIA output -> AD7616 analog input
         add(f"UT{j}", "qssc:TLV9004", "TLV9004",
             "Package_SO:TSSOP-14_4.4x5mm_P0.65mm", 0, 0, pins=tia)
-        add(f"UC{j}", "qssc:LMV339", "LMV339",
-            "Package_SO:SOIC-14_3.9x8.7mm_P1.27mm", 0, 0, pins=cmp)
-    # ---- per-channel TIA feedback (Rf 1M || Cf 1p) + comparator pull-up 10k
+    # ---- per-channel TIA feedback (Rf 1M || Cf 1p) -------------------------
     for i in range(64):
         add(f"Rf{i}", "qssc:R", "1M", "Resistor_SMD:R_0603_1608Metric", 0, 0,
             pins={"1": f"DET_IN{i}", "2": f"DET_TIA{i}"})
         add(f"Cf{i}", "qssc:C", "1pF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
             pins={"1": f"DET_IN{i}", "2": f"DET_TIA{i}"})
-        add(f"Rpu{i}", "qssc:R", "10k", "Resistor_SMD:R_0603_1608Metric", 0, 0,
-            pins={"1": f"DET_DIG{i}", "2": "+3V3"})
-    # ---- threshold DAC (MCP4725) + I2C pull-ups + DET_REF bias divider ------
-    add("UDAC", "qssc:MCP4725", "MCP4725", "Package_TO_SOT_SMD:SOT-23-6", 0, 0,
-        pins={"1": "+3V3", "2": "GND", "3": "DET_THR", "4": "I2C_SDA",
-              "5": "I2C_SCL", "6": "GND"})
-    add("R_I2C_SDA", "qssc:R", "4.7k", "Resistor_SMD:R_0603_1608Metric", 0, 0,
-        pins={"1": "I2C_SDA", "2": "+3V3"})
-    add("R_I2C_SCL", "qssc:R", "4.7k", "Resistor_SMD:R_0603_1608Metric", 0, 0,
-        pins={"1": "I2C_SCL", "2": "+3V3"})
+    # ---- DET_REF bias divider: +3V3 split 1:1 -> 1.65 V virtual ground -----
+    # (the TIA non-inverting inputs share this reference; the AD7616 reads the
+    # TIA output as a single-ended 0..3.3 V signal within its +/-5 V range.)
     add("Rref1", "qssc:R", "10k", "Resistor_SMD:R_0603_1608Metric", 0, 0,
         pins={"1": "+3V3", "2": "DET_REF"})
     add("Rref2", "qssc:R", "10k", "Resistor_SMD:R_0603_1608Metric", 0, 0,
         pins={"1": "DET_REF", "2": "GND"})
     add("Cref", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
         pins={"1": "DET_REF", "2": "GND"})
-    add("Cdac", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
-        pins={"1": "DET_THR", "2": "GND"})
-    # ---- per-IC decoupling (one 100nF each on the 32 front-end ICs) --------
+    # ---- per-IC decoupling (one 100nF each on the 16 TIA ICs) --------------
     for j in range(16):
         add(f"Cut{j}", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
             pins={"1": "+3V3", "2": "GND"})      # TLV9004 decoupling
-        add(f"Cuc{j}", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
-            pins={"1": "+3V3", "2": "GND"})      # LMV339 decoupling
+    # ---- +5V_A rail: ferrite-isolated +5V for the AD7616 analog VCC --------
+    # The AD7616 VCC is 5 V analog; isolating it from the main +5V rail with a
+    # 600-ohm ferrite + bulk/HF decoupling keeps the ADC's sampling transients
+    # off the digital +5V (and vice-versa).  VDRIVE is +3V3 (logic levels).
+    add("FB_A", "qssc:L", "600Ω@100MHz", "Inductor_SMD:L_0603_1608Metric", 0, 0,
+        pins={"1": "+5V", "2": "+5V_A"})
+    add("C_Abulk", "qssc:C", "10uF", "Capacitor_SMD:C_0805_2012Metric", 0, 0,
+        pins={"1": "+5V_A", "2": "GND"})
+    add("C_ahf", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
+        pins={"1": "+5V_A", "2": "GND"})
+    # ---- 4x AD7616 (16-ch 16-bit ADC): digitize the 64 TIA outputs ---------
+    # Pin numbers verified against KiCad Analog_ADC:AD7616 (datasheet Rev. 0).
+    # Bank A inputs V0A..V7A (pins 28,26,24,22,19,17,14,12) take channels
+    # 16j+0..16j+7; bank B inputs V0B..V7B (pins 73,75,77,79,2,4,7,9) take
+    # channels 16j+8..16j+15.  Per-channel VGND pins all tie to GND.
+    VA_PINS = ["28", "26", "24", "22", "19", "17", "14", "12"]   # V0A..V7A
+    VB_PINS = ["73", "75", "77", "79", "2", "4", "7", "9"]       # V0B..V7B
+    VAG_GND = ["27", "25", "23", "21", "20", "18", "13", "11"]   # V0AGND..V7AGND
+    VBG_GND = ["74", "76", "78", "80", "1", "3", "8", "10"]      # V0BGND..V7BGND
+    AD7616_FP = "Package_QFP:LQFP-80_14x14mm_P0.65mm"
+    for j in range(4):
+        p = {}
+        # 16 analog inputs <- DET_TIA{16j+k}
+        for k in range(8):
+            p[VA_PINS[k]] = f"DET_TIA{16*j + k}"        # bank A
+            p[VB_PINS[k]] = f"DET_TIA{16*j + 8 + k}"    # bank B
+        # per-channel grounds + all analog/digital/reg/ref grounds -> GND
+        for g in VAG_GND + VBG_GND:
+            p[g] = "GND"
+        for g in ["5", "16", "29", "72", "50", "69", "51", "32", "34"]:
+            p[g] = "GND"
+        # power: VCC (4 pins) -> +5V_A, VDRIVE -> +3V3
+        for vcc in ["6", "15", "30", "71"]:
+            p[vcc] = "+5V_A"
+        p["49"] = "+3V3"                      # VDRIVE
+        # serial-mode config ties (datasheet serial-interface section):
+        p["40"] = "+3V3"   # SER/PAR = HIGH -> serial/SPI mode
+        p["45"] = "GND"    # SER1W = LOW -> 1-wire (all data on SDOA, SDOB unused)
+        p["37"] = "+3V3"   # SEQEN = HIGH -> sequencer auto-cycles all 8 VA/VB pairs
+        p["35"] = "GND"    # REFSEL = LOW -> internal reference (REFCAP/REFINOUT decoupled)
+        # software range/channel config via SDI -> HW pins tied low (don't care):
+        # range: HW_RNGSEL1=1, HW_RNGSEL0=0 -> hardware mode, +/-5 V bipolar
+        # range on all 16 channels (AD7616 datasheet Table 8; the 0..3.3 V TIA
+        # output fits with full resolution: 3.3/5*32768 ~= 21.6k codes).  Hardware
+        # mode (HW_RNGSEL != 00) PROHIBITS register access, so SDI is unused and
+        # no init config-register write is needed -- the range is pin-strapped.
+        p["39"] = "GND"; p["38"] = "+3V3"     # HW_RNGSEL0=0, HW_RNGSEL1=1 -> +/-5V HW mode
+        p["64"] = "GND"; p["65"] = "GND"; p["66"] = "GND"   # CHSEL0/1/2 (don't-care in sequencer mode)
+        p["61"] = "GND"   # BURST/WR = LOW (serial read, no burst)
+        p["58"] = "GND"; p["59"] = "GND"; p["60"] = "GND"   # OS0/1/2 = no oversampling
+        p["46"] = "GND"   # CRCEN = LOW (no CRC)
+        # reference/reg decoupling pins -> dedicated 2-pin nets to decoupling caps
+        p["31"] = f"adc_refc{j}"     # REFCAP
+        p["33"] = f"adc_refio{j}"    # REFINOUT
+        p["70"] = f"adc_rgc{j}"      # REGCAP  (1.0 V analog regulator out)
+        p["52"] = f"adc_rgd{j}"      # REGCAPD (1.0 V digital regulator out)
+        # FPGA SPI bus: shared CONVST/SCLK/MISO/RESETn, per-chip CS, chip0 BUSY.
+        # (BUSY is push-pull -> only chip0's BUSY is read; all 4 finish a
+        # simultaneous CONVST together.  SDOB + SDI = NC in 1-wire hardware mode.)
+        p["68"] = "adc_convst"        # CONVST (shared)
+        p["62"] = "adc_sclk"          # SCLK (shared)
+        p["57"] = "adc_miso"          # SDOA (shared; 4 chips share, per-chip CS selects)
+        p["36"] = "adc_resetn"        # RESET (shared, active-low)
+        p["63"] = f"adc_cs{j}"        # CS (per chip)
+        if j == 0:
+            p["67"] = "adc_busy"      # BUSY (only chip0 -> FPGA; push-pull, no wire-OR)
+        add(f"UAD{j}", "qssc:AD7616", "AD7616", AD7616_FP, 0, 0, pins=p)
+        # per-chip decoupling (datasheet ref/reg/supply caps):
+        add(f"Cua{j}", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
+            pins={"1": "+5V_A", "2": "GND"})              # VCC HF
+        add(f"CuaB{j}", "qssc:C", "10uF", "Capacitor_SMD:C_0805_2012Metric", 0, 0,
+            pins={"1": "+5V_A", "2": "GND"})              # VCC bulk
+        add(f"Cud{j}", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
+            pins={"1": "+3V3", "2": "GND"})               # VDRIVE
+        add(f"Cur{j}", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
+            pins={"1": f"adc_refc{j}", "2": "GND"})       # REFCAP
+        add(f"Crio{j}", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
+            pins={"1": f"adc_refio{j}", "2": "GND"})      # REFINOUT
+        add(f"Crgc{j}", "qssc:C", "1uF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
+            pins={"1": f"adc_rgc{j}", "2": "GND"})        # REGCAP (1.0 V reg)
+        add(f"Crgd{j}", "qssc:C", "1uF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
+            pins={"1": f"adc_rgd{j}", "2": "GND"})        # REGCAPD (1.0 V reg)
     # ---- 3x TLC5947 constant-current LED driver (daisy-chained, 64 emitters) --
     # Replaces the old 8x 74HCT240 + 64x AO3401A P-MOS + 128 passives (208 parts)
     # with 3 chips + 3 Riref + 3 decoupling caps (9 parts).  Each TLC5947 has 24
@@ -1166,9 +1351,13 @@ build_chip_frontend_and_driver()
 RF_NETS = {"RF_OUT", "RF_OUT_N", "RF_IN", "RF_AMP_OUT", "J3_SIG", "LF_CP", "LF_MID",
            "LF_OUT", "CPout", "VTUNE", "refclk_25m"}
 USB_NETS = {"USB_DP", "USB_DM", "USB_DP_F", "USB_DM_F"}
-ANALOG_NETS = {"VREFP", "VREFN"}   # TIA/XADC/DET_BIAS analog nets removed in the
-                                   # single-board pivot.
-POWER_NETS = {"+3V3", "+1V8", "+1V0", "+5V", "+5V_RF", "+5V_IN", "+5V_TIA",
+# Analog nets: the 64 TIA outputs (DET_TIA{i}) carry the photoluminescence
+# intensity waveform to the AD7616 inputs; DET_REF is the 1.65 V TIA virtual
+# ground.  These get the Analog netclass (wider clearance, no plane pour under
+# the TIA->ADC run).  The XADC/VREFP/VREFN/TIA_OUT/DET_BIAS nets are GONE
+# (single-board + ADC pivot).
+ANALOG_NETS = {"DET_REF", "VREFP", "VREFN"}
+POWER_NETS = {"+3V3", "+1V8", "+1V0", "+5V", "+5V_A", "+5V_RF", "+5V_IN", "+5V_TIA",
               "+12V_EMIT", "+12V_EMIT_IN", "GND", "3V3OUT", "VBUS_USB"}
 
 
@@ -1191,7 +1380,7 @@ def net_class(net):
         return "RF"
     if net in USB_NETS:
         return "USB"
-    if net in ANALOG_NETS:
+    if net in ANALOG_NETS or net.startswith("DET_TIA"):
         return "Analog"
     if net in POWER_NETS:
         return "Power"
@@ -1209,7 +1398,7 @@ def all_nets():
 # Schematic emitter
 # --------------------------------------------------------------------------
 ROOT_UUID = "00000000-0000-0000-0000-000000000001"
-POWER_SYMS = {"+3V3", "+1V8", "+1V0", "+5V", "+5V_RF", "+12V_EMIT", "GND"}
+POWER_SYMS = {"+3V3", "+1V8", "+1V0", "+5V", "+5V_A", "+5V_RF", "+12V_EMIT", "GND"}
 
 
 def emit_schematic():
@@ -1720,48 +1909,65 @@ def assign_pcb_positions():
         # ---- Phase 1b procedural grids (board 210x140; die@(80,55) +
         # FPGA@(128,55) layout kept).  All spacing is sized to the largest
         # courtyard half-extent in each block so nothing overlaps: TSSOP-14
-        # x+/-3.85/y+/-2.75, SOIC-14 x+/-3.7/y+/-4.58, HTSSOP-32 x+/-4/y+/-6.5,
-        # 0603 ~+/-0.9.  Front-end lives in the right zone x[144,200] (8 cols @
-        # 8mm) stacked TIA -> TIA-decoupling -> comparator -> cmp-decoupling ->
-        # feedback -> pull-ups, with the threshold-DAC group at x=205.  The
-        # emitter driver (3x TLC5947 + 3x Riref + 3x Cem, 9 parts) lives BELOW
-        # the die at y=78..86 (EM bottom-edge pads fan down to the TLC5947 OUTn
-        # sinks); the old 208-part P-MOS driver that filled this zone is gone.
+        # x+/-3.85/y+/-2.75, LQFP-80 x+/-8/y+/-8, HTSSOP-32 x+/-4/y+/-6.5,
+        # 0603 ~+/-0.9, 0805 ~+/-1.3.  Detector front-end lives in the right
+        # zone x[140,208]: TIA bank (y24-43) -> 4x AD7616 ADC 2x2 grid
+        # (y44-92, each 14mm LQFP + a 7-cap decoupling column) -> 64x TIA
+        # feedback Rf/Cf (y100-124).  The +5V_A rail + DET_REF divider sit at
+        # the zone edges.  The old 16x LMV339 + 64x pull-up + MCP4725 comparator
+        # chain that filled y44-124 is GONE (ADC pivot); the freed space holds
+        # the 4 ADCs + their decoupling.  The emitter driver (3x TLC5947 + 3x
+        # Riref + 3x Cem, 9 parts) lives BELOW the die at y=78 (EM bottom-edge
+        # pads fan down to the TLC5947 OUTn sinks).
         elif c["ref"].startswith("UT"):          # 16x TLV9004 TIA  (8 cols x 2 rows)
             j = int(c["ref"][2:]); r, col = j // 8, j % 8
             c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 144 + col * 8, 24 + r * 8, 0
-        elif c["ref"].startswith("UC"):          # 16x LMV339 comparator (8 cols x 2 rows)
-            j = int(c["ref"][2:]); r, col = j // 8, j % 8
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 144 + col * 8, 46 + r * 14, 0
         elif c["ref"].startswith("Cut"):         # 16x TLV9004 decoupling (8 cols x 2 rows)
             j = int(c["ref"][3:]); r, col = j // 8, j % 8
             c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 144 + col * 8, 37 + r * 3, 0
-        elif c["ref"].startswith("Cuc"):          # 16x LMV339 decoupling (8 cols x 2 rows)
-            j = int(c["ref"][3:]); r, col = j // 8, j % 8
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 144 + col * 8, 66 + r * 3, 0
+        elif c["ref"].startswith("UAD"):         # 4x AD7616 ADC (2x2 grid, 14mm LQFP-80)
+            j = int(c["ref"][3:])
+            grid = [(150, 52), (186, 52), (150, 82), (186, 82)]
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = grid[j][0], grid[j][1], 0
+        elif c["ref"].startswith("CuaB"):        # AD7616 VCC bulk 10uF (per chip, decap column)
+            j = int(c["ref"][4:]); x = 164 if j in (0, 2) else 200
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = x, (44 if j in (0, 1) else 74) + 3, 0
+        elif c["ref"].startswith("Cua"):         # AD7616 VCC HF 100nF (per chip)
+            j = int(c["ref"][3:]); x = 164 if j in (0, 2) else 200
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = x, (44 if j in (0, 1) else 74) + 0, 0
+        elif c["ref"].startswith("Cud"):         # AD7616 VDRIVE 100nF (per chip)
+            j = int(c["ref"][3:]); x = 164 if j in (0, 2) else 200
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = x, (44 if j in (0, 1) else 74) + 6, 0
+        elif c["ref"].startswith("Cur"):         # AD7616 REFCAP 100nF (per chip)
+            j = int(c["ref"][3:]); x = 164 if j in (0, 2) else 200
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = x, (44 if j in (0, 1) else 74) + 9, 0
+        elif c["ref"].startswith("Crio"):        # AD7616 REFINOUT 100nF (per chip)
+            j = int(c["ref"][4:]); x = 164 if j in (0, 2) else 200
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = x, (44 if j in (0, 1) else 74) + 12, 0
+        elif c["ref"].startswith("Crgc"):        # AD7616 REGCAP 1uF (per chip)
+            j = int(c["ref"][4:]); x = 164 if j in (0, 2) else 200
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = x, (44 if j in (0, 1) else 74) + 15, 0
+        elif c["ref"].startswith("Crgd"):        # AD7616 REGCAPD 1uF (per chip)
+            j = int(c["ref"][4:]); x = 164 if j in (0, 2) else 200
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = x, (44 if j in (0, 1) else 74) + 18, 0
         elif c["ref"].startswith("Rf"):           # 64x TIA feedback R (8 cols x 8 rows)
             i = int(c["ref"][2:]); r, col = i // 8, i % 8
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 144 + col * 8, 74 + r * 3, 0
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 144 + col * 8, 104 + r * 3, 0
         elif c["ref"].startswith("Cf"):           # 64x TIA feedback C (8 cols x 8 rows, +3mm x)
             i = int(c["ref"][2:]); r, col = i // 8, i % 8
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 147 + col * 8, 74 + r * 3, 0
-        elif c["ref"].startswith("Rpu"):         # 64x comparator pull-up (8 cols x 8 rows)
-            i = int(c["ref"][3:]); r, col = i // 8, i % 8
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 144 + col * 8, 100 + r * 3, 0
-        elif c["ref"] == "UDAC":                  # MCP4725 threshold DAC (far-right edge)
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 205, 100, 0
-        elif c["ref"] == "R_I2C_SDA":
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 205, 104, 0
-        elif c["ref"] == "R_I2C_SCL":
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 205, 108, 0
-        elif c["ref"] == "Rref1":
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 205, 112, 0
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 147 + col * 8, 104 + r * 3, 0
+        elif c["ref"] == "FB_A":                 # +5V_A ferrite (right zone bottom-left)
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 140, 128, 0
+        elif c["ref"] == "C_Abulk":              # +5V_A bulk/HF decoupling
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 146, 128, 0
+        elif c["ref"] == "C_ahf":
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 146, 132, 0
+        elif c["ref"] == "Rref1":               # DET_REF 1.65V divider (right zone top)
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 140, 18, 0
         elif c["ref"] == "Rref2":
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 205, 116, 0
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 144, 18, 0
         elif c["ref"] == "Cref":
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 205, 120, 0
-        elif c["ref"] == "Cdac":
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 205, 124, 0
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 148, 18, 0
         elif c["ref"].startswith("UE"):          # 3x TLC5947 LED driver (row below the die)
             j = int(c["ref"][2:])                 # UE0..2 -> x 40/60/100, y=78
             xs = [40, 60, 100]
@@ -1787,12 +1993,11 @@ def assign_sch_positions():
     net (verified: 19k 'Output+Output' ERC errors).  Grid them out on the A1
     sheet right of the existing (x<350) schematic content.  Spacing > 2x the
     symbol pin reach (~10mm) so no two distinct nets share a pin endpoint."""
-    new = [c for c in COMPONENTS if c["ref"] == "UDAC" or c["ref"] == "Rref1"
-           or c["ref"] == "Rref2" or c["ref"] == "Cdac" or c["ref"] == "Cref"
-           or c["ref"] == "R_I2C_SDA" or c["ref"] == "R_I2C_SCL"
+    new = [c for c in COMPONENTS if c["ref"] in ("Rref1", "Rref2", "Cref",
+                                                  "FB_A", "C_Abulk", "C_ahf")
            or any(c["ref"].startswith(p) and c["ref"][len(p):].isdigit()
-                  for p in ("UT", "UC", "Rf", "Cf", "Rpu",
-                            "Cut", "Cuc", "Cdac", "Cref",
+                  for p in ("UT", "UAD", "Cua", "CuaB", "Cud", "Cur", "Crio",
+                            "Crgc", "Crgd", "Rf", "Cf", "Cut",
                             "UE", "Riref", "Cem"))]
     cols, step_x, step_y = 19, 22.0, 20.0
     for idx, c in enumerate(new):

@@ -838,12 +838,20 @@ def _nearest_same_net_point(vx, vy, netcode, obs_segs, obs_circles):
     return best_pt
 
 
-def _bcu_seg_clear(x1, y1, x2, y2, skip_nc, obs_segs, obs_circles, hw, gap):
+def _bcu_seg_clear(x1, y1, x2, y2, skip_nc, obs_segs, obs_circles, hw, gap,
+                   placed_vias=None):
     """True if a B.Cu trace segment clears every OTHER-net B.Cu track and
     through-via barrel by >= gap. Same-net (skip_nc) copper may be touched (the
     tie trace ends ON the rail). Through-via barrels sit on B.Cu regardless of
     their own layer span, so all non-same-net vias are obstacles (conservative
-    for a microvia that does not reach B.Cu -- only over-blocks, never shorts)."""
+    for a microvia that does not reach B.Cu -- only over-blocks, never shorts).
+
+    ``placed_vias`` is an optional list of (cx, cy, netcode) for vias placed
+    DURING this build() run (rail-pad GND/+3V3 + stitching vias), which are NOT
+    in ``obs_circles`` (snapshotted before _clear_routed). Without this, a +5V
+    straggler L-trace on B.Cu crosses the just-placed GND/+3V3 rail-pad vias
+    (a decoupling-cap bank row) and shorts them -- 5 shorting_items DRC errors.
+    Radius is VIA_DIAM_NM/2 (same 0.6 mm via this script places everywhere)."""
     for sx1, sy1, sx2, sy2, shw, snc, slay in obs_segs:
         if snc == skip_nc or slay != pcbnew.B_Cu:
             continue
@@ -854,10 +862,18 @@ def _bcu_seg_clear(x1, y1, x2, y2, skip_nc, obs_segs, obs_circles, hw, gap):
             continue
         if _seg_dist2(cx, cy, x1, y1, x2, y2) < (hw + cr + gap) ** 2:
             return False
+    if placed_vias:
+        cr = VIA_DIAM_NM / 2
+        for cx, cy, cnc in placed_vias:
+            if cnc == skip_nc:
+                continue
+            if _seg_dist2(cx, cy, x1, y1, x2, y2) < (hw + cr + gap) ** 2:
+                return False
     return True
 
 
-def _tie_stragglers_to_rail(board, netcode, via_positions, obs_segs, obs_circles):
+def _tie_stragglers_to_rail(board, netcode, via_positions, obs_segs, obs_circles,
+                            placed_vias=None):
     """For each straggler via just placed (a THROUGH via tying an isolated power
     pad via its F.Cu stub), route a thin 0.2 mm B.Cu L-trace from the via to the
     nearest existing same-net rail copper so the pad joins the rail. B.Cu carries
@@ -865,7 +881,9 @@ def _tie_stragglers_to_rail(board, netcode, via_positions, obs_segs, obs_circles
     L-orders are blocked the pad is left honestly to GUI. ``via_positions`` is
     the list of (vx, vy, nc) the rail-pad spiral appended to via_centers (the via
     OBJECTS' GetPosition() returns a bare SwigPyObject after board mutation).
-    Returns n_tracks."""
+    ``placed_vias`` is the full via_centers list (surviving + rail-pad +
+    stitching + straggler), so the L-trace also clears vias placed earlier in
+    this run that the pre-clear obs snapshot cannot see. Returns n_tracks."""
     hw = RAIL_TRACK_THIN_NM / 2
     gap = COPPER_GAP_NM
     nt = 0
@@ -880,7 +898,8 @@ def _tie_stragglers_to_rail(board, netcode, via_positions, obs_segs, obs_circles
             continue  # via already sits on / within touching distance of rail
         for mx, my in ((tx, vy), (vx, ty)):
             segs = ((vx, vy, mx, my), (mx, my, tx, ty))
-            if all(_bcu_seg_clear(a, b, c, d, netcode, obs_segs, obs_circles, hw, gap)
+            if all(_bcu_seg_clear(a, b, c, d, netcode, obs_segs, obs_circles, hw,
+                                  gap, placed_vias)
                    for a, b, c, d in segs):
                 for x1, y1, x2, y2 in segs:
                     t = pcbnew.PCB_TRACK(board)
@@ -984,7 +1003,8 @@ def build(board, gnd, p33, bbox, pads) -> dict:
                                         via_centers, tie_segs))
         straggler_vias.extend(placed)
         nt2 = _tie_stragglers_to_rail(board, nc, via_centers[n_before:],
-                                     straggler_obs[0], straggler_obs[1])
+                                     straggler_obs[0], straggler_obs[1],
+                                     via_centers)
         straggler_tracks += nt2
         straggler_summary.append(f"{nm}:{len(placed)}via/{nt2}trk")
     if straggler_vias:

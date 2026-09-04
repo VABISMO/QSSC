@@ -6,21 +6,23 @@ circuit through ``qiskit-aer`` using a noise model derived from the chosen
 :class:`~qssc.defects.DefectProfile` (T1, T2 and optical readout error).  The
 backend is honest about what it does: the *quantum* result is produced by a
 statevector/noise simulation, and the FPGA + on-chip readout stack is
-responsible for the *physical readout visualisation* on the 8x8 CQD-emitter /
-graphene-detector grid.
+responsible for the *physical readout visualisation* on the 64-channel CQD
+emitter / graphene-detector array.
 
 When ``hardware`` is provided (a real or simulated FPGA connection) the backend
-also drives the on-chip readout path -- firing the CQD emitter pixel for each
-measured-1 qubit and reading back the graphene detector electrode's lock-in
-photocurrent -- so the physical readout matches the simulated bitstring. There
-is no camera: the chip reads out directly on-chip (protocol §3).
+also drives the on-chip readout path -- arming the CQD emitter channel for each
+measured qubit, firing all armed channels **in parallel** via DRIVE_PATTERN, and
+reading back all 64 graphene detector electrodes' 16-bit AD7616 samples in one
+parallel READ_DETECTORS reply -- so the physical readout matches the simulated
+bitstring. There is no camera, no analog MUX, no serial pixel scan: the chip
+reads out directly on-chip and in parallel (protocol §3).
 """
 from __future__ import annotations
 
 import logging
 import math
 import time
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence
 
 import numpy as np
 
@@ -42,7 +44,7 @@ from .simulator import (
     QubitSite, SimulatedFPGA, auto_align,
     ASE_GAIN, BRIGHT_CODE, BG_CODE, READOUT_NOISE,
     LOCKIN_MOD_HZ, ODMR_CONTRAST,
-    ADC_BITS, ADC_MAX, DETECT_THRESHOLD,
+    ADC_BITS, ADC_MAX, DETECT_THRESHOLD, N_SITES,
 )
 
 logger = logging.getLogger(__name__)
@@ -83,33 +85,62 @@ class FPGAConnection:
 
 
 class EmitterController:
-    """Drive the 8x8 on-chip CQD ASE/LED emitter array over the FPGA UART link.
+    """Drive the 64-channel on-chip CQD ASE/LED emitter array over the FPGA UART link.
 
-    The FPGA enables an external higher-voltage CQD emitter driver for the
-    addressed pixel (row anode-enable x col cathode-enable crossbar). The wire
-    command is ``DRIVE_EMITTER <row> <col> <duration_ms>``.
+    The FPGA drives 3x TLC5947 constant-current LED drivers over a 4-wire SPI;
+    each of the 64 channels has its own 12-bit grayscale word, so multiple
+    emitters light simultaneously at independent intensities. The wire commands
+    (matching ``fpga/rtl/command_parser.v`` exactly)::
+
+        DRIVE_EMITTER <index> <duration_ms>   pump one channel at full (gs=4095)
+        SET_EMITTER <index> <level 0..4095>   arm one channel's grayscale
+        DRIVE_PATTERN <duration_ms>           fire ALL armed channels in parallel
+        CLEAR_EMITTERS                        disarm all channels (gs=0)
+
+    There is no 8x8 row/col crossbar: every channel is independent and addressed
+    by a single linear index 0..63. ``drive`` is the single-channel convenience
+    wrapper; ``set_emitter`` + ``drive_pattern`` is the parallel multi-emitter
+    path used by the per-run optical readout.
     """
 
-    GRID = 8
+    N_SITES = N_SITES
 
     def __init__(self, fpga):
         self.fpga = fpga
 
-    def drive(self, row: int, col: int, duration_ms: int = 50):
-        if not (0 <= row < self.GRID and 0 <= col < self.GRID):
-            raise ValueError("emitter position out of range")
-        return self.fpga.send_command(f"DRIVE_EMITTER {row} {col} {duration_ms}")
+    def drive(self, index: int, duration_ms: int = 50):
+        if not (0 <= index < self.N_SITES):
+            raise ValueError("emitter index out of range")
+        return self.fpga.send_command(f"DRIVE_EMITTER {index} {duration_ms}")
+
+    def set_emitter(self, index: int, level: int):
+        """Arm one channel's 12-bit grayscale (0..4095); fires on DRIVE_PATTERN."""
+        if not (0 <= index < self.N_SITES):
+            raise ValueError("emitter index out of range")
+        if not (0 <= level <= 4095):
+            raise ValueError("emitter level out of range 0..4095")
+        return self.fpga.send_command(f"SET_EMITTER {index} {level}")
+
+    def drive_pattern(self, duration_ms: int = 50):
+        """Fire every armed (gs>0) channel simultaneously for duration_ms."""
+        return self.fpga.send_command(f"DRIVE_PATTERN {duration_ms}")
+
+    def clear_emitters(self):
+        """Disarm all channels (gs=0)."""
+        return self.fpga.send_command("CLEAR_EMITTERS")
 
 
 class DetectorInterface:
     """Read the on-chip graphene/MoS2 photodetector array over the FPGA UART link.
 
-    Each electrode's lock-in photocurrent is returned as a 12-bit ADC code
-    (0..4095). ``READ_DETECTOR <site>`` returns one code; ``READ_DETECTORS``
-    streams all 64 codes (space-separated) in a single reply.
+    Each electrode's TIA output is digitised in parallel by 4x AD7616 16-bit
+    simultaneous-sampling ADCs. ``READ_DETECTOR <site>`` returns one 16-bit
+    sample (0..65535); ``READ_DETECTORS`` streams all 64 samples
+    (space-separated) in a single reply -- the 4 ADCs sample together, so all
+    64 channels are captured simultaneously, not scanned.
     """
 
-    GRID = 8
+    N_SITES = N_SITES
 
     def __init__(self, fpga):
         self.fpga = fpga
@@ -124,7 +155,7 @@ class DetectorInterface:
         return np.array(codes, dtype=np.int32)
 
     def read_odmr(self, site: int) -> int:
-        """Convenience: single-site photocurrent (alias of ``read``)."""
+        """Convenience: single-site 16-bit sample (alias of ``read``)."""
         return self.read(site)
 
 
@@ -191,67 +222,64 @@ def make_connection(port: Optional[str] = None, *, profile="NV",
 # ---------------------------------------------------------------------------
 
 class CalibrationManager:
-    """Build the emitter-pixel -> qubit-site -> detector-electrode LUT.
+    """Build the emitter-channel -> qubit-site -> detector-electrode LUT.
 
-    On-chip calibration (protocol §5.6): drive each CQD emitter pixel in turn,
-    read every graphene detector electrode, and register the electrode whose
-    lock-in photocurrent responds above threshold. No camera, no alignment
-    jig -- the software discovers the coupling purely from the detector
-    response. On the 1:1-laid-out chip the mapping is the identity, but the
-    sweep is the method that establishes it.
+    On-chip calibration (protocol §5.6): drive each CQD emitter channel in
+    turn, read all 64 graphene detector electrodes in parallel, and register
+    the electrode whose 16-bit AD7616 sample responds above threshold. No
+    camera, no alignment jig -- the software discovers the coupling purely from
+    the detector response. On the 1:1-laid-out chip the mapping is the
+    identity, but the sweep is the method that establishes it.
     """
 
-    GRID = 8
+    N_SITES = N_SITES
 
     def __init__(self, emitter: EmitterController, detector: DetectorInterface,
-                 threshold: int = 1000):
+                 threshold: int = DETECT_THRESHOLD):
         self.emitter = emitter
         self.detector = detector
         self.threshold = threshold
-        # emitter-pixel (row,col) -> detector-electrode index
-        self.mapping: Dict[Tuple[int, int], int] = {}
+        # emitter-channel index -> detector-electrode index
+        self.mapping: Dict[int, int] = {}
 
     def perform_calibration(self):
-        for row in range(self.GRID):
-            for col in range(self.GRID):
-                self.emitter.drive(row, col, 50)
-                codes = self.detector.read_all()
-                best = int(np.argmax(codes))
-                if codes[best] > self.threshold:
-                    self.mapping[(row, col)] = best
+        for index in range(self.N_SITES):
+            self.emitter.drive(index, 50)
+            codes = self.detector.read_all()
+            best = int(np.argmax(codes))
+            if codes[best] > self.threshold:
+                self.mapping[index] = best
         return self.mapping
 
     @classmethod
-    def default_detector_lut(cls) -> Dict[Tuple[int, int], int]:
+    def default_detector_lut(cls) -> Dict[int, int]:
         """Deterministic identity LUT used when no physical calibration is run."""
-        return {(r, c): r * cls.GRID + c
-                for r in range(cls.GRID) for c in range(cls.GRID)}
+        return {i: i for i in range(cls.N_SITES)}
 
 
 class QubitReadoutProcessor:
-    """Threshold graphene-detector photocurrent codes into qubit states.
+    """Threshold graphene-detector 16-bit AD7616 samples into qubit states.
 
     A pumped site in the bright ms=0 spin state (state 0) reports a high
-    photocurrent code; a resonant microwave pulse flips it to the dark ms=+-1
-    state (state 1) and the code drops to the ODMR-dip level. We threshold
+    16-bit sample; a resonant microwave pulse flips it to the dark ms=+-1
+    state (state 1) and the sample drops to the ODMR-dip level. We threshold
     midway between the bright and dark levels to recover the bit.
     """
 
     # mirrors qssc.simulator constants (ensemble ODMR: dark = bright*(1-contrast))
-    BRIGHT_CODE = 3200
-    DARK_CODE = 3040                       # BRIGHT * (1 - ODMR_CONTRAST), the ~5% dip
+    BRIGHT_CODE = 51200
+    DARK_CODE = 48640                       # BRIGHT * (1 - ODMR_CONTRAST), the ~5% dip
 
     def __init__(self, bright: int = BRIGHT_CODE, dark: int = DARK_CODE):
         self.bright = bright
         self.dark = dark
         self.threshold = 0.5 * (bright + dark)
 
-    def process(self, codes: np.ndarray, lut: Dict[Tuple[int, int], int],
-                num_qubits: int = 64) -> List[int]:
+    def process(self, codes: np.ndarray, lut: Dict[int, int],
+                num_qubits: int = N_SITES) -> List[int]:
         states = [0] * num_qubits
         for i in range(num_qubits):
-            r, c = divmod(i, 8)
-            det = lut.get((r, c))
+            det = lut.get(i)
             if det is None or det >= len(codes):
                 continue
             states[i] = 1 if int(codes[det]) < self.threshold else 0
@@ -723,11 +751,14 @@ class QSSCBackend(BackendV2):
     def _drive_optical_readout(self, circuit: QuantumCircuit, counts: dict, shots: int) -> dict:
         """Drive the on-chip readout to display the most-likely measured bitstring.
 
-        The 8x8 CQD crossbar lights ONE emitter pixel at a time, so for each
-        measured-1 qubit we drive its pixel and read the coupled graphene detector
-        electrode's lock-in photocurrent before moving on -- no multi-pixel
-        accumulation, no camera, no image. The detector codes are thresholded to
-        recover the physical readout state per site.
+        The 64 CQD channels are independent: we ARM every measured qubit's
+        emitter (SET_EMITTER) at full grayscale, set each coupled spin to the
+        measured bit (0 = bright ms=0 high PL, 1 = dark ms=+-1 ODMR dip the
+        circuit's MW pulses drove), then fire ALL armed emitters SIMULTANEOUSLY
+        with a single DRIVE_PATTERN and read all 64 detector electrodes in one
+        parallel READ_DETECTORS reply. This is the real hardware parallelism --
+        no pixel-by-pixel serial scan, no camera, no image. The 16-bit AD7616
+        samples are thresholded to recover the physical readout state per site.
         """
         try:
             emitter = EmitterController(self.hardware)
@@ -735,42 +766,43 @@ class QSSCBackend(BackendV2):
             proc = QubitReadoutProcessor()
             lut = CalibrationManager.default_detector_lut()
             bitstring = max(counts, key=counts.get) if counts else "0" * circuit.num_clbits
-            # map measured classical bits -> qubit grid positions
+            # map measured classical bits -> qubit indices (hardware channels)
             meas_map = []
             for instr in circuit.data:
                 if instr.operation.name == "measure":
                     cl = circuit.find_bit(instr.clbits[0]).index
                     pq = circuit.find_bit(instr.qubits[0]).index
                     meas_map.append((cl, pq))
-            codes = np.zeros(self._n_qubits, dtype=np.int32)
-            measured_dets: list = []
-            measured_pqs: set = set()
+            measured_pqs: list = []
+            measured_pqset: set = set()
             for cl, pq in meas_map:
                 str_idx = (circuit.num_clbits - 1) - cl
                 if str_idx < len(bitstring) and pq < self._n_qubits:
                     bit = int(bitstring[str_idx] == "1")
-                    r, c = divmod(pq, 8)
-                    det = lut.get((r, c), r * 8 + c)
-                    # Pump the pixel (DRIVE_EMITTER), then set the spin state to
-                    # the measured bit: 0 = bright ms=0 (high PL), 1 = dark ms=+-1
-                    # (the ODMR dip the preceding MW pulses drove). The pump only
-                    # illuminates; the spin state reflects the circuit's result.
-                    emitter.drive(r, c, 50)
+                    det = lut.get(pq, pq)
+                    # Arm this channel (SET_EMITTER) and set the spin state to
+                    # the measured bit. All armed channels fire together below.
+                    emitter.set_emitter(pq, 4095)
                     self.hardware.sim_states[pq] = bit
-                    codes[det] = detector.read(det)
-                    measured_dets.append(det)
-                    measured_pqs.add(pq)
+                    measured_pqs.append((pq, det))
+                    measured_pqset.add(pq)
+            # Fire every armed emitter in parallel, then read all 64 detectors
+            # in one parallel reply -- the 4x AD7616 sample simultaneously.
+            emitter.drive_pattern(50)
+            codes = detector.read_all()
             states = proc.process(codes, lut, num_qubits=self._n_qubits)
-            # electrodes that were never pumped read code 0 (below threshold),
-            # which process() would threshold as state 1 (dark). Mark them -1 so
-            # "not read this run" is distinguishable from "read as |1⟩".
+            # electrodes that were never armed read the background floor (below
+            # threshold), which process() would threshold as state 1 (dark).
+            # Mark them -1 so "not read this run" is distinguishable from "read
+            # as |1>".
             for i in range(self._n_qubits):
-                if i not in measured_pqs:
+                if i not in measured_pqset:
                     states[i] = -1
-            # photocurrent mean over the electrodes actually pumped (the
-            # unpumped floor would otherwise drag the mean to ~0).
+            measured_dets = [det for _, det in measured_pqs]
             photocurrent_mean = (float(np.mean([codes[d] for d in measured_dets]))
                                  if measured_dets else 0.0)
+            # Disarm all channels so the next run starts clean.
+            emitter.clear_emitters()
             return {"displayed_bitstring": bitstring, "read_states": states,
                     "photocurrent_mean": photocurrent_mean}
         except Exception as exc:  # pragma: no cover - hardware path
@@ -845,9 +877,9 @@ class QSSCBackend(BackendV2):
         the backend's defect profile and temperature**.
 
         CQD ASE emitter -> SU-8/PDMS waveguide -> long-pass filter ->
-        2D photodetector -> TIA + 64:1 analog MUX -> Artix-7 XADC (12-bit) ->
-        1 kHz lock-in. The readout figures (bright/dark codes, dip, noise,
-        lock-in SNR) are anchored to the *same* simulator constants the
+        2D photodetector -> TIA -> 4x AD7616 16-bit parallel ADC ->
+        1 kHz lock-in (host-side). The readout figures (bright/dark codes, dip,
+        noise, lock-in SNR) are anchored to the *same* simulator constants the
         ``SimulatedFPGA`` uses (``BRIGHT_CODE`` is the saturated bright level),
         while the detector noise, ODMR contrast, ASE gain and waveguide loss are
         **temperature-dependent** so the panel reflects the current run, not a
@@ -879,7 +911,7 @@ class QSSCBackend(BackendV2):
             det_type, responsivity = "graphene/MoS2 photodetector array", 0.10
             contrast0, linewidth_hz = ODMR_CONTRAST, self.profile.odmr_linewidth_hz
         # --- temperature dependence (anchored at 300 K) ---------------------
-        set_resistor_ohm = 220
+        set_resistor_ohm = 4870          # TLC5947 R_IREF (sets constant-current)
         # optical pump power out of the CQD pixel: drive_ma * forward_v is the
         # electrical input in mW (mA * V), * eta_eqe is the wall-plug -> optical
         # efficiency. (The old `* 1e-3 * 1000` here was a no-op that obscured units.)
@@ -905,7 +937,8 @@ class QSSCBackend(BackendV2):
             "temperature_k": round(T, 3),
             "emitter": {
                 "type": "CQD ASE/LED array (ITO/PEDOT:PSS/CQD-PVA/ZnO/Ag)",
-                "pixels": self._n_qubits, "grid": "8x8",
+                "pixels": self._n_qubits, "grid": "64 parallel channels",
+                "driver": "3x TLC5947 constant-current (12-bit PWM, 4-wire SPI)",
                 "wavelength_nm": self.profile.excitation_wavelength_nm,
                 "drive_ma": drive_ma, "forward_v": forward_v,
                 "set_resistor_ohm": set_resistor_ohm,
@@ -934,11 +967,12 @@ class QSSCBackend(BackendV2):
                 "bias_v": 0.5,
                 "responsivity_a_per_w": responsivity,
                 "nep_nw_per_sqrt_hz": 50.0,
-                "tia": "ADA4530-1 class",
+                "tia": "TLV9004 class (64 parallel channels)",
                 "transimpedance_ohm": int(tia_rf),
-                "mux": "64:1 analog",
+                "adc": "4x AD7616 parallel 16-bit simultaneous-sampling",
                 "adc_bits": ADC_BITS, "adc_max": ADC_MAX,
                 "adc_vref_v": adc_vref,
+                "range_v": "+/-5 bipolar (HW-pin-strapped)",
             },
             "readout": {
                 "lockin_mod_hz": LOCKIN_MOD_HZ,
@@ -963,7 +997,7 @@ class QSSCBackend(BackendV2):
                 "after_filter_uw": round(p_at_det_mw * 1e3, 2),
                 "at_detector_uw": round(p_at_det_mw * 1e3, 2),
                 "end_to_end_efficiency": round(eta_end, 5),
-                "reconciles_with": "simulator BRIGHT_CODE=3200",
+                "reconciles_with": f"simulator BRIGHT_CODE={BRIGHT_CODE}",
             },
         }
 

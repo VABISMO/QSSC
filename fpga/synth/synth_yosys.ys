@@ -16,8 +16,7 @@ read_verilog fpga/rtl/uart_tx.v
 read_verilog fpga/rtl/spi_master.v
 read_verilog fpga/rtl/tlc5947_ctrl.v
 read_verilog fpga/rtl/emitter_array.v
-read_verilog fpga/rtl/photon_counter_array.v
-read_verilog fpga/rtl/i2c_master.v
+read_verilog fpga/rtl/adc_reader.v
 read_verilog fpga/rtl/adf4351_ctrl.v
 read_verilog fpga/rtl/command_parser.v
 read_verilog fpga/rtl/top_level.v

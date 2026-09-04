@@ -1553,6 +1553,23 @@ def build(board) -> dict:
                                      len(net_pads[n]))):
         if net in POWER_ROUTER_LAYER:
             continue
+        if _is_chip_net(net):
+            # The 0.30 mm-pitch dog-bone field is beyond the 0.2 mm line-router
+            # grid: each dog-bone via marks a radius-2 (5-cell) block, and
+            # same-parity vias sit only 0.60 mm (3 cells) apart, so their mark
+            # blocks overlap by 2 cells. The own-keepout `allowed` override lets
+            # a net claim that overlap (its own via's block covers it) and route
+            # into the neighbour's via copper -- 2 Chip-clearance DRC violations
+            # (DET_IN62 escape track 0.025 mm from DET_IN60's via on In3.Cu).
+            # _chip_fanout already placed each pad's dog-bone (pad -> 0.15 mm
+            # F.Cu stub -> through-via), which is itself DRC-clean; only the
+            # via<->target ESCAPE is beyond this router. Leave all 128 chip nets
+            # unrouted for the FreeRouting pass (Task 17, continuous-copper
+            # routing that respects the 0.10 mm Chip clearance). The dog-bone
+            # vias are preserved by the chip_via_pos guard in the VIP-removal
+            # block below, so the fanout stays intact for FreeRouting to finish.
+            fail.append(net)
+            continue
         pads = net_pads[net]
         if len(pads) < 2:
             single.append(net)            # 1-pad net: nothing to connect (not a

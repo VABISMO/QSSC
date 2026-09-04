@@ -137,7 +137,7 @@ export function BarCounts({ counts, max = 8 }) {
 // every chip component the simulator checks, RECALCULATED for the current
 // profile + temperature (each execution). CQD ASE emitter -> SU-8/PDMS
 // waveguide -> defect crystal (spin host / qubit: pump in, PL out) -> long-pass
-// filter -> 2D photodetector -> TIA -> XADC -> 1 kHz lock-in.
+// filter -> 2D photodetector -> TIA -> 4x AD7616 (16-bit parallel) -> 1 kHz lock-in.
 //
 // The per-stage numbers are computed client-side from `profile` + `temperature`
 // (mirroring qssc/backend.py::optical_readout) so the diagram is always live
@@ -153,7 +153,7 @@ export function BarCounts({ counts, max = 8 }) {
 // dip = BRIGHT * contrast ; SNR = dip / noise. Cooling raises contrast and
 // lowers noise, so the lock-in SNR climbs sharply — the readout improves cold.
 // ---------------------------------------------------------------------------
-const ADC_MAX = 4095, BRIGHT_CODE = 3200, LOCKIN_MOD_HZ = 1000
+const ADC_MAX = 65535, BRIGHT_CODE = 51200, LOCKIN_MOD_HZ = 1000
 
 // per-profile optical-stack config (source of truth mirrors backend.py).
 // The defect crystal is the central quantum element (pump in -> PL out, ODMR
@@ -232,7 +232,7 @@ export function OpticalChainDiagram({ data, infoData, profile, temperature, acti
   const iBright = rd.photocurrent_bright_ua ?? +c.iBright.toFixed(3)
   const tiaMohm = (de.transimpedance_ohm ?? 1e6) / 1e6
   const vBright = iBright * tiaMohm
-  const adcBits = de.adc_bits ?? 12
+  const adcBits = de.adc_bits ?? 16
   const bright = rd.bright_code ?? c.bright
   const dark = rd.dark_code ?? c.dark
   const dip = rd.dip_counts ?? c.dip
@@ -254,7 +254,7 @@ export function OpticalChainDiagram({ data, infoData, profile, temperature, acti
     { icon: '◆', t: filterLabel.length > 16 ? filterLabel.slice(0, 14) + '…' : filterLabel, v: [`T ${(filtT * 100).toFixed(0)}%`, filterPasses] },
     { icon: '◼', t: detLabel, v: [`R ${resp} A/W`, `${iBright} µA`] },
     { icon: '⚡', t: 'TIA', v: [`${tiaMohm} MΩ`, `→ ${vBright.toFixed(2)} V`] },
-    { icon: '▣', t: 'XADC', v: [`${adcBits}-bit`, `${bright}/${dark}`] },
+    { icon: '▣', t: 'AD7616', v: [`${adcBits}-bit`, `${bright}/${dark}`] },
     { icon: '◎', t: '1 kHz lock-in', v: [`SNR ${snr}σ`, `dip ${dip} c`] },
   ]
   // 8 stages -> 7 arrows. The crystal arrow is the pump->PL transduction

@@ -6,9 +6,11 @@ chip operating at room temperature.  The canonical (default) defect family is
 the nitrogen-vacancy (NV-) centre in CVD diamond — the only family here whose
 room-temperature coherence (T2 ~ 1.8 ms in 12C-enriched diamond) is long enough
 to compute seriously at 300 K.  The boron vacancy (VB-) in hBN and the silicon
-vacancy (V_Si) in SiC are kept as sensor variants.  Readout is on-chip: an 8x8
-CQD ASE/LED emitter array pumps each site and a graphene/MoS2 photodetector
-array reads it back through an FPGA lock-in — no camera.
+vacancy (V_Si) in SiC are kept as sensor variants.  Readout is on-chip and
+fully parallel: 64 CQD ASE/LED emitters (3x TLC5947 constant-current drivers)
+pump the sites and 64 graphene/MoS2 photodetectors (each with its own TIA,
+digitised by 4x AD7616 16-bit simultaneous-sampling ADCs) read them back
+through an FPGA lock-in — no camera, no analog MUX, no serial scan.
 """
 from .defects import (
     DefectProfile, HBN_VB, NV_DIAMOND, SIC_VS, PROFILES, get_profile,

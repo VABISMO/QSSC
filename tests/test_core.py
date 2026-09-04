@@ -41,19 +41,19 @@ def test_cqd_pulse():
     # scaled by the ASE gain factor. No galvo scan on this chip (fixed array).
     pulse = simulate_cqd_pulse(intensity=1.0, rng=np.random.default_rng(0))
     assert set(pulse.keys()) >= {"intensity", "duration_s", "adc", "ase_gain"}
-    assert 0 <= pulse["adc"] <= 4095
+    assert 0 <= pulse["adc"] <= 65535
     assert pulse["ase_gain"] >= 1.0
 
 
 def test_detector_response():
-    # On-chip graphene/MoS2 detector array: N electrodes of int32 ADC codes,
-    # bright (high code) under a pumped emitter with no resonant MW.
+    # On-chip graphene/MoS2 detector array: 64 electrodes of int32 16-bit AD7616
+    # codes, bright (high code) under a pumped emitter with no resonant MW.
     rng = np.random.default_rng(0)
-    codes = make_detector_response({(0, 0), (3, 4)}, profile="NV", grid=8, rng=rng)
+    codes = make_detector_response({0, 28}, profile="NV", n_sites=64, rng=rng)
     assert codes.shape == (64,) and codes.dtype == np.int32
-    assert 0 <= codes.min() and codes.max() <= 4095
+    assert 0 <= codes.min() and codes.max() <= 65535
     # pumped electrodes are bright; un-pumped are at the background floor
-    assert codes[0] > codes[1]  # (0,0) bright vs (0,1) background
+    assert codes[0] > codes[1]  # channel 0 bright vs channel 1 background
 
 
 def test_detector_dip_is_ensemble_contrast():
@@ -61,9 +61,9 @@ def test_detector_dip_is_ensemble_contrast():
     # 75% single-spin swing. A pumped electrode on-resonance (MW at D) reads
     # DARK_CODE = BRIGHT_CODE*(1 - ODMR_CONTRAST), a few percent below bright.
     rng = np.random.default_rng(0)
-    bright = make_detector_response({(0, 0)}, profile="NV", grid=8, rng=rng)[0]
+    bright = make_detector_response({0}, profile="NV", n_sites=64, rng=rng)[0]
     rng = np.random.default_rng(0)
-    dark = make_detector_response({(0, 0)}, profile="NV", grid=8,
+    dark = make_detector_response({0}, profile="NV", n_sites=64,
                                   mw_freq_khz=2_870_000, rng=rng)[0]
     dip_frac = (bright - dark) / bright
     # real NV-ensemble ODMR: 3-8%. Reject the old 75% (regression guard).
@@ -75,7 +75,7 @@ def test_odmr_resonance_linewidth():
     # 287 MHz noise*D window. On-resonance and just-within-linewidth flip the
     # spin; far off-resonance is rejected. (freq is in kHz: +4 MHz = +4000 kHz.)
     fpga = SimulatedFPGA("NV", seed=0)
-    fpga.send_command("DRIVE_EMITTER 0 0 50")
+    fpga.send_command("DRIVE_EMITTER 0 50")
     # 2.87 GHz exactly (on) and +4 MHz (within the 5 MHz line) -> OK
     assert fpga.send_command("APPLY_PULSE 0 2870000 2 200 0") == "OK"
     assert fpga.send_command("APPLY_PULSE 0 2874000 2 200 0") == "OK"
@@ -112,22 +112,29 @@ def test_xy8():
 
 
 def test_simulated_fpga_protocol():
-    # On-chip readout command set: DRIVE_EMITTER / READ_DETECTOR / APPLY_PULSE /
-    # READ_DETECTORS / CALIBRATE. No CAPTURE_FRAME / receive_image.
+    # On-chip parallel readout command set: DRIVE_EMITTER / SET_EMITTER /
+    # DRIVE_PATTERN / CLEAR_EMITTERS / READ_DETECTOR / APPLY_PULSE /
+    # READ_DETECTORS / CLEAR_DETECTORS / CALIBRATE. No CAPTURE_FRAME.
     fpga = SimulatedFPGA("NV", seed=1)
-    assert fpga.send_command("DRIVE_EMITTER 0 0 50") == "OK"
-    # with no resonant MW yet, a pumped site reads bright (high ADC code)
+    assert fpga.send_command("DRIVE_EMITTER 0 50") == "OK"
+    # with no resonant MW yet, a pumped site reads bright (high 16-bit code)
     code = int(fpga.send_command("READ_DETECTOR 0"))
-    assert 0 <= code <= 4095 and code > 100
-    assert fpga.send_command("APPLY_PULSE 0 2870000 2 200 0") == "OK"
-    # READ_DETECTORS streams 64 space-separated codes
+    assert 0 <= code <= 65535 and code > 1000
+    # parallel multi-emitter path: arm two channels, fire in parallel, clear
+    assert fpga.send_command("SET_EMITTER 10 4095") == "OK"
+    assert fpga.send_command("SET_EMITTER 20 4095") == "OK"
+    assert fpga.send_command("DRIVE_PATTERN 50") == "OK"
     stream = fpga.send_command("READ_DETECTORS")
     toks = stream.split()
     assert len(toks) == 64
     assert all(t.lstrip("-").isdigit() for t in toks)
+    # channels 10 and 20 are armed -> bright; channel 11 is not -> background
+    assert int(toks[10]) > int(toks[11])
+    assert fpga.send_command("CLEAR_EMITTERS") == "OK"
+    assert fpga.send_command("CLEAR_DETECTORS") == "OK"
     assert fpga.send_command("CALIBRATE") == "OK"
     # unknown / malformed -> ERR
-    assert fpga.send_command("FIRE_LASER 0 0 50") == "ERR"
+    assert fpga.send_command("FIRE_LASER 0 50") == "ERR"
     assert fpga.send_command("CAPTURE_FRAME") == "ERR"
 
 
@@ -137,39 +144,39 @@ def test_readout_odmr_dip():
     # resonant X-gate (phase ~= pi) flips the spin to dark (ms=+-1, low code),
     # and an off-resonance drive is rejected by the linewidth check (ERR).
     fpga = SimulatedFPGA("NV", seed=3)
-    assert fpga.send_command("DRIVE_EMITTER 5 5 50") == "OK"
+    assert fpga.send_command("DRIVE_EMITTER 45 50") == "OK"
     # Lock-in averaging: read the electrode several times and take the mean so
-    # the small ensemble ODMR dip (~5%, ~160 ADC counts) is resolved above the
-    # per-sample lock-in noise -- exactly what the 1 kHz lock-in does on the
-    # real chip. A single noisy sample would not robustly show the dip.
+    # the small ensemble ODMR dip (~5%, ~2560 16-bit counts) is resolved above
+    # the per-sample lock-in noise -- exactly what the 1 kHz lock-in does on
+    # the real chip. A single noisy sample would not robustly show the dip.
     bright = np.mean([int(fpga.send_command("READ_DETECTOR 45")) for _ in range(20)])
     # resonant X-gate at D_NV = 2.87 GHz (phase 3142 mrad ~= pi) -> spin flip
     assert fpga.send_command("APPLY_PULSE 45 2870000 2 200 3142") == "OK"
     dark = np.mean([int(fpga.send_command("READ_DETECTOR 45")) for _ in range(20)])
-    # the ODMR dip is the ~5% ensemble contrast (~160 counts); averaging leaves
-    # it well above the residual lock-in noise, so assert > 100 counts of dip.
-    assert bright > dark + 100
+    # the ODMR dip is the ~5% ensemble contrast (~2560 counts); averaging leaves
+    # it well above the residual lock-in noise, so assert > 1000 counts of dip.
+    assert bright > dark + 1000
     # off-resonance drive (4 GHz vs 2.87 GHz, far outside the ~5 MHz linewidth)
     # -> ERR, no flip applied
     assert fpga.send_command("APPLY_PULSE 45 4000000 2 200 3142") == "ERR"
 
 
 def test_calibration_detector_lut():
-    # The external CalibrationManager sweep drives each emitter pixel in turn,
-    # reads all 64 detector electrodes, and registers the modulated one. With
-    # single-pixel crossbar addressing this must recover the identity LUT
-    # (emitter pixel (r,c) -> detector electrode r*8+c), not a degenerate
-    # always-picks-zero mapping.
+    # The external CalibrationManager sweep drives each emitter channel in
+    # turn, reads all 64 detector electrodes in parallel, and registers the
+    # modulated one. With single-channel addressing this must recover the
+    # identity LUT (emitter channel i -> detector electrode i), not a
+    # degenerate always-picks-zero mapping.
     from qssc.backend import (EmitterController, DetectorInterface,
                               CalibrationManager)
     fpga = SimulatedFPGA("NV", seed=4)
     em = EmitterController(fpga)
     det = DetectorInterface(fpga)
-    cal = CalibrationManager(em, det, threshold=1000)
+    cal = CalibrationManager(em, det)
     mapping = cal.perform_calibration()
     assert len(mapping) == 64
-    for (r, c), electrode in mapping.items():
-        assert electrode == r * 8 + c  # 1:1 emitter-pixel -> detector-electrode
+    for channel, electrode in mapping.items():
+        assert electrode == channel  # 1:1 emitter-channel -> detector-electrode
     # the default identity LUT must agree with the swept one
     assert mapping == CalibrationManager.default_detector_lut()
 
@@ -446,19 +453,21 @@ def test_optical_readout_chain():
     assert o["filter"]["transmission"] == pytest.approx(0.92)
     # canonical on-chip design is waveguide-direct: no microlens stage at all
     assert "microlens" not in o
-    # detector + TIA + XADC
-    assert o["detector"]["adc_bits"] == 12
+    # detector + TIA + 4x AD7616 parallel 16-bit ADC (no MUX, no XADC)
+    assert o["detector"]["adc_bits"] == 16
+    assert "AD7616" in o["detector"]["adc"]
+    assert "mux" not in o["detector"]
     assert o["detector"]["responsivity_a_per_w"] > 0
     # readout figures anchor to the simulator constants
     r = o["readout"]
-    assert r["bright_code"] == 3200
-    assert r["dark_code"] == 3040
-    assert r["dip_counts"] == 160
-    assert r["readout_noise_counts"] == 40
+    assert r["bright_code"] == 51200
+    assert r["dark_code"] == 48640
+    assert r["dip_counts"] == 2560
+    assert r["readout_noise_counts"] == 640
     assert r["single_read_snr_sigma"] == pytest.approx(4.0)
     assert r["odmr_contrast"] == pytest.approx(0.05)
     assert r["photocurrent_bright_ua"] == pytest.approx(
-        (3200 / 4095) * 1.0 / 1e6 * 1e6, rel=1e-3)
+        (51200 / 65535) * 1.0 / 1e6 * 1e6, rel=1e-3)
     # end-to-end link budget reconciles with BRIGHT_CODE
     lb = o["link_budget"]
     assert 0 < lb["end_to_end_efficiency"] < 0.01
@@ -482,7 +491,7 @@ def test_optical_readout_is_temperature_dependent():
     assert rc["single_read_snr_sigma"] > rw["single_read_snr_sigma"]
     assert rc["single_read_snr_sigma"] > 4.0          # 77 K beats the 300 K 4sigma
     # bright level is anchored (detector saturation), only dark/dip move
-    assert rc["bright_code"] == rw["bright_code"] == 3200
+    assert rc["bright_code"] == rw["bright_code"] == 51200
     # SiC uses the NIR stack
     sic = QSSCBackend("SiC-VSi", sites=_quick_sites(), seed=0).optical_readout()
     assert sic["emitter"]["wavelength_nm"] >= 700
@@ -520,12 +529,12 @@ def test_readout_reflects_measured_bit():
     det = DetectorInterface(fpga)
     proc = QubitReadoutProcessor()
     lut = CalibrationManager.default_detector_lut()
-    # threshold must sit between bright (3200) and the ~5% dark dip (3040)
-    assert proc.threshold == 0.5 * (3200 + 3040)
+    # threshold must sit between bright (51200) and the ~5% dark dip (48640)
+    assert proc.threshold == 0.5 * (51200 + 48640)
     # measured bit 0 -> spin bright -> high code; measured bit 1 -> dark dip -> low code
-    em.drive(0, 0, 50); fpga.sim_states[0] = 0
+    em.drive(0, 50); fpga.sim_states[0] = 0
     code_bright = det.read(0)
-    em.drive(0, 0, 50); fpga.sim_states[0] = 1
+    em.drive(0, 50); fpga.sim_states[0] = 1
     code_dark = det.read(0)
     assert code_bright > code_dark, "bright spin must read higher than dark dip"
     import numpy as np

@@ -4,26 +4,32 @@
 This module is the room-temperature software twin of the physical chip.  It
 models the *on-chip* readout path the fabrication protocol actually describes:
 
-* an **8x8 electrically-pumped CQD ASE/LED emitter array** (green ~520-540 nm)
-  that optically pumps each qubit site,
-* an **N-electrode graphene/MoS2 photodetector array** (one electrode per site)
-  whose photocurrent the FPGA reads back through a **lock-in** (MW modulated at
-* ~1 kHz), and
+* **64 electrically-pumped CQD ASE/LED emitters** (green ~520-540 nm), each on
+  its own TLC5947 constant-current channel -- driven **in parallel** (multiple
+  emitters light simultaneously at independent 12-bit grayscale levels),
+* **64 graphene/MoS2 photodetector electrodes** (one per site), each with its
+  own TIA, digitised **in parallel** by 4x AD7616 16-bit simultaneous-sampling
+  ADCs -- no analog MUX, no serial scan, no XADC, and
 * the spin-defect Hamiltonian (ODMR with hyperfine structure) + the
   dynamical-decoupling toolbox.
 
 There is **no camera and no VCSEL/galvo microscopy rig** -- the chip reads out
-directly on-chip.  A software pulse-capture sweep (drive each emitter pixel,
+directly on-chip.  A software pulse-capture sweep (drive each emitter channel,
 sample every detector electrode, find the modulated one) builds the
-emitter-pixel -> qubit-site -> detector-electrode lookup table; that is the
+emitter-channel -> qubit-site -> detector-electrode lookup table; that is the
 calibration flow, not image-based defect detection.
+
+The wire protocol mirrors ``fpga/rtl/command_parser.v`` exactly so the *same*
+Python control code drives the simulator and the real Artix-7 board:
+``DRIVE_EMITTER <index> <ms>``, ``SET_EMITTER <index> <level>``,
+``DRIVE_PATTERN <ms>``, ``CLEAR_EMITTERS``, ``READ_DETECTOR <site>``,
+``READ_DETECTORS``, ``CLEAR_DETECTORS``, ``APPLY_PULSE ...``, ``CALIBRATE``.
 
 Everything is parametrised by a :class:`~qssc.defects.DefectProfile`.  The
 default profile is **NV-diamond** (the only defect family here that is
 compute-capable at 300 K).
 
-NumPy is the only hard requirement; the readout model is pure NumPy (the old
-OpenCV image-based path has been removed).
+NumPy is the only hard requirement; the readout model is pure NumPy.
 """
 from __future__ import annotations
 
@@ -41,29 +47,41 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # On-chip readout constants (CQD ASE emitter + graphene/MoS2 detector + lock-in)
 # ---------------------------------------------------------------------------
-ADC_BITS = 12
-ADC_MAX = (1 << ADC_BITS) - 1            # 4095
-# Each detector electrode sits under one emitter pixel and reads a *small
+# 64 parallel channels: 64 emitters (3x TLC5947) + 64 detectors (4x AD7616).
+# The die is a 128-pad part -- 64 emitter pads on the bottom edge, 64 detector
+# pads on the top edge -- addressed by a single linear index 0..63 (no 8x8
+# row/col crossbar; every channel is independent and simultaneous).
+N_SITES = 64
+# The AD7616 is a 16-bit bipolar +/-5V ADC. Detector samples are 16-bit
+# (0..65535), the digitised TIA output -- NOT 12-bit XADC codes. The 1 kHz
+# lock-in demodulation that turns these raw samples into a PL/ODMR signal is
+# done host-side (mod_sync is the reference); the FPGA delivers raw samples.
+ADC_BITS = 16
+ADC_MAX = (1 << ADC_BITS) - 1            # 65535
+# Each detector electrode sits under one emitter channel and reads a *small
 # ensemble* of defects (not a single isolated spin), so the on-resonance PL dip
 # is the ensemble ODMR contrast, not the large single-NV spin-readout contrast.
 # Real NV-ensemble ODMR at 300 K is 3-8%; 5% is the honest mid-range and matches
 # the CW spectrum model (simulate_odmr, contrast_depth=0.03, same order).
 ODMR_CONTRAST = 0.05                      # ensemble ODMR dip fraction at resonance
 ODMR_LINEWIDTH_HZ = 5.0e6                 # ODMR linewidth (~5 MHz; matches simulate_odmr)
-BRIGHT_CODE = 3200                        # pumped ensemble, spin ms=0 (bright) -> full PL
-DARK_CODE = 3040                          # pumped ensemble at resonance -> BRIGHT*(1-ODMR_CONTRAST)
-BG_CODE = 100                             # unpumped electrode -> detector background floor
+# Bright/dark/background are 16-bit AD7616 codes, scaled from the original
+# 12-bit XADC values by *16 (3200->51200, 3040->48640, 100->1600) so the
+# fractional saturation, ODMR dip fraction and lock-in SNR are preserved.
+BRIGHT_CODE = 51200                       # pumped ensemble, spin ms=0 (bright) -> full PL
+DARK_CODE = 48640                         # pumped ensemble at resonance -> BRIGHT*(1-ODMR_CONTRAST)
+BG_CODE = 1600                            # unpumped electrode -> detector background floor
 # Post-lock-in photocurrent noise (ADC counts). The 1 kHz lock-in averages many
-# MW-modulation cycles, suppressing broadband noise so the small 5% dip (~160
+# MW-modulation cycles, suppressing broadband noise so the small 5% dip (~2560
 # counts) is resolved at ~4 sigma in a single read. The per-qubit *quantum*
 # readout error (profile.readout_error, ~8% for NV) is the spin
 # initialisation/projection imperfection, injected separately in the Qiskit
 # noise model -- it is decoupled from this detector SNR, as on real hardware.
-READOUT_NOISE = 40                        # std dev of lock-in photocurrent noise (ADC counts)
+READOUT_NOISE = 640                       # std dev of lock-in photocurrent noise (16-bit counts)
 ASE_GAIN = 1.15                            # ASE concentrates the CQD emission into the waveguide
 LOCKIN_MOD_HZ = 1000.0                    # MW modulation frequency for the lock-in readout
-DETECT_THRESHOLD = 1000                   # lock-in amplitude above which a site counts as coupled
-SITE_FAB_YIELD = 0.9                      # fraction of pixels the fabrication step wires correctly
+DETECT_THRESHOLD = 16000                  # lock-in amplitude above which a site counts as coupled
+SITE_FAB_YIELD = 0.9                      # fraction of channels the fabrication step wires correctly
 
 
 # ---------------------------------------------------------------------------
@@ -74,12 +92,16 @@ class SimulatedFPGA:
     """In-process stand-in for the Artix-7 control board.
 
     Understands the same text commands as ``fpga/rtl/command_parser.v`` -- the
-    on-chip readout protocol (no camera):
+    parallel on-chip readout protocol (no camera, no analog MUX):
 
-    * ``DRIVE_EMITTER <row> <col> <duration_ms>``  -- drive a CQD emitter pixel
+    * ``DRIVE_EMITTER <index> <duration_ms>``  -- pump one CQD emitter at full
+    * ``SET_EMITTER <index> <level 0..4095>``  -- arm one emitter's grayscale
+    * ``DRIVE_PATTERN <duration_ms>``          -- fire ALL armed emitters in parallel
+    * ``CLEAR_EMITTERS``                       -- disarm all emitters (gs=0)
     * ``APPLY_PULSE <qubit> <freq_khz> <amp> <duration_ns> <phase>``  -- program the ADF4351
-    * ``READ_DETECTOR <site>``  -- read one graphene detector electrode's photocurrent code
-    * ``READ_DETECTORS``       -- stream all N detector electrodes' photocurrent codes
+    * ``READ_DETECTOR <site>``  -- read one detector's 16-bit AD7616 intensity sample
+    * ``READ_DETECTORS``       -- stream all 64 detectors' 16-bit samples in parallel
+    * ``CLEAR_DETECTORS``      -- no-op on the ADC (no counters), replies OK
     * ``CALIBRATE``            -- run the emitter->site->detector sweep, build the LUT
 
     The ``APPLY_PULSE`` fields are **decimal integers** matching the firmware
@@ -89,13 +111,21 @@ class SimulatedFPGA:
     hardware -- :class:`~qssc.backend.MicrowaveController` emits exactly this
     integer form.
 
+    Parallelism: ``SET_EMITTER`` arms per-channel 12-bit grayscale (the TLC5947
+    holds the level), and ``DRIVE_PATTERN`` fires every armed channel
+    *simultaneously* -- multiple emitters light at once at independent
+    intensities, exactly as the 3x TLC5947 constant-current chain does on the
+    real board. ``READ_DETECTORS`` returns all 64 AD7616 samples in one reply
+    (the 4 ADCs sample simultaneously). There is no 8x8 row/col crossbar and no
+    serial pixel-by-pixel scan.
+
     Readout physics: a pumped site in the bright ms=0 spin state (state 0)
     reports a high detector photocurrent; a resonant microwave pulse (X gate,
     phase ~= pi) flips it to the dark ms=+-1 state (state 1) and the
     photocurrent drops -- that dip *is* the ODMR signal the lock-in recovers.
     """
 
-    GRID = 8
+    N_SITES = N_SITES
 
     def __init__(self, profile: DefectProfile | str = "NV",
                  temperature_k: float = 300.0, noise: float = 0.1,
@@ -104,12 +134,15 @@ class SimulatedFPGA:
         self.temperature_k = temperature_k
         self.noise = noise
         self.rng = np.random.default_rng(seed)
-        self.active_emitters: set[Tuple[int, int]] = set()
+        # per-channel 12-bit grayscale (TLC5947 gs register); 0 = off. A channel
+        # "pumps" its coupled detector when gs > 0 (DRIVE_EMITTER sets full,
+        # SET_EMITTER arms an arbitrary level, DRIVE_PATTERN fires all armed).
+        self.emitter_gs: Dict[int, int] = {}
         self.sim_states: Dict[int, int] = {}
         self.sim_freq = self.profile.zero_field_splitting
         self.last_mw_freq_khz: Optional[int] = None
-        # emitter-pixel (row,col) -> detector electrode index, discovered by CALIBRATE
-        self.lut: Dict[Tuple[int, int], int] = {}
+        # emitter channel index -> detector electrode index, discovered by CALIBRATE
+        self.lut: Dict[int, int] = {}
         t1, t2 = coherence_at_temperature(self.profile, temperature_k)
         self.t1, self.t2 = t1, t2
 
@@ -119,16 +152,43 @@ class SimulatedFPGA:
         head = parts[0]
         try:
             if head == "DRIVE_EMITTER":
-                row, col = int(parts[1]), int(parts[2])
-                if not (0 <= row < self.GRID and 0 <= col < self.GRID):
+                # DRIVE_EMITTER <index> <duration_ms>: pump ONE emitter at full
+                # (gs=4095) for duration_ms. Matches the firmware emitter_array
+                # cmd_drive: only the addressed channel is lit during the pump
+                # window (every other channel is off), and the channel is cleared
+                # again when the window ends. The host reads the detector during
+                # that window, so model this as a single-channel pump that
+                # REPLACES the active set (not additive). For parallel multi-
+                # emitter firing use SET_EMITTER + DRIVE_PATTERN instead.
+                index = int(parts[1])
+                if not (0 <= index < self.N_SITES):
                     return "ERR"
-                # The 8x8 crossbar asserts ONE anode row + ONE cathode col at a
-                # time, so only the addressed pixel is lit -- the previous pixel
-                # turns off. Model that as single-pixel addressing (replace, not
-                # accumulate), matching real hardware and the CALIBRATE sweep.
-                self.active_emitters = {(row, col)}
+                if len(parts) > 2 and int(parts[2]) < 0:
+                    return "ERR"
+                self.emitter_gs = {index: 4095}
                 # optical pump polarises the NV spin into the bright ms=0 state (0)
-                self.sim_states[row * self.GRID + col] = 0
+                self.sim_states[index] = 0
+                return "OK"
+            if head == "SET_EMITTER":
+                # SET_EMITTER <index> <level 0..4095>: arm one channel's grayscale.
+                index = int(parts[1])
+                level = int(parts[2])
+                if not (0 <= index < self.N_SITES) or not (0 <= level <= 4095):
+                    return "ERR"
+                self.emitter_gs[index] = level
+                if level > 0:
+                    self.sim_states.setdefault(index, 0)
+                return "OK"
+            if head == "DRIVE_PATTERN":
+                # DRIVE_PATTERN <duration_ms>: fire every armed (gs>0) channel in
+                # parallel. The gs registers are already set; this just gates the
+                # pump on. Negative duration is invalid.
+                if len(parts) > 1 and int(parts[1]) < 0:
+                    return "ERR"
+                return "OK"
+            if head == "CLEAR_EMITTERS":
+                # Disarm all channels (gs=0) -- matches the TLC5947 all-zero load.
+                self.emitter_gs = {}
                 return "OK"
             if head == "APPLY_PULSE":
                 # Canonical wire format (matches command_parser.v and
@@ -147,12 +207,15 @@ class SimulatedFPGA:
                 return self._apply_pulse(qubit, freq_ghz, amp, dur, phase_rad)
             if head == "READ_DETECTOR":
                 site = int(parts[1])
-                if not (0 <= site < self.GRID * self.GRID):
+                if not (0 <= site < self.N_SITES):
                     return "ERR"
                 return str(self._photocurrent_code(site))
             if head == "READ_DETECTORS":
-                codes = [self._photocurrent_code(q) for q in range(self.GRID * self.GRID)]
+                codes = [self._photocurrent_code(q) for q in range(self.N_SITES)]
                 return " ".join(str(c) for c in codes)
+            if head == "CLEAR_DETECTORS":
+                # No-op on the ADC (no counters to zero) -- matches command_parser.v.
+                return "OK"
             if head == "CALIBRATE":
                 self._calibrate()
                 return "OK"
@@ -187,9 +250,8 @@ class SimulatedFPGA:
         return "OK"
 
     def _photocurrent_code(self, site: int) -> int:
-        """12-bit ADC code for one detector electrode's lock-in photocurrent."""
-        r, c = divmod(site, self.GRID)
-        if (r, c) not in self.active_emitters:
+        """16-bit AD7616 sample of one detector's lock-in photocurrent."""
+        if self.emitter_gs.get(site, 0) <= 0:
             level = BG_CODE                       # no pump -> no PL, background floor
         else:
             state = self.sim_states.get(site, 0)
@@ -199,23 +261,22 @@ class SimulatedFPGA:
         return int(min(max(code, 0), ADC_MAX))
 
     def _calibrate(self) -> None:
-        """Emitter->detector sweep: drive each pixel, read all electrodes, pick
-        the modulated one. On this 1:1-laid-out sim the mapping is the identity,
-        but the sweep is the *method* by which the software discovers it without
-        an alignment jig (protocol §5.6)."""
+        """Emitter->detector sweep: drive each channel, read all electrodes,
+        pick the modulated one. On this 1:1-laid-out sim the mapping is the
+        identity, but the sweep is the *method* by which the software discovers
+        it without an alignment jig (protocol §5.6)."""
         self.lut = {}
-        saved_emitters = set(self.active_emitters)
+        saved_gs = dict(self.emitter_gs)
         try:
-            for r in range(self.GRID):
-                for c in range(self.GRID):
-                    self.active_emitters = {(r, c)}
-                    self.sim_states[r * self.GRID + c] = 0
-                    codes = [self._photocurrent_code(q) for q in range(self.GRID * self.GRID)]
-                    best = int(np.argmax(codes))
-                    if codes[best] > DETECT_THRESHOLD:
-                        self.lut[(r, c)] = best
+            for index in range(self.N_SITES):
+                self.emitter_gs = {index: 4095}
+                self.sim_states[index] = 0
+                codes = [self._photocurrent_code(q) for q in range(self.N_SITES)]
+                best = int(np.argmax(codes))
+                if codes[best] > DETECT_THRESHOLD:
+                    self.lut[index] = best
         finally:
-            self.active_emitters = saved_emitters
+            self.emitter_gs = saved_gs
 
     def close(self):  # pragma: no cover
         pass
@@ -229,34 +290,35 @@ def simulate_cqd_pulse(intensity: float = 1.0, duration: float = 1e-6,
                       ase_gain: float = ASE_GAIN, rng: Optional[np.random.Generator] = None) -> dict:
     """Return a noisy CQD emitter pump record (intensity, duration, ADC value).
 
-    Models an electrically-pumped CQD ASE/LED pixel: even a green LED-level pump
+    Models an electrically-pumped CQD ASE/LED channel: even a green LED-level pump
     polarises the NV spin, and the ``ase_gain`` factor represents the
     amplified-spontaneous-emission edge coupling that concentrates the emission
     spectrally/into the waveguide (the protocol is honest that this is ASE, not
-    a laser).
+    a laser). ``adc`` is a 16-bit AD7616 code (0..65535).
     """
     rng = rng or np.random.default_rng()
     inten = float(np.clip(rng.normal(intensity, 0.05 * intensity), 0, 2)) * ase_gain
     dur = float(max(duration + rng.normal(0, 0.1e-6), 1e-9))
-    return {"intensity": inten, "duration_s": dur, "adc": int(min(inten * 4095, ADC_MAX)),
+    return {"intensity": inten, "duration_s": dur, "adc": int(min(inten * ADC_MAX / 2.0, ADC_MAX)),
             "ase_gain": ase_gain}
 
 
 def make_detector_response(active_emitters: set, profile: DefectProfile | str = "NV",
-                           mw_freq_khz: Optional[int] = None, grid: int = 8,
+                           mw_freq_khz: Optional[int] = None, n_sites: int = N_SITES,
                            rng: Optional[np.random.Generator] = None) -> np.ndarray:
-    """Per-electrode graphene/MoS2 detector photocurrent (12-bit ADC codes).
+    """Per-electrode graphene/MoS2 detector photocurrent (16-bit AD7616 codes).
 
-    Models the on-chip lock-in readout: an electrode under a pumped emitter
+    Models the on-chip parallel readout: an electrode whose emitter channel is
+    armed (in ``active_emitters``, a set of integer channel indices 0..63)
     reports high photocurrent when the defect spin is in the bright ms=0 state
     (state 0) and a reduced photocurrent (the ODMR dip) when a resonant
     microwave drive (``mw_freq_khz`` within the linewidth of D) flips it to the
     dark ms=+-1 state. Electrodes with no active emitter report only the
-    detector background floor. Returns an ``int32`` array of ``grid**2`` codes.
+    detector background floor. Returns an ``int32`` array of ``n_sites`` codes.
     """
     prof = get_profile(profile) if isinstance(profile, str) else profile
     rng = rng or np.random.default_rng()
-    n = grid * grid
+    n = n_sites
     on_resonance = False
     if mw_freq_khz is not None:
         # on-resonance when the MW drive sits within one ODMR linewidth of D
@@ -264,8 +326,7 @@ def make_detector_response(active_emitters: set, profile: DefectProfile | str = 
         on_resonance = abs(mw_freq_khz * 1e3 - prof.zero_field_splitting) < prof.odmr_linewidth_hz
     codes = np.empty(n, dtype=np.int32)
     for q in range(n):
-        r, c = divmod(q, grid)
-        if (r, c) not in active_emitters:
+        if q not in active_emitters:
             level = BG_CODE
         else:
             level = BRIGHT_CODE if not on_resonance else DARK_CODE
@@ -341,7 +402,7 @@ def auto_align(profile: DefectProfile | str = "NV",
         r, c = divmod(idx, grid)
         coupled = rng.random() < p_usable
         if coupled:
-            code = int(make_detector_response({(r, c)}, prof, rng=rng, grid=grid)[idx])
+            code = int(make_detector_response({idx}, prof, rng=rng, n_sites=n_needed)[idx])
             # readout error anchored to the profile nominal value, mildly modulated
             # by site brightness (brighter emitters read out a little more
             # reliably). Bounded 0.7x..1.3x nominal so a dim site can never

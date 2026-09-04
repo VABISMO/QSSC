@@ -8,9 +8,10 @@
 # 3.3 V (LVCMOS33). clk_100mhz is on a clock-capable (MRCC) pin.
 #
 # Parallel architecture: 64 emitters driven by 3x TLC5947 constant-current
-# LED drivers over a 4-wire SPI (em_sclk/sin/xlat/blank), and 64 photon-
-# counting detector channels read in parallel (det_in[63:0], comparator ->
-# LVCMOS -> 64 fabric counters). No analog MUX, no row/col matrix, no XADC.
+# LED drivers over a 4-wire SPI (em_sclk/sin/xlat/blank), and 64 photo-
+# luminescence-intensity channels read in parallel via 4x AD7616 16-bit
+# ADCs over a 9-wire SPI (adc_convst/sclk/miso/busy/cs[3:0]/resetn).
+# No analog MUX, no row/col matrix, no XADC, no photon counting.
 # =============================================================================
 
 # ---- Global options ---------------------------------------------------------
@@ -38,74 +39,29 @@ set_property IOSTANDARD LVCMOS33 [get_ports tx]
 set_property SLEW SLOW  [get_ports tx]
 set_property DRIVE 8    [get_ports tx]
 
-# ---- 64 detector photon-count inputs (comparator -> FPGA LVCMOS33) ----------
-# det_in[i] = digitised photocurrent of detector i (DET_DIG{i}); each channel
-# has its own TIA + Schmitt comparator, counted by a 64-wide counter fabric.
-set_property PACKAGE_PIN A18  [get_ports {det_in[0]}]
-set_property PACKAGE_PIN B18  [get_ports {det_in[1]}]
-set_property PACKAGE_PIN D18  [get_ports {det_in[2]}]
-set_property PACKAGE_PIN E18  [get_ports {det_in[3]}]
-set_property PACKAGE_PIN F18  [get_ports {det_in[4]}]
-set_property PACKAGE_PIN G18  [get_ports {det_in[5]}]
-set_property PACKAGE_PIN J18  [get_ports {det_in[6]}]
-set_property PACKAGE_PIN L18  [get_ports {det_in[7]}]
-set_property PACKAGE_PIN M18  [get_ports {det_in[8]}]
-set_property PACKAGE_PIN P18  [get_ports {det_in[9]}]
-set_property PACKAGE_PIN R18  [get_ports {det_in[10]}]
-set_property PACKAGE_PIN T18  [get_ports {det_in[11]}]
-set_property PACKAGE_PIN U18  [get_ports {det_in[12]}]
-set_property PACKAGE_PIN B17  [get_ports {det_in[13]}]
-set_property PACKAGE_PIN C17  [get_ports {det_in[14]}]
-set_property PACKAGE_PIN D17  [get_ports {det_in[15]}]
-set_property PACKAGE_PIN E17  [get_ports {det_in[16]}]
-set_property PACKAGE_PIN G17  [get_ports {det_in[17]}]
-set_property PACKAGE_PIN H17  [get_ports {det_in[18]}]
-set_property PACKAGE_PIN J17  [get_ports {det_in[19]}]
-set_property PACKAGE_PIN M17  [get_ports {det_in[20]}]
-set_property PACKAGE_PIN N17  [get_ports {det_in[21]}]
-set_property PACKAGE_PIN P17  [get_ports {det_in[22]}]
-set_property PACKAGE_PIN R17  [get_ports {det_in[23]}]
-set_property PACKAGE_PIN U17  [get_ports {det_in[24]}]
-set_property PACKAGE_PIN V17  [get_ports {det_in[25]}]
-set_property PACKAGE_PIN A16  [get_ports {det_in[26]}]
-set_property PACKAGE_PIN B16  [get_ports {det_in[27]}]
-set_property PACKAGE_PIN C16  [get_ports {det_in[28]}]
-set_property PACKAGE_PIN E16  [get_ports {det_in[29]}]
-set_property PACKAGE_PIN F16  [get_ports {det_in[30]}]
-set_property PACKAGE_PIN G16  [get_ports {det_in[31]}]
-set_property PACKAGE_PIN H16  [get_ports {det_in[32]}]
-set_property PACKAGE_PIN K16  [get_ports {det_in[33]}]
-set_property PACKAGE_PIN L16  [get_ports {det_in[34]}]
-set_property PACKAGE_PIN M16  [get_ports {det_in[35]}]
-set_property PACKAGE_PIN N16  [get_ports {det_in[36]}]
-set_property PACKAGE_PIN R16  [get_ports {det_in[37]}]
-set_property PACKAGE_PIN T16  [get_ports {det_in[38]}]
-set_property PACKAGE_PIN U16  [get_ports {det_in[39]}]
-set_property PACKAGE_PIN V16  [get_ports {det_in[40]}]
-set_property PACKAGE_PIN A15  [get_ports {det_in[41]}]
-set_property PACKAGE_PIN C15  [get_ports {det_in[42]}]
-set_property PACKAGE_PIN D15  [get_ports {det_in[43]}]
-set_property PACKAGE_PIN E15  [get_ports {det_in[44]}]
-set_property PACKAGE_PIN F15  [get_ports {det_in[45]}]
-set_property PACKAGE_PIN H15  [get_ports {det_in[46]}]
-set_property PACKAGE_PIN J15  [get_ports {det_in[47]}]
-set_property PACKAGE_PIN K15  [get_ports {det_in[48]}]
-set_property PACKAGE_PIN L15  [get_ports {det_in[49]}]
-set_property PACKAGE_PIN N15  [get_ports {det_in[50]}]
-set_property PACKAGE_PIN P15  [get_ports {det_in[51]}]
-set_property PACKAGE_PIN R15  [get_ports {det_in[52]}]
-set_property PACKAGE_PIN T15  [get_ports {det_in[53]}]
-set_property PACKAGE_PIN V15  [get_ports {det_in[54]}]
-set_property PACKAGE_PIN A14  [get_ports {det_in[55]}]
-set_property PACKAGE_PIN B14  [get_ports {det_in[56]}]
-set_property PACKAGE_PIN C14  [get_ports {det_in[57]}]
-set_property PACKAGE_PIN D14  [get_ports {det_in[58]}]
-set_property PACKAGE_PIN F14  [get_ports {det_in[59]}]
-set_property PACKAGE_PIN G14  [get_ports {det_in[60]}]
-set_property PACKAGE_PIN H14  [get_ports {det_in[61]}]
-set_property PACKAGE_PIN J14  [get_ports {det_in[62]}]
-set_property PACKAGE_PIN N14  [get_ports {det_in[63]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {det_in[*]}]
+# ---- 4x AD7616 parallel ADC readout (FPGA <- 64 TIA outputs) ---------------
+# 9-wire SPI bus: adc_convst (shared conversion start), adc_sclk (shared
+# clock), adc_miso (shared SDOA, per-chip CS selects the driver), adc_busy
+# (chip0 only -- push-pull, all 4 finish a simultaneous CONVST together),
+# adc_cs[3:0] (per-chip select), adc_resetn (shared reset, active-low). The
+# +/-5V range is HW-pin-strapped on each AD7616 (no MOSI / config writes).
+set_property PACKAGE_PIN A18  [get_ports adc_convst]
+set_property PACKAGE_PIN B18  [get_ports adc_sclk]
+set_property PACKAGE_PIN D18  [get_ports adc_miso]
+set_property PACKAGE_PIN E18  [get_ports adc_busy]
+set_property PACKAGE_PIN M18  [get_ports adc_resetn]
+set_property PACKAGE_PIN F18  [get_ports {adc_cs[0]}]
+set_property PACKAGE_PIN G18  [get_ports {adc_cs[1]}]
+set_property PACKAGE_PIN J18  [get_ports {adc_cs[2]}]
+set_property PACKAGE_PIN L18  [get_ports {adc_cs[3]}]
+set_property IOSTANDARD LVCMOS33 [get_ports adc_convst]
+set_property IOSTANDARD LVCMOS33 [get_ports adc_sclk]
+set_property IOSTANDARD LVCMOS33 [get_ports adc_miso]
+set_property IOSTANDARD LVCMOS33 [get_ports adc_busy]
+set_property IOSTANDARD LVCMOS33 [get_ports adc_resetn]
+set_property IOSTANDARD LVCMOS33 [get_ports {adc_cs[*]}]
+set_property SLEW FAST [get_ports adc_sclk]
+set_property DRIVE 8   [get_ports adc_sclk]
 
 # ---- TLC5947 constant-current LED driver (FPGA -> 3x TLC5947, 64 emitters) --
 # 4-wire interface: em_sclk (shift clock), em_sin (data in), em_xlat (latch),
@@ -151,13 +107,6 @@ set_property IOSTANDARD LVCMOS33 [get_ports {spi_pins[3]}]
 set_property SLEW FAST [get_ports {spi_pins[1]}]
 set_property DRIVE 8   [get_ports {spi_pins[1]}]
 
-# ---- I2C to MCP4725 comparator-threshold DAC --------------------------------
-# Open-drain SDA/SCL with 4.7k pull-ups to +3V3 on the board.
-set_property PACKAGE_PIN M1   [get_ports i2c_sda]
-set_property IOSTANDARD LVCMOS33 [get_ports i2c_sda]
-set_property PACKAGE_PIN N1   [get_ports i2c_scl]
-set_property IOSTANDARD LVCMOS33 [get_ports i2c_scl]
-
 # ---- 25 MHz reference clock to ADF4351 REF_IN -------------------------------
 set_property PACKAGE_PIN B8   [get_ports refclk_out]
 set_property IOSTANDARD LVCMOS33 [get_ports refclk_out]
@@ -173,7 +122,7 @@ set_property DRIVE 8   [get_ports refclk_out]
 # drives these pins automatically at config time -- no per-port pin assignments.
 
 # ---- Timing: clock-domain crossings (constrained for analysis) --------------
-# The 1 kHz mod_sync is derived from sys_clk (no CDC). The 64 det_in channels
-# are synchronous to sys_clk (comparator outputs registered in the fabric).
+# The 1 kHz mod_sync is derived from sys_clk (no CDC). The AD7616 SPI bus
+# (adc_*) is a synchronous master interface clocked by adc_sclk from sys_clk.
 # Asynchronous reset is not timed.
 set_false_path -through [get_ports reset]
