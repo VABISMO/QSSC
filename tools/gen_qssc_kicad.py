@@ -344,12 +344,22 @@ def fpga_pin_list():
 # the contact pads carry NO paste).  Each face is its own footprint so the two
 # boards are independent: QSSC_Chip_EM on the main F.Cu, QSSC_Chip_DET on the
 # head B.Cu.  Symbol pin NUMBER == footprint pad name so fp_net_pads nets every
-# pad by name.  20x20 mm die, 0.30 mm perimeter pad pitch (ACF handles down to
-# ~0.1 mm); the 64 pads escape outward as dog-bone vias (route_signals._chip_fanout,
-# pad-layer-derived: F.Cu pads -> F.Cu stub + B.Cu via; B.Cu pads -> B.Cu stub +
-# F.Cu via).
-_PITCH = 0.30
-_X0 = -_PITCH * 63 / 2                       # 64 pads centered -> -9.45..+9.45
+# pad by name.  The optical die carries an 8x8 GRID of electrodes = 64 pads
+# evenly across the 20x20 mm (2x2 cm) face, ~2.5 mm pitch (user spec).  Each pad
+# escapes outward as a dog-bone via (route_signals._chip_fanout, pad-layer-
+# derived: F.Cu pads -> F.Cu stub + B.Cu via; B.Cu pads -> B.Cu stub + F.Cu via).
+GRID_N = 8                                    # 8x8 electrodes = 64 per face
+GRID_PITCH = 2.5                              # mm; 8 pads -> 7 intervals = 17.5 mm span
+GRID_HALF = GRID_PITCH * (GRID_N - 1) / 2     # 8.75 mm -> grid spans -8.75..+8.75
+
+def _chip_grid_xy(i):
+    """(x, y) in mm of electrode #i (0..63) on the 8x8 grid, row-major
+    (i = row*8 + col, row/col in 0..7), centered on the 20x20 mm die.
+    EM0/DET0 -> top-left (-8.75,-8.75); EM7 -> top-right (+8.75,-8.75);
+    EM63 -> bottom-right (+8.75,+8.75)."""
+    row, col = divmod(i, GRID_N)
+    return (round(-GRID_HALF + col * GRID_PITCH, 3),
+            round(-GRID_HALF + row * GRID_PITCH, 3))
 
 
 def chip_pin_list_em():
@@ -438,39 +448,40 @@ def _chip_fp_body(lib_id, value, descr, pads, layer="F.Cu"):
 
 def chip_footprint_em():
     """Footprint for the die BOTTOM (emitter) face on the MAIN board F.Cu: 64 EM
-    cathode pads on the bottom edge (y=+10) + EM_ANODE on the LEFT edge.  ACF
-    direct-contact pads (F.Cu + F.Mask, NO F.Paste -- the die is clamped
-    face-down, not soldered).  EM_ANODE is on the left edge (not the bottom EM
-    row) so its fanout via clears the 0.30 mm-pitch EM dog-bone via field."""
-    def pad(name, x, y, w=0.15, h=0.30):
+    cathode pads on an 8x8 grid across the 20x20 mm face (~2.5 mm pitch) +
+    EM_ANODE common-anode pad on the LEFT edge.  ACF direct-contact pads
+    (F.Cu + F.Mask, NO F.Paste -- the die is clamped face-down, not soldered).
+    EM_ANODE is on the left edge (clear of the 8x8 grid, whose leftmost column
+    is at x=-8.75) so its fanout via does not collide with the grid dog-bones."""
+    def pad(name, x, y, w=1.2, h=1.2):
         return L(A("pad"), S(name), A("smd"), A("rect"),
                  L(A("at"), A(round(x, 3)), A(round(y, 3))),
                  L(A("size"), A(w), A(h)),
                  L(A("layers"), S("F.Cu"), S("F.Mask")))
-    pads = [pad(f"EM{i}", _X0 + i * _PITCH, 10.0) for i in range(64)]
+    pads = [pad(f"EM{i}", *_chip_grid_xy(i)) for i in range(64)]
     pads.append(L(A("pad"), S("EM_ANODE"), A("smd"), A("rect"),
-                  L(A("at"), A(-10.0), A(0)),
-                  L(A("size"), A(0.30), A(1.0)),
+                  L(A("at"), A(-9.9), A(0)),
+                  L(A("size"), A(0.5), A(1.5)),
                   L(A("layers"), S("F.Cu"), S("F.Mask"))))
     return _chip_fp_body("qssc:QSSC_Chip_EM", "QSSC_Chip_EM",
-                         "QSSC die BOTTOM face: 64 CQD emitter cathodes + common anode; 20x20 mm ACF contact pads (0.30 mm pitch) on F.Cu",
+                         "QSSC die BOTTOM face: 64 CQD emitter cathodes on an 8x8 grid + common anode; 20x20 mm ACF contact pads (~2.5 mm pitch) on F.Cu",
                          pads, "F.Cu")
 
 
 def chip_footprint_det():
     """Footprint for the die TOP (detector) face on the DETECTOR HEAD B.Cu: 64
-    DET pads on the top edge (y=-10).  ACF direct-contact pads (B.Cu + B.Mask,
-    NO B.Paste -- the head is clamped face-down onto the die, not soldered).
-    Pads on B.Cu so the head's bottom face contacts the die's top face when the
-    two boards are stacked."""
-    def pad(name, x, y):
+    DET pads on an 8x8 grid across the 20x20 mm face (~2.5 mm pitch).  ACF
+    direct-contact pads (B.Cu + B.Mask, NO B.Paste -- the head is clamped
+    face-down onto the die, not soldered).  Pads on B.Cu so the head's bottom
+    face contacts the die's top face when the two boards are stacked."""
+    def pad(name, x, y, w=1.2, h=1.2):
         return L(A("pad"), S(name), A("smd"), A("rect"),
                  L(A("at"), A(round(x, 3)), A(round(y, 3))),
-                 L(A("size"), A(0.15), A(0.30)),
+                 L(A("size"), A(w), A(h)),
                  L(A("layers"), S("B.Cu"), S("B.Mask")))
-    pads = [pad(f"DET{i}", _X0 + i * _PITCH, -10.0) for i in range(64)]
+    pads = [pad(f"DET{i}", *_chip_grid_xy(i)) for i in range(64)]
     return _chip_fp_body("qssc:QSSC_Chip_DET", "QSSC_Chip_DET",
-                         "QSSC die TOP face: 64 graphene detector electrodes; 20x20 mm ACF contact pads on B.Cu (0.30 mm pitch)",
+                         "QSSC die TOP face: 64 graphene detector electrodes on an 8x8 grid; 20x20 mm ACF contact pads on B.Cu (~2.5 mm pitch)",
                          pads, "B.Cu")
 
 
@@ -506,21 +517,21 @@ SOCKET_MNT_POS = [(-SOCKET_MNT, -SOCKET_MNT), (+SOCKET_MNT, -SOCKET_MNT),
 def socket_footprint():
     """Ironwood SBT open-top spring-pin socket footprint for the die EMITTER
     (bottom) face on the MAIN board F.Cu.  65 solder pads (64 EM cathodes on the
-    bottom edge y=+10 + EM_ANODE on the LEFT edge) at the SAME 0.30 mm perimeter
-    positions as QSSC_Chip_EM (the SBT spring pins transfer 1:1 die-pad -> PCB
-    pad), but on F.Cu + F.Paste + F.Mask (soldered socket, not ACF contact).
-    ~25x25 mm body outline + 4 NPTH corner mount holes.  Pad NAMES == QSSC_Chip_EM
-    so chip_net_map_em() nets every pad identically and route_signals._chip_fanout
-    dog-bones them with the SAME escape geometry as the ACF footprint."""
-    def pad(name, x, y, w=0.15, h=0.30):
+    8x8 grid across the 20x20 mm face + EM_ANODE on the LEFT edge) at the SAME
+    ~2.5 mm grid positions as QSSC_Chip_EM (the SBT spring pins transfer 1:1
+    die-pad -> PCB pad), but on F.Cu + F.Paste + F.Mask (soldered socket, not
+    ACF contact).  ~25x25 mm body outline + 4 NPTH corner mount holes.  Pad
+    NAMES == QSSC_Chip_EM so chip_net_map_em() nets every pad identically and
+    route_signals._chip_fanout dog-bones them with the SAME escape geometry."""
+    def pad(name, x, y, w=1.2, h=1.2):
         return L(A("pad"), S(name), A("smd"), A("rect"),
                  L(A("at"), A(round(x, 3)), A(round(y, 3))),
                  L(A("size"), A(w), A(h)),
                  L(A("layers"), S("F.Cu"), S("F.Paste"), S("F.Mask")))
-    pads = [pad(f"EM{i}", _X0 + i * _PITCH, 10.0) for i in range(64)]
+    pads = [pad(f"EM{i}", *_chip_grid_xy(i)) for i in range(64)]
     pads.append(L(A("pad"), S("EM_ANODE"), A("smd"), A("rect"),
-                  L(A("at"), A(-10.0), A(0)),
-                  L(A("size"), A(0.30), A(1.0)),
+                  L(A("at"), A(-9.9), A(0)),
+                  L(A("size"), A(0.5), A(1.5)),
                   L(A("layers"), S("F.Cu"), S("F.Paste"), S("F.Mask"))))
     # 4 NPTH mount holes (solder-less hardware mount; no net, no symbol pin).
     for mx, my in SOCKET_MNT_POS:
@@ -535,7 +546,7 @@ def socket_footprint():
              L(A("version"), A(20240108)),
              L(A("generator"), S("gen_qssc_kicad")),
              L(A("generator_version"), S("8.0")),
-             L(A("descr"), S("Ironwood SBT open-top spring-pin socket for the 20x20 mm / 0.30 mm-pitch QSSC die emitter face; 64 EM cathode + EM_ANODE solder pads on F.Cu; 4 NPTH mount holes (custom part -- finalize hole drill/positions from the Ironwood quote drawing)")),
+             L(A("descr"), S("Ironwood SBT open-top spring-pin socket for the 20x20 mm / 2.5 mm-pitch (8x8 grid) QSSC die emitter face; 64 EM cathode + EM_ANODE solder pads on F.Cu; 4 NPTH mount holes (custom part -- finalize hole drill/positions from the Ironwood quote drawing)")),
              L(A("attr"), A("smd")),
              L(A("property"), S("Reference"), S("U"),
                L(A("at"), A(0), A(-cy), A(0)),
