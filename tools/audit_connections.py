@@ -63,7 +63,6 @@ def audit_board(name: str, path: Path) -> int:
     caps = {}  # net -> count of caps on that net
     for fp in fps:
         ref = fp.GetReference()
-        val = fp.GetValue()
         lib = fp.GetFPID().GetLibItemName()
         if "(no foot" in str(lib) or lib == "" or "no_footprint" in str(lib):
             no_fp.append(ref)
