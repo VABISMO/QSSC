@@ -3,21 +3,24 @@
 ball map (.tmpwork/fpga_csg324_map.json, built by gen_fpga_ballmap_csg324.py).
 
 Parallel architecture (single merged board): the FPGA drives 64 individual
-emitters and reads 64 individual photon-counting detector channels in
-parallel -- no analog MUX, no 8x8 row/col matrix, no XADC.  The RTL top-level
-ports (fpga/rtl/top_level.v, after the Phase 3 refactor) are:
+emitters (3x TLC5947 over 4-wire SPI) and reads 64 photoluminescence-intensity
+channels in parallel via 4x AD7616 16-bit ADCs over a 9-wire SPI bus -- no
+analog MUX, no 8x8 row/col matrix, no XADC, no photon counting.  The RTL
+top-level ports (fpga/rtl/top_level.v) are:
 
     clk_100mhz, reset, rx, tx,
-    det_in[63:0]        # 64 comparator outputs -> FPGA LVCMOS33 inputs (DET_DIG)
+    adc_convst, adc_sclk, adc_miso, adc_busy, adc_resetn, adc_cs[3:0]
+                        # 4x AD7616 parallel ADC (64 TIA outputs digitised)
     em_sclk, em_sin, em_xlat, em_blank   # 4-wire TLC5947 LED driver (72-ch chain)
-    mod_sync, mw_gate, spi_pins[3:0], refclk_out,
-    i2c_sda, i2c_scl    # MCP4725 threshold DAC
+    mod_sync, mw_gate, spi_pins[3:0], refclk_out
 
 This maps the JSON signal names (SPI_LE/SPI_CLK/SPI_DATA/ADF_MUXOUT,
-DET_DIG*/em_*, I2C_SDA/I2C_SCL) to the RTL port convention and assigns
-every port to the datasheet-correct CSG324 ball.  All VCCO banks run at
-3.3 V -> LVCMOS33 everywhere.  clk_100mhz lands on an MRCC (clock-capable)
-pin of the CSG324 (see the ballmap).
+adc_*/em_*) to the RTL port convention and assigns every port to the
+datasheet-correct CSG324 ball.  All VCCO banks run at 3.3 V -> LVCMOS33
+everywhere.  clk_100mhz lands on an MRCC (clock-capable) pin of the CSG324
+(see the ballmap).  The MCP4725 I2C threshold DAC is GONE (the comparator
+chain it served was removed by the ADC pivot; the AD7616 range is HW-pin-
+strapped to +/-5 V, so no config-register writes either).
 """
 from __future__ import annotations
 import json
@@ -27,8 +30,8 @@ ROOT = Path(__file__).resolve().parent.parent
 MAP = ROOT / ".tmpwork" / "fpga_csg324_map.json"
 OUT = ROOT / "fpga" / "constraints.xdc"
 
-# JSON control-signal name -> RTL port expression (the 64-bit buses are
-# emitted separately below from the DET_DIG*/EM_DRV* signal entries).
+# JSON control-signal name -> RTL port expression (the adc_cs bus is emitted
+# separately below from the adc_cs* signal entries).
 PORT = {
     "clk_100mhz": "clk_100mhz",
     "reset": "reset",
@@ -41,8 +44,6 @@ PORT = {
     "SPI_CLK": "{spi_pins[1]}",
     "SPI_DATA": "{spi_pins[2]}",
     "ADF_MUXOUT": "{spi_pins[3]}",
-    "I2C_SDA": "i2c_sda",
-    "I2C_SCL": "i2c_scl",
 }
 
 
@@ -66,9 +67,10 @@ def emit() -> str:
     L.append("# 3.3 V (LVCMOS33). clk_100mhz is on a clock-capable (MRCC) pin.")
     L.append("#")
     L.append("# Parallel architecture: 64 emitters driven by 3x TLC5947 constant-current")
-    L.append("# LED drivers over a 4-wire SPI (em_sclk/sin/xlat/blank), and 64 photon-")
-    L.append("# counting detector channels read in parallel (det_in[63:0], comparator ->")
-    L.append("# LVCMOS -> 64 fabric counters). No analog MUX, no row/col matrix, no XADC.")
+    L.append("# LED drivers over a 4-wire SPI (em_sclk/sin/xlat/blank), and 64 photo-")
+    L.append("# luminescence-intensity channels read in parallel via 4x AD7616 16-bit")
+    L.append("# ADCs over a 9-wire SPI (adc_convst/sclk/miso/busy/cs[3:0]/resetn).")
+    L.append("# No analog MUX, no row/col matrix, no XADC, no photon counting.")
     L.append("# =============================================================================")
     L.append("")
 
@@ -105,13 +107,25 @@ def emit() -> str:
     L.append("set_property DRIVE 8    [get_ports tx]")
     L.append("")
 
-    # ---- detector inputs (64 parallel photon-count channels) ----
-    L.append("# ---- 64 detector photon-count inputs (comparator -> FPGA LVCMOS33) ----------")
-    L.append("# det_in[i] = digitised photocurrent of detector i (DET_DIG{i}); each channel")
-    L.append("# has its own TIA + Schmitt comparator, counted by a 64-wide counter fabric.")
-    for i in range(64):
-        L.append(f"set_property PACKAGE_PIN {sig[f'DET_DIG{i}']}  [get_ports {{det_in[{i}]}}]")
-    L.append("set_property IOSTANDARD LVCMOS33 [get_ports {det_in[*]}]")
+    # ---- detector readout: 4x AD7616 parallel ADC over a 9-wire SPI bus ----
+    L.append("# ---- 4x AD7616 parallel ADC readout (FPGA <- 64 TIA outputs) ---------------")
+    L.append("# 9-wire SPI bus: adc_convst (shared conversion start), adc_sclk (shared")
+    L.append("# clock), adc_miso (shared SDOA, per-chip CS selects the driver), adc_busy")
+    L.append("# (chip0 only -- push-pull, all 4 finish a simultaneous CONVST together),")
+    L.append("# adc_cs[3:0] (per-chip select), adc_resetn (shared reset, active-low). The")
+    L.append("# +/-5V range is HW-pin-strapped on each AD7616 (no MOSI / config writes).")
+    L.append(f"set_property PACKAGE_PIN {ball('adc_convst')}  [get_ports adc_convst]")
+    L.append(f"set_property PACKAGE_PIN {ball('adc_sclk')}  [get_ports adc_sclk]")
+    L.append(f"set_property PACKAGE_PIN {ball('adc_miso')}  [get_ports adc_miso]")
+    L.append(f"set_property PACKAGE_PIN {ball('adc_busy')}  [get_ports adc_busy]")
+    L.append(f"set_property PACKAGE_PIN {ball('adc_resetn')}  [get_ports adc_resetn]")
+    for j in range(4):
+        L.append(f"set_property PACKAGE_PIN {sig[f'adc_cs{j}']}  [get_ports {{adc_cs[{j}]}}]")
+    for p in ("adc_convst", "adc_sclk", "adc_miso", "adc_busy", "adc_resetn"):
+        L.append(f"set_property IOSTANDARD LVCMOS33 [get_ports {p}]")
+    L.append("set_property IOSTANDARD LVCMOS33 [get_ports {adc_cs[*]}]")
+    L.append("set_property SLEW FAST [get_ports adc_sclk]")
+    L.append("set_property DRIVE 8   [get_ports adc_sclk]")
     L.append("")
 
     # ---- TLC5947 emitter driver (4-wire SPI, 72-ch chain, 64 used) ----
@@ -166,15 +180,6 @@ def emit() -> str:
     L.append("set_property DRIVE 8   [get_ports {spi_pins[1]}]")
     L.append("")
 
-    # ---- I2C (MCP4725 threshold DAC) ----
-    L.append("# ---- I2C to MCP4725 comparator-threshold DAC --------------------------------")
-    L.append("# Open-drain SDA/SCL with 4.7k pull-ups to +3V3 on the board.")
-    L.append(f"set_property PACKAGE_PIN {ball('I2C_SDA')}   [get_ports i2c_sda]")
-    L.append("set_property IOSTANDARD LVCMOS33 [get_ports i2c_sda]")
-    L.append(f"set_property PACKAGE_PIN {ball('I2C_SCL')}   [get_ports i2c_scl]")
-    L.append("set_property IOSTANDARD LVCMOS33 [get_ports i2c_scl]")
-    L.append("")
-
     # ---- refclk_out ----
     L.append("# ---- 25 MHz reference clock to ADF4351 REF_IN -------------------------------")
     L.append(f"set_property PACKAGE_PIN {ball('refclk_out')}   [get_ports refclk_out]")
@@ -197,8 +202,8 @@ def emit() -> str:
 
     # ---- timing ----
     L.append("# ---- Timing: clock-domain crossings (constrained for analysis) --------------")
-    L.append("# The 1 kHz mod_sync is derived from sys_clk (no CDC). The 64 det_in channels")
-    L.append("# are synchronous to sys_clk (comparator outputs registered in the fabric).")
+    L.append("# The 1 kHz mod_sync is derived from sys_clk (no CDC). The AD7616 SPI bus")
+    L.append("# (adc_*) is a synchronous master interface clocked by adc_sclk from sys_clk.")
     L.append("# Asynchronous reset is not timed.")
     L.append("set_false_path -through [get_ports reset]")
     L.append("")
@@ -209,14 +214,14 @@ def emit() -> str:
 def main() -> None:
     OUT.write_text(emit())
     m = json.loads(MAP.read_text())
-    n_det = sum(1 for k in m["signals"] if k.startswith("DET_DIG"))
+    n_adc = sum(1 for k in m["signals"] if k.startswith("adc_"))
     n_em = sum(1 for k in m["signals"] if k.startswith("em_"))
     print(f"wrote {OUT}")
     print(f"  CSG324: {len(m['signals'])} user-IO signals "
-          f"(det_in={n_det} em_SPI={n_em} control={len(m['signals']) - n_det - n_em})")
+          f"(adc_SPI={n_adc} em_SPI={n_em} control={len(m['signals']) - n_adc - n_em})")
     print(f"  clk_100mhz -> {m['signals']['clk_100mhz']} (MRCC)")
     print(f"  refclk_out -> {m['signals']['refclk_out']}")
-    print(f"  i2c_sda -> {m['signals']['I2C_SDA']}  i2c_scl -> {m['signals']['I2C_SCL']}")
+    print(f"  adc_convst -> {m['signals']['adc_convst']}  adc_sclk -> {m['signals']['adc_sclk']}")
 
 
 if __name__ == "__main__":

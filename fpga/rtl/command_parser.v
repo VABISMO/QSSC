@@ -13,14 +13,14 @@
 //   CLEAR_EMITTERS                         -> disarm all emitters (gs=0), OK\n
 //   APPLY_PULSE <qubit> <freq_khz> <amp> <duration_ns> <phase>
 //                                          -> program ADF4351 + gate RF, OK\n
-//   READ_DETECTOR <site>                   -> read one of 64 photon counters,
-//                                               reply <count>\n
-//   READ_DETECTORS                         -> stream all 64 counters,
-//                                               reply <c0> <c1> ... <c63>\n
-//   CLEAR_DETECTORS                        -> zero all 64 counters, OK\n
-//   SET_THRESHOLD <0..4095>                -> MCP4725 comparator threshold, OK\n
-//   CALIBRATE                              -> for each emitter: clear, pump,
-//                                               read_all, store brightest det
+//   READ_DETECTOR <site>                   -> read one of 64 AD7616 intensity
+//                                               samples, reply <sample>\n
+//   READ_DETECTORS                         -> stream all 64 samples,
+//                                               reply <s0> <s1> ... <s63>\n
+//   CLEAR_DETECTORS                        -> no-op on the ADC (no counters to
+//                                               zero), reply OK\n
+//   CALIBRATE                              -> for each emitter: pump, read_all,
+//                                               store brightest detector
 //                                               -> cal_lut[em], then OK\n
 //
 // The emitter commands drive a 3x TLC5947 constant-current LED driver over a
@@ -30,8 +30,17 @@
 // pumps one emitter at a time (it must isolate which emitter maps to which
 // detector), using DRIVE_EMITTER internally.
 //
+// The detector commands read 16-bit AD7616 intensity samples (0..65535, the
+// digitised TIA output over the +/-5V bipolar range) from adc_reader -- NOT
+// photon counts. The 1 kHz lock-in demodulation that turns these samples into
+// a PL/ODMR signal is done host-side (mod_sync is the reference); the FPGA
+// just delivers the raw parallel samples. The old SET_THRESHOLD / MCP4725
+// comparator-threshold DAC command is GONE (the comparator chain was removed
+// by the AD7616 pivot; the ADC range is HW-pin-strapped, so there is no
+// threshold to program).
+//
 // Unknown / malformed commands reply "ERR\n". Numbers are decimal integers
-// (optionally signed). Detector counts are 16-bit (0..65535) sent as ASCII
+// (optionally signed). Detector samples are 16-bit (0..65535) sent as ASCII
 // decimal, space-separated for READ_DETECTORS.
 //
 // A small TX engine (separate always block) drives the UART transmitter: the
@@ -62,10 +71,11 @@ module command_parser #(
     output reg        pll_start,
     output reg [31:0] pll_freq_khz,
     input             pll_busy,
-    // Photon counter array (64 parallel digital readout)
+    // ADC reader (64-ch parallel readout via 4x AD7616; same handshake the
+    // photon_counter_array used, but `det_code` is a 16-bit intensity sample)
     output reg        det_read_one,
     output reg        det_read_all,
-    output reg        det_clear,        // 1-cycle pulse: zero all 64 counters
+    output reg        det_clear,        // no-op on the ADC (no counters to clear)
     output reg [5:0]  det_site,
     input             det_busy,
     input      [15:0] det_code,
@@ -84,11 +94,7 @@ module command_parser #(
     output reg [11:0] pll_phase,        // -> ADF4351 R1 PHASE
     output reg [1:0]  pll_rf_pwr,       // -> ADF4351 R4 RF_PWR (4 levels)
     output reg [31:0] mw_gate_ns,       // -> RF-switch gate timer (duration, ns)
-    output reg        mw_gate_load,     // 1-cycle pulse: arm the RF-switch gate
-    // I2C to MCP4725 comparator-threshold DAC (SET_THRESHOLD)
-    output reg        i2c_start,
-    output reg [11:0] i2c_data,
-    input             i2c_busy
+    output reg        mw_gate_load      // 1-cycle pulse: arm the RF-switch gate
 );
     // ---- Command IDs -------------------------------------------------------
     localparam [3:0] CMD_DRIVE     = 4'd0;   // DRIVE_EMITTER (2 args)
@@ -96,8 +102,7 @@ module command_parser #(
     localparam [3:0] CMD_READ_ONE  = 4'd2;   // READ_DETECTOR (1 arg)
     localparam [3:0] CMD_READ_ALL  = 4'd3;   // READ_DETECTORS (0 args)
     localparam [3:0] CMD_CALIBRATE = 4'd4;   // CALIBRATE (0 args)
-    localparam [3:0] CMD_CLEAR     = 4'd5;   // CLEAR_DETECTORS (0 args)
-    localparam [3:0] CMD_THRESH    = 4'd6;   // SET_THRESHOLD (1 arg)
+    localparam [3:0] CMD_CLEAR     = 4'd5;   // CLEAR_DETECTORS (0 args, ADC no-op)
     localparam [3:0] CMD_ERR       = 4'd7;
     localparam [3:0] CMD_SET       = 4'd8;   // SET_EMITTER (2 args: index, level)
     localparam [3:0] CMD_PATTERN   = 4'd9;   // DRIVE_PATTERN (1 arg: duration_ms)
@@ -119,7 +124,6 @@ module command_parser #(
     localparam [3:0] S_CAL_READ      = 4'd12;  // calibrate: capture max count
     localparam [3:0] S_CAL_STORE     = 4'd13;  // calibrate: store LUT, next pixel
     localparam [3:0] S_PULSE_WAIT    = 4'd14;  // APPLY_PULSE: wait PLL done, arm gate
-    localparam [3:0] S_THRESH_WAIT   = 4'd15;  // SET_THRESHOLD: wait I2C done
     // SET/CLEAR_EMITTER: wait for the TLC5947 load to finish, then reply OK.
     // (The 4-bit FSM was full at 0..15, so the state reg is widened to 5 bits
     //  and this state lives above the original range.)
@@ -152,14 +156,13 @@ module command_parser #(
     reg        code_is_last;    // read_all code was the final channel
     reg [15:0] code_latch;      // snapshot of det_code on code_valid (held stable
                                 // while the UART drains; the live det_code may
-                                // change once we ack the counter sweep)
+                                // change once we ack the ADC reader sweep)
 
     // ---- Read-one / read-all mode flag ------------------------------------
     reg        read_all_mode;
 
-    // ---- APPLY_PULSE / SET_THRESHOLD / SET_EMITTER: wait for the peripheral --
+    // ---- APPLY_PULSE / SET_EMITTER: wait for the peripheral -----------------
     reg        pll_busy_seen;
-    reg        i2c_busy_seen;
     reg        em_busy_seen;
 
     // ---- Calibration helpers ----------------------------------------------
@@ -202,8 +205,8 @@ module command_parser #(
         end
     endfunction
 
-    // combinational decimal encoding of the latched detector count (the live
-    // det_code may change once we ack the counter array, so S_ENC must use
+    // combinational decimal encoding of the latched detector sample (the live
+    // det_code may change once we ack the ADC reader, so S_ENC must use
     // the snapshot taken in S_RONE_WAIT / S_RALL_WAIT).
     wire [47:0] enc = enc_dec(code_latch);
     wire [2:0]  dlen = enc[42:40];      // low 3 bits of len (len is 1..5)
@@ -260,9 +263,6 @@ module command_parser #(
         mw_gate_ns     = 32'd0;
         mw_gate_load   = 1'b0;
         pll_busy_seen  = 1'b0;
-        i2c_busy_seen  = 1'b0;
-        i2c_start      = 1'b0;
-        i2c_data       = 12'd0;
         for (k = 0; k < 64; k = k + 1) cal_lut[k] = 6'd0;
     end
 
@@ -342,9 +342,6 @@ module command_parser #(
             mw_gate_ns     <= 32'd0;
             mw_gate_load   <= 1'b0;
             pll_busy_seen  <= 1'b0;
-            i2c_busy_seen  <= 1'b0;
-            i2c_start      <= 1'b0;
-            i2c_data       <= 12'd0;
             tx_load        <= 1'b0;
             tx_din         <= 8'd0;
         end else begin
@@ -360,7 +357,6 @@ module command_parser #(
             det_clear      <= 1'b0;
             det_code_ack   <= 1'b0;
             mw_gate_load   <= 1'b0;
-            i2c_start      <= 1'b0;
 
             // Line accumulation only while idle and no line pending.
             if (fsm == S_IDLE && !line_ready && rx_valid) begin
@@ -464,21 +460,6 @@ module command_parser #(
                                     fsm       <= S_ARGSP;
                                 end else begin
                                     cmd_id <= CMD_ERR;   // READ_DETECTOR needs args
-                                    fsm    <= S_DISPATCH;
-                                end
-                            end else if (cmd_str[0]=="S" && cmd_str[1]=="E" &&
-                                         cmd_str[2]=="T" && cmd_str[3]=="_" &&
-                                         cmd_str[4]=="T" && cmd_str[5]=="H" &&
-                                         cmd_str[6]=="R" && cmd_str[7]=="E" &&
-                                         cmd_str[8]=="S" && cmd_str[9]=="H" &&
-                                         cmd_str[10]=="O" && cmd_str[11]=="L" &&
-                                         cmd_str[12]=="D") begin
-                                cmd_id <= CMD_THRESH; arg_count <= 3'd1;
-                                if (!is_eol && ch == 8'h20) begin
-                                    parse_idx <= parse_idx + 7'd1;
-                                    fsm       <= S_ARGSP;
-                                end else begin
-                                    cmd_id <= CMD_ERR;   // SET_THRESHOLD needs args
                                     fsm    <= S_DISPATCH;
                                 end
                             end else begin
@@ -680,21 +661,13 @@ module command_parser #(
                             fsm           <= S_RALL_WAIT;
                         end
                         CMD_CLEAR : begin
-                            det_clear <= 1'b1;     // 1-cycle pulse: zero all 64 counters
+                            // CLEAR_DETECTORS: the AD7616 has no counters to
+                            // zero, so this is a no-op that just replies OK.
+                            // (det_clear is pulsed for sim/API compatibility --
+                            // adc_reader ignores it.)
+                            det_clear <= 1'b1;
                             reply_ok  <= 1'b1;
                             fsm       <= S_REPLY_LOAD;
-                        end
-                        CMD_THRESH : begin
-                            // threshold 0..4095 (12-bit MCP4725 DAC code)
-                            if ($signed(arg_vals[0]) < 0 || $signed(arg_vals[0]) > 32'd4095) begin
-                                reply_ok <= 1'b0;            // ERR
-                                fsm      <= S_REPLY_LOAD;
-                            end else begin
-                                i2c_data       <= arg_vals[0][11:0];
-                                i2c_start      <= 1'b1;
-                                i2c_busy_seen  <= 1'b0;
-                                fsm            <= S_THRESH_WAIT;
-                            end
                         end
                         CMD_CALIBRATE : begin
                             cal_em       <= 6'd0;
@@ -780,12 +753,14 @@ module command_parser #(
                     end
                 end
 
-                // ---- Calibration: clear the 64 counters AND drive the next
-                // emitter pixel in the same cycle (both are 1-cycle pulses).
-                // Clearing before the pump means the read_all snapshot reflects
-                // only the photons collected during this emitter's pump window.
+                // ---- Calibration: drive the next emitter pixel, then read all
+                // 64 ADC intensity samples and store the detector electrode with
+                // the brightest response as cal_lut[emitter]. (det_clear is also
+                // pulsed for sim/API compatibility -- the ADC has no counters to
+                // zero, so it is a no-op on the reader; the read_all snapshot is
+                // the latest free-running sample of each channel.)
                 S_CAL_DRIVE : begin
-                    det_clear      <= 1'b1;          // zero all 64 counters
+                    det_clear      <= 1'b1;          // no-op on the ADC (compat)
                     em_index       <= cal_em;
                     em_duration_ms <= 32'd1;        // 1 ms pump pulse
                     em_cmd_drive   <= 1'b1;          // pump this one emitter (TLC5947)
@@ -803,15 +778,15 @@ module command_parser #(
 
                 S_CAL_READ : begin
                     // read_all stream is in flight; capture the channel with the
-                    // highest count for this emitter pixel and ACK each code so
-                    // the counter array advances the sweep. Without the ack the
-                    // controller stalls in S_WAIT_ACK and CALIBRATE hangs.
+                    // highest intensity sample for this emitter pixel and ACK each
+                    // sample so the ADC reader advances the sweep. Without the ack
+                    // the reader stalls in S_WAIT_ACK and CALIBRATE hangs.
                     if (det_code_valid) begin
                         if (det_code > cal_max_code) begin
                             cal_max_code <= det_code;
                             cal_max_det  <= det_code_idx;
                         end
-                        det_code_ack <= 1'b1;   // release this code, next channel
+                        det_code_ack <= 1'b1;   // release this sample, next channel
                     end
                     if (det_sweep_done) begin
                         fsm <= S_CAL_STORE;
@@ -839,16 +814,6 @@ module command_parser #(
                         mw_gate_load <= 1'b1;
                         reply_ok     <= 1'b1;
                         fsm          <= S_REPLY_LOAD;
-                    end
-                end
-
-                // ---- SET_THRESHOLD: wait for the I2C master to finish
-                // writing the MCP4725 DAC code, then reply OK.
-                S_THRESH_WAIT : begin
-                    if (i2c_busy)        i2c_busy_seen <= 1'b1;
-                    if (i2c_busy_seen && !i2c_busy) begin
-                        reply_ok <= 1'b1;
-                        fsm      <= S_REPLY_LOAD;
                     end
                 end
 

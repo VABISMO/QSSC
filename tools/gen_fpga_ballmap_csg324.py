@@ -3,13 +3,11 @@
 symbol ``FPGA_Xilinx_Artix7:XC7A35T-CSG324`` (324 pads, DS181/UG475).
 
 Supersedes ``gen_fpga_ballmap.py`` (CPG236, 238 pads) — the parallel 64-ch
-readout + 64-ch emitter drive needs 128 user IO (64 DET_DIG inputs + 64
-EM_DRV outputs) plus ~13 control nets ≈ 141 user IO, which exceeds the
-CPG236's ~125.  CSG324 has 215 user IO.
+readout + 64-ch emitter drive needs the CSG324's 215 user IO.
 
 Emits ``.tmpwork/fpga_csg324_map.json`` consumed by ``gen_qssc_kicad.py``::
 
-  { signals: {net: ball}     # control + 64 DET_DIG + 4 em_SPI (side-assigned)
+  { signals: {net: ball}     # control + 9 adc_SPI + 4 em_SPI (side-assigned)
     power:   {rail: [balls]} # derived from symbol pin names (never drops a GND)
     config:  {name: ball}    # D00-D03/FCS_B/CCLK/DONE/INIT_B/PROGRAM_B/M0-M2
     jtag:    {name: ball}    # TCK/TMS/TDI/TDO
@@ -17,14 +15,16 @@ Emits ``.tmpwork/fpga_csg324_map.json`` consumed by ``gen_qssc_kicad.py``::
 
 Assignment (deterministic, routing-friendly):
   * clk_100mhz (in)  + refclk_25m (out, =refclk_out) -> MRCC clock-capable balls
-  * 64 DET_DIG0-63   -> right-edge balls (high column) toward the comparator
-                        front-end (above the die, board y<44)
+  * 9 adc_SPI        -> right-edge balls toward the 4x AD7616 parallel ADCs
+                        (adc_convst/sclk/miso/busy/cs0..3/resetn; the 64 TIA
+                        outputs -> 4 AD7616 -> FPGA over this 9-wire bus)
   * 4 em_SPI         -> bottom-edge balls toward the 3x TLC5947 constant-current
                         LED driver below the die (em_sclk/sin/xlat/blank)
   * control nets     -> remaining general IO
-The old det_mux_sel*/emitter_rows*/emitter_cols* signals AND the 64x EM_DRV
-GPIO are gone (the parallel architecture has no MUX, no row/col matrix, and the
-TLC5947 drives the 64 emitters over 4 SPI wires, not 64 GPIO).
+The old 64x DET_DIG photon-counter inputs, the I2C MCP4725 threshold DAC, the
+det_mux_sel*/emitter_rows*/emitter_cols* signals AND the 64x EM_DRV GPIO are
+gone (the readout is now 4x AD7616 parallel ADC, the range is HW-pin-strapped,
+and the TLC5947 drives the 64 emitters over 4 SPI wires, not 64 GPIO).
 """
 from __future__ import annotations
 import re, json
@@ -200,18 +200,27 @@ def main() -> None:
         signals[name] = b
     taken |= set(em_balls)
 
-    # 3c. 64 DET_DIG inputs -> right-edge balls (high col), excluding taken.
-    det_pool = sorted(
+    # 3c. 9-pin ADC SPI bus -> right-edge balls toward the 4x AD7616 ADCs that
+    # live in the right zone (x150-186) of the merged board.  The old 64x DET_DIG
+    # photon-counter inputs are GONE: the readout is now 4x AD7616 parallel ADCs
+    # over a 9-wire bus (CONVST/SCLK/MISO/BUSY/CS0..3/RESETn -- no MOSI, the
+    # range is HW-pin-strapped to +/-5 V), so the FPGA detector interface
+    # collapses from 64 pins to 9.  55 user-IO balls are freed (spare).
+    adc_pool = sorted(
         (b for b in avail if b not in taken),
         key=lambda b: (-col(b), rowidx(b)))          # right cols first
-    det_balls = det_pool[:64]
-    for i, b in enumerate(det_balls):
-        signals[f"DET_DIG{i}"] = b
-    taken |= set(det_balls)
+    adc_balls = adc_pool[:9]
+    adc_names = ["adc_convst", "adc_sclk", "adc_miso", "adc_busy",
+                 "adc_cs0", "adc_cs1", "adc_cs2", "adc_cs3", "adc_resetn"]
+    for name, b in zip(adc_names, adc_balls):
+        signals[name] = b
+    taken |= set(adc_balls)
 
     # 3d. control nets -> remaining general IO (prefer SRCC/centre, then rest).
+    # (I2C_SDA/I2C_SCL are GONE: the MCP4725 threshold DAC was removed with the
+    # comparator/photon-counter chain -- the AD7616 range is HW-pin-strapped.)
     control = ["reset", "tx", "rx", "SPI_CLK", "SPI_DATA", "SPI_LE",
-               "ADF_MUXOUT", "mod_sync", "mw_gate", "I2C_SDA", "I2C_SCL"]
+               "ADF_MUXOUT", "mod_sync", "mw_gate"]
     ctrl_pool = sorted(
         (b for b in avail if b not in taken),
         key=lambda b: (col(b), rowidx(b)))            # left/centre first
@@ -232,15 +241,15 @@ def main() -> None:
 
     n_pow = sum(len(v) for v in power.values())
     n_sig = len(signals)
-    n_det = sum(1 for k in signals if k.startswith("DET_DIG"))
+    n_adc = sum(1 for k in signals if k.startswith("adc_"))
     n_em = sum(1 for k in signals if k.startswith("em_"))
     print(f"wrote {OUT}")
     print(f"  power balls: {n_pow} (GND={len(power['GND'])} "
           f"MGT_GND={len(power.get('MGT_GND', []))} "
           f"VCCINT={len(power['VCCINT'])} "
           f"VCCO banks={sum(1 for k in power if k.startswith('VCCO_'))})")
-    print(f"  signals: {n_sig}  (DET_DIG={n_det} em_SPI={n_em} "
-          f"control={n_sig - n_det - n_em})")
+    print(f"  signals: {n_sig}  (adc_SPI={n_adc} em_SPI={n_em} "
+          f"control={n_sig - n_adc - n_em})")
     print(f"  config: {len(config)}  jtag: {len(jtag)}  xadc: {len(xadc)}")
     print(f"  spare IO: {len(avail) - len(taken)}")
     total = n_sig + n_pow + len(config) + len(jtag) + len(xadc)

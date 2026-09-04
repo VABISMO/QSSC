@@ -7,20 +7,24 @@
 //   * UART rx/tx           (115200 baud, 8-N-1)
 //   * command_parser       (text protocol over UART)
 //   * emitter_array        (64 parallel CQD emitters via 3x TLC5947, 4-wire SPI)
-//   * photon_counter_array (64 parallel photon counters, comparator->LVCMOS)
+//   * adc_reader           (64-ch parallel readout via 4x AD7616 16-bit ADC,
+//                           9-wire SPI; replaces photon_counter_array)
 //   * adf4351_ctrl         (microwave PLL register sequencer)
 //   * spi_master           (32-bit SPI for the ADF4351)
-//   * i2c_master           (MCP4725 comparator-threshold DAC)
 //   * refclk_out           (25 MHz reference for the ADF4351, 100 MHz / 4)
 //
-// There is NO analog MUX and NO XADC: each of the 64 detectors has its own
-// TIA + Schmitt comparator on the board, and the 64 comparator outputs come
-// straight in as `det_in[63:0]` LVCMOS inputs, counted by a 64-wide counter
-// fabric. The 64 CQD emitters are driven IN PARALLEL by 3x TLC5947 constant-
-// current LED drivers over a 4-wire SPI (em_sclk/sin/xlat/blank): each
-// channel has its own 12-bit grayscale word, so multiple emitters light
-// simultaneously at independent intensities. No 8x8 row/col matrix, no 64
-// FPGA GPIO. mod_sync is the 1 kHz lock-in reference (host-side demodulation).
+// There is NO analog MUX, NO XADC, NO photon counting, NO MCP4725 threshold
+// DAC: each of the 64 detectors has its own TIA on the board, and the 64 TIA
+// outputs are digitised IN PARALLEL by 4x AD7616 16-bit dual simultaneous-
+// sampling ADCs over a 9-wire SPI bus (adc_convst/sclk/miso/busy/cs[3:0]/
+// resetn). The +/-5V range is HW-pin-strapped, so there is no MOSI / config
+// write. adc_reader continuously refreshes a 64x16 sample RAM and serves 16-bit
+// intensity samples to the host; the 1 kHz lock-in demodulation is host-side
+// (mod_sync is the reference). The 64 CQD emitters are driven IN PARALLEL by
+// 3x TLC5947 constant-current LED drivers over a 4-wire SPI
+// (em_sclk/sin/xlat/blank): each channel has its own 12-bit grayscale word, so
+// multiple emitters light simultaneously at independent intensities. No 8x8
+// row/col matrix, no 64 FPGA GPIO.
 //
 // Port names match fpga/constraints.xdc.
 //============================================================================
@@ -30,23 +34,26 @@ module top_level (
     // UART (FT232)
     input             rx,
     output            tx,
-    // 64 detector photon-count inputs (board TIA + comparator -> LVCMOS33)
-    input      [63:0] det_in,
+    // 4x AD7616 parallel 16-bit ADC readout (64 TIA outputs digitised, 9-wire
+    // SPI bus; the +/-5V range is HW-pin-strapped on each AD7616 -> no MOSI).
+    output            adc_convst,      // shared conversion start (rising edge)
+    output            adc_sclk,        // shared SPI clock (<=40 MHz, idles high)
+    input             adc_miso,        // shared SDOA (per-chip CS selects driver)
+    input             adc_busy,        // chip0 BUSY (all 4 finish a CONVST together)
+    output [3:0]      adc_cs,          // per-chip chip select (active low)
+    output            adc_resetn,      // shared reset (active low)
     // 64 parallel CQD emitters via 3x TLC5947 (4-wire SPI, 72-ch chain, 64 used)
     output            em_sclk,
     output            em_sin,
     output            em_xlat,
     output            em_blank,
-    // lock-in modulation reference (1 kHz)
+    // lock-in modulation reference (1 kHz, host-side demodulation)
     output            mod_sync,
     // ADF4351 SPI: {LE, CLK, DATA, MUXOUT}  (MUXOUT is an input from the PLL)
     inout  [3:0]      spi_pins,
     output            refclk_out,      // 25 MHz to ADF4351 REF_IN
     // RF-switch gate pulse (MW pulse envelope duration)
-    output            mw_gate,
-    // I2C to MCP4725 comparator-threshold DAC (open-drain, 4.7k pull-ups)
-    inout             i2c_sda,
-    inout             i2c_scl
+    output            mw_gate
 );
     // ---- Parameters --------------------------------------------------------
     // FAST_SIM collapses the slow real-time counters (UART bit period, emitter
@@ -166,7 +173,12 @@ module top_level (
         .spi_done        (spi_done_w)
     );
 
-    // ---- Photon counter array (64 parallel digital readout) ---------------
+    // ---- ADC reader (64-ch parallel readout via 4x AD7616, 9-wire SPI) -----
+    // Replaces photon_counter_array: same host handshake to command_parser
+    // (read_one/read_all/clear/site/busy/code/code_valid/code_idx/sweep_done/
+    // code_ack), but the 16-bit `code` is an AD7616 intensity sample of the
+    // detector TIA output, not a photon count. adc_reader also generates the
+    // 1 kHz mod_sync lock-in reference (previously in photon_counter_array).
     wire        det_read_one;
     wire        det_read_all;
     wire        det_clear;
@@ -179,11 +191,11 @@ module top_level (
     wire        det_code_ack;
     wire        mod_sync_int;
 
-    photon_counter_array #(.N_DET(64), .CLK_HZ(100_000_000)) det_inst (
+    adc_reader #(.N_DET(64), .CLK_HZ(100_000_000)) det_inst (
         .clk         (clk_100mhz),
         .reset       (reset_sync),
         .read_one    (det_read_one),
-        .read_all   (det_read_all),
+        .read_all    (det_read_all),
         .site        (det_site),
         .clear       (det_clear),
         .busy        (det_busy),
@@ -192,33 +204,16 @@ module top_level (
         .code_idx    (det_code_idx),
         .sweep_done  (det_sweep_done),
         .code_ack    (det_code_ack),
-        .det_in      (det_in),
+        .adc_convst  (adc_convst),
+        .adc_sclk    (adc_sclk),
+        .adc_miso    (adc_miso),
+        .adc_busy    (adc_busy),
+        .adc_cs      (adc_cs),
+        .adc_resetn  (adc_resetn),
         .mod_sync    (mod_sync_int)
     );
 
     assign mod_sync = mod_sync_int;
-
-    // ---- I2C MCP4725 threshold DAC -----------------------------------------
-    wire        i2c_start;
-    wire [11:0] i2c_data;
-    wire        i2c_busy;
-
-`ifdef FAST_SIM
-    localparam I2C_CLK_DIV = 2;              // fast SCL in sim
-`else
-    localparam I2C_CLK_DIV = 500;            // 100 MHz/(2*500) = 100 kHz
-`endif
-
-    i2c_master #(.CLK_DIV(I2C_CLK_DIV)) i2c_inst (
-        .clk   (clk_100mhz),
-        .reset (reset_sync),
-        .start (i2c_start),
-        .data  (i2c_data),
-        .busy  (i2c_busy),
-        .done  (),
-        .sda   (i2c_sda),
-        .scl   (i2c_scl)
-    );
 
     // ---- Calibration LUT readback (write-only in this build) ---------------
     wire [5:0] lut_rd_data;
@@ -265,10 +260,7 @@ module top_level (
         .pll_phase        (pll_phase_w),
         .pll_rf_pwr       (pll_rf_pwr_w),
         .mw_gate_ns       (mw_gate_ns_w),
-        .mw_gate_load     (mw_gate_load),
-        .i2c_start        (i2c_start),
-        .i2c_data         (i2c_data),
-        .i2c_busy         (i2c_busy)
+        .mw_gate_load     (mw_gate_load)
     );
 
     assign pll_phase  = pll_phase_w;

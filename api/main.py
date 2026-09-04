@@ -23,6 +23,7 @@ from qssc import (
     auto_align, simulate_odmr, QSSCBackend,
     make_detector_response, PROFILES,
 )
+from qssc.simulator import DETECT_THRESHOLD
 from qssc.protocol import (
     protocol_as_dict, protocol_summary, protocol_platforms,
 )
@@ -276,18 +277,19 @@ def protocol_variants():
 
 @app.get("/api/calibration")
 def calibration(profile: str = "NV", grid: int = 8):
-    """Default emitter-pixel -> qubit-site -> detector-electrode LUT (the
+    """Default emitter-channel -> qubit-site -> detector-electrode LUT (the
     identity mapping used before a physical calibration sweep is run). The
-    on-chip readout has no camera pixels; each site is identified by its
-    emitter (row, col) and the graphene detector electrode it drives."""
+    on-chip readout has no camera pixels; each of the 64 sites is identified
+    by its emitter channel index and the graphene detector electrode it drives
+    (1:1 identity on this layout)."""
     from qssc.backend import CalibrationManager
     lut = CalibrationManager.default_detector_lut()
     sites = []
-    for idx in range(grid * grid):
+    for idx in range(64):
         r, c = divmod(idx, grid)
         sites.append({"qubit_id": idx, "row": r, "col": c,
-                      "electrode": lut.get((r, c), idx)})
-    return {"grid": grid, "sites": sites}
+                      "channel": idx, "electrode": lut.get(idx, idx)})
+    return {"grid": grid, "channels": 64, "sites": sites}
 
 
 @app.get("/api/signal")
@@ -365,10 +367,10 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
     # the readout. Response keys are kept (frame_shape = detector-array shape,
     # defects_detected = sites above threshold, frame_mean/max = photocurrent
     # code stats) so the stage-0 dashboard render stays unchanged.
-    active = {(r, c) for r in range(grid) for c in range(grid)}
+    active = {idx for idx in range(grid * grid)}
     response = make_detector_response(active, profile=profile,
-                                       grid=grid, rng=rng).reshape(grid, grid)
-    threshold = 1000
+                                       n_sites=grid * grid, rng=rng).reshape(grid, grid)
+    threshold = DETECT_THRESHOLD
     n_detected = int(np.count_nonzero(response > threshold))
 
     # Stage 2 — auto-align grid
