@@ -119,3 +119,6 @@ hardware/pcb/*erc*.txt
 hardware/pcb/*drc*.txt
 hardware/pcb/t*.kicad_sch
 /tools/bin/
+
+# KiCad live-edit lock files
+hardware/pcb/~*.lck

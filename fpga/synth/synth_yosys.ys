@@ -1,5 +1,5 @@
 # Yosys synthesis script for the QSSC FPGA control RTL.
-# Target: Xilinx Artix-7 XC7A35T-1CPG236C (the QSSC control FPGA).
+# Target: Xilinx Artix-7 XC7A35T-1CSG324C (single-board parallel QSSC).
 # Goal: a Vivado-like gate-level mapping (LUT/FF/CARRY/BRAM/DSP) so the stat
 # report is a realistic resource estimate, plus a structural netlist we can
 # diff against the XDC pin list. This is NOT place-and-route (no Vivado here),
@@ -14,8 +14,10 @@
 read_verilog fpga/rtl/uart_rx.v
 read_verilog fpga/rtl/uart_tx.v
 read_verilog fpga/rtl/spi_master.v
+read_verilog fpga/rtl/tlc5947_ctrl.v
 read_verilog fpga/rtl/emitter_array.v
-read_verilog fpga/rtl/photodetector_readout.v
+read_verilog fpga/rtl/photon_counter_array.v
+read_verilog fpga/rtl/i2c_master.v
 read_verilog fpga/rtl/adf4351_ctrl.v
 read_verilog fpga/rtl/command_parser.v
 read_verilog fpga/rtl/top_level.v

@@ -104,7 +104,10 @@ jobs:
       - name: iverilog functional simulation (self-checking testbench)
         run: |
           cd fpga
-          iverilog -g2012 -o /tmp/qssc_tb.vvp -s tb_top_level rtl/*.v sim/tb_top_level.v
+          # FAST_SIM collapses the UART bit period and the 1 ms emitter pump
+          # so the 64-pixel CALIBRATE sweep runs in seconds, not minutes.
+          # Production timing is untouched (the define is sim-only).
+          iverilog -g2012 -DFAST_SIM -o /tmp/qssc_tb.vvp -s tb_top_level rtl/*.v sim/tb_top_level.v
           vvp /tmp/qssc_tb.vvp | tee /tmp/sim.log
           grep -q "ALL CHECKS PASSED" /tmp/sim.log
       - name: Cache oss-cad-suite (yosys)

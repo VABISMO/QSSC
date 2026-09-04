@@ -37,6 +37,9 @@ include = ["qssc*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "slow: marks the full headless routing-pipeline test (gated on QSSC_SLOW=1)",
+]
 # make the top-level `api` package importable when running `pytest` directly
 # (qssc is installed editable; api is not a packaged module)
 pythonpath = ["."]

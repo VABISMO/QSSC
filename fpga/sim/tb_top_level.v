@@ -2,32 +2,63 @@
 //============================================================================
 // tb_top_level.v
 // ----------------------------------------------------------------------------
-// Simple testbench for the QSSC top_level. Generates a 100 MHz clock and
-// reset, sends "DRIVE_EMITTER 3 4 50\n" over the UART RX line at 115200 baud
-// and checks the "OK\n" reply + the decoded emitter crossbar pattern, then
-// sends "READ_DETECTORS\n" and checks the streamed 64-electrode photocurrent
-// code sequence. Camera/SCCB/RF pins are gone (on-chip readout has no camera).
+// Self-checking testbench for the QSSC single-board parallel top_level.
+// Event-driven: it polls the captured UART-TX byte count rather than sleeping
+// for fixed real-time windows, so it runs fast under the FAST_SIM define
+// (CLKS_PER_BIT=8, emitter 1 ms = 10 clk) as well as at production timing.
+//
+//   1. DRIVE_EMITTER <index> <ms>  -> TLC5947 gs[index]=4095 + em_blank low, OK\n
+//   2. DRIVE_EMITTER 64 <ms>       -> out-of-range index, ERR\n
+//   3. drive 12 rising edges on det_in[63:0] -> READ_DETECTOR 5 = "12\n"
+//   4. READ_DETECTORS             -> "12 12 ... 12\n" (64 codes, 192 bytes)
+//   5. CLEAR_DETECTORS            -> OK\n, then READ_DETECTOR 5 = "0\n"
+//   6. SET_THRESHOLD 2048         -> OK\n (MCP4725 I2C write completes)
+//   7. APPLY_PULSE ...            -> OK\n + mw_gate pulse
+//   8. APPLY_PULSE freq=0         -> ERR\n
+//   9. SET_EMITTER / DRIVE_PATTERN -> parallel: arm 3 emitters, fire in parallel
+//  10. CALIBRATE                  -> OK\n (64-pixel clear/pump/read_all sweep)
+// Emitters are 64 parallel CQD channels driven by 3x TLC5947 over 4-wire SPI
+// (em_sclk/sin/xlat/blank) -- no 64-line emitter_en bus anymore.
 //============================================================================
 module tb_top_level;
-    localparam integer   CLK_PERIOD  = 10;         // 100 MHz -> 10 ns
-    localparam integer   CLKS_PER_BIT = 868;       // 100 MHz / 115200
-    localparam integer   BIT_TIME    = CLK_PERIOD * CLKS_PER_BIT;
+`ifdef FAST_SIM
+    localparam integer   CLK_PERIOD   = 10;         // 100 MHz -> 10 ns
+    localparam integer   CLKS_PER_BIT = 8;          // fast UART in sim
+    localparam integer   BIT_TIME     = CLK_PERIOD * CLKS_PER_BIT;
+    // fixed inter-test waits, in clock cycles (emitter finish, etc.)
+    localparam integer   W_EM_DONE    = 8000;       // > TLC load (~1728) + pump + end-load
+    localparam integer   W_GENERIC    = 50000;      // command dispatch + reply
+    localparam integer   W_CAL        = 600000;    // 64-pixel calibrate (each w/ TLC load)
+    localparam integer   W_SAFE       = 1200000;    // safety timeout
+`else
+    localparam integer   CLK_PERIOD   = 10;
+    localparam integer   CLKS_PER_BIT = 868;        // 100 MHz / 115200
+    localparam integer   BIT_TIME     = CLK_PERIOD * CLKS_PER_BIT;
+    localparam integer   W_EM_DONE    = 600000;     // > 5 ms emitter pulse
+    localparam integer   W_GENERIC    = 400000;
+    localparam integer   W_CAL        = 100000000;  // ~64 ms + margin @ real clk
+    localparam integer   W_SAFE       = 200000000;  // 200 ms safety net
+`endif
 
     // ---- DUT signals -------------------------------------------------------
     reg         clk_100mhz = 1'b0;
     reg         reset      = 1'b1;
     reg         rx         = 1'b1;       // UART idle
     wire        tx;
-    wire [7:0]  emitter_rows;
-    wire [7:0]  emitter_cols;
-    wire [5:0]  det_mux_sel;
+    reg  [63:0] det_in     = 64'd0;      // 64 comparator outputs (stimulus)
+    wire        em_sclk;
+    wire        em_sin;
+    wire        em_xlat;
+    wire        em_blank;
     wire        mod_sync;
     wire        mw_gate;
     wire [3:0]  spi_pins;
     wire        refclk_out;
+    wire        i2c_sda;
+    wire        i2c_scl;
 
     // ---- Captured TX bytes -------------------------------------------------
-    reg [7:0]   rx_log [0:511];
+    reg [7:0]   rx_log [0:1023];
     integer     rx_log_cnt = 0;
     integer     i;
     reg [7:0]   rx_byte_cap;
@@ -40,18 +71,26 @@ module tb_top_level;
 
     // ---- DUT ---------------------------------------------------------------
     top_level dut (
-        .clk_100mhz  (clk_100mhz),
-        .reset       (reset),
-        .rx          (rx),
-        .tx          (tx),
-        .emitter_rows(emitter_rows),
-        .emitter_cols(emitter_cols),
-        .det_mux_sel (det_mux_sel),
-        .mod_sync    (mod_sync),
-        .mw_gate     (mw_gate),
-        .spi_pins    (spi_pins),
-        .refclk_out  (refclk_out)
+        .clk_100mhz (clk_100mhz),
+        .reset      (reset),
+        .rx         (rx),
+        .tx         (tx),
+        .det_in     (det_in),
+        .em_sclk    (em_sclk),
+        .em_sin     (em_sin),
+        .em_xlat    (em_xlat),
+        .em_blank   (em_blank),
+        .mod_sync   (mod_sync),
+        .spi_pins   (spi_pins),
+        .refclk_out (refclk_out),
+        .mw_gate    (mw_gate),
+        .i2c_sda    (i2c_sda),
+        .i2c_scl    (i2c_scl)
     );
+
+    // open-drain I2C bus with a weak pull-up so released lines read high.
+    pullup sda_pu (i2c_sda);
+    pullup scl_pu (i2c_scl);
 
     // ---- 100 MHz clock -----------------------------------------------------
     always #(CLK_PERIOD/2) clk_100mhz = ~clk_100mhz;
@@ -72,6 +111,37 @@ module tb_top_level;
         end
     endtask
 
+    // ---- drive N rising edges on every det_in bit (a photon burst) --------
+    task pulse_det_all;
+        input integer n;
+        integer j;
+        begin
+            for (j = 0; j < n; j = j + 1) begin
+                det_in = 64'hFFFFFFFFFFFFFFFF;
+                repeat(5) @(posedge clk_100mhz);
+                det_in = 64'd0;
+                repeat(5) @(posedge clk_100mhz);
+            end
+        end
+    endtask
+
+    // ---- wait until at least `n` TX bytes captured, or `tmo` cycles --------
+    task wait_for_bytes;
+        input integer n;
+        input integer tmo;
+        integer t;
+        begin
+            t = 0;
+            while (rx_log_cnt < n && t < tmo) begin
+                @(posedge clk_100mhz);
+                t = t + 1;
+            end
+            if (t >= tmo)
+                $display("TB: WARNING wait_for_bytes(%0d) timeout after %0d cyc (got %0d)",
+                         n, tmo, rx_log_cnt);
+        end
+    endtask
+
     // ---- UART RX monitor (sample tx line) ---------------------------------
     initial begin
         forever begin
@@ -84,8 +154,7 @@ module tb_top_level;
                     rx_byte_cap[i] = tx;
                     #(BIT_TIME);
                 end
-                // middle of stop bit now
-                if (rx_log_cnt < 512) begin
+                if (rx_log_cnt < 1024) begin
                     rx_log[rx_log_cnt] = rx_byte_cap;
                     rx_log_cnt = rx_log_cnt + 1;
                 end
@@ -94,153 +163,172 @@ module tb_top_level;
     end
 
     // ---- Main stimulus -----------------------------------------------------
-    integer c;
     integer r;
-    reg [7:0] cmd_bytes [0:31];
-    reg [7:0] sendb;        // scalar temp (pyverilog can't take a memory word as a task arg)
+    integer c;
+    reg [7:0] cmd_bytes [0:39];
     initial begin
         // Reset
         reset = 1'b1;
-        for (r=0;r<20;r=r+1) begin @(posedge clk_100mhz); end
+        for (r=0;r<20;r=r+1) @(posedge clk_100mhz);
         reset = 1'b0;
-        for (r=0;r<5;r=r+1) begin @(posedge clk_100mhz); end
+        for (r=0;r<5;r=r+1) @(posedge clk_100mhz);
 
-        // ---- 1) DRIVE_EMITTER 3 4 50 -------------------------------------
-        // "DRIVE_EMITTER 3 4 50\n" (13 + space + 1 + space + 1 + space + 1 + 0 + \n = 21)
+        // ---- 1) DRIVE_EMITTER 3 100 (index=3, 100 "ms" pump) ---------------
+        // 100 ms > OK-TX time so the emitter is still firing when OK arrives.
+        rx_log_cnt = 0;
         cmd_bytes[0]="D";  cmd_bytes[1]="R";  cmd_bytes[2]="I";  cmd_bytes[3]="V";
         cmd_bytes[4]="E";  cmd_bytes[5]="_";  cmd_bytes[6]="E";  cmd_bytes[7]="M";
         cmd_bytes[8]="I";  cmd_bytes[9]="T";  cmd_bytes[10]="T"; cmd_bytes[11]="E";
         cmd_bytes[12]="R"; cmd_bytes[13]=" "; cmd_bytes[14]="3"; cmd_bytes[15]=" ";
-        cmd_bytes[16]="4"; cmd_bytes[17]=" "; cmd_bytes[18]="5"; cmd_bytes[19]="0";
-        cmd_bytes[20]=8'h0A;
-
-        $display("TB: sending DRIVE_EMITTER 3 4 50");
-        for (c = 0; c < 21; c = c + 1) begin
-            sendb = cmd_bytes[c];
-            uart_send_byte(sendb);
+        cmd_bytes[16]="1"; cmd_bytes[17]="0"; cmd_bytes[18]="0"; cmd_bytes[19]=8'h0A;
+        $display("TB: sending DRIVE_EMITTER 3 100");
+        for (c=0;c<20;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(3, W_GENERIC);       // OK\n
+        // The pump runs in the background after OK. The TLC5947 grayscale
+        // register for channel 3 must be full (4095) and em_blank low (on).
+        // (Hierarchical ref into the emitter_array -> tlc5947_ctrl gs array.)
+        $display("TB: gs[3]=%0d em_blank=%b (expect 4095, 0)", dut.em_inst.tlc_inst.gs[3], em_blank);
+        if (dut.em_inst.tlc_inst.gs[3] === 12'd4095 && em_blank === 1'b0) begin
+            ok_count = ok_count + 1;  $display("TB: TLC5947 gs[3]=4095 + blank low  (PASS)");
+        end else begin
+            err_count = err_count + 1; $display("TB: FAIL emitter drive (gs[3] or blank)");
         end
-
-        // Wait for the parser to react, the emitter to fire, and "OK\n" reply.
-        #(200000*CLK_PERIOD);
-
-        // ---- Self-check: emitter crossbar pattern -------------------------
-        // row=3 -> rows = 1<<3 = 0x08 ; col=4 -> cols = ~(1<<4) = 0xEF
-        $display("TB: emitter_rows=0x%02h (expect 0x08), emitter_cols=0x%02h (expect 0xEF)",
-                 emitter_rows, emitter_cols);
-        if (emitter_rows === 8'h08) ok_count = ok_count + 1;
-        else begin err_count = err_count + 1; $display("TB: FAIL emitter_rows mismatch"); end
-        if (emitter_cols === 8'hEF) ok_count = ok_count + 1;
-        else begin err_count = err_count + 1; $display("TB: FAIL emitter_cols mismatch"); end
-
-        // ---- Self-check: reply = "OK\n" (0x4F 0x4B 0x0A) -----------------
         if (rx_log_cnt >= 3 &&
             rx_log[0] === 8'h4F && rx_log[1] === 8'h4B && rx_log[2] === 8'h0A) begin
-            ok_count = ok_count + 1;
-            $display("TB: DRIVE_EMITTER reply = OK\\n  (PASS)");
+            ok_count = ok_count + 1;  $display("TB: DRIVE_EMITTER reply = OK\\n  (PASS)");
         end else begin
             err_count = err_count + 1;
             $display("TB: FAIL DRIVE_EMITTER reply (got %0d bytes, first=0x%02h)",
                      rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
         end
+        repeat(W_EM_DONE) @(posedge clk_100mhz);   // let the emitter pulse finish
 
-        // ---- 2) READ_DETECTORS -------------------------------------------
-        // Reset the capture log so the stream starts at index 0.
-        rx_log_cnt = 0;
-        cmd_bytes[0]="R";  cmd_bytes[1]="E";  cmd_bytes[2]="A";  cmd_bytes[3]="D";
-        cmd_bytes[4]="_";  cmd_bytes[5]="D";  cmd_bytes[6]="E";  cmd_bytes[7]="T";
-        cmd_bytes[8]="E";  cmd_bytes[9]="C";  cmd_bytes[10]="T"; cmd_bytes[11]="O";
-        cmd_bytes[12]="R"; cmd_bytes[13]="S"; cmd_bytes[14]=8'h0A;
-
-        $display("TB: sending READ_DETECTORS");
-        for (c = 0; c < 15; c = c + 1) begin
-            sendb = cmd_bytes[c];
-            uart_send_byte(sendb);
-        end
-
-        // 64 conversions * ~100 cycles each + UART TX of ~320 bytes
-        #(4000000*CLK_PERIOD);
-
-        // ---- Self-check: detector stream ---------------------------------
-        // Behavioural XADC: electrode n -> code 1000 + 40*n. All 4-digit, so the
-        // stream is "1000 1040 1080 ... 3520\n" (64 codes, 63 spaces, 1 newline
-        // => 256 + 63 + 1 = 320 bytes). Check the prefix and the byte count.
-        $display("TB: READ_DETECTORS captured %0d bytes", rx_log_cnt);
-        if (rx_log_cnt >= 5 &&
-            rx_log[0] === 8'h31 && rx_log[1] === 8'h30 &&
-            rx_log[2] === 8'h30 && rx_log[3] === 8'h30 &&
-            rx_log[4] === 8'h20) begin
-            ok_count = ok_count + 1;
-            $display("TB: detector stream starts with \"1000 \"  (PASS)");
-        end else begin
-            err_count = err_count + 1;
-            $display("TB: FAIL detector stream prefix (got %0d bytes, first=0x%02h)",
-                     rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
-        end
-        // 64 codes (4 digits each) + 63 spaces + 1 newline = 320 bytes
-        if (rx_log_cnt === 320) begin
-            ok_count = ok_count + 1;
-            $display("TB: detector stream length = 320 bytes  (PASS)");
-        end else begin
-            err_count = err_count + 1;
-            $display("TB: FAIL detector stream length (got %0d, expect 320)", rx_log_cnt);
-        end
-        // last byte must be '\n'
-        if (rx_log_cnt >= 1 && rx_log[rx_log_cnt-1] === 8'h0A) begin
-            ok_count = ok_count + 1;
-            $display("TB: detector stream ends with '\\n'  (PASS)");
-        end else begin
-            err_count = err_count + 1;
-            $display("TB: FAIL detector stream terminator");
-        end
-
-        // ---- 3) READ_DETECTOR 5 (single-electrode read) -----------------
-        // Behavioural XADC: electrode 5 -> code 1000 + 40*5 = 1200 -> "1200\n"
-        rx_log_cnt = 0;
-        cmd_bytes[0]="R";  cmd_bytes[1]="E";  cmd_bytes[2]="A";  cmd_bytes[3]="D";
-        cmd_bytes[4]="_";  cmd_bytes[5]="D";  cmd_bytes[6]="E";  cmd_bytes[7]="T";
-        cmd_bytes[8]="E";  cmd_bytes[9]="C";  cmd_bytes[10]="T"; cmd_bytes[11]="O";
-        cmd_bytes[12]="R"; cmd_bytes[13]=" "; cmd_bytes[14]="5"; cmd_bytes[15]=8'h0A;
-        $display("TB: sending READ_DETECTOR 5");
-        for (c = 0; c < 16; c = c + 1) begin sendb = cmd_bytes[c]; uart_send_byte(sendb); end
-        #(200000*CLK_PERIOD);
-        $display("TB: READ_DETECTOR captured %0d bytes", rx_log_cnt);
-        if (rx_log_cnt >= 5 &&
-            rx_log[0] === 8'h31 && rx_log[1] === 8'h32 &&
-            rx_log[2] === 8'h30 && rx_log[3] === 8'h30 &&
-            rx_log[4] === 8'h0A) begin
-            ok_count = ok_count + 1;
-            $display("TB: READ_DETECTOR reply = \"1200\\n\"  (PASS)");
-        end else begin
-            err_count = err_count + 1;
-            $display("TB: FAIL READ_DETECTOR reply (got %0d bytes, first=0x%02h)",
-                     rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
-        end
-
-        // ---- 4) Out-of-range DRIVE_EMITTER 9 9 50 -> ERR ----------------
-        // row=9 / col=9 are out of the 0..7 crossbar; bounds check must reject.
+        // ---- 2) DRIVE_EMITTER 64 100 -> ERR (index out of range 0..63) -----
         rx_log_cnt = 0;
         cmd_bytes[0]="D";  cmd_bytes[1]="R";  cmd_bytes[2]="I";  cmd_bytes[3]="V";
         cmd_bytes[4]="E";  cmd_bytes[5]="_";  cmd_bytes[6]="E";  cmd_bytes[7]="M";
         cmd_bytes[8]="I";  cmd_bytes[9]="T";  cmd_bytes[10]="T"; cmd_bytes[11]="E";
-        cmd_bytes[12]="R"; cmd_bytes[13]=" "; cmd_bytes[14]="9"; cmd_bytes[15]=" ";
-        cmd_bytes[16]="9"; cmd_bytes[17]=" "; cmd_bytes[18]="5"; cmd_bytes[19]="0";
+        cmd_bytes[12]="R"; cmd_bytes[13]=" "; cmd_bytes[14]="6"; cmd_bytes[15]="4";
+        cmd_bytes[16]=" "; cmd_bytes[17]="1"; cmd_bytes[18]="0"; cmd_bytes[19]="0";
         cmd_bytes[20]=8'h0A;
-        $display("TB: sending DRIVE_EMITTER 9 9 50 (expect ERR)");
-        for (c = 0; c < 21; c = c + 1) begin sendb = cmd_bytes[c]; uart_send_byte(sendb); end
-        #(200000*CLK_PERIOD);
+        $display("TB: sending DRIVE_EMITTER 64 100 (expect ERR)");
+        for (c=0;c<21;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(4, W_GENERIC);        // ERR\n
         if (rx_log_cnt >= 4 &&
             rx_log[0] === 8'h45 && rx_log[1] === 8'h52 &&
             rx_log[2] === 8'h52 && rx_log[3] === 8'h0A) begin
-            ok_count = ok_count + 1;
-            $display("TB: out-of-range DRIVE_EMITTER reply = ERR\\n  (PASS)");
+            ok_count = ok_count + 1;  $display("TB: out-of-range DRIVE_EMITTER = ERR\\n  (PASS)");
         end else begin
             err_count = err_count + 1;
             $display("TB: FAIL bounds-check ERR (got %0d bytes, first=0x%02h)",
                      rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
         end
 
-        // ---- 5) APPLY_PULSE valid -> OK ---------------------------------
-        // qubit=0, freq_khz=2870000 (2.87 GHz NV), amp=100, dur=500 ns, phase=0.
+        // ---- 3) drive 12 photon events on all 64 channels, READ_DETECTOR 5
+        pulse_det_all(12);
+        rx_log_cnt = 0;
+        cmd_bytes[0]="R";  cmd_bytes[1]="E";  cmd_bytes[2]="A";  cmd_bytes[3]="D";
+        cmd_bytes[4]="_";  cmd_bytes[5]="D";  cmd_bytes[6]="E";  cmd_bytes[7]="T";
+        cmd_bytes[8]="E";  cmd_bytes[9]="C";  cmd_bytes[10]="T"; cmd_bytes[11]="O";
+        cmd_bytes[12]="R"; cmd_bytes[13]=" "; cmd_bytes[14]="5"; cmd_bytes[15]=8'h0A;
+        $display("TB: sending READ_DETECTOR 5 (expect 12)");
+        for (c=0;c<16;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(3, W_GENERIC);        // "12\n"
+        $display("TB: READ_DETECTOR captured %0d bytes", rx_log_cnt);
+        if (rx_log_cnt >= 3 &&
+            rx_log[0] === 8'h31 && rx_log[1] === 8'h32 && rx_log[2] === 8'h0A) begin
+            ok_count = ok_count + 1;  $display("TB: READ_DETECTOR 5 = \"12\\n\"  (PASS)");
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL READ_DETECTOR reply (got %0d bytes, first=0x%02h)",
+                     rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
+        end
+
+        // ---- 4) READ_DETECTORS -> 64 codes "12", space-separated ----------
+        rx_log_cnt = 0;
+        cmd_bytes[0]="R";  cmd_bytes[1]="E";  cmd_bytes[2]="A";  cmd_bytes[3]="D";
+        cmd_bytes[4]="_";  cmd_bytes[5]="D";  cmd_bytes[6]="E";  cmd_bytes[7]="T";
+        cmd_bytes[8]="E";  cmd_bytes[9]="C";  cmd_bytes[10]="T"; cmd_bytes[11]="O";
+        cmd_bytes[12]="R"; cmd_bytes[13]="S"; cmd_bytes[14]=8'h0A;
+        $display("TB: sending READ_DETECTORS (expect 64 x \"12\")");
+        for (c=0;c<15;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(192, W_GENERIC*4);     // 64 codes * ("12" + sep) = 192 bytes
+        $display("TB: READ_DETECTORS captured %0d bytes", rx_log_cnt);
+        if (rx_log_cnt >= 3 &&
+            rx_log[0] === 8'h31 && rx_log[1] === 8'h32 && rx_log[2] === 8'h20) begin
+            ok_count = ok_count + 1;  $display("TB: detector stream starts \"12 \"  (PASS)");
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL detector prefix (got %0d bytes, first=0x%02h)",
+                     rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
+        end
+        if (rx_log_cnt === 192) begin
+            ok_count = ok_count + 1;  $display("TB: detector stream length = 192 bytes  (PASS)");
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL detector stream length (got %0d, expect 192)", rx_log_cnt);
+        end
+        if (rx_log_cnt >= 1 && rx_log[rx_log_cnt-1] === 8'h0A) begin
+            ok_count = ok_count + 1;  $display("TB: detector stream ends '\\n'  (PASS)");
+        end else begin
+            err_count = err_count + 1;  $display("TB: FAIL detector stream terminator");
+        end
+
+        // ---- 5) CLEAR_DETECTORS -> OK, then READ_DETECTOR 5 = "0" ----------
+        rx_log_cnt = 0;
+        cmd_bytes[0]="C";  cmd_bytes[1]="L";  cmd_bytes[2]="E";  cmd_bytes[3]="A";
+        cmd_bytes[4]="R";  cmd_bytes[5]="_";  cmd_bytes[6]="D";  cmd_bytes[7]="E";
+        cmd_bytes[8]="T";  cmd_bytes[9]="E";  cmd_bytes[10]="C"; cmd_bytes[11]="T";
+        cmd_bytes[12]="O"; cmd_bytes[13]="R"; cmd_bytes[14]="S"; cmd_bytes[15]=8'h0A;
+        $display("TB: sending CLEAR_DETECTORS");
+        for (c=0;c<16;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(3, W_GENERIC);         // OK\n
+        if (rx_log_cnt >= 3 &&
+            rx_log[0] === 8'h4F && rx_log[1] === 8'h4B && rx_log[2] === 8'h0A) begin
+            ok_count = ok_count + 1;  $display("TB: CLEAR_DETECTORS = OK\\n  (PASS)");
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL CLEAR_DETECTORS reply (got %0d bytes, first=0x%02h)",
+                     rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
+        end
+        // counters now zero
+        rx_log_cnt = 0;
+        cmd_bytes[0]="R";  cmd_bytes[1]="E";  cmd_bytes[2]="A";  cmd_bytes[3]="D";
+        cmd_bytes[4]="_";  cmd_bytes[5]="D";  cmd_bytes[6]="E";  cmd_bytes[7]="T";
+        cmd_bytes[8]="E";  cmd_bytes[9]="C";  cmd_bytes[10]="T"; cmd_bytes[11]="O";
+        cmd_bytes[12]="R"; cmd_bytes[13]=" "; cmd_bytes[14]="5"; cmd_bytes[15]=8'h0A;
+        $display("TB: sending READ_DETECTOR 5 (expect 0 after clear)");
+        for (c=0;c<16;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(2, W_GENERIC);         // "0\n"
+        if (rx_log_cnt >= 2 &&
+            rx_log[0] === 8'h30 && rx_log[1] === 8'h0A) begin
+            ok_count = ok_count + 1;  $display("TB: READ_DETECTOR 5 after clear = \"0\\n\"  (PASS)");
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL post-clear read (got %0d bytes, first=0x%02h)",
+                     rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
+        end
+
+        // ---- 6) SET_THRESHOLD 2048 -> OK (MCP4725 I2C write) --------------
+        rx_log_cnt = 0;
+        cmd_bytes[0]="S";  cmd_bytes[1]="E";  cmd_bytes[2]="T";  cmd_bytes[3]="_";
+        cmd_bytes[4]="T";  cmd_bytes[5]="H";  cmd_bytes[6]="R";  cmd_bytes[7]="E";
+        cmd_bytes[8]="S";  cmd_bytes[9]="H";  cmd_bytes[10]="O"; cmd_bytes[11]="L";
+        cmd_bytes[12]="D"; cmd_bytes[13]=" "; cmd_bytes[14]="2"; cmd_bytes[15]="0";
+        cmd_bytes[16]="4"; cmd_bytes[17]="8"; cmd_bytes[18]=8'h0A;
+        $display("TB: sending SET_THRESHOLD 2048 (expect OK)");
+        for (c=0;c<19;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(3, W_GENERIC);         // OK\n (after I2C transaction)
+        if (rx_log_cnt >= 3 &&
+            rx_log[0] === 8'h4F && rx_log[1] === 8'h4B && rx_log[2] === 8'h0A) begin
+            ok_count = ok_count + 1;  $display("TB: SET_THRESHOLD = OK\\n  (PASS)");
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL SET_THRESHOLD reply (got %0d bytes, first=0x%02h)",
+                     rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
+        end
+
+        // ---- 7) APPLY_PULSE valid -> OK + mw_gate pulse ----------------
         rx_log_cnt = 0;
         cmd_bytes[0]="A";  cmd_bytes[1]="P";  cmd_bytes[2]="P";  cmd_bytes[3]="L";
         cmd_bytes[4]="Y";  cmd_bytes[5]="_";  cmd_bytes[6]="P";  cmd_bytes[7]="U";
@@ -252,27 +340,23 @@ module tb_top_level;
         cmd_bytes[28]="0"; cmd_bytes[29]=" "; cmd_bytes[30]="0"; cmd_bytes[31]=8'h0A;
         $display("TB: sending APPLY_PULSE 0 2870000 100 500 0 (expect OK)");
         mw_gate_seen = 1'b0;
-        for (c = 0; c < 32; c = c + 1) begin sendb = cmd_bytes[c]; uart_send_byte(sendb); end
-        #(400000*CLK_PERIOD);
+        for (c=0;c<32;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(3, W_GENERIC);         // OK\n
         if (rx_log_cnt >= 3 &&
             rx_log[0] === 8'h4F && rx_log[1] === 8'h4B && rx_log[2] === 8'h0A) begin
-            ok_count = ok_count + 1;
-            $display("TB: APPLY_PULSE reply = OK\\n  (PASS)");
+            ok_count = ok_count + 1;  $display("TB: APPLY_PULSE = OK\\n  (PASS)");
         end else begin
             err_count = err_count + 1;
             $display("TB: FAIL APPLY_PULSE reply (got %0d bytes, first=0x%02h)",
                      rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
         end
-        // The RF-switch gate must pulse for the requested 500 ns (50 cycles).
         if (mw_gate_seen) begin
-            ok_count = ok_count + 1;
-            $display("TB: mw_gate pulsed after APPLY_PULSE  (PASS)");
+            ok_count = ok_count + 1;  $display("TB: mw_gate pulsed after APPLY_PULSE  (PASS)");
         end else begin
-            err_count = err_count + 1;
-            $display("TB: FAIL mw_gate did not pulse");
+            err_count = err_count + 1;  $display("TB: FAIL mw_gate did not pulse");
         end
 
-        // ---- 6) APPLY_PULSE invalid freq (0) -> ERR --------------------
+        // ---- 8) APPLY_PULSE invalid freq (0) -> ERR --------------------
         rx_log_cnt = 0;
         cmd_bytes[0]="A";  cmd_bytes[1]="P";  cmd_bytes[2]="P";  cmd_bytes[3]="L";
         cmd_bytes[4]="Y";  cmd_bytes[5]="_";  cmd_bytes[6]="P";  cmd_bytes[7]="U";
@@ -282,36 +366,133 @@ module tb_top_level;
         cmd_bytes[20]="5"; cmd_bytes[21]="0"; cmd_bytes[22]="0"; cmd_bytes[23]=" ";
         cmd_bytes[24]="0"; cmd_bytes[25]=8'h0A;
         $display("TB: sending APPLY_PULSE 0 0 100 500 0 (expect ERR)");
-        for (c = 0; c < 26; c = c + 1) begin sendb = cmd_bytes[c]; uart_send_byte(sendb); end
-        #(200000*CLK_PERIOD);
+        for (c=0;c<26;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(4, W_GENERIC);         // ERR\n
         if (rx_log_cnt >= 4 &&
             rx_log[0] === 8'h45 && rx_log[1] === 8'h52 &&
             rx_log[2] === 8'h52 && rx_log[3] === 8'h0A) begin
-            ok_count = ok_count + 1;
-            $display("TB: invalid APPLY_PULSE reply = ERR\\n  (PASS)");
+            ok_count = ok_count + 1;  $display("TB: invalid APPLY_PULSE = ERR\\n  (PASS)");
         end else begin
             err_count = err_count + 1;
             $display("TB: FAIL APPLY_PULSE ERR (got %0d bytes, first=0x%02h)",
                      rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
         end
 
-        // ---- 7) CALIBRATE -> OK -----------------------------------------
-        // Drives all 64 emitter pixels (1 ms each) + reads the 64-electrode
-        // sweep per pixel, building the LUT. With the MUX_SETTLE this is ~64
-        // pixels * 64 electrodes * ~150 cycles ~= 600k cycles + 64 ms pump.
+        // ---- 9) SET_EMITTER + DRIVE_PATTERN: parallel multi-emitter -------
+        // Arm emitters 0, 10 and 20 at full grayscale, then DRIVE_PATTERN to
+        // fire all three SIMULTANEOUSLY (the parallel-at-FPGA-speed check).
+        // SET_EMITTER 0 4095
+        rx_log_cnt = 0;
+        cmd_bytes[0]="S";  cmd_bytes[1]="E";  cmd_bytes[2]="T";  cmd_bytes[3]="_";
+        cmd_bytes[4]="E";  cmd_bytes[5]="M";  cmd_bytes[6]="I";  cmd_bytes[7]="T";
+        cmd_bytes[8]="T";  cmd_bytes[9]="E";  cmd_bytes[10]="R"; cmd_bytes[11]=" ";
+        cmd_bytes[12]="0"; cmd_bytes[13]=" "; cmd_bytes[14]="4"; cmd_bytes[15]="0";
+        cmd_bytes[16]="9"; cmd_bytes[17]="5"; cmd_bytes[18]=8'h0A;
+        $display("TB: sending SET_EMITTER 0 4095");
+        for (c=0;c<19;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(3, W_GENERIC);        // OK\n (after TLC load)
+        if (rx_log_cnt >= 3 &&
+            rx_log[0] === 8'h4F && rx_log[1] === 8'h4B && rx_log[2] === 8'h0A) begin
+            ok_count = ok_count + 1;  $display("TB: SET_EMITTER 0 = OK\\n  (PASS)");
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL SET_EMITTER 0 reply (got %0d bytes, first=0x%02h)",
+                     rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
+        end
+        // SET_EMITTER 10 4095
+        rx_log_cnt = 0;
+        cmd_bytes[0]="S";  cmd_bytes[1]="E";  cmd_bytes[2]="T";  cmd_bytes[3]="_";
+        cmd_bytes[4]="E";  cmd_bytes[5]="M";  cmd_bytes[6]="I";  cmd_bytes[7]="T";
+        cmd_bytes[8]="T";  cmd_bytes[9]="E";  cmd_bytes[10]="R"; cmd_bytes[11]=" ";
+        cmd_bytes[12]="1"; cmd_bytes[13]="0"; cmd_bytes[14]=" "; cmd_bytes[15]="4";
+        cmd_bytes[16]="0"; cmd_bytes[17]="9"; cmd_bytes[18]="5"; cmd_bytes[19]=8'h0A;
+        $display("TB: sending SET_EMITTER 10 4095");
+        for (c=0;c<20;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(3, W_GENERIC);
+        if (rx_log_cnt >= 3 &&
+            rx_log[0] === 8'h4F && rx_log[1] === 8'h4B && rx_log[2] === 8'h0A)
+            ok_count = ok_count + 1;
+        else begin
+            err_count = err_count + 1; $display("TB: FAIL SET_EMITTER 10 reply");
+        end
+        // SET_EMITTER 20 4095
+        rx_log_cnt = 0;
+        cmd_bytes[0]="S";  cmd_bytes[1]="E";  cmd_bytes[2]="T";  cmd_bytes[3]="_";
+        cmd_bytes[4]="E";  cmd_bytes[5]="M";  cmd_bytes[6]="I";  cmd_bytes[7]="T";
+        cmd_bytes[8]="T";  cmd_bytes[9]="E";  cmd_bytes[10]="R"; cmd_bytes[11]=" ";
+        cmd_bytes[12]="2"; cmd_bytes[13]="0"; cmd_bytes[14]=" "; cmd_bytes[15]="4";
+        cmd_bytes[16]="0"; cmd_bytes[17]="9"; cmd_bytes[18]="5"; cmd_bytes[19]=8'h0A;
+        $display("TB: sending SET_EMITTER 20 4095");
+        for (c=0;c<20;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(3, W_GENERIC);
+        if (rx_log_cnt >= 3 &&
+            rx_log[0] === 8'h4F && rx_log[1] === 8'h4B && rx_log[2] === 8'h0A)
+            ok_count = ok_count + 1;
+        else begin
+            err_count = err_count + 1; $display("TB: FAIL SET_EMITTER 20 reply");
+        end
+        // DRIVE_PATTERN 100 -> fire all three armed emitters in parallel
+        rx_log_cnt = 0;
+        cmd_bytes[0]="D";  cmd_bytes[1]="R";  cmd_bytes[2]="I";  cmd_bytes[3]="V";
+        cmd_bytes[4]="E";  cmd_bytes[5]="_";  cmd_bytes[6]="P";  cmd_bytes[7]="A";
+        cmd_bytes[8]="T";  cmd_bytes[9]="T";  cmd_bytes[10]="E"; cmd_bytes[11]="R";
+        cmd_bytes[12]="N"; cmd_bytes[13]=" "; cmd_bytes[14]="1"; cmd_bytes[15]="0";
+        cmd_bytes[16]="0"; cmd_bytes[17]=8'h0A;
+        $display("TB: sending DRIVE_PATTERN 100 (3 emitters in parallel)");
+        for (c=0;c<18;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(3, W_GENERIC);        // OK\n (pump runs in background)
+        // The parallel check: gs[0]=gs[10]=gs[20]=4095 AND em_blank low, all at
+        // once -- multiple emitters armed and firing simultaneously.
+        $display("TB: gs[0]=%0d gs[10]=%0d gs[20]=%0d blank=%b (expect 4095 each, 0)",
+                 dut.em_inst.tlc_inst.gs[0], dut.em_inst.tlc_inst.gs[10],
+                 dut.em_inst.tlc_inst.gs[20], em_blank);
+        if (rx_log_cnt >= 3 &&
+            rx_log[0] === 8'h4F && rx_log[1] === 8'h4B && rx_log[2] === 8'h0A &&
+            dut.em_inst.tlc_inst.gs[0]  === 12'd4095 &&
+            dut.em_inst.tlc_inst.gs[10] === 12'd4095 &&
+            dut.em_inst.tlc_inst.gs[20] === 12'd4095 &&
+            em_blank === 1'b0) begin
+            ok_count = ok_count + 1;  $display("TB: 3 emitters fire in parallel  (PASS)");
+        end else begin
+            err_count = err_count + 1; $display("TB: FAIL parallel DRIVE_PATTERN");
+        end
+        repeat(W_EM_DONE) @(posedge clk_100mhz);   // let the pattern pump finish
+        // CLEAR_EMITTERS -> OK, all gs back to 0
+        rx_log_cnt = 0;
+        cmd_bytes[0]="C";  cmd_bytes[1]="L";  cmd_bytes[2]="E";  cmd_bytes[3]="A";
+        cmd_bytes[4]="R";  cmd_bytes[5]="_";  cmd_bytes[6]="E";  cmd_bytes[7]="M";
+        cmd_bytes[8]="I";  cmd_bytes[9]="T";  cmd_bytes[10]="T"; cmd_bytes[11]="E";
+        cmd_bytes[12]="R"; cmd_bytes[13]="S"; cmd_bytes[14]=8'h0A;
+        $display("TB: sending CLEAR_EMITTERS");
+        for (c=0;c<15;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(3, W_GENERIC);        // OK\n (after TLC load of all-zero)
+        if (rx_log_cnt >= 3 &&
+            rx_log[0] === 8'h4F && rx_log[1] === 8'h4B && rx_log[2] === 8'h0A &&
+            dut.em_inst.tlc_inst.gs[0]  === 12'd0 &&
+            dut.em_inst.tlc_inst.gs[10] === 12'd0 &&
+            dut.em_inst.tlc_inst.gs[20] === 12'd0) begin
+            ok_count = ok_count + 1;  $display("TB: CLEAR_EMITTERS = OK, gs=0  (PASS)");
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL CLEAR_EMITTERS (got %0d bytes, gs0=%0d)",
+                     rx_log_cnt, dut.em_inst.tlc_inst.gs[0]);
+        end
+
+        // ---- 10) CALIBRATE -> OK -----------------------------------------
+        // 64 pixels * (clear + 1-ms-equivalent pump + 64-channel internal
+        // read_all sweep). Under FAST_SIM the whole sweep is a few thousand
+        // cycles; under real timing it is ~65 ms (wait_for_bytes with a large
+        // timeout handles both).
         rx_log_cnt = 0;
         cmd_bytes[0]="C";  cmd_bytes[1]="A";  cmd_bytes[2]="L";  cmd_bytes[3]="I";
         cmd_bytes[4]="B";  cmd_bytes[5]="R";  cmd_bytes[6]="A";  cmd_bytes[7]="T";
         cmd_bytes[8]="E";  cmd_bytes[9]=8'h0A;
         $display("TB: sending CALIBRATE");
-        for (c = 0; c < 10; c = c + 1) begin sendb = cmd_bytes[c]; uart_send_byte(sendb); end
-        // CALIBRATE drives 64 pixels * 1 ms pump (64 ms) + 64x64-elec sweep
-        // (~6 ms) ~= 70 ms; wait 80 ms for the final OK\n.
-        #(8000000*CLK_PERIOD);
+        for (c=0;c<10;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(3, W_CAL);              // OK\n
         if (rx_log_cnt >= 3 &&
             rx_log[0] === 8'h4F && rx_log[1] === 8'h4B && rx_log[2] === 8'h0A) begin
-            ok_count = ok_count + 1;
-            $display("TB: CALIBRATE reply = OK\\n  (PASS)");
+            ok_count = ok_count + 1;  $display("TB: CALIBRATE = OK\\n  (PASS)");
         end else begin
             err_count = err_count + 1;
             $display("TB: FAIL CALIBRATE reply (got %0d bytes, first=0x%02h)",
@@ -328,7 +509,7 @@ module tb_top_level;
 
     // ---- Safety timeout ----------------------------------------------------
     initial begin
-        #500_000_000;   // 500 ms safety net (CALIBRATE completes in ~70 ms)
+        #(W_SAFE * CLK_PERIOD);
         $display("TB: TIMEOUT");
         $finish;
     end
