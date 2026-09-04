@@ -117,8 +117,21 @@ parser.out
 !.tmpwork/pins.json
 hardware/pcb/*erc*.txt
 hardware/pcb/*drc*.txt
+hardware/pcb/*erc*.json
+hardware/pcb/*drc*.json
+hardware/pcb/qssc.json
 hardware/pcb/t*.kicad_sch
 /tools/bin/
+
+# FreeRouting (Specctra DSN/SES) + freeroute.py build artifacts -- derived from
+# the committed .kicad_pcb on demand by `python3 tools/freeroute.py`. The
+# freerouting.jar binary itself lives in /tools/bin/ (ignored above); see
+# tools/freeroute.py for how to obtain the pinned 2.1.0 jar.
+hardware/pcb/*.dsn
+hardware/pcb/*.ses
+hardware/pcb/*.freeroute.log
+hardware/pcb/*.freeroute.stdout
+hardware/pcb/*.freeroute.drc.json
 
 # KiCad live-edit lock files
 hardware/pcb/~*.lck

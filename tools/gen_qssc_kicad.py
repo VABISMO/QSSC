@@ -1223,7 +1223,7 @@ def build_main_board():
                         "21": "GND", "22": "RSET", "23": "GND", "24": "VREF", "26": "+3V3",
                         "27": "GND", "28": "+3V3", "29": "refclk_25m", "30": "ADF_MUXOUT",
                         "31": "GND", "32": "+3V3", "33": "GND", "8": "GND",
-                        "19": "REFIN_N"},
+                        "19": "ADF_TEMP"},
         nc_pins=["5", "13", "14", "15", "25"])
     # ADF4351 pin-tie rationale (verified vs ADI ADF4351 datasheet, 32-lead LFCSP):
     #   pin 20 VTUNE  -> LF_OUT  (loop-filter output drives the VCO tuning input;
@@ -1233,15 +1233,18 @@ def build_main_board():
     #   pin 24 VREF   -> VREF    (internal reference node -- needs a DECOUPLING cap to
     #                             GND, NOT a direct tie; a direct GND tie shorts the
     #                             internal reference. Decoupled by C36 below.)
-    #   pin 19 REFIN- -> REFIN_N (inverting ref input; single-ended CMOS ref on pin 29
-    #                             REFIN+ -> decouple REFIN- to GND with 100nF (C37), per
-    #                             datasheet Fig. 51 single-ended REFIN; NOT a direct GND)
+    #   pin 19 TEMP   -> ADF_TEMP (temperature-compensation OUTPUT; the ADF4351
+    #                             has NO REFIN- pin -- the reference is single-ended
+    #                             on REFIN pin 29.  Per datasheet Table 5, TEMP
+    #                             requires decoupling caps to GND as close as
+    #                             possible -> C37 100nF, NOT a no_connect and NOT
+    #                             a direct tie.  Net is a 2-pin decoupling net.)
     #   pin  5 SW     -> NC      (fast-lock switch I/O; fast-lock unused, leave open)
-    #   pin 13 RFOUTB+ -> NC     (unused RF output B; datasheet: leave floating)
-    #   pin 14 RFOUTB- -> NC     (unused RF output B; datasheet: leave floating)
-    #   pin 15 RFOUTA- -> NC     (complement of used single-ended RFOUTA+ pin 12;
+    #   pin 13 RFOUTA- -> NC     (complement of used single-ended RFOUTA+ pin 12;
     #                             datasheet: unused RF output left floating)
-    #   pin 25 CE/MUX -> NC      (chip-enable tied internally / MUXOUT2 unused)
+    #   pin 14 RFOUTB+ -> NC     (unused RF output B; datasheet: leave floating)
+    #   pin 15 RFOUTB- -> NC     (unused RF output B; datasheet: leave floating)
+    #   pin 25 LD     -> NC      (lock-detect output, unused)
     #   pin 29 REFIN  -> refclk_25m (FPGA 25 MHz out on ball A14, aliased in fpga_net_map)
     add("R67", "qssc:R", "1k", "Resistor_SMD:R_0603_1608Metric", 250, 175, pins={"1": "LF_CP", "2": "LF_MID"})
     add("C31", "qssc:C", "220p", "Capacitor_SMD:C_0603_1608Metric", 240, 175, pins={"1": "LF_CP", "2": "GND"})
@@ -1252,7 +1255,7 @@ def build_main_board():
     add("C36", "qssc:C", "100n", "Capacitor_SMD:C_0603_1608Metric", 315, 175,
         pins={"1": "VREF", "2": "GND"})  # ADF4351 pin 24 VREF decoupling (internal ref node)
     add("C37", "qssc:C", "100n", "Capacitor_SMD:C_0603_1608Metric", 315, 185,
-        pins={"1": "REFIN_N", "2": "GND"})  # ADF4351 pin 19 REFIN- decoupling (single-ended CMOS ref)
+        pins={"1": "ADF_TEMP", "2": "GND"})  # ADF4351 pin 19 TEMP decoupling (temp-comp output, datasheet Table 5)
     add("C34", "qssc:C", "100p", "Capacitor_SMD:C_0603_1608Metric", 330, 150, pins={"1": "RF_OUT", "2": "RF_IN"})
     add("U5", "qssc:GVA-84", "GVA-84+", "Package_TO_SOT_SMD:SOT-89-3",
         360, 150, pins=GVA84_NETS)
