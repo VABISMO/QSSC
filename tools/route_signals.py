@@ -1292,23 +1292,127 @@ def _bga_fanout(board, x0, y0, routed, fps=None):
 
 
 def _chip_fanout(board, x0, y0, routed, fps=None):
-    """Die-face fanout for the QSSC optical chip.  The die carries an 8x8 GRID
-    of 64 electrodes across the 20x20 mm face at ~2.5 mm pitch (1.2 mm pads ->
-    1.3 mm inter-pad gaps).  At this COARSE pitch a 0.2 mm track escapes each
-    pad directly through the gaps, so NO dog-bone via fanout is needed: the
-    earlier 0.30 mm perimeter-row design required a staggered dog-bone (the line
-    router could not thread the 0.30 mm field), but that stub+via geometry SHORTS
-    neighboring pads when applied to an interior 8x8 grid (the per-pad escape
-    direction lands a via on the adjacent-row pad -> DRC shorting_items between
-    emitter_cat{i} and emitter_cat{i+8}).  So this is now a NO-OP: the 64 die
-    nets are left bare and force-failed in the line router (see `structured_chip`
-    in build()), and FreeRouting escapes the 8x8 grid directly -- a standard
-    autorouter job at 2.5 mm pitch.
+    """Dog-bone fanout for a QSSC_Chip die FACE.  The die carries an 8x8 GRID of
+    64 electrodes across the 20x20 mm face at 2.5 mm pitch (1.2 mm pads -> 1.3 mm
+    inter-pad gaps, 17.5 mm span).  The main board carries QSSC_Chip_EM (64 EM
+    cathodes on F.Cu + EM_ANODE on the F.Cu left edge); the detector head carries
+    QSSC_Chip_DET (64 DET electrodes on B.Cu).
 
-    Returns the empty 5-tuple so the caller's merges are no-ops and the chip
-    pads remain in net_pads (the force-fail skips them for the line router;
-    FreeRouting's DSN export carries every net regardless of net_pads/fail)."""
-    return set(), {}, {}, {}, {}
+    Each netted die pad gets a short 0.15 mm stub on the pad's OWN layer (F.Cu
+    for EM, B.Cu for DET) outward toward the nearest die edge, to a 0.20 mm
+    through-via 1.0 mm out (in the 1.3 mm inter-pad gap).  At 2.5 mm pitch the
+    via clears the adjacent-row/col pad by 0.80 mm (>> 0.15 mm netclass), so NO
+    shorting -- the 68/98 shorting_items seen in the OLD 0.30 mm-pitch design
+    (where a 1.0 mm stub blew PAST the 0.30 mm-pitch neighbour) cannot occur
+    here.  The through-via barrel ties the pad to the OPPOSITE surface (B.Cu for
+    EM, F.Cu for DET), which is CLEAR of die pads (the die sits on one layer per
+    board), so the line router escapes via->target (TLC5947 sink / TIA / ADC
+    input) on that clear layer.  Unlike the old code, NO fixed 3 mm escape is
+    pre-routed: that fixed escape was the short source (adjacent-row escapes on
+    the same column overlapped on the escape layer).  The line router (_route_pair,
+    via the via_pads pseudo-pad + pad_vip entry) routes from the via on the clear
+    opposite layer, marking keepout so no two nets' escapes overlap.
+
+    EM_ANODE (+12V_EMIT, a POWER_NET) is NOT fanned out here -- the power router
+    (POWER_ROUTER_LAYER[+12V_EMIT] = B.Cu) ties it.  Fanouting it would add it to
+    chip_pad_centers and hide it from the power router.
+
+    Returns (chip_pad_centers, via_pads, vip_net, pad_vip, vip_vias):
+      chip_pad_centers: set of (x,y) chip-pad centres to EXCLUDE from net_pads
+        (the stub already connects the pad to its via; routing from the pad
+        itself would duplicate the stub and hit the keepout overlap).
+      via_pads: net_name -> [_PadProxy at the via position on the escape layer]
+        -- a routing endpoint the line router connects to the TLC5947/TIA/ADC
+        pad, registered in pad_vip so _route_pair escapes it on the opposite
+        surface.
+      vip_net / pad_vip / vip_vias: same shape as _bga_fanout's, merged by the
+        caller with the BGA fanout dicts.
+    """
+    chip = next((fp for fp in (fps if fps is not None else board.GetFootprints())
+                 if fp.GetReference() == "Uchip"), None)
+    if chip is None:
+        return set(), {}, {}, {}, {}
+    pads = list(chip.Pads())
+    if len(pads) < 60:                   # not a die face (64 DET / 65 EM+ANODE)
+        return set(), {}, {}, {}, {}
+    cx0, cy0 = chip.x, chip.y            # die centre = footprint origin (20x20 body)
+
+    _skip = PLANE_NETS | POWER_NETS
+    all_pads = [p for p in pads
+                if p.GetNetname() and p.GetNetname() not in _skip]
+    chip_pad_centers = set()
+    via_pads = {}
+    vip_net, pad_vip, vip_vias = {}, {}, {}
+    STUB = 1_000_000                     # 1.0 mm: lands the via mid-gap (0.80 mm clr)
+
+    def _stub(px, py, vx, vy, nc, lay):
+        t = pcbnew.PCB_TRACK(board)
+        t.SetStart(pcbnew.VECTOR2I(int(px), int(py)))
+        t.SetEnd(pcbnew.VECTOR2I(int(vx), int(vy)))
+        t.SetNetCode(nc)
+        t.SetWidth(150_000)              # 0.15 mm Chip-class stub
+        t.SetLayer(lay)                  # pad's own layer (F.Cu EM / B.Cu DET)
+        board.Add(t)
+
+    def _vip(vx, vy, nc):
+        v = pcbnew.PCB_VIA(board)
+        v.SetPosition(pcbnew.VECTOR2I(int(vx), int(vy)))
+        v.SetNetCode(nc)
+        v.SetViaType(pcbnew.VIATYPE_THROUGH)
+        v.SetDrill(BGA_VIA_DRILL_NM)
+        v.SetWidth(BGA_VIA_DIAM_NM)
+        board.Add(v)
+        return v
+
+    for p in sorted(all_pads, key=lambda q: (q.GetPosition().x,
+                                             q.GetPosition().y)):
+        nm = p.GetNetname()
+        nc = p.GetNetCode()
+        px, py = p.GetPosition().x, p.GetPosition().y
+        pad_lay = p.GetLayer()                      # F_CU (EM) or B_CU (DET)
+        esc_lay = B_CU if pad_lay == F_CU else F_CU  # opposite, clear surface
+        # stub outward toward the nearest die edge (perpendicular to it).  For an
+        # interior 8x8 pad this points toward the nearest side; the via lands in
+        # the 1.3 mm gap, clear of the 2.5 mm-pitch neighbours (see docstring).
+        ddx, ddy = px - cx0, py - cy0
+        if abs(ddy) >= abs(ddx):
+            dx, dy = 0, (1 if ddy > 0 else -1)       # top/bottom edge -> +/-y
+        else:
+            dx, dy = (1 if ddx > 0 else -1), 0       # left/right edge -> +/-x
+        chip_pad_centers.add((int(px), int(py)))
+        vx, vy = int(px + dx * STUB), int(py + dy * STUB)
+        _stub(px, py, vx, vy, nc, pad_lay)
+        v = _vip(vx, vy, nc)
+        ix = int((vx - x0) // GRID_NM)
+        iy = int((vy - y0) // GRID_NM)
+        r = BGA_VIP_MARK_RADIUS
+        # through-via barrel sits in the 1.3 mm gap (past the pad edge), so mark
+        # its keepout on EVERY signal layer so other nets do not short to it.
+        for lay in SIGNAL_LAYERS:
+            _mark(routed, ix, iy, lay, r)
+        cells = {(ix + dx_, iy + dy_, lay)
+                 for lay in SIGNAL_LAYERS
+                 for dx_ in range(-r, r + 1) for dy_ in range(-r, r + 1)}
+        vip_net.setdefault(nm, set()).add((ix, iy, esc_lay))
+        vip_net[nm] |= cells
+        pad_vip[(vx, vy)] = (esc_lay, cells)
+        vip_vias.setdefault(nm, []).append(v)
+        # mark the 0.15 mm stub cells on the pad's own layer (other nets' routes
+        # on that layer must avoid the stub).
+        ixp = int((px - x0) // GRID_NM)
+        iyp = int((py - y0) // GRID_NM)
+        for gx_ in range(min(ixp, ix), max(ixp, ix) + 1):
+            for gy_ in range(min(iyp, iy), max(iyp, iy) + 1):
+                _mark(routed, gx_, gy_, pad_lay, r)
+        # via_pads endpoint = the via position on the escape layer; the line
+        # router (_route_pair, vip_a branch) escapes from here on esc_lay to a
+        # via-up near the target, then F.Cu to the target pad.
+        via_pads.setdefault(nm, []).append(_PadProxy(
+            cx=vx, cy=vy, bx=vx - 100_000, by=vy - 100_000, bw=200_000, bh=200_000,
+            netname=nm, netcode=nc, is_pth=False, layer=esc_lay,
+            attrib=pcbnew.PAD_ATTRIB_SMD, has_hole=False))
+
+    return chip_pad_centers, via_pads, vip_net, pad_vip, vip_vias
 
 
 def build(board) -> dict:
@@ -1348,10 +1452,11 @@ def build(board) -> dict:
 
     routed = set()
     vip_net, pad_vip, vip_vias = _bga_fanout(board, x0, y0, routed, fps=fps)
-    # QSSC_Chip die-face fanout: 0.15 mm stub (on the pad's own layer) + a
-    # staggered through-via per pad, escaping on the opposite surface. Adds via
-    # pseudo-pads (via_pads) and merges its vip dicts. Main board: 65 EM/ANODE
-    # pads on F.Cu escape B.Cu; head board: 64 DET pads on B.Cu escape F.Cu.
+    # QSSC_Chip die-face dog-bone fanout: 0.15 mm stub (pad's own layer) + a
+    # 0.20 mm through-via 1.0 mm out, escaped on the opposite (clear) surface by
+    # the line router. Adds via pseudo-pads (via_pads) + merges its vip dicts.
+    # Main: 64 EM cathodes on F.Cu escape B.Cu (EM_ANODE/+12V_EMIT left to the
+    # power router). Head: 64 DET pads on B.Cu escape F.Cu.
     chip_pad_centers, via_pads, cv_net, cv_pad_vip, cv_vias = _chip_fanout(
         board, x0, y0, routed, fps=fps)
     vip_net.update(cv_net)
@@ -1483,27 +1588,21 @@ def build(board) -> dict:
     # need long B.Cu runs and must claim the (still-empty) B.Cu before short
     # local nets fill it. Then non-BGA nets, shortest first. Power rails are
     # already routed above and skipped here.
-    # `structured_chip` lists the chip nets already closed by a deterministic
-    # structured fanout. Empty here => ALL chip nets are deferred (appended to
-    # `fail`) for FreeRouting. The 8x8 die grid is 2.5 mm pitch (1.3 mm gaps) so
-    # _chip_fanout is a no-op (no dog-bone vias) and FreeRouting escapes the
-    # bare pads directly; the line router's 0.2 mm grid cannot do the long
-    # crossing pad->target fan without blocking every short net.
-    structured_chip = set()
+    # `structured_chip` = the chip nets that got a dog-bone via in _chip_fanout
+    # (64 emitter_cat on main / 64 DET_IN on head).  Each has a via_pads pseudo-
+    # pad on the clear opposite layer + a pad_vip entry, so _route_pair escapes
+    # via->target on that clear layer (vip_a branch).  They sort FIRST (vip_net
+    # members) so they claim the still-empty escape layer before short local
+    # nets fill it.  A chip net NOT in structured_chip (none expected -- every
+    # netted die pad gets a via) is left for FreeRouting.  The dog-bone vias are
+    # preserved by the chip_via_pos guard in the VIP-removal block below.
+    structured_chip = set(via_pads.keys())
     for net in sorted(net_pads,
                       key=lambda n: (0 if n in vip_net else 1, -_span(net_pads[n]),
                                      len(net_pads[n]))):
         if net in POWER_ROUTER_LAYER:
             continue
         if _is_chip_net(net) and net not in structured_chip:
-            # Chip nets are closed by the deterministic _structured_bus_fanout
-            # (crossing-free by construction) BEFORE this loop; any chip net NOT
-            # in `structured_chip` was not pairable there and is left for
-            # FreeRouting. The line router's 0.2 mm grid cannot do the long
-            # crossing breakout->target fan (chip nets sort first as vip_net
-            # members and crisscross the board, blocking every short net), so do
-            # NOT attempt them here. The dog-bone vias are preserved by the
-            # chip_via_pos guard in the VIP-removal block below.
             fail.append(net)
             continue
         pads = net_pads[net]
