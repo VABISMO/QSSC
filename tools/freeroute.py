@@ -13,7 +13,7 @@ disables the crashing optimizer entirely -- the autorouter (-mp) still runs
 and produces a complete SES; we lose only post-route pull-tight/length-tuning
 (GUI-optimize later). Verified against the head board that crashed at 47 min on -mt 2. NB: the 2.4.1 jar needs Java 25 (class v69); this box has Java 21/23, so we run the Java-21-built 2.1.0 jar (tools/bin/freerouting.jar) with -mt 0.
 """
-import sys, subprocess, os
+import sys, subprocess
 from pathlib import Path
 import pcbnew
 
