@@ -110,10 +110,10 @@
       },
       "rules": {
         "max_error": 0.005,
-        "min_clearance": 0.15,
+        "min_clearance": 0.1,
         "min_connection": 0.0,
         "min_copper_edge_clearance": 0.3,
-        "min_hole_clearance": 0.18,
+        "min_hole_clearance": 0.15,
         "min_hole_to_hole": 0.25,
         "min_microvia_diameter": 0.2,
         "min_microvia_drill": 0.1,
@@ -123,8 +123,8 @@
         "min_text_thickness": 0.08,
         "min_through_hole_diameter": 0.1,
         "min_track_width": 0.15,
-        "min_via_annular_width": 0.1,
-        "min_via_diameter": 0.45,
+        "min_via_annular_width": 0.05,
+        "min_via_diameter": 0.2,
         "solder_mask_to_copper_clearance": 0.0,
         "use_height_for_length_calcs": true
       },
@@ -267,12 +267,29 @@
         "line_style": 0,
         "microvia_diameter": 0.2,
         "microvia_drill": 0.1,
-        "name": "RF",
-        "pcb_color": "rgba(255, 0, 0, 0.000)",
+        "name": "Analog",
+        "pcb_color": "rgba(255, 255, 0, 0.000)",
         "schematic_color": "rgba(0, 0, 0, 0.000)",
-        "track_width": 0.3,
+        "track_width": 0.2,
         "via_diameter": 0.6,
         "via_drill": 0.3,
+        "wire_width": 6
+      },
+      {
+        "bus_width": 12,
+        "clearance": 0.1,
+        "diff_pair_gap": 0.25,
+        "diff_pair_via_gap": 0.25,
+        "diff_pair_width": 0.2,
+        "line_style": 0,
+        "microvia_diameter": 0.2,
+        "microvia_drill": 0.1,
+        "name": "Chip",
+        "pcb_color": "rgba(0, 255, 255, 0.000)",
+        "schematic_color": "rgba(0, 0, 0, 0.000)",
+        "track_width": 0.15,
+        "via_diameter": 0.2,
+        "via_drill": 0.1,
         "wire_width": 6
       },
       {
@@ -301,10 +318,10 @@
         "line_style": 0,
         "microvia_diameter": 0.2,
         "microvia_drill": 0.1,
-        "name": "USB",
-        "pcb_color": "rgba(0, 255, 0, 0.000)",
+        "name": "RF",
+        "pcb_color": "rgba(255, 0, 0, 0.000)",
         "schematic_color": "rgba(0, 0, 0, 0.000)",
-        "track_width": 0.2,
+        "track_width": 0.3,
         "via_diameter": 0.6,
         "via_drill": 0.3,
         "wire_width": 6
@@ -318,8 +335,8 @@
         "line_style": 0,
         "microvia_diameter": 0.2,
         "microvia_drill": 0.1,
-        "name": "Analog",
-        "pcb_color": "rgba(255, 255, 0, 0.000)",
+        "name": "USB",
+        "pcb_color": "rgba(0, 255, 0, 0.000)",
         "schematic_color": "rgba(0, 0, 0, 0.000)",
         "track_width": 0.2,
         "via_diameter": 0.6,
@@ -360,6 +377,262 @@
       {
         "netclass": "Power",
         "pattern": "3V3OUT"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN0"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN1"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN10"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN11"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN12"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN13"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN14"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN15"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN16"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN17"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN18"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN19"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN2"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN20"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN21"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN22"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN23"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN24"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN25"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN26"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN27"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN28"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN29"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN3"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN30"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN31"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN32"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN33"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN34"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN35"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN36"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN37"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN38"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN39"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN4"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN40"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN41"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN42"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN43"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN44"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN45"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN46"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN47"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN48"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN49"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN5"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN50"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN51"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN52"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN53"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN54"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN55"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN56"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN57"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN58"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN59"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN6"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN60"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN61"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN62"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN63"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN7"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN8"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "DET_IN9"
       },
       {
         "netclass": "Power",
@@ -416,6 +689,262 @@
       {
         "netclass": "Analog",
         "pattern": "VREFP"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode0"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode1"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode10"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode11"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode12"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode13"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode14"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode15"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode16"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode17"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode18"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode19"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode2"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode20"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode21"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode22"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode23"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode24"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode25"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode26"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode27"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode28"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode29"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode3"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode30"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode31"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode32"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode33"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode34"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode35"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode36"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode37"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode38"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode39"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode4"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode40"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode41"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode42"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode43"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode44"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode45"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode46"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode47"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode48"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode49"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode5"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode50"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode51"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode52"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode53"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode54"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode55"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode56"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode57"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode58"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode59"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode6"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode60"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode61"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode62"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode63"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode7"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode8"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_anode9"
       },
       {
         "netclass": "RF",

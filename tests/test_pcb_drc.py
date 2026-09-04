@@ -10,10 +10,11 @@ The committed ``qssc.kicad_pcb`` is already routed by the tools pipeline
 (``gen_qssc_kicad.py`` -> ``route_signals.py`` -> ``route_qssc_pcb.py``); this
 test does NOT regenerate or re-route -- it verifies the committed artefact.
 ``unconnected_items`` is set to "ignore" in the project (the headless line
-router cannot escape every interior 0.5 mm-pitch BGA ball -- see
-route_signals.py docstring); that severity is masked, so we assert on
-violations + footprint errors, not unconnected, and confirm the unconnected
-severity is indeed "ignore" so a future rule change can't silently regress.
+router cannot escape every interior 0.8 mm-pitch CSG324 BGA ball or every
+0.30 mm-pitch QSSC_Chip die pad -- see route_signals.py docstring); that
+severity is masked, so we assert on violations + footprint errors, not
+unconnected, and confirm the unconnected severity is indeed "ignore" so a
+future rule change can't silently regress.
 
 Skips automatically where ``kicad-cli`` is not on PATH (CI has no KiCad).
 """

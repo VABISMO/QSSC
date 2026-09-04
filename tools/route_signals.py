@@ -20,15 +20,15 @@ DRC-clean by construction:
   * track endpoints snap to real pad centres (no dangling ends).
   * via-in-pad vias on nets that never escape are REMOVED (else via_dangling).
 
-FPGA BGA fanout (the user's first priority): the 0.5 mm-pitch CPG236 has 23
-netted signal balls on its right edge; balls shadowed by a neighbour one column
-toward the escape edge cannot escape on F.Cu (BGA pads are F.Cu SMD, so B.Cu
-under the BGA is open). A 0.20/0.10 mm via-in-pad (HDI-lite) gives each shadowed
-ball a B.Cu seed to escape rightward. 0.5 mm pitch / 0.275 mm pads -> the
-via-in-pad keeps >0.26 mm clearance to the neighbouring ball, DRC-clean at the
-0.15 mm netclass clearance. 70 of 238 BGA balls are unnetted spare IO (no
-UG475 pin binding) and stay bare; the other 168 are GND(79)/+3V3(30)/
-+1V0(8)/+1V8(3)/signal(48) and all tie via through-VIP or escape.
+FPGA BGA fanout (the user's first priority): the 0.8 mm-pitch CSG324 has ~141
+netted balls; balls shadowed by a neighbour one column toward the escape edge
+cannot escape on F.Cu (BGA pads are F.Cu SMD, so the pad-free inner signal
+layers In3/In4 and B.Cu are open under the BGA). A 0.20/0.10 mm via-in-pad
+(HDI-lite) gives each shadowed ball an inner-layer seed to escape. 0.8 mm
+pitch / 0.40 mm pads -> the via-in-pad keeps >0.20 mm clearance to the
+neighbouring ball, DRC-clean at the 0.15 mm netclass clearance. Unnetted balls
+are spare IO and stay bare; the netted balls are GND/+3V3/+1V0/+1V8/signal and
+all tie via microvia/blind via/through-VIP or escape on F.Cu.
 
 Power/GND planes + GND stitching mesh come from route_qssc_pcb.py (run this
 FIRST on the clean board, then the plane script). Idempotent: clears every
@@ -118,13 +118,22 @@ EXCLUDE_NETS = {"USB_DP", "USB_DM"}
 _RF_NETS = {"RF_OUT", "RF_OUT_N", "RF_IN", "RF_AMP_OUT", "J3_SIG", "LF_CP", "LF_MID",
             "LF_OUT", "CPout", "VTUNE", "refclk_25m"}
 _USB_NETS = {"USB_DP", "USB_DM"}
-_ANALOG_NETS = {"TIA_OUT", "TIA_OUT_N", "DET_IN", "DET_BIAS", "VREFP", "VREFN", "TIA_REF",
+_ANALOG_NETS = {"TIA_OUT", "TIA_OUT_N", "DET_BIAS", "VREFP", "VREFN", "TIA_REF",
                 "VauxP0", "VauxN0"}
+# Chip die-pad nets (DET_IN0..63, emitter_anode0..63) get the 0.10 mm-clearance
+# "Chip" netclass authored in gen_qssc_kicad so the 0.30 mm-pitch dog-bone vias
+# (0.125 mm neighbour clearance) pass DRC. Mirror gen_qssc_kicad._is_chip_net.
 _NETCLASS_WIDTH_NM = {"Default": 200_000, "RF": 300_000, "Power": 500_000,
-                      "USB": 200_000, "Analog": 200_000}
+                      "USB": 200_000, "Analog": 200_000, "Chip": 150_000}
+
+
+def _is_chip_net(net):
+    return net.startswith("DET_IN") or net.startswith("emitter_anode")
 
 
 def _net_class(net):
+    if _is_chip_net(net):
+        return "Chip"
     if net in _RF_NETS:
         return "RF"
     if net in _USB_NETS:
@@ -154,8 +163,8 @@ def _mark_radius_for_width(w_nm):
 
 # ---- FPGA BGA fanout (HDI-lite via-in-pad, 6-layer) ----
 BGA_REF = "U1"
-BGA_PITCH_NM = 500_000            # 0.5 mm CPG236 pitch
-BGA_VIA_DIAM_NM = 200_000         # 0.20 mm via-in-pad (fits 0.275 mm pad)
+BGA_PITCH_NM = 800_000            # 0.8 mm CSG324 pitch (XC7A35T-1CSG324C)
+BGA_VIA_DIAM_NM = 200_000         # 0.20 mm via-in-pad (fits 0.40 mm CSG324 ball)
 BGA_VIA_DRILL_NM = 100_000         # 0.10 mm HDI drill
 
 # 6-layer HDI BGA fanout. The FPGA's ~140 netted balls tie to their nets by
@@ -1075,11 +1084,11 @@ def _apply_hdi_rules(board):
     """Relax the board's minimum via / drill / annular to HDI so the BGA fanout
     passes DRC: microvias (0.20 mm / 0.10 mm drill, F.Cu->In1 GND), blind vias
     (0.30 mm / 0.15 mm drill, F.Cu->In2 +3V3) and through via-in-pad (0.20 mm /
-    0.10 mm). The 0.5 mm-pitch CPG236 cannot be fanned out with KiCad defaults.
-    A 0.10 mm drill is standard HDI laser-drill capability; a 0.05 mm annular is
-    the standard via-in-pad figure (the PAD copper, not the via ring, provides
-    the annular -- via-in-pad is filled+capped). Blind/buried + microvias must
-    be explicitly allowed in the design rules."""
+    0.10 mm). The 0.8 mm-pitch CSG324 BGA fanout is comfortable with these HDI
+    sizes. A 0.10 mm drill is standard HDI laser-drill capability; a 0.05 mm
+    annular is the standard via-in-pad figure (the PAD copper, not the via ring,
+    provides the annular -- via-in-pad is filled+capped). Blind/buried + microvias
+    must be explicitly allowed in the design rules."""
     br = board.GetDesignSettings()
     br.m_ViasMinSize = BGA_VIA_DIAM_NM
     br.m_MinThroughDrill = BGA_VIA_DRILL_NM
@@ -1090,9 +1099,9 @@ def _apply_hdi_rules(board):
 
 
 def _bga_fanout(board, x0, y0, routed, fps=None):
-    """HDI via-in-pad fanout for the 0.5 mm-pitch FPGA BGA on the 6-layer
-    stackup. Each netted ball ties to its net by via TYPE (see the PLANE_NETS /
-    POWER_RAIL_LAYER / column-parity notes above):
+    """HDI via-in-pad fanout for the 0.8 mm-pitch FPGA BGA (CSG324) on the
+    6-layer stackup. Each netted ball ties to its net by via TYPE (see the
+    PLANE_NETS / POWER_RAIL_LAYER / column-parity notes above):
 
       * GND  -> microvia  F.Cu->In1.Cu  (no signal-layer keepout)
       * +3V3 -> blind via F.Cu->In2.Cu  (no signal-layer keepout)
@@ -1127,11 +1136,10 @@ def _bga_fanout(board, x0, y0, routed, fps=None):
                  if fp.GetReference() == BGA_REF), None)
     if fpga is None:
         return {}, {}, {}
-    # Only the FPGA BGA (CPG236, 238 pads) gets HDI via-in-pad fanout. On the
-    # chip module, U1 is the ADG732 (a 49-pad QFN-48, not a BGA) -- a via-in-pad
-    # on a QFN pad is a fabrication defect (solder wicks through the unplugged
-    # via, starving the joint), so skip fanout there. Guard on pad count:
-    # < 100 pads is not the FPGA BGA.
+    # Only the FPGA BGA (CSG324, 324 pads) gets HDI via-in-pad fanout. Guard on
+    # pad count: < 100 pads is not the FPGA BGA (the merged board has no second
+    # BGA -- the 128-pad QSSC_Chip is a fine-pitch QFN-style edge-pad die, handled
+    # by the chip fanout, not here).
     if len(list(fpga.Pads())) < 100:
         return {}, {}, {}
     pads = list(fpga.Pads())
@@ -1275,6 +1283,114 @@ def _bga_fanout(board, x0, y0, routed, fps=None):
     return vip_net, pad_vip, vip_vias
 
 
+def _chip_fanout(board, x0, y0, routed, fps=None):
+    """Staggered dog-bone fanout for the 128-pad QSSC_Chip die (0.30 mm pitch,
+    0.15x0.30 mm pads). The chip pads are too fine for the 0.2 mm line router: a
+    0.2 mm track at a pad centre clears the 0.30 mm-pitch neighbour pad by only
+    0.125 mm < the 0.15 mm netclass clearance, and the 0.3 mm PAD_KEEPOUT rings
+    of adjacent pads overlap and block the perpendicular exit. So each netted
+    pad gets a 0.15 mm F.Cu stub outward (perpendicular to the die edge: DET top
+    edge -> up, EM bottom edge -> down) to a staggered 0.20 mm through-via just
+    past the pad row; the line router then escapes the via on B.Cu (pad-free, the
+    cleanest jump layer) to the TIA / P-MOS target.
+
+    Stagger (even pads 0.5 mm, odd pads 1.0 mm out) spaces the 0.20 mm vias on a
+    ~0.58 mm diagonal so adjacent vias clear the 0.15 mm rule (same-row vias sit
+    0.60 mm apart, clearing by 0.40 mm).
+
+    Returns (chip_pad_centers, via_pads, vip_net, pad_vip, vip_vias):
+      chip_pad_centers: set of (x,y) chip-pad centres to EXCLUDE from net_pads
+        (the stub already connects the pad to its via; routing from the pad
+        itself would duplicate the stub and hit the keepout overlap).
+      via_pads: net_name -> [_PadProxy at the via position] -- a routing
+        endpoint the line router connects to the TIA/P-MOS pad, registered in
+        pad_vip so _route_pair escapes it on the inner/B.Cu jump layer.
+      vip_net / pad_vip / vip_vias: same shape as _bga_fanout's, merged by the
+        caller with the BGA fanout dicts.
+    """
+    chip = next((fp for fp in (fps if fps is not None else board.GetFootprints())
+                 if fp.GetReference() == "Uchip"), None)
+    if chip is None:
+        return set(), {}, {}, {}, {}
+    pads = list(chip.Pads())
+    if len(pads) < 100:                  # not the 128-pad die
+        return set(), {}, {}, {}, {}
+    cy = sum(p.GetPosition().y for p in pads) // len(pads)
+
+    def _netted(edge):
+        return [p for p in edge if p.GetNetname() and p.GetNetname() not in PLANE_NETS]
+
+    top = _netted(sorted([p for p in pads if p.GetPosition().y < cy],
+                         key=lambda p: p.GetPosition().x))
+    bot = _netted(sorted([p for p in pads if p.GetPosition().y > cy],
+                         key=lambda p: p.GetPosition().x))
+
+    chip_pad_centers = set()
+    via_pads = {}
+    vip_net, pad_vip, vip_vias = {}, {}, {}
+
+    def _stub(px, py, vx, vy, nc):
+        t = pcbnew.PCB_TRACK(board)
+        t.SetStart(pcbnew.VECTOR2I(int(px), int(py)))
+        t.SetEnd(pcbnew.VECTOR2I(int(vx), int(vy)))
+        t.SetNetCode(nc)
+        t.SetWidth(150_000)              # 0.15 mm fine stub (clears 0.30 mm neighbour)
+        t.SetLayer(pcbnew.F_Cu)
+        board.Add(t)
+
+    def _vip(vx, vy, nc):
+        v = pcbnew.PCB_VIA(board)
+        v.SetPosition(pcbnew.VECTOR2I(int(vx), int(vy)))
+        v.SetNetCode(nc)
+        v.SetViaType(pcbnew.VIATYPE_THROUGH)
+        v.SetDrill(BGA_VIA_DRILL_NM)
+        v.SetWidth(BGA_VIA_DIAM_NM)
+        board.Add(v)
+        return v
+
+    def _do(rank, p, dy):
+        nm = p.GetNetname()
+        nc = p.GetNetCode()
+        px, py = p.GetPosition().x, p.GetPosition().y
+        chip_pad_centers.add((int(px), int(py)))
+        stub = 500_000 if (rank % 2 == 0) else 1_000_000      # 0.5 / 1.0 mm stagger
+        vx, vy = int(px), int(py + dy * stub)
+        _stub(px, py, vx, vy, nc)
+        v = _vip(vx, vy, nc)
+        esc_lay = B_CU                      # B.Cu is pad-free -> cleanest escape
+        ix = int((vx - x0) // GRID_NM)
+        iy = int((vy - y0) // GRID_NM)
+        # The dog-bone via sits OUTSIDE the chip pad (offset by the stub), so the
+        # pad keepout does NOT cover its barrel -- mark the through-barrel keepout
+        # on EVERY signal layer (incl. F.Cu) so other nets do not short to it.
+        for lay in SIGNAL_LAYERS:
+            _mark(routed, ix, iy, lay, BGA_VIP_MARK_RADIUS)
+        r = BGA_VIP_MARK_RADIUS
+        cells = {(ix + dx, iy + dy_, lay)
+                 for lay in SIGNAL_LAYERS
+                 for dx in range(-r, r + 1) for dy_ in range(-r, r + 1)}
+        vip_net.setdefault(nm, set()).add((ix, iy, esc_lay))
+        vip_net[nm] |= cells
+        pad_vip[(vx, vy)] = (esc_lay, cells)
+        vip_vias.setdefault(nm, []).append(v)
+        # mark the 0.15 mm F.Cu stub cells so other nets' F.Cu routes avoid it.
+        ixp = int((px - x0) // GRID_NM)
+        iyp = int((py - y0) // GRID_NM)
+        for lay in (F_CU,):
+            for gy_ in range(min(iyp, iy), max(iyp, iy) + 1):
+                _mark(routed, ixp, gy_, lay, BGA_VIP_MARK_RADIUS)
+        via_pads.setdefault(nm, []).append(_PadProxy(
+            cx=vx, cy=vy, bx=vx - 100_000, by=vy - 100_000, bw=200_000, bh=200_000,
+            netname=nm, netcode=nc, is_pth=False, layer=pcbnew.F_Cu,
+            attrib=pcbnew.PAD_ATTRIB_SMD, has_hole=False))
+
+    for rank, p in enumerate(top):
+        _do(rank, p, -1)                     # DET top edge -> escape up (-y)
+    for rank, p in enumerate(bot):
+        _do(rank, p, +1)                     # EM bottom edge -> escape down (+y)
+    return chip_pad_centers, via_pads, vip_net, pad_vip, vip_vias
+
+
 def build(board) -> dict:
     # Snapshot EVERYTHING read from the board BEFORE any mutation: KiCad's swig
     # binding returns bare SwigPyObjects (no .GetCenter/.Pads) for
@@ -1296,16 +1412,34 @@ def build(board) -> dict:
 
     routed = set()
     vip_net, pad_vip, vip_vias = _bga_fanout(board, x0, y0, routed, fps=fps)
+    # 128-pad QSSC_Chip die fanout: 0.15 mm stub + staggered through-via per pad,
+    # escaping on B.Cu. Adds via pseudo-pads (via_pads) and merges its vip dicts.
+    chip_pad_centers, via_pads, cv_net, cv_pad_vip, cv_vias = _chip_fanout(
+        board, x0, y0, routed, fps=fps)
+    vip_net.update(cv_net)
+    pad_vip.update(cv_pad_vip)
+    for nm, vs in cv_vias.items():
+        vip_vias.setdefault(nm, []).extend(vs)
+    # The 128 chip dog-bone vias are a COMPLETE fanout (pad -> 0.15 mm stub ->
+    # through-via) that the GUI finishes on B.Cu; unlike a BGA via-in-pad that
+    # never escaped (a true dangling barrel), a dog-bone via is a valid net tie
+    # the line router routes FROM. So the failed-net VIP removal block below
+    # must NEVER tear them down (else 128 dead stubs end in mid-air). Track them
+    # by (x,y) position (swig proxies re-wrap on access, so id() is unreliable)
+    # so the removal loop can skip them while still dropping BGA VIPs of nets
+    # that genuinely never escaped.
+    chip_via_pos = {(int(v.GetX()), int(v.GetY()))
+                    for vs in cv_vias.values() for v in vs}
     # BGA pad bounding box (nm) for the edge-escape phase 2b: the FPGA footprint
-    # from the snapshot. None if there is no BGA (chip module) -> phase 2b skips.
+    # from the snapshot. None if there is no BGA -> phase 2b skips.
     bga_bbox = None
     fpga_fp = next((fp for fp in fps if fp.GetReference() == BGA_REF), None)
     if fpga_fp is not None and len(fpga_fp.Pads()) >= 100:
         pxs = [p.GetPosition().x for p in fpga_fp.Pads()]
         pys = [p.GetPosition().y for p in fpga_fp.Pads()]
         bga_bbox = (min(pxs), min(pys), max(pxs), max(pys))
-    # every via placed by _bga_fanout (microvias + blind + through VIPs); the
-    # removal block below decrements the through-vias of FAILED signal nets.
+    # every via placed by _bga_fanout + _chip_fanout; the removal block below
+    # decrements the through-vias of FAILED signal nets.
     bga_vias = sum(len(vs) for vs in vip_vias.values())
 
     # _route_power routes the five power rails FIRST on dedicated inner/bottom
@@ -1325,7 +1459,17 @@ def build(board) -> dict:
         for p in fp.Pads():
             nm = p.GetNetname()
             if nm and nm not in PLANE_NETS and nm not in EXCLUDE_NETS:
+                # skip the 128-pad chip die pads: _chip_fanout already tied each
+                # to a staggered dog-bone via (a via_pads pseudo-pad). Routing
+                # from the chip pad itself would duplicate the stub and hit the
+                # 0.30 mm-pitch keepout overlap; route from the via instead.
+                if (int(p.GetPosition().x), int(p.GetPosition().y)) in chip_pad_centers:
+                    continue
                 net_pads.setdefault(nm, []).append(p)
+    # add the chip-fanout via pseudo-pads as routing endpoints (the stub already
+    # connects each chip pad to its via; the line router routes via<->target).
+    for nm, ps in via_pads.items():
+        net_pads.setdefault(nm, []).extend(ps)
 
     done, partial, fail, single, nt, nv = [], [], [], [], 0, 0
     diag = {} if _DEBUG else None
@@ -1491,12 +1635,18 @@ def build(board) -> dict:
     # they tie the FPGA power balls to the rail layer regardless of whether the
     # rail track reached the regulator, and removing them would disconnect the
     # balls. So only SIGNAL-net VIPs are removed. Done nets keep theirs.
+    # EXCEPTION: the 128 QSSC_Chip dog-bone vias are a complete fanout (pad +
+    # 0.15 mm stub + through-via) the GUI finishes on B.Cu, NOT a dangling
+    # via-in-pad -- tearing them down would leave 128 dead stubs in mid-air. So
+    # they are kept regardless of whether the line router escaped them.
     fail_set = set(fail)
     for net, vs in vip_vias.items():
         if net in fail_set and net not in POWER_NETS:
             for v in vs:
+                if (int(v.GetX()), int(v.GetY())) in chip_via_pos:
+                    continue
                 board.Remove(v)
-            bga_vias -= len(vs)
+                bga_vias -= 1
     return {"routed": done, "unrouted": fail, "partial_power": partial,
             "single": single, "tracks": nt, "vias": nv,
             "bga_fanout_vias": bga_vias, "excluded": sorted(EXCLUDE_NETS)}

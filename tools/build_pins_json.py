@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Reproducibly build ``.tmpwork/pins.json`` -- the standard-KiCad-symbol pin
-tables that ``tools/gen_qssc_kicad.py`` (and ``gen_chip_module.py``) load at
+tables that ``tools/gen_qssc_kicad.py`` loads at
 import time via ``std_pins(libname, sym)``.
 
 ``pins.json`` is a *build input* to the board generators (it is read at import,
@@ -46,8 +46,11 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / ".tmpwork" / "pins.json"
 SYM_LIB = Path("/usr/share/kicad/symbols")
 
-# The exact set of std_pins("lib", "sym") calls made by gen_qssc_kicad.py and
-# gen_chip_module.py. Keep in sync with those files (grep std_pins).
+# The exact set of std_pins("lib", "sym") calls made by gen_qssc_kicad.py
+# (the merged-board generator). Keep in sync (grep std_pins). A few legacy
+# symbols (e.g. ADA4530-1, Conn_02x30) are retained so the builder reproduces
+# the committed pins.json snapshot byte-for-byte even though the merged board
+# no longer instantiates every one.
 SYMBOLS: list[tuple[str, str]] = [
     ("74xGxx", "74LVC1G04"),
     ("Amplifier_Operational", "ADA4530-1"),

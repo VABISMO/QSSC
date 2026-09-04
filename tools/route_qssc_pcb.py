@@ -106,6 +106,14 @@ VIP_MIN_NM = 1_200_000             # 1.2 mm -- via-in-pad only for large pads
 # toward each other) from co-locating.
 DRILL_MIN_CENTER_NM = 600_000      # 0.6 mm min centre-to-centre between vias
 RAIL_TRACK_NM = 400_000            # 0.4 mm F.Cu tie trace (pad-centre -> via)
+# Dense SMT connector leads (0.3 mm wide on a 0.5 mm pitch -- Samtec LSHM-130)
+# cannot host a 0.4 mm tie trace: the adjacent-row lead 0.5 mm away leaves only
+# 0.5 - 0.2 (0.4 mm trace half) - 0.15 (lead half) = 0.15 mm < the 0.16 mm
+# COPPER_GAP. A 0.2 mm trace (0.1 mm half) clears by 0.25 mm. The board's global
+# min_track_width is 0.15 mm so 0.2 mm passes the width DRC. Idempotent because
+# _clear_routed strips EVERY GND/+3V3 PCB_TRACK (route_signals routes none).
+RAIL_TRACK_THIN_NM = 200_000       # 0.2 mm tie trace for <=0.3 mm-wide pads
+RAIL_TRACK_THIN_MAX = 300_000       # pad narrow side <= this -> use the thin trace
 
 
 def _find_netcode(board, name):
@@ -149,7 +157,20 @@ def _clear_routed(board):
     tracks = [t for t in board.Tracks()]
     for t in tracks:
         nm = t.GetNetname()
-        if nm in ("GND", "+3V3") and t.GetWidth() > VIP_MAX_NM:
+        if nm not in ("GND", "+3V3"):
+            continue
+        if isinstance(t, pcbnew.PCB_VIA):
+            # strip only this script's own WIDE vias (0.6 mm stitching / rail-pad);
+            # KEEP the <= VIP_MAX_NM via-in-pad VIPs owned by route_signals
+            # (GND 0.2 mm microvias, +3V3 0.3 mm THRU vias on the BGA).
+            if t.GetWidth() > VIP_MAX_NM:
+                board.Remove(t)
+        else:
+            # PCB_TRACK: every GND/+3V3 tie trace is THIS script's (route_signals
+            # routes no GND/+3V3 tracks -- those nets are inner planes + BGA
+            # via-in-pad), so strip a tie trace at ANY width -- including the
+            # 0.2 mm dense-connector trace, which the > VIP_MAX_NM width test
+            # would leave behind as a ghost obstacle on a re-run.
             board.Remove(t)
 
 
@@ -467,10 +488,10 @@ def _add_rail_pad_vias(board, netcode, bga_xy, rail_pads, pads, sig_circles,
         # the via sits on F.Cu too, so it must clear a DIFFERENT-net tie trace
         # placed by the other rail pass (a +3V3 via over a GND trace would short).
         # Same-net tie traces (this pass's own, appended below) are skipped.
-        for tx1, ty1, tx2, ty2, tnc in tie_segs:
+        for tx1, ty1, tx2, ty2, tnc, thw in tie_segs:
             if tnc == netcode:
                 continue
-            req = via_r + track_hw + gap
+            req = via_r + thw + gap
             if _seg_dist2(vx, vy, tx1, ty1, tx2, ty2) < req * req:
                 return False
         # via-to-via spacing vs surviving vias + this call's placed vias:
@@ -516,10 +537,10 @@ def _add_rail_pad_vias(board, netcode, bga_xy, rail_pads, pads, sig_circles,
         # the other rail pass (parallel GND/+3V3 fanouts 0.5 mm apart would
         # otherwise leave a 0.1 mm gap < the 0.15 mm Power rule). Same-net traces
         # (this pass's own, appended below) may run parallel -- no DRC issue.
-        for tx1, ty1, tx2, ty2, tnc in tie_segs:
+        for tx1, ty1, tx2, ty2, tnc, thw in tie_segs:
             if tnc == netcode:
                 continue
-            req = track_hw + track_hw + gap
+            req = track_hw + thw + gap
             if _seg_seg_dist2(x1, y1, x2, y2, tx1, ty1, tx2, ty2) < req * req:
                 return False
         for cx, cy, cnc in via_centers:
@@ -542,6 +563,17 @@ def _add_rail_pad_vias(board, netcode, bga_xy, rail_pads, pads, sig_circles,
             continue
         if (px, py) in bga_xy:
             continue
+        # Per-pad tie-trace width: a dense SMT connector lead (<= 0.3 mm narrow
+        # side on a 0.5 mm pitch) cannot host a 0.4 mm trace alongside the
+        # adjacent-row lead (0.15 mm gap < COPPER_GAP), so use the 0.2 mm thin
+        # trace there. The closures below read `track_hw` late (cell binding), so
+        # reassigning it here makes _clears / _trace_clears use this pad's width.
+        if min(psz_x, psz_y) <= RAIL_TRACK_THIN_MAX:
+            track_hw = RAIL_TRACK_THIN_NM / 2
+            this_trk_w = RAIL_TRACK_THIN_NM
+        else:
+            track_hw = RAIL_TRACK_NM / 2
+            this_trk_w = RAIL_TRACK_NM
         placed = False
         # Via-in-pad for a large pad (centre exposed-pad / big connector lug):
         # a 0.6 mm via centred in a >= VIP_MIN_NM pad clears its own pad's edges
@@ -586,12 +618,13 @@ def _add_rail_pad_vias(board, netcode, bga_xy, rail_pads, pads, sig_circles,
                     t.SetStart(pcbnew.VECTOR2I(int(px), int(py)))
                     t.SetEnd(pcbnew.VECTOR2I(int(vx), int(vy)))
                     t.SetLayer(pcbnew.F_Cu)
-                    t.SetWidth(RAIL_TRACK_NM)
+                    t.SetWidth(this_trk_w)
                     t.SetNetCode(netcode)
                     board.Add(t)
-                    # record the trace so the other rail pass keeps copper gap to
-                    # it (see _clears / _trace_clears tie_segs checks).
-                    tie_segs.append((px, py, vx, vy, netcode))
+                    # record the trace (+ its half-width) so the other rail pass
+                    # keeps copper gap to it (see _clears / _trace_clears tie_segs
+                    # checks, which use this trace's real half-width).
+                    tie_segs.append((px, py, vx, vy, netcode, track_hw))
                     placed = True
                     break
                 if placed:
@@ -625,7 +658,6 @@ def _add_stitching_vias(board, netcode, bbox, pads, sig_circles, sig_segs,
     gap = COPPER_GAP_NM
     via_pad2 = (via_r + gap) ** 2
     via_via2 = (2 * via_r + gap) ** 2  # 0.76 mm: diff-net copper clearance
-    track_hw_st = RAIL_TRACK_NM / 2   # tie-trace half-width for the tie-seg check
     drill_min2 = DRILL_MIN_CENTER_NM ** 2
     margin = 2_000_000  # 2 mm in from the board edge
     x0 = bbox.GetX() + margin
@@ -662,10 +694,10 @@ def _add_stitching_vias(board, netcode, bbox, pads, sig_circles, sig_segs,
             if clear:
                 # a GND stitching via must clear a DIFFERENT-net (e.g. +3V3) tie
                 # trace (it sits on F.Cu too); same-net (GND) traces are fine.
-                for tx1, ty1, tx2, ty2, tnc in tie_segs:
+                for tx1, ty1, tx2, ty2, tnc, thw in tie_segs:
                     if tnc == netcode:
                         continue
-                    req = via_r + track_hw_st + gap
+                    req = via_r + thw + gap
                     if _seg_dist2(x, y, tx1, ty1, tx2, ty2) < req * req:
                         clear = False
                         break
@@ -694,6 +726,162 @@ def _add_stitching_vias(board, netcode, bbox, pads, sig_circles, sig_segs,
     return vias
 
 
+# Non-plane power nets whose dense SMT connector pins the line router
+# (route_signals) often cannot tie -- a 0.5 mm pitch field defeats its 0.3 mm
+# keepout ring, so e.g. J11.57 / J1.57 (+5V main->module power) end up ISOLATED
+# from the +5V rail and the module gets no power. This router's 0.16 mm
+# copper-gap rectangle model CAN fit a 0.2 mm fanout there, so it ties the
+# isolated stragglers here: thin F.Cu stub pad->via (reuses _add_rail_pad_vias)
+# then a thin B.Cu L-trace via->nearest same-net rail copper. Idempotent: the
+# pad is detected ISOLATED via connectivity, so a re-run (which does NOT strip
+# +5V) skips an already-tied pad; a full pipeline re-run has route_signals
+# strip+rebuild the +5V rail first, so this re-ties.
+STRAGGLER_POWER_NETS = ("+5V", "+5V_RF", "+5V_IN")
+
+
+def _seg_nearest(px, py, x1, y1, x2, y2):
+    """Squared distance from point (px,py) to segment (x1,y1)-(x2,y2) and the
+    nearest point on that segment, in nm."""
+    dx = x2 - x1
+    dy = y2 - y1
+    if dx == 0 and dy == 0:
+        return (px - x1) ** 2 + (py - y1) ** 2, (x1, y1)
+    tt = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)
+    if tt < 0:
+        tt = 0
+    elif tt > 1:
+        tt = 1
+    cx = x1 + tt * dx
+    cy = y1 + tt * dy
+    return (px - cx) ** 2 + (py - cy) ** 2, (cx, cy)
+
+
+def _straggler_obstacles(board):
+    """Snapshot (segs, circles) carrying netcode (+ layer for tracks) for EVERY
+    track/via on the board, taken BEFORE _clear_routed (board.Tracks() is only
+    iterable then). The B.Cu straggler tie trace must reach the existing same-net
+    rail, so the netcode lets the clearance check SKIP same-net copper -- the
+    GND/+3V3 rail-pass obstacles (sig_segs/sig_circles, no netcode) cannot, so
+    this richer snapshot is kept separate and only used by the straggler pass."""
+    segs = []     # (x1, y1, x2, y2, hw, netcode, layer)
+    circles = []  # (cx, cy, r, netcode)
+    for t in board.Tracks():
+        nc = t.GetNetCode()
+        if isinstance(t, pcbnew.PCB_VIA):
+            c = t.GetPosition()
+            circles.append((c.x, c.y, t.GetWidth() / 2, nc))
+        else:
+            s = t.GetStart()
+            e = t.GetEnd()
+            segs.append((s.x, s.y, e.x, e.y, t.GetWidth() / 2, nc, t.GetLayer()))
+    return segs, circles
+
+
+def _detect_straggler_pads(board, netcodes_set, bga_xy):
+    """{netcode: [(x,y,attr,sx,sy),...]} of SMD, non-BGA pads on each straggler
+    power net that are ISOLATED -- no same-net track/via touches them (the line
+    router could not tie them). Uses BuildConnectivity on the intact board
+    (before _clear_routed). Pads already tied by a prior run of this pass are
+    NOT isolated, so they are skipped -- the idempotency for a route_qssc_pcb
+    -only re-run."""
+    board.BuildConnectivity()
+    conn = board.GetConnectivity()
+    out = {}
+    for fp in board.GetFootprints():
+        is_bga = _is_bga(fp)
+        for pad in fp.Pads():
+            nc = pad.GetNetCode()
+            if nc not in netcodes_set:
+                continue
+            if is_bga:
+                continue
+            if pad.GetAttribute() == pcbnew.PAD_ATTRIB_PTH:
+                continue
+            if len(list(conn.GetConnectedTracks(pad))) == 0:
+                c = pad.GetCenter()
+                sz = pad.GetSize()
+                out.setdefault(nc, []).append(
+                    (c.x, c.y, pad.GetAttribute(), int(sz.x), int(sz.y)))
+    return out
+
+
+def _nearest_same_net_point(vx, vy, netcode, obs_segs, obs_circles):
+    """Nearest (x, y) point of existing same-net copper (a via centre or the
+    nearest point on a same-net track) to (vx, vy), or None."""
+    best_d2 = float("inf")
+    best_pt = None
+    for sx1, sy1, sx2, sy2, shw, snc, slay in obs_segs:
+        if snc != netcode:
+            continue
+        d2, pt = _seg_nearest(vx, vy, sx1, sy1, sx2, sy2)
+        if d2 < best_d2:
+            best_d2, best_pt = d2, pt
+    for cx, cy, cr, cnc in obs_circles:
+        if cnc != netcode:
+            continue
+        d2 = (vx - cx) ** 2 + (vy - cy) ** 2
+        if d2 < best_d2:
+            best_d2, best_pt = d2, (cx, cy)
+    return best_pt
+
+
+def _bcu_seg_clear(x1, y1, x2, y2, skip_nc, obs_segs, obs_circles, hw, gap):
+    """True if a B.Cu trace segment clears every OTHER-net B.Cu track and
+    through-via barrel by >= gap. Same-net (skip_nc) copper may be touched (the
+    tie trace ends ON the rail). Through-via barrels sit on B.Cu regardless of
+    their own layer span, so all non-same-net vias are obstacles (conservative
+    for a microvia that does not reach B.Cu -- only over-blocks, never shorts)."""
+    for sx1, sy1, sx2, sy2, shw, snc, slay in obs_segs:
+        if snc == skip_nc or slay != pcbnew.B_Cu:
+            continue
+        if _seg_seg_dist2(x1, y1, x2, y2, sx1, sy1, sx2, sy2) < (hw + shw + gap) ** 2:
+            return False
+    for cx, cy, cr, cnc in obs_circles:
+        if cnc == skip_nc:
+            continue
+        if _seg_dist2(cx, cy, x1, y1, x2, y2) < (hw + cr + gap) ** 2:
+            return False
+    return True
+
+
+def _tie_stragglers_to_rail(board, netcode, via_positions, obs_segs, obs_circles):
+    """For each straggler via just placed (a THROUGH via tying an isolated power
+    pad via its F.Cu stub), route a thin 0.2 mm B.Cu L-trace from the via to the
+    nearest existing same-net rail copper so the pad joins the rail. B.Cu carries
+    no SMD pads, so an L-path (two orthogonal segments) is usually clear; if both
+    L-orders are blocked the pad is left honestly to GUI. ``via_positions`` is
+    the list of (vx, vy, nc) the rail-pad spiral appended to via_centers (the via
+    OBJECTS' GetPosition() returns a bare SwigPyObject after board mutation).
+    Returns n_tracks."""
+    hw = RAIL_TRACK_THIN_NM / 2
+    gap = COPPER_GAP_NM
+    nt = 0
+    for vx, vy, vc in via_positions:
+        if vc != netcode:
+            continue
+        tgt = _nearest_same_net_point(vx, vy, netcode, obs_segs, obs_circles)
+        if tgt is None:
+            continue
+        tx, ty = tgt
+        if (tx - vx) ** 2 + (ty - vy) ** 2 <= (hw * 4) ** 2:
+            continue  # via already sits on / within touching distance of rail
+        for mx, my in ((tx, vy), (vx, ty)):
+            segs = ((vx, vy, mx, my), (mx, my, tx, ty))
+            if all(_bcu_seg_clear(a, b, c, d, netcode, obs_segs, obs_circles, hw, gap)
+                   for a, b, c, d in segs):
+                for x1, y1, x2, y2 in segs:
+                    t = pcbnew.PCB_TRACK(board)
+                    t.SetStart(pcbnew.VECTOR2I(int(x1), int(y1)))
+                    t.SetEnd(pcbnew.VECTOR2I(int(x2), int(y2)))
+                    t.SetLayer(pcbnew.B_Cu)
+                    t.SetWidth(RAIL_TRACK_THIN_NM)
+                    t.SetNetCode(netcode)
+                    board.Add(t)
+                    nt += 1
+                break
+    return nt
+
+
 def build(board, gnd, p33, bbox, pads) -> dict:
     """Add the copper-plane foundation to an ALREADY-LOADED board and return a
     stats dict. Does NOT load or save -- callers (main / tests) own the board
@@ -719,6 +907,19 @@ def build(board, gnd, p33, bbox, pads) -> dict:
     # via it lands clears it too). Without it, parallel 0.5 mm-pitch GND/+3V3
     # fanouts leave a 0.1 mm gap < the 0.15 mm Power rule.
     tie_segs = []
+    # Straggler power pads (e.g. +5V connector pins the line router could not
+    # tie -> module gets no power): snapshot obstacles + detect the ISOLATED
+    # pads BEFORE _clear_routed (board.Tracks() / BuildConnectivity need the
+    # intact board; a re-run skips a pad a prior run already tied -> idempotent).
+    straggler_nc = {}
+    for nm in STRAGGLER_POWER_NETS:
+        try:
+            straggler_nc[_find_netcode(board, nm)] = nm
+        except KeyError:
+            pass
+    straggler_obs = _straggler_obstacles(board) if straggler_nc else ([], [])
+    straggler_pads = (_detect_straggler_pads(board, set(straggler_nc), bga_xy)
+                      if straggler_nc else {})
     _clear_routed(board)
 
     # Detect the plane layers from the board's layer labels (works for both the
@@ -750,6 +951,33 @@ def build(board, gnd, p33, bbox, pads) -> dict:
     # tying the plane to the surface layers for signal-integrity returns).
     vias += _add_stitching_vias(board, gnd, bbox, pads, sig_circles, sig_segs,
                                 via_centers, tie_segs)
+
+    # Tie isolated straggler power pads (e.g. +5V J11.57 / J1.57) to their rail:
+    # a thin 0.2 mm F.Cu stub -> 0.6 mm via (the rail-pad spiral, which fits the
+    # 0.5 mm connector pitch the line router's 0.3 mm keepout ring cannot), then
+    # a 0.2 mm B.Cu L-trace from that via to the nearest existing same-net rail
+    # copper. Run before zone fill so the GND/+3V3 planes carve anti-pads around
+    # the new through-via barrels.
+    straggler_vias = []
+    straggler_tracks = 0
+    straggler_summary = []
+    for nc, nm in straggler_nc.items():
+        iso = straggler_pads.get(nc, [])
+        if not iso:
+            continue
+        n_before = len(via_centers)
+        placed = list(_add_rail_pad_vias(board, nc, bga_xy, {nc: iso}, pads,
+                                        sig_circles, sig_segs, sig_segs_fcu,
+                                        via_centers, tie_segs))
+        straggler_vias.extend(placed)
+        nt2 = _tie_stragglers_to_rail(board, nc, via_centers[n_before:],
+                                     straggler_obs[0], straggler_obs[1])
+        straggler_tracks += nt2
+        straggler_summary.append(f"{nm}:{len(placed)}via/{nt2}trk")
+    if straggler_vias:
+        print(f"  straggler power tie: {len(straggler_vias)} via(s), "
+              f"{straggler_tracks} B.Cu tie track(s) ({', '.join(straggler_summary)})")
+    vias += straggler_vias
 
     # fill all zones now that vias exist (ZONE_FILLER.Fill takes a vector)
     vec = pcbnew.ZONES()

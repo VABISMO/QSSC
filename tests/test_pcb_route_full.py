@@ -6,11 +6,11 @@ regenerated board:
 
     gen_qssc_kicad.py  ->  route_signals.py  ->  route_qssc_pcb.py
 
-and asserts the line router ties the majority of non-plane nets (the headless
-L/Z router cannot escape every interior 0.5 mm-pitch BGA ball -- see
-route_signals.py docstring -- so we assert a threshold, not 100%), that the
-plane foundation lands the two inner planes, and that the pipeline is idempotent
-(a second pass reproduces the same net counts).
+and asserts the line router ties a meaningful fraction of non-plane nets (the
+headless L/Z router cannot escape every interior 0.8 mm-pitch CSG324 BGA ball
+-- see route_signals.py docstring -- so we assert a threshold, not 100%), that
+the plane foundation lands the two inner planes, and that the pipeline is
+idempotent (a second pass reproduces the same net counts).
 
 This is SLOW (the line router is O(nets * grid) on a 0.2 mm grid over an 85 mm
 board) and is gated behind ``QSSC_SLOW=1`` so it does not run in the normal
@@ -43,19 +43,21 @@ pytestmark = [
                        reason="set QSSC_SLOW=1 to run the full pipeline"),
 ]
 
-# A headless L/Z router on a 0.5 mm-pitch BGA cannot escape every interior ball
-# (no free grid cell in the channel between same-parity VIPs 1.0 mm apart). The
-# correct router routes ~14/71 non-plane nets DRC-clean: the via-footprint
-# check (a THROUGH via's r3 mark on all 4 signal layers, so a via-up can never
-# land 0.1-0.6 mm off another net's track) and the multi_vip / multi_keepout
-# guards (a per-net override can never relax a cell a NEIGHBOUR pad/via also
-# owns) are provably DRC-correct but conservative -- they replaced the earlier
-# centre-only via check that placed shorting vias and inflated the count to a
-# buggy 24-37. This threshold guards against a regression below the correct
-# router's known capacity (placement drift margin), NOT a completeness target;
-# the real correctness bar is test_pcb_drc.py (0 violations on the committed
-# board). The remaining nets are finished in the KiCad GUI (see HARDWARE_DESIGN
-# §15) -- the headless router is a 1st pass, not a full autorouter.
+# A headless L/Z router on the merged single board cannot escape every interior
+# 0.8 mm-pitch CSG324 BGA ball, nor every 0.30 mm-pitch QSSC_Chip die pad (the
+# 128-pad die gets a staggered dog-bone fanout: 0.15 mm F.Cu stub + 0.20 mm
+# through-via per pad, escaped on B.Cu). The router routes a meaningful fraction
+# of the ~500 non-plane nets DRC-clean: the via-footprint check (a THROUGH via's
+# r3 mark on all 4 signal layers, so a via-up can never land 0.1-0.6 mm off
+# another net's track) and the multi_vip / multi_keepout guards (a per-net
+# override can never relax a cell a NEIGHBOUR pad/via also owns) are provably
+# DRC-correct but conservative. This threshold guards against a regression
+# below the router's known capacity (placement drift margin), NOT a
+# completeness target; the real correctness bar is test_pcb_drc.py (0 violations
+# on the committed board). The remaining nets (BGA edge escapes, chip B.Cu
+# escapes, dense-connector ties) are finished in the KiCad GUI (see
+# HARDWARE_DESIGN §15) -- the headless router is a 1st pass, not a full
+# autorouter.
 MIN_ROUTED = 12
 
 

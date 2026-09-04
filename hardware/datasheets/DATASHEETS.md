@@ -1,12 +1,13 @@
 # QSSC — Component datasheets & verified pinouts
 
-Local reference folder for every active component on the two QSSC boards
-(main control board + swappable chip module).  Each entry has:
+Local reference folder for every active component on the QSSC merged single
+board (FPGA + 128-pad quantum die + 64-ch parallel detector front-end +
+64-ch parallel emitter driver, all on one PCB).  Each entry has:
 
 - the **verified pinout** (extracted from the installed KiCad 8 symbol library
   at `/usr/share/kicad/symbols/` and cross-checked against the datasheet —
   these are the pin numbers that map 1:1 to the footprint pad numbers used in
-  `tools/gen_qssc_kicad.py` / `tools/gen_chip_module.py`), and
+  `tools/gen_qssc_kicad.py`), and
 - the **canonical datasheet URL** (download in a browser when a PDF is not
   already in `pdfs/` — many manufacturer sites block headless `curl`).
 

@@ -1094,13 +1094,25 @@ RF_NETS = {"RF_OUT", "RF_OUT_N", "RF_IN", "RF_AMP_OUT", "J3_SIG", "LF_CP", "LF_M
            "LF_OUT", "CPout", "VTUNE", "refclk_25m"}
 USB_NETS = {"USB_DP", "USB_DM", "USB_DP_F", "USB_DM_F"}
 ANALOG_NETS = {"VREFP", "VREFN"}   # TIA/XADC/DET_BIAS analog nets removed in the
-                                   # single-board pivot; DET_IN{i}/emitter_anode{i}
-                                   # are Default for now (classed in Phase 4)
+                                   # single-board pivot.
 POWER_NETS = {"+3V3", "+1V8", "+1V0", "+5V", "+5V_RF", "+5V_IN", "+5V_TIA", "GND",
               "3V3OUT", "VBUS_USB"}
 
 
+def _is_chip_net(net):
+    """The 128 QSSC_Chip die-pad nets: DET_IN0..63 (top edge -> TIA inputs) and
+    emitter_anode0..63 (bottom edge -> P-MOS drains). These fan out as staggered
+    0.30 mm-pitch dog-bone vias (0.15 mm stub + 0.20 mm through-via) whose
+    neighbour-to-neighbour edge clearance is 0.125 mm < the 0.15 mm Default
+    clearance. KiCad DRC takes the MAX of the two nets' netclass clearances, so
+    a Chip class at 0.10 mm relaxes ONLY chip<->chip (the dog-bone case, 0.125 mm
+    >= 0.10 mm) while chip<->everything-else stays 0.15 mm (max 0.10, 0.15)."""
+    return net.startswith("DET_IN") or net.startswith("emitter_anode")
+
+
 def net_class(net):
+    if _is_chip_net(net):
+        return "Chip"
     if net in RF_NETS:
         return "RF"
     if net in USB_NETS:
@@ -1418,12 +1430,26 @@ def emit_pro():
     ds["rule_severities"]["copper_edge_clearance"] = "ignore"
     ds["rule_severities"]["text_height"] = "ignore"
     ds["rule_severities"]["text_thickness"] = "ignore"
-    ds["rules"]["min_clearance"] = 0.15
+    ds["rules"]["min_clearance"] = 0.10
+    # 0.10 mm (4 mil) board min clearance -- standard HDI capability, same class
+    # as the 0.10 mm laser drills already used. The netclass clearances stay at
+    # 0.15 mm (see below), so every net-pair is governed by its 0.15 mm netclass
+    # EXCEPT chip<->chip: the "Chip" netclass is 0.10 mm so the 128 QSSC_Chip
+    # 0.30 mm-pitch dog-bone vias (0.125 mm neighbour clearance) pass. The board
+    # min_clearance is the floor; lowering it to 0.10 mm only unleashes the chip
+    # dog-bones -- all other pairs keep 0.15 mm (their netclass > board min).
     ds["rules"]["min_track_width"] = 0.15
     ds["rules"]["min_via_diameter"] = 0.45
     ds["rules"]["min_via_annular_width"] = 0.1
-    ds["rules"]["min_hole_clearance"] = 0.18
+    ds["rules"]["min_hole_clearance"] = 0.15
     ds["rules"]["min_hole_to_hole"] = 0.25
+    # 0.15 mm (6 mil) board min hole_clearance -- the floor for drill-hole-to-copper
+    # of a DIFFERENT net. The 128 QSSC_Chip 0.30 mm-pitch dog-bone vias sit 0.175 mm
+    # from the neighbour pad's F.Cu stub (e.g. DET_IN30 drill vs DET_IN29 stub),
+    # which is under the old 0.18 mm floor but clears 0.15 mm with 0.025 mm margin.
+    # Non-chip vias (0.8 mm-pitch CSG324 BGA VIPs, GND/+3V3 stitching) are on much
+    # coarser pitches so 0.15 mm is safe board-wide. Same floor-unleashes-chip
+    # pattern as min_clearance above.
     ds["rules"]["min_copper_edge_clearance"] = 0.3
     nc = proj["net_settings"]["classes"]
     nc.clear()
@@ -1458,6 +1484,15 @@ def emit_pro():
                "diff_pair_width": 0.2, "line_style": 0, "microvia_diameter": 0.2, "microvia_drill": 0.1,
                "name": "Analog", "pcb_color": "rgba(255, 255, 0, 0.000)", "schematic_color": "rgba(0, 0, 0, 0.000)",
                "track_width": 0.2, "via_diameter": 0.6, "via_drill": 0.3, "wire_width": 6})
+    # Chip netclass: the 128 QSSC_Chip die-pad nets (DET_IN0..63, emitter_anode0..63)
+    # fan out as 0.30 mm-pitch dog-bone vias whose neighbour edge clearance is 0.125
+    # mm. A 0.10 mm clearance (vs the 0.15 mm board default) relaxes ONLY chip<->chip
+    # so the dog-bones pass DRC; chip<->other nets keep 0.15 mm (KiCad takes the max
+    # of the two netclass clearances). Track width 0.15 mm matches the dog-bone stub.
+    nc.append({"bus_width": 12, "clearance": 0.10, "diff_pair_gap": 0.25, "diff_pair_via_gap": 0.25,
+               "diff_pair_width": 0.2, "line_style": 0, "microvia_diameter": 0.2, "microvia_drill": 0.1,
+               "name": "Chip", "pcb_color": "rgba(0, 255, 255, 0.000)", "schematic_color": "rgba(0, 0, 0, 0.000)",
+               "track_width": 0.15, "via_diameter": 0.2, "via_drill": 0.1, "wire_width": 6})
     # netclass patterns: assign nets by prefix
     patterns = []
     for n in all_nets():
