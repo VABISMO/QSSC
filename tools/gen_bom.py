@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 """Regenerate ``hardware/datasheets/BOM.csv`` from the ACTUAL components on the
-single merged QSSC board (the components emitted by ``gen_qssc_kicad.py``).
+two QSSC sandwich boards (the components emitted by ``gen_qssc_kicad.py``).
 
-The committed BOM was a stale two-board artefact (Samtec J11/J1, ADG732 MUX,
-ADA4530 TIA, 74LVC1G04, 74HCT240, AO3401A P-MOS, a "chip/main" Board column).
-After the single-board parallel pivot + TLC5947 emitter redesign it no longer
-matched the board at all. This builder imports the board generator, populates
-``COMPONENTS`` exactly as the board build does, groups parts by
-(value, footprint), and writes a correct single-board BOM with no leftovers.
+The QSSC die is a two-faced (no-TSV) die clamped between TWO PCBs:
+  - **main** board: FPGA + 3x TLC5947 emitter + RF + USB + power, die BOTTOM /
+    emitter face on F.Cu (ACF pressure contact), BTB HOST connector J12.
+  - **head** board: 16x TLV9004 TIA + 4x AD7616 ADC, die TOP / detector face on
+    B.Cu, BTB DAUGHTER connector J12. The 9-wire AD7616 SPI + GND/+3V3/+5V
+    cross the BTB connector; RTL and Qiskit software are unchanged.
+
+This builder imports the board generator, populates ``COMPONENTS`` for each
+board exactly as the board builds do, groups parts by (Board, value,
+footprint), and writes a correct two-board BOM with a Board column.
 
 Run:  python3 tools/gen_bom.py
 (Pure-Python: imports gen_qssc_kicad, no kicad-cli / no resource cap needed.)
 
-Columns: Designators, Qty, Value, Footprint, Manufacturer, MPN, DatasheetURL
+Columns: Board, Designators, Qty, Value, Footprint, Manufacturer, MPN, DatasheetURL
 IC/connector MPNs are filled from a curated map (verified against
 DATASHEETS.md); passives (R/C/L/D) are left generic (no MPN) since the value
 + footprint fully specify them for procurement.
@@ -53,15 +57,18 @@ MPN_MAP: dict[tuple[str, str], tuple[str, str, str]] = {
     ("TLC5947", "HTSSOP-32"):
         ("Texas Instruments", "TLC5947",
          "https://www.ti.com/lit/ds/symlink/tlc5947.pdf"),
-    ("TLV9004", "SOIC-14"):
+    ("TLV9004", "TSSOP-14"):
         ("Texas Instruments", "TLV9004",
          "https://www.ti.com/lit/ds/symlink/tlv9004.pdf"),
-    ("LMV339", "TSSOP-14"):
-        ("Texas Instruments", "LMV339",
-         "https://www.ti.com/lit/ds/symlink/lmv339.pdf"),
-    ("MCP4725", "SOT-23-6"):
-        ("Microchip", "MCP4725",
-         "https://ww1.microchip.com/downloads/en/devicedoc/22060d.pdf"),
+    ("AD7616", "LQFP-80"):
+        ("Analog Devices", "AD7616BSTZ",
+         "https://www.analog.com/media/en/technical-documentation/data-sheets/ad7616.pdf"),
+    ("BTB_HOST", "Conn_02x10_BTB"):
+        ("Würth Elektronik", "61302011121",
+         "https://www.we-online.com/en/components/products/WR-PHD_2_54_MM_SMT_PIN_HEADER_61302011121"),
+    ("BTB_DAUGHTER", "Conn_02x10_BTB"):
+        ("Würth Elektronik", "61002021121",
+         "https://www.we-online.com/en/components/products/WR-PHD_2_54_MM_THT_FEMALE_HEADER_VERTICAL_61002021121"),
     ("AMS1117-3.3", "SOT-223"):
         ("AMS", "AMS1117-3.3",
          "https://www.mouser.com/datasheet/2/260/AMS1117-Datasheet-1273816.pdf"),
@@ -98,8 +105,10 @@ MPN_MAP: dict[tuple[str, str], tuple[str, str, str]] = {
     ("ESD5V0", "D_SOD-923"):
         ("ON Semi", "ESD5V0S3B-U",
          "https://www.onsemi.com/pub/Collateral/ESD5V0S3B-U-D.PDF"),
-    ("QSSC_Chip", "QSSC_Chip"):
-        ("project die", "QSSC-128pad-CQD", ""),
+    ("QSSC_Chip_EM", "QSSC_Chip_EM"):
+        ("project die", "QSSC-128pad-CQD (emitter face)", ""),
+    ("QSSC_Chip_DET", "QSSC_Chip_DET"):
+        ("project die", "QSSC-128pad-CQD (detector face)", ""),
 }
 
 
@@ -118,31 +127,39 @@ def _ref_sort_key(ref: str):
 
 
 def main() -> None:
-    # Populate COMPONENTS exactly as the board build does.
+    # Populate COMPONENTS for each board exactly as the board build does.
+    # The board is identified by its Board label for the BOM column.
     g.build_pincoords()
-    g.assign_pcb_positions()
-    g.assign_sch_positions()
 
-    comps = g.COMPONENTS
-    # Group by (value, footprint) -> list of refs.
-    groups: dict[tuple[str, str], list[str]] = {}
-    for c in comps:
-        key = (c["value"], c["fp"])
-        groups.setdefault(key, []).append(c["ref"])
+    board_comps: list[tuple[str, list[dict]]] = []
+    for label, build_fn in (("main", g.build_main_board),
+                            ("head", g.build_detector_head)):
+        g.COMPONENTS.clear()
+        build_fn()
+        board_comps.append((label, list(g.COMPONENTS)))
+    g.COMPONENTS.clear()
+
+    # Group by (Board, value, footprint) -> list of refs.
+    groups: dict[tuple[str, str, str], list[str]] = {}
+    for label, comps in board_comps:
+        for c in comps:
+            key = (label, c["value"], c["fp"])
+            groups.setdefault(key, []).append(c["ref"])
 
     # Stable, readable row order: ICs/connectors first by value, then passives
     # by (value, footprint). Within a row, designators sorted naturally.
     def row_sort_key(item):
-        (value, fp), refs = item
+        (_board, value, fp), refs = item
         # IC/connector-ish footprints (non-R/C/L/D passives) sort first.
         passive = re.match(r"^(R|C|L|D)\d", refs[0])
         return (0 if passive else 1, value, fp)
 
     rows = []
-    for (value, fp), refs in sorted(groups.items(), key=row_sort_key):
+    for (board, value, fp), refs in sorted(groups.items(), key=row_sort_key):
         refs = sorted(refs, key=_ref_sort_key)
         mfr, mpn, url = _mpn_for(value, fp)
         rows.append({
+            "Board": board,
             "Designators": ", ".join(refs),
             "Qty": len(refs),
             "Value": value,
@@ -152,7 +169,7 @@ def main() -> None:
             "DatasheetURL": url,
         })
 
-    fieldnames = ["Designators", "Qty", "Value", "Footprint",
+    fieldnames = ["Board", "Designators", "Qty", "Value", "Footprint",
                   "Manufacturer", "MPN", "DatasheetURL"]
     OUT.parent.mkdir(parents=True, exist_ok=True)
     with OUT.open("w", newline="") as f:
@@ -161,22 +178,24 @@ def main() -> None:
         w.writerows(rows)
 
     # Summary to stdout.
-    n_comp = len(comps)
+    n_comp = sum(len(c) for _, c in board_comps)
     n_rows = len(rows)
     print(f"wrote {OUT}")
+    print(f"  main: {len(board_comps[0][1])} comps | head: {len(board_comps[1][1])} comps")
     print(f"  {n_comp} components -> {n_rows} distinct BOM line items")
     # sanity: list any leftover two-board parts that must NOT appear.
     forbidden = {"ADG732BCPZ", "ADA4530-1", "74LVC1G04", "74HCT240",
-                 "AO3401A", "AO3400A", "Samtec LSHM-130"}
+                 "AO3401A", "AO3400A", "Samtec LSHM-130",
+                 "LMV339", "MCP4725"}
     leftovers = [r for r in rows if r["Value"] in forbidden
-                 or "Samtec" in r["Manufacturer"]]
+                or "Samtec" in r["Manufacturer"]]
     if leftovers:
-        print("  !! LEFTOVER two-board parts found:")
+        print("  !! LEFTOVER stale parts found:")
         for r in leftovers:
-            print(f"     {r['Value']} ({r['Designators']})")
+            print(f"     [{r['Board']}] {r['Value']} ({r['Designators']})")
     else:
-        print("  no two-board leftovers (no ADG732/ADA4530/74HCT240/"
-              "AO3401A/Samtec) -- clean single-board BOM")
+        print("  no stale leftovers (no ADG732/ADA4530/74HCT240/AO3401A/"
+              "LMV339/MCP4725/Samtec) -- clean two-board BOM")
 
 
 if __name__ == "__main__":
