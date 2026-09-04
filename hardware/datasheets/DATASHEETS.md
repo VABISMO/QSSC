@@ -80,7 +80,7 @@ BTB HOST connector J12.
 | 16  | VVCO    | +3V3               | |
 | 17  | VVCO    | +3V3               | |
 | 18  | AGNDVCO | GND                | |
-| 19  | TEMP    | NC                 | temperature monitor, unused |
+| 19  | TEMP    | ADF_TEMP           | temperature-compensation OUTPUT — **decoupled by C37 100nF to GND per datasheet Table 5 (NOT no-connect; the ADF4351 has NO REFIN- pin, the reference is single-ended on REFIN pin 29)** |
 | 20  | VTUNE   | LF_OUT             | **loop-filter output drives VCO tune — closes the PLL loop** |
 | 21  | AGNDVCO | GND                | |
 | 22  | RSET    | RSET               | R73 4.7k -> GND |
@@ -146,18 +146,20 @@ BTB HOST connector J12.
 | pad | name | direction | net on QSSC | note |
 |----:|------|-----------|-------------|------|
 | 1   | TXD  | output    | UART_RX     | -> FPGA rx (P17). Net is FPGA-perspective: the FT232 *transmit* drives the FPGA *receive* line. |
-| 4   | VCCIO| power     | +3V3        | |
+| 4   | VCCIO| power     | +3V3        | I/O supply |
 | 5   | RXD  | input     | UART_TX     | <- FPGA tx (P18). |
-| 6,9,10,11 | RI/DCR/DCD/CTS | input | NC | unused modem control |
-| 7,18,21,25,26 | GND | power | GND | |
-| 15  | USBD+ | bidir    | USB_DP      | -> USB-C |
-| 16  | USBD- | bidir    | USB_DM      | -> USB-C |
-| 17  | 3V3OUT| output   | NC (3V3OUT) | internal regulator out, unused |
-| 19,20 | VCC | power    | +3V3        | |
-| 2,3,12,13,14,22,23,27,28 | DTR/RTS/CBUS/OSC | — | NC | unused |
+| 15  | USBD+ | bidir    | USB_DP_F    | -> R78 series-damping -> USB_DP -> USB-C |
+| 16  | USBD- | bidir    | USB_DM_F    | -> R79 series-damping -> USB_DM -> USB-C |
+| 17  | 3V3OUT| output   | 3V3OUT      | internal regulator out — **decoupled by C57 100nF to GND** (regulator stability; NOT no-connect) |
+| 19  | RESET#| input    | +3V3        | internal pull-up; tied HIGH |
+| 20,24 | VCC | power   | +3V3        | core supply (two VCC pads per SSOP-28 datasheet) |
+| 7,18,21,23,25,26 | GND/AGND | power | GND | all bond-pad grounds (pin 23 = AGND) |
+| 2,3,6,9,10,11,12,13,14,22,27,28 | DTR/RTS/CBUS/OSC/TEST | — | NC | unused modem control / crystal / LED drive / test — `(no_connect)` per datasheet |
 - **Connection note:** the FPGA ballmap ports are `tx`/`rx`; `fpga_net_map()`
   aliases them to `UART_TX`/`UART_RX` so the FT232 and FPGA share one net
-  (the prior name mismatch silently disconnected the UART).
+  (the prior name mismatch silently disconnected the UART). Pins 23 (AGND) and
+  24 (VCC) are required supply/ground pads per the SSOP-28 datasheet and are now
+  netted (previously unnetted — a real datasheet violation).
 
 ### J10 — USB-C receptacle (GCT USB4105-16P)
 - **Function:** USB + 5V power input.
@@ -334,9 +336,14 @@ on the BOTTOM face.  Because the bottom face cannot be wire-bonded face-up, the
 die is **clamped between two PCBs** — a main board (below, contacting the
 bottom/emitter face) and a detector head (above, contacting the top/detector
 face) — joined by the J12 board-to-board connector.  Each face is contacted by
-**ACF (anisotropic conductive film) pressure contact**, not solder.
+a different mechanism (the die is **removable**):
 
-### Uchip — QSSC_Chip_EM (main board) + QSSC_Chip_DET (head board)
+- **Emitter face (main board, die BOTTOM) — Ironwood SBT spring-pin socket**
+  (soldered, see `### Uchip — Ironwood_SBT socket` below).  NOT ACF.
+- **Detector face (head board, die TOP) — ACF (anisotropic conductive film)
+  pressure contact**, not solder.
+
+### Uchip — Ironwood_SBT socket (main board) + QSSC_Chip_DET (head board)
 - **Function:** the project's own fabricated quantum die — 64 top-face
   detector electrodes + 64 bottom-face emitter electrodes, driven and read in
   PARALLEL (no ADG732 MUX, no serial sweep, no XADC).  No commercial
@@ -346,14 +353,24 @@ face) — joined by the J12 board-to-board connector.  Each face is contacted by
 - **Die:** 20 x 20 mm, 129 pads @ 0.30 mm pitch (0.15 x 0.30 mm): 64 DET pads
   on the TOP face + 64 EM cathode pads on the BOTTOM face + 1 EM_ANODE pad
   (the shared common anode).
-- **Two footprints, one die:** `QSSC_Chip_EM` places the 64 EM cathodes +
-  EM_ANODE on the **main board F.Cu** (the die sits face-down on the main
-  board; EM pads on F.Cu contact the die bottom face via ACF, no F.Paste).
-  `QSSC_Chip_DET` places the 64 DET pads on the **head board B.Cu + B.Mask**
-  (the head sits above the die; DET pads on B.Cu contact the die top face via
-  ACF, no B.Paste — a contact interface, not soldered).  The two boards'
-  origins are offset by (60, 0) mm so the two die footprints align on the
-  physical die.
+- **Two footprints, one die:** `Ironwood_SBT` places the 64 EM cathodes +
+  EM_ANODE on the **main board F.Cu + F.Paste + F.Mask** — these are the
+  SOLDER pads of a commercial **Ironwood SBT** open-top / clamshell spring-pin
+  socket (the die sits emitter-down in the socket; spring pins contact the die
+  bottom pads; lid clamps it; die is removable).  `QSSC_Chip_DET` places the
+  64 DET pads on the **head board B.Cu + B.Mask** (no B.Paste — ACF contact
+  interface, not soldered).  The two boards' origins are offset by (60, 0) mm
+  so the two die footprints align on the physical die.
+- **Why a socket on the emitter face:** the user required a real **commercial
+  socket that fits the 20×20 mm / 0.30 mm-pitch die**.  No off-the-shelf socket
+  exists at that pitch/size (Yamaichi IC609 caps at 0.40 mm / ≤12 mm, Enplas
+  at 0.50 mm / 4×4 mm).  **Ironwood Electronics SBT** open-top spring-pin
+  sockets are **made-to-order** and explicitly cover 0.30 mm pitch over IC
+  bodies 1–50 mm — quoted against the die drawing.  +2.5 mm/side body →
+  25×25 mm, open-top/clamshell, hardware/screw mount, >100 k insertion cycles,
+  −55…+150 °C, <100 mΩ/pin.  MPN = "SBT custom (quote)" (mechanical, non-Digi-Key
+  BOM line).  The detector face stays ACF (lowest parasitic C at the TIA input;
+  a soldered socket there would add pin parasitics in the photocurrent path).
 - **Emitter topology (common-anode, validated against the fab protocol):**
   the 64 EM pads are per-pixel CATHODES (net `emitter_cat{i}`), each sunk by
   one TLC5947 OUTn constant-current channel (3-chip daisy chain, 72 ch, 64
@@ -374,6 +391,8 @@ face) — joined by the J12 board-to-board connector.  Each face is contacted by
   pads escape on F.Cu (head).  The dense 0.30 mm field is beyond the 0.2 mm
   line-router grid, so the via<->target escapes are routed by FreeRouting;
   the dog-bone fanout itself (pad -> stub -> via) is DRC-clean and in place.
+- **Datasheet:** Ironwood SBT spring-pin test sockets (made-to-order, quoted
+  against the die drawing): <https://www.ironwood.com/pqfp-spring-pin-test-sockets/>
 
 ---
 

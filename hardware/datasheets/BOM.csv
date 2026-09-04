@@ -1,5 +1,5 @@
 Board,Designators,Qty,Value,Footprint,Manufacturer,MPN,DatasheetURL
-main,C36,1,100n,Capacitor_SMD:C_0603_1608Metric,,,
+main,"C36, C37",2,100n,Capacitor_SMD:C_0603_1608Metric,,,
 main,"C1, C2, C3, C4, C5, C6, C7, C8, C9, C10, C11, C12, C13, C14, C15, C16, C17, C18, C19, C20, C40, C44, C46, C48, C55, C56, C58, C59, C60, C61, C62, C63, C64, C65, C68, C86, Cem0, Cem1, Cem2",39,100nF,Capacitor_SMD:C_0603_1608Metric,,,
 main,L2,1,100nH,Inductor_SMD:L_0603_1608Metric,,,
 main,"C34, C35",2,100p,Capacitor_SMD:C_0603_1608Metric,,,
@@ -41,12 +41,12 @@ main,J12,1,BTB_HOST,qssc:Conn_02x10_BTB,Würth Elektronik,61302011121,https://ww
 main,J1,1,FT232RL,Package_SO:SSOP-28_5.3x10.2mm_P0.65mm,FTDI,FT232RL,https://www.ftdichip.com/Support/Documents/DataSheets/ICs/DS_FT232R.pdf
 main,U5,1,GVA-84+,Package_TO_SOT_SMD:SOT-89-3,Mini-Circuits,GVA-84+,https://www.minicircuits.com/WebStore/dashboard.html?model=GVA-84%2B
 main,LED1,1,Green,LED_SMD:LED_0603_1608Metric,,,
+main,Uchip,1,Ironwood_SBT,qssc:Ironwood_SBT,Ironwood Electronics,SBT custom (quote against die drawing),https://www.ironwood.com/pqfp-spring-pin-test-sockets/
 main,J9,1,JTAG,Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical,Würth,61300411121,
 main,J8,1,MW_GATE,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,Würth,61300211121,
 main,"#FLG1, #FLG2, #FLG3, #FLG4, #FLG5, #FLG6, #FLG7, #FLG8",8,PWR_FLAG,,,,
 head,"#FLG10, #FLG11, #FLG9",3,PWR_FLAG,,,,
 head,Uchip,1,QSSC_Chip_DET,qssc:QSSC_Chip_DET,project die,QSSC-128pad-CQD (detector face),
-main,Uchip,1,QSSC_Chip_EM,qssc:QSSC_Chip_EM,project die,QSSC-128pad-CQD (emitter face),
 main,J7,1,RESET,Button_Switch_THT:SW_PUSH_6mm_H5mm,Würth,430182050816,
 main,J3,1,SMA,Connector_Coaxial:SMA_Amphenol_132289_EdgeMount,Amphenol,132289,https://www.amphenolrf.com/132289.html
 main,D_USB,1,SS14 Schottky,Diode_SMD:D_SMA,,,

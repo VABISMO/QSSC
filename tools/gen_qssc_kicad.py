@@ -480,6 +480,81 @@ def chip_footprint():
     return chip_footprint_em()
 
 
+# ---- Ironwood SBT open-top spring-pin SOCKET for the die emitter face --------
+# The user requires a REAL commercial socket that fits the 20x20 mm / 0.30 mm
+# pitch die (not an ACF pressure pad).  Ironwood Electronics SBT (Stamped Spring
+# Pin) sockets support 0.30 mm pitch and IC bodies 1-50 mm as a MADE-TO-ORDER
+# commercial product (footprint only +2.5 mm/side, open-top clamshell lid,
+# hardware/screw mount, >100k cycles, -55..+150 C, <100 mOhm/pin).  No off-the-
+# shelf socket exists at 0.30 mm / 20 mm (Yamaichi IC609 caps at 0.40 mm /
+# <=12 mm, Enplas at 0.50 mm / 4x4 mm) -> the socket is an Ironwood custom SBT,
+# quoted against the die drawing.  The SBT spring pins transfer 1:1 die-pad ->
+# PCB-pad at the SAME 0.30 mm perimeter positions, so the 65 contact pads reuse
+# the QSSC_Chip_EM pad geometry -- but they SOLDER to the board (F.Cu + F.Paste +
+# F.Mask; the ACF QSSC_Chip_EM pads carry no paste).  4 NPTH mount holes at the
+# socket corners (solder-less hardware mount).  The mount-hole drill/positions
+# below are SANE DEFAULTS -- FINALIZE them from the Ironwood quote drawing.
+SOCKET_BODY_HALF = 12.5     # 25x25 mm body (+2.5 mm/side over the 20 mm die)
+SOCKET_CRTYD_HALF = 13.5    # courtyard half-extent (contains body + 4 NPTH pads)
+SOCKET_MNT = 11.5           # mount-hole centre offset (just inside body corners)
+SOCKET_MNT_DRILL = 2.5      # M2 screw clearance drill (finalize from drawing)
+SOCKET_MNT_PAD = 3.5        # NPTH keep-out pad diameter (finalize from drawing)
+SOCKET_MNT_POS = [(-SOCKET_MNT, -SOCKET_MNT), (+SOCKET_MNT, -SOCKET_MNT),
+                  (-SOCKET_MNT, +SOCKET_MNT), (+SOCKET_MNT, +SOCKET_MNT)]
+
+
+def socket_footprint():
+    """Ironwood SBT open-top spring-pin socket footprint for the die EMITTER
+    (bottom) face on the MAIN board F.Cu.  65 solder pads (64 EM cathodes on the
+    bottom edge y=+10 + EM_ANODE on the LEFT edge) at the SAME 0.30 mm perimeter
+    positions as QSSC_Chip_EM (the SBT spring pins transfer 1:1 die-pad -> PCB
+    pad), but on F.Cu + F.Paste + F.Mask (soldered socket, not ACF contact).
+    ~25x25 mm body outline + 4 NPTH corner mount holes.  Pad NAMES == QSSC_Chip_EM
+    so chip_net_map_em() nets every pad identically and route_signals._chip_fanout
+    dog-bones them with the SAME escape geometry as the ACF footprint."""
+    def pad(name, x, y, w=0.15, h=0.30):
+        return L(A("pad"), S(name), A("smd"), A("rect"),
+                 L(A("at"), A(round(x, 3)), A(round(y, 3))),
+                 L(A("size"), A(w), A(h)),
+                 L(A("layers"), S("F.Cu"), S("F.Paste"), S("F.Mask")))
+    pads = [pad(f"EM{i}", _X0 + i * _PITCH, 10.0) for i in range(64)]
+    pads.append(L(A("pad"), S("EM_ANODE"), A("smd"), A("rect"),
+                  L(A("at"), A(-10.0), A(0)),
+                  L(A("size"), A(0.30), A(1.0)),
+                  L(A("layers"), S("F.Cu"), S("F.Paste"), S("F.Mask"))))
+    # 4 NPTH mount holes (solder-less hardware mount; no net, no symbol pin).
+    for mx, my in SOCKET_MNT_POS:
+        pads.append(L(A("pad"), S(""), A("np_thru_hole"), A("circle"),
+                      L(A("at"), A(round(mx, 3)), A(round(my, 3))),
+                      L(A("size"), A(SOCKET_MNT_PAD), A(SOCKET_MNT_PAD)),
+                      L(A("drill"), A(SOCKET_MNT_DRILL)),
+                      L(A("layers"), S("*.Cu"), S("*.Mask"))))
+    b, cy = SOCKET_BODY_HALF, SOCKET_CRTYD_HALF
+    return L(A("footprint"), S("qssc:Ironwood_SBT"),
+             L(A("layer"), S("F.Cu")),
+             L(A("version"), A(20240108)),
+             L(A("generator"), S("gen_qssc_kicad")),
+             L(A("generator_version"), S("8.0")),
+             L(A("descr"), S("Ironwood SBT open-top spring-pin socket for the 20x20 mm / 0.30 mm-pitch QSSC die emitter face; 64 EM cathode + EM_ANODE solder pads on F.Cu; 4 NPTH mount holes (custom part -- finalize hole drill/positions from the Ironwood quote drawing)")),
+             L(A("attr"), A("smd")),
+             L(A("property"), S("Reference"), S("U"),
+               L(A("at"), A(0), A(-cy), A(0)),
+               L(A("effects"), L(A("font"), L(A("size"), A(0.8), A(0.8))))),
+             L(A("property"), S("Value"), S("Ironwood_SBT"),
+               L(A("at"), A(0), A(cy), A(0)),
+               L(A("effects"), L(A("font"), L(A("size"), A(0.8), A(0.8))))),
+             L(A("fp_rect"), L(A("start"), A(-b), A(-b)), L(A("end"), A(b), A(b)),
+               L(A("stroke"), L(A("width"), A(0.05)), L(A("type"), A("solid"))),
+               L(A("fill"), A("none")), L(A("layer"), S("F.Fab")), L(A("uuid"), S(u()))),
+             L(A("fp_rect"), L(A("start"), A(-b), A(-b)), L(A("end"), A(b), A(b)),
+               L(A("stroke"), L(A("width"), A(0.12)), L(A("type"), A("solid"))),
+               L(A("fill"), A("none")), L(A("layer"), S("F.SilkS")), L(A("uuid"), S(u()))),
+             L(A("fp_rect"), L(A("start"), A(-cy), A(-cy)), L(A("end"), A(cy), A(cy)),
+               L(A("stroke"), L(A("width"), A(0.05)), L(A("type"), A("solid"))),
+               L(A("fill"), A("none")), L(A("layer"), S("F.CrtYd")), L(A("uuid"), S(u()))),
+             *pads)
+
+
 # ---- Conn_02x10_BTB -- board-to-board connector (main <-> detector head) -----
 # A 2x10 2.54 mm through-hole pin header (HOST, male long pins on the main
 # board) + socket (DAUGHTER, female on the head) mates the two PCBs and sets the
@@ -825,6 +900,12 @@ def authored_symbols():
                                   (-34.0, -10.16, 34.0, 16.51), value="QSSC_Chip_EM"))
     syms.append(custom_symbol_def("qssc", "QSSC_Chip_DET", "U", chip_pin_list_det(),
                                   (-34.0, -10.16, 34.0, 10.16), value="QSSC_Chip_DET"))
+    # Ironwood_SBT -- the commercial spring-pin SOCKET that holds the die emitter
+    # face on the main board (replaces the ACF QSSC_Chip_EM pad field).  Same 65
+    # electrical pins (64 EM + EM_ANODE) as QSSC_Chip_EM so chip_net_map_em() nets
+    # every contact; the 4 NPTH mount holes are footprint-only (no symbol pin).
+    syms.append(custom_symbol_def("qssc", "Ironwood_SBT", "U", chip_pin_list_em(),
+                                  (-34.0, -10.16, 34.0, 16.51), value="Ironwood_SBT"))
     # Conn_02x10_BTB -- board-to-board connector between the main board and the
     # detector head (9-wire AD7616 SPI + 3V3/5V/GND).  Replicates the standard
     # 2x10 generic connector pin layout; the footprint is authored inline.
@@ -946,7 +1027,8 @@ def replicated_symbol(lib, name, refpref, stdpinlist, value=None):
 SYM_NAME = {
     "qssc:XC7A35T_CSG324": "XC7A35T_CSG324",
     "qssc:QSSC_Chip": "QSSC_Chip", "qssc:QSSC_Chip_EM": "QSSC_Chip_EM",
-    "qssc:QSSC_Chip_DET": "QSSC_Chip_DET", "qssc:Conn_02x10_BTB": "Conn_02x10_BTB",
+    "qssc:QSSC_Chip_DET": "QSSC_Chip_DET", "qssc:Ironwood_SBT": "Ironwood_SBT",
+    "qssc:Conn_02x10_BTB": "Conn_02x10_BTB",
     "qssc:GVA-84": "GVA-84+",
     "qssc:AP2127K-1.0": "AP2127K-1.0", "qssc:AMS1117-1.8": "AMS1117-1.8",
     "qssc:AMS1117-3.3": "AMS1117-3.3", "qssc:AMS1117-5.0": "AMS1117-5.0",
@@ -994,9 +1076,10 @@ def build_pincoords():
 COMPONENTS = []
 
 
-def add(ref, lib_id, value, fp, x, y, rot=0, pins=None):
+def add(ref, lib_id, value, fp, x, y, rot=0, pins=None, nc_pins=None):
     COMPONENTS.append(dict(ref=ref, lib_id=lib_id, value=value, fp=fp,
-                           x=x, y=y, rot=rot, pins=pins or {}))
+                           x=x, y=y, rot=rot, pins=pins or {},
+                           nc_pins=list(nc_pins) if nc_pins else []))
 
 
 def pin_endpoint(comp, pinnum):
@@ -1104,10 +1187,21 @@ def build_main_board():
     # FT232 USBDP/USBDM (pins 15/16) -> USB_DP_F/USB_DM_F -> R78/R79 27R series
     # damping -> USB_DP/USB_DM (ESD diodes D1/D2 + USB-C).  Series R dampens the
     # USB edge reflections; ESD stays on the connector side (correct clamp point).
+    # FT232RL pin-tie rationale (verified vs FTDI FT232RL datasheet, SSOP-28):
+    #   pin  1 RXD  -> UART_RX   pin  5 TXD  -> UART_TX
+    #   pin 15 USBDP -> USB_DP_F pin 16 USBDM -> USB_DM_F (series-damped via R78/R79)
+    #   pin  4 VCCIO -> +3V3 (I/O supply)    pin 17 3V3OUT -> 3V3OUT (reg o/p, dec by C57)
+    #   pin 20 VCC   -> +3V3 (core supply)  pin 24 VCC   -> +3V3 (core supply, 2nd pad)
+    #   pin 23 AGND  -> GND  (analog gnd)    pin 19 RESET#-> +3V3 (internal pull-up ok)
+    #   pins 7/18/21/25/26 GND -> GND (all bond-pad grounds tied)
+    #   pins 2/3/6/9-14/22/27/28 -> NC (modem control, crystal, LED drive, TEST):
+    #       unused per datasheet; emitted as (no_connect) below.
     add("J1", "qssc:FT232RL", "FT232RL", "Package_SO:SSOP-28_5.3x10.2mm_P0.65mm",
         300, 70, pins={"1": "UART_RX", "5": "UART_TX", "15": "USB_DP_F", "16": "USB_DM_F",
-                       "4": "+3V3", "17": "3V3OUT", "20": "+3V3", "7": "GND", "18": "GND",
-                       "21": "GND", "25": "GND", "19": "+3V3", "26": "GND"})
+                       "4": "+3V3", "17": "3V3OUT", "20": "+3V3", "23": "GND", "24": "+3V3",
+                       "7": "GND", "18": "GND", "21": "GND", "25": "GND",
+                       "19": "+3V3", "26": "GND"},
+        nc_pins=["2", "3", "6", "9", "10", "11", "12", "13", "14", "22", "27", "28"])
     # USB-C VBUS is on its own VBUS_USB net; D_USB (Schottky, below) passes
     # USB -> +5V_IN only, blocking the barrel wall adapter from back-feeding +5V
     # into the USB host.  Barrel stays direct so the +5V rail keeps the full 5.0 V
@@ -1128,7 +1222,9 @@ def build_main_board():
                         "12": "RF_OUT", "16": "+3V3", "17": "+3V3", "18": "GND", "20": "LF_OUT",
                         "21": "GND", "22": "RSET", "23": "GND", "24": "VREF", "26": "+3V3",
                         "27": "GND", "28": "+3V3", "29": "refclk_25m", "30": "ADF_MUXOUT",
-                        "31": "GND", "32": "+3V3", "33": "GND", "8": "GND"})
+                        "31": "GND", "32": "+3V3", "33": "GND", "8": "GND",
+                        "19": "ADF_TEMP"},
+        nc_pins=["5", "13", "14", "15", "25"])
     # ADF4351 pin-tie rationale (verified vs ADI ADF4351 datasheet, 32-lead LFCSP):
     #   pin 20 VTUNE  -> LF_OUT  (loop-filter output drives the VCO tuning input;
     #                             WITHOUT this the PLL loop is open and VCO freq drifts)
@@ -1137,7 +1233,18 @@ def build_main_board():
     #   pin 24 VREF   -> VREF    (internal reference node -- needs a DECOUPLING cap to
     #                             GND, NOT a direct tie; a direct GND tie shorts the
     #                             internal reference. Decoupled by C36 below.)
+    #   pin 19 TEMP   -> ADF_TEMP (temperature-compensation OUTPUT; the ADF4351
+    #                             has NO REFIN- pin -- the reference is single-ended
+    #                             on REFIN pin 29.  Per datasheet Table 5, TEMP
+    #                             requires decoupling caps to GND as close as
+    #                             possible -> C37 100nF, NOT a no_connect and NOT
+    #                             a direct tie.  Net is a 2-pin decoupling net.)
     #   pin  5 SW     -> NC      (fast-lock switch I/O; fast-lock unused, leave open)
+    #   pin 13 RFOUTA- -> NC     (complement of used single-ended RFOUTA+ pin 12;
+    #                             datasheet: unused RF output left floating)
+    #   pin 14 RFOUTB+ -> NC     (unused RF output B; datasheet: leave floating)
+    #   pin 15 RFOUTB- -> NC     (unused RF output B; datasheet: leave floating)
+    #   pin 25 LD     -> NC      (lock-detect output, unused)
     #   pin 29 REFIN  -> refclk_25m (FPGA 25 MHz out on ball A14, aliased in fpga_net_map)
     add("R67", "qssc:R", "1k", "Resistor_SMD:R_0603_1608Metric", 250, 175, pins={"1": "LF_CP", "2": "LF_MID"})
     add("C31", "qssc:C", "220p", "Capacitor_SMD:C_0603_1608Metric", 240, 175, pins={"1": "LF_CP", "2": "GND"})
@@ -1147,6 +1254,8 @@ def build_main_board():
     add("R73", "qssc:R", "4.7k", "Resistor_SMD:R_0603_1608Metric", 300, 175, pins={"1": "RSET", "2": "GND"})
     add("C36", "qssc:C", "100n", "Capacitor_SMD:C_0603_1608Metric", 315, 175,
         pins={"1": "VREF", "2": "GND"})  # ADF4351 pin 24 VREF decoupling (internal ref node)
+    add("C37", "qssc:C", "100n", "Capacitor_SMD:C_0603_1608Metric", 315, 185,
+        pins={"1": "ADF_TEMP", "2": "GND"})  # ADF4351 pin 19 TEMP decoupling (temp-comp output, datasheet Table 5)
     add("C34", "qssc:C", "100p", "Capacitor_SMD:C_0603_1608Metric", 330, 150, pins={"1": "RF_OUT", "2": "RF_IN"})
     add("U5", "qssc:GVA-84", "GVA-84+", "Package_TO_SOT_SMD:SOT-89-3",
         360, 150, pins=GVA84_NETS)
@@ -1169,7 +1278,13 @@ def build_main_board():
     # LED driver (below the die) -- the common +12V_EMIT anode rail is the EM_ANODE pad.
     # The 128 nets escape outward on F.Cu (top edge up, bottom edge down).
     # ==========================================================================
-    add("Uchip", "qssc:QSSC_Chip_EM", "QSSC_Chip_EM", "qssc:QSSC_Chip_EM",
+    # The die sits EMITTER-DOWN in an Ironwood SBT open-top spring-pin socket
+    # (qssc:Ironwood_SBT) on F.Cu -- a real commercial socket (made-to-order,
+    # 0.30 mm pitch / 20 mm body) replaces the ACF QSSC_Chip_EM pad field.  The
+    # 65 contact pads net identically (chip_net_map_em) so the dog-bone fanout is
+    # unchanged; the head PCB still contacts the detector/TOP face via ACF/pogo
+    # (QSSC_Chip_DET on B.Cu).  Die removable (socket lid).
+    add("Uchip", "qssc:Ironwood_SBT", "Ironwood_SBT", "qssc:Ironwood_SBT",
         80, 55, pins=chip_net_map_em())
 
     # mw_gate drives the RF switch on THIS board (ADF4351 -> GVA-84+ -> SMA), so it
@@ -1323,7 +1438,7 @@ def build_main_board():
 # samples over a 9-pin SPI bus (adc_convst/sclk/miso/busy/cs0..3/resetn)
 # and does the 1 kHz lock-in demodulation numerically in signal_processor.v.
 # This is a TRUE analog readout of the photoluminescence intensity -- the user
-# explicitly rejected photon counting ("yo krio la señal no un contador"): the
+# explicitly rejected photon counting (user: "I want the signal, not a counter"): the
 # 16x LMV339 comparator + 64x pull-up + MCP4725 threshold DAC + 64 FPGA
 # photon-counter chain is GONE, replaced by 4 ADC chips (66 parts removed, 34
 # added; FPGA detector IO drops 64+2 -> 9 pins).
@@ -1435,7 +1550,14 @@ def build_detector_analog():
         p["63"] = f"adc_cs{j}"        # CS (per chip)
         if j == 0:
             p["67"] = "adc_busy"      # BUSY (only chip0 -> FPGA; push-pull, no wire-OR)
-        add(f"UAD{j}", "qssc:AD7616", "AD7616", AD7616_FP, 0, 0, pins=p)
+        # Intentionally-unused pins (AD7616 1-wire HW serial mode, datasheet Table 8
+        # + serial-interface section): the parallel DB bus (DB0-3,DB6-9 = pins
+        # 41-44,47,48,53,54) is inert in serial mode; SDI (55) carries no register
+        # data because HW mode (HW_RNGSEL != 00) PROHIBITS register access; SDOB
+        # (56) is the second serial output, unused in 1-wire mode (all data on
+        # SDOA = pin 57).  All declared (no_connect) per datasheet.
+        add(f"UAD{j}", "qssc:AD7616", "AD7616", AD7616_FP, 0, 0, pins=p,
+            nc_pins=["41", "42", "43", "44", "47", "48", "53", "54", "55", "56"])
         # per-chip decoupling (datasheet ref/reg/supply caps):
         add(f"Cua{j}", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
             pins={"1": "+5V_A", "2": "GND"})              # VCC HF
@@ -1480,7 +1602,13 @@ def build_emitter_driver():
             i = 24 * j + k
             if i < 64:
                 pins[str(5 + k)] = f"emitter_cat{i}"
-        add(f"UE{j}", "qssc:TLC5947", "TLC5947", TLC_FP, 0, 0, pins=pins)
+        # chip2 (j=2) uses only OUT0..OUT15 (pins 5..20); OUT16..OUT23 (pins
+        # 21..28) are unused and SOUT (pin 29) is the dangling end of the daisy
+        # chain -> all declared (no_connect) per TLC5947 datasheet (unused outputs
+        # left open; SOUT unconnected at the chain tail).
+        nc = (["21", "22", "23", "24", "25", "26", "27", "28", "29"]
+              if j == 2 else [])
+        add(f"UE{j}", "qssc:TLC5947", "TLC5947", TLC_FP, 0, 0, pins=pins, nc_pins=nc)
         # Riref: IREF -> GND, sets the per-channel constant current.
         add(f"Riref{j}", "qssc:R", "4.87k", "Resistor_SMD:R_0603_1608Metric", 0, 0,
             pins={"1": f"em_iref{j}", "2": "GND"})
@@ -1576,6 +1704,7 @@ def emit_schematic(cfg):
 
     instances = []
     labels = []
+    no_connects = []
 
     for c in COMPONENTS:
         lib_id = c["lib_id"]
@@ -1625,6 +1754,23 @@ def emit_schematic(cfg):
                       L(A("justify"), A("left"), A("bottom"))),
                     L(A("uuid"), S(u())))
             labels.append(lab)
+        # (no_connect) markers at every documented-unused pin.  The schematic is
+        # 100% net-label (0 wires), so without these the intentionally-floating /
+        # unused pins render as dangling and ERC reports pin_not_connected.  A
+        # no_connect at the pin endpoint is the KiCad-correct way to declare "this
+        # pin is deliberately left open per the datasheet" — it silences
+        # pin_not_connected for that pin without adding copper.  Keyed off the
+        # per-component `nc_pins` list (FT232 modem/crystal/LED pins, ADF4351 unused
+        # RF outputs + SW + CE, AD7616 parallel-DB bus in 1-wire HW mode, TLC5947
+        # chip2 unused OUT16-23 + SOUT, FPGA spare/XADC balls).
+        for pnum in c.get("nc_pins", []):
+            if pnum not in coords:
+                continue
+            px, py, _ = pin_endpoint(c, pnum)
+            nc = L(A("no_connect"),
+                   L(A("at"), A(round(px, 4)), A(round(py, 4))),
+                   L(A("uuid"), S(u())))
+            no_connects.append(nc)
 
     sch = L(A("kicad_sch"),
             L(A("version"), A(20231120)),
@@ -1636,6 +1782,7 @@ def emit_schematic(cfg):
             lib_symbols,
             *instances,
             *labels,
+            *no_connects,
             L(A("sheet_instances"), L(A("path"), S("/"), L(A("page"), S("1")))))
     return emit(sch)
 
@@ -1653,6 +1800,8 @@ def load_footprint_mod(fp_lib_id):
         return chip_footprint_em()
     if fp_lib_id == "qssc:Conn_02x10_BTB":  # board-to-board connector (authored)
         return conn_02x10_footprint()
+    if fp_lib_id == "qssc:Ironwood_SBT":    # die emitter-face spring-pin socket (authored)
+        return socket_footprint()
     lib, name = fp_lib_id.split(":", 1)
     p = Path(FP_LIB) / f"{lib}.pretty" / f"{name}.kicad_mod"
     return parse(p.read_text())
@@ -2082,9 +2231,9 @@ def assign_pcb_positions():
         # ---- +12V_EMIT emitter anode supply (left edge, below the 5V chain) ----
         # J4 12V barrel (left edge, rot 180 opening -x) -> F2 1A PTC. The rail
         # runs on B.Cu up to y~55 and across to the die EM_ANODE pad on the LEFT
-        # edge (70,55) -- mid-height, clear of the DET (top) and EM (bottom)
-        # dog-bone via fields. C85/C86 bulk+HF decouple it right at the anode
-        # fanout (just left of the die courtyard x69.5, y~52/58).
+        # edge (70,55) -- mid-height, clear of the EM (bottom) dog-bone via field.
+        # C85/C86 bulk+HF decouple it right at the anode fanout (just left of the
+        # Ironwood_SBT socket courtyard x66.5, y~52/58).
         "J4": (10, 72, 180), "F2": (24, 72, 0), "C85": (64, 52, 0), "C86": (64, 58, 0),
         # ---- quantum die (centre) + FPGA (moved right off the die) ----
         "Uchip": (80, 55, 0),

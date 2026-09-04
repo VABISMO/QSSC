@@ -1347,25 +1347,74 @@ configures and shifts in grayscale data. This replaces the old 100 k P-MOS
 gate pull-ups — the constant-current sinks are simply open until enabled, with
 no floating-gate hazard.
 
-### C3. Die size & pad pitch
+### C3. Die size, pad pitch & the Ironwood SBT socket
 
 The QSSC_Chip die is **20 × 20 mm**, a **two-faced die, no TSVs**: **64
 detector electrodes on the TOP face** + **64 emitter cathodes on the BOTTOM
 face** + one **EM_ANODE** pad on the bottom face (the shared common anode,
 clear of the dog-bone field). Both faces use **0.30 mm pitch** (0.15 × 0.30 mm
 pads). The die is **clamped between the two PCBs** — it is NOT wire-bonded.
-The head board's **B.Cu** contacts the die TOP (detector) face via ACF
-pressure contact (no B.Paste — it is a contact interface, not a solder
-joint); the main board's **F.Cu** contacts the die BOTTOM (emitter) face the
-same way. The 64 EM pads are per-pixel cathodes (`emitter_cat{i}`); EM_ANODE
-is the +12V_EMIT common anode. 0.30 mm pitch needs a staggered dog-bone
-fanout (0.15 mm stub on the pad's own layer + 0.20 mm through-via, even pads
-0.5 mm out, odd 1.0 mm out, escaped on the opposite layer — main EM escapes
-on B.Cu, head DET escapes on F.Cu) — an HDI escape handled by the main 6-layer
-stack + the Chip netclass (0.10 mm clearance). The head 4-layer stack is
-enough for its 64 DET pads (no FPGA, no dense BGA).
+
+The two faces are contacted by **two different mechanisms** (the die is
+removable):
+
+- **Emitter face (main board, BOTTOM face) — Ironwood SBT open-top spring-pin
+  socket.** The 64 EM cathode pads + EM_ANODE are soldered to a commercial
+  **Ironwood SBT** open-top / clamshell spring-pin socket on the main board
+  **F.Cu + F.Paste + F.Mask** (`qssc:Ironwood_SBT`, footprint `Uchip`). The die
+  sits emitter-down in the socket (spring pins contact the die bottom pads),
+  lid clamps it. Ironwood SBT is **made-to-order**, quoted against the die
+  drawing; it is the only commercial socket that covers **0.30 mm pitch over a
+  20 mm body** (+2.5 mm/side → 25 × 25 mm body, open-top, hardware/screw mount,
+  >100 k insertion cycles, −55…+150 °C, <100 mΩ/pin). No off-the-shelf socket
+  exists at this pitch/size — Yamaichi IC609 caps at 0.40 mm / ≤12 mm, Enplas
+  at 0.50 mm / 4 × 4 mm. The socket adds 4 NPTH M2 mount holes; the die centre
+  stays (80, 55) so the socket body centres on the same origin as the die.
+  MPN = "Ironwood SBT custom (quote)" — tracked in the BOM as a mechanical
+  (non-Digi-Key) line.
+- **Detector face (head board, TOP face) — ACF / pogo pressure contact.** The
+  head board's **B.Cu + B.Mask** contacts the die TOP (detector) face via ACF
+  pressure contact (**no B.Paste** — it is a contact interface, not a solder
+  joint). This face stays ACF because the detector electrodes need the lowest
+  parasitic capacitance directly at the TIA input; a soldered socket there would
+  add pin inductance/capacitance in the photocurrent path.
+
+The 64 EM pads are per-pixel cathodes (`emitter_cat{i}`); EM_ANODE is the
++12V_EMIT common anode. 0.30 mm pitch needs a staggered dog-bone fanout
+(0.15 mm stub on the pad's own layer + 0.20 mm through-via, even pads 0.5 mm
+out, odd 1.0 mm out, escaped on the opposite layer — main EM escapes on B.Cu,
+head DET escapes on F.Cu) — an HDI escape handled by the main 6-layer stack +
+the Chip netclass (0.10 mm clearance). The head 4-layer stack is enough for
+its 64 DET pads (no FPGA, no dense BGA).
+
+**z-height note (finalize from the Ironwood quote drawing):** the socket
+raises the die above main F.Cu by the socket body height; the BTB J12 pin
+length must span (socket height + die thickness + head contact gap) for the
+two-board sandwich to mate. The exact socket body height + mount-hole drill
+are finalized from the Ironwood quote drawing; the footprint uses sane
+defaults (±12.5 mm body, ±13.5 mm courtyard, M2 mount holes at ±11.5 mm,
+2.5 mm drill) that keep the board DRC-clean pending the drawing.
+
 The board (210 × 140 mm) fits the die + the 64-channel front-end above + the
 64-channel driver below + the FPGA/RF/USB/power with DRC-clean courtyards.
+
+### C4. Per-IC pin→net audit (datasheet compliance)
+
+Every IC is pinned per its datasheet; intentionally-unused pins carry a
+`(no_connect)` marker in the schematic so they are not mistaken for an
+overlooked connection. The full per-pin netting lives in `tools/gen_qssc_kicad.py`
+(`build_main_board` / `build_detector_analog` / `build_emitter_driver`); this
+table is the auditable summary.
+
+| IC | ref | package | datasheet-compliance notes |
+|---|---|---|---|
+| FT232RL | J1 | SSOP-28 | VCC (pin 20 + pin 24) → +3V3; AGND (pin 23) + all GND pads → GND; VCCIO (4) → +3V3; 3V3OUT (17) decoupled by C57; RESET# (19) → +3V3 (internal pull-up); RXD/TXD (1/5) → UART; USBDP/DM (15/16) → USB_DP/DM_F via R78/R79. NC (no_connect): modem/crystal/LED/TEST pins 2,3,6,9-14,22,27,28. |
+| ADF4351 | U3 | QFN-32-1EP | SPI CLK/DATA/LE (1/2/3) → FPGA; CE (4) → +3V3 (always on); VTUNE (20) → LF_OUT (loop closed via R67/C31/C32/R68/C33); PDB_RF (26) → +3V3 (RF enabled, active-low PD); VREF (24) decoupled by C36 (internal ref, NOT direct GND); REFIN (29) → refclk_25m (FPGA A14); **TEMP (19) → ADF_TEMP decoupled by C37** (temp-comp output per datasheet Table 5 — the ADF4351 has NO REFIN− pin, the reference is single-ended on REFIN); RSET (22) → R73 4.7k; RFOUTA+ (12) → RF_OUT (single-ended, C34 AC-coupled to GVA-84+). NC (no_connect): SW (5, fast-lock unused), RFOUTA− (13), RFOUTB+/− (14/15), LD (25) — unused RF outputs float, LD unused, per datasheet. All AVDD/DVDD/SDVDD/Vp/VVCO → +3V3 with per-supply 100nF. |
+| AD7616 ×4 | UAD0-3 | LQFP-80 | 16 analog inputs (VA/VB pins) ← DET_TIA{0..63}; VCC (6/15/30/71) → +5V_A; VDRIVE (49) → +3V3; SER/PAR (40) HIGH → serial; SER1W (45) LOW → 1-wire (SDOA only); SEQEN (37) HIGH → sequencer; REFSEL (35) LOW → internal ref (REFCAP/REFINOUT decoupled C36/Crio); HW_RNGSEL1/0 (38/39) = 1/0 → ±5 V HW mode (pin-strapped, NO register access); CHSEL (64-66), BURST (61), OS (58-60), CRCEN (46) → GND; REFCAP/REFINOUT/REGCAP/REGCAPD (31/33/70/52) decoupled by Cur/Crio/Crgc/Crgd. NC (no_connect): parallel DB bus DB0-3/6-9 (41-44,47,48,53,54), SDI (55, no reg access in HW mode), SDOB (56, unused in 1-wire). SPI: CONVST/SCLK/SDOA/RESET shared + per-chip CS; BUSY (67) only chip0. |
+| TLC5947 ×3 | UE0-2 | HTSSOP-32-1EP | SIN (4): chip0 ← em_sin, chip1/2 ← prior SOUT; SOUT (29): chip0/1 → next SIN, chip2 NC; XLAT (30) → em_xlat; BLANK (2) → em_blank; SCLK (3) → em_sclk; IREF (31) → Riref 4.87k → 10.1 mA/ch; VCC (32) → +3V3 (Cem decoupling); GND (1,33) + EP. OUT0-23 (5-28) → emitter_cat{i}; chip2 uses only OUT0-15. NC (no_connect): chip2 OUT16-23 (21-28) + SOUT (29). |
+| TLV9004 ×16 | UT0-15 | TSSOP-14 | 4 ch each: in- (2/6/9/13) ← DET_IN{i}; in+ (3/5/10/12) → DET_REF 1.65 V; out (1/7/8/14) → DET_TIA{i}; V+ (4) → +3V3; V- (11) → GND; Rf 1 MΩ ‖ Cf 1 pF across in-/out. |
+| Ironwood SBT | Uchip | custom (25×25 mm) | 65 solder pads (64 EM cathodes + EM_ANODE) on F.Cu + F.Paste + F.Mask at 0.30 mm die pitch; 4 NPTH M2 mount holes. EM pads → emitter_cat{i}; EM_ANODE → +12V_EMIT. Die removable, emitter-down. |
+| QSSC_Chip_DET | Uchip (head) | custom | 64 DET electrodes on B.Cu + B.Mask (no B.Paste, ACF contact) → DET_IN{i}; dog-bone escapes on F.Cu. |
 
 ---
 
