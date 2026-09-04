@@ -1,21 +1,30 @@
 # QSSC — Quantum Solid-State Chip (Room Temperature) — Electronic Hardware Design
 
-This document describes the electronic hardware of the **QSSC** control board: a
-**single merged 6-layer HDI PCB** that carries a Xilinx Artix-7 FPGA
-(**XC7A35T-1CSG324C**) and a **128-pad quantum die** on the same board. The die
-integrates **64 individual CQD emitters** (bottom edge, ~520–540 nm,
-electrically pumped) and **64 individual graphene/MoS₂ photodetectors** (top
-edge), both read/driven **fully in parallel** — no analog multiplexer, no
-serial sweep. Detectors are read out as **digital photon counts**: 64×
-transimpedance amplifier + 64× comparator → 64 FPGA LVCMOS inputs → 64 parallel
-16-bit counters in the fabric. Emitters are driven individually by **3× TLC5947**
-24-channel 12-bit PWM constant-current LED drivers (daisy-chained, 72 channels,
-64 used): each emitter cathode sinks into one TLC5947 OUTn channel, and the 64
-emitters share a common **+12V_EMIT** anode rail (the CQD EL turn-on is 4–8 V,
-so a 12 V LED supply gives the constant-current sink headroom). All 64 emitters
-fire in parallel at independent 12-bit intensities over a 4-wire FPGA interface
+This document describes the electronic hardware of the **QSSC** — a **two-PCB
+sandwich** that carries a Xilinx Artix-7 FPGA (**XC7A35T-1CSG324C**) and a
+**two-faced 129-pad quantum die** clamped between two boards. The die integrates
+**64 individual CQD emitters** (bottom face, ~520–540 nm, electrically pumped)
+and **64 individual graphene/MoS₂ photodetectors** (top face), both read/driven
+**fully in parallel** — no analog multiplexer, no serial sweep. The die has **no
+through-silicon vias (TSVs)**, so each face is contacted by its own PCB:
+  - **Main board** (6-layer HDI 210×140 mm) below the die — FPGA + 3× TLC5947
+    emitter driver + RF + USB + power + config flash, contacting the die BOTTOM
+    (emitter) face on F.Cu via ACF pressure contact.
+  - **Detector head** (4-layer 150×140 mm) above the die — 16× TLV9004 TIA +
+    4× AD7616 ADC, contacting the die TOP (detector) face on B.Cu via ACF.
+  - **J12 board-to-board connector** (2×10, 2.54 mm) joins the two boards and
+    carries the 9-wire AD7616 SPI + GND/+3V3/+5V.
+
+Detectors are read out as **digitised waveforms**: 64× transimpedance amplifier
+→ 4× AD7616 16-channel simultaneous-sampling 16-bit ADC → 9-wire SPI across J12
+→ the FPGA. Emitters are driven individually by **3× TLC5947** 24-channel 12-bit
+PWM constant-current LED drivers (daisy-chained, 72 channels, 64 used): each
+emitter cathode sinks into one TLC5947 OUTn channel, and the 64 emitters share a
+common **+12V_EMIT** anode rail (the CQD EL turn-on is 4–8 V, so a 12 V LED
+supply gives the constant-current sink headroom). All 64 emitters fire in
+parallel at independent 12-bit intensities over a 4-wire FPGA interface
 (em_sclk/em_sin/em_xlat/em_blank). Microwave pulses for ODMR spin control
-V_B⁻) are synthesised by an ADF4351 PLL + GVA-84+ MMIC amplifier. A host PC
+(V_B⁻) are synthesised by an ADF4351 PLL + GVA-84+ MMIC amplifier. A host PC
 communicates over USB-UART (FT232). Master clock is a 100 MHz TCXO. Power is
 derived from a 5 V input through 3.3 V / 1.8 V / 1.0 V LDOs.
 
@@ -25,15 +34,24 @@ and is read electrically. The hBN V_B⁻ and SiC V_Si defect families are retain
 as sensor variants (the same control board drives them; only the host substrate
 and MW frequency change).
 
-> **Architecture pivot (2026-09).** The design was previously **two boards** — a
-> main control board + a swappable chip module mated by a 60-pin Samtec — with
-> 64 detectors read **serially** through a 64:1 analog MUX → one TIA → the
-> FPGA's single XADC, and 64 emitters driven as an 8×8 matrix. That design is
-> **superseded**. The MUX, the XADC analog chain, the ADA4530 TIA, the Samtec
-> J11, the 8×8 emitter matrix and the second board are all gone. "Una sola
-> placa, todo en paralelo": one board, every channel parallel, digital
-> photon-counting. This document describes the merged single-board parallel
-> design only; any residual reference to MUX/XADC/J11/8×8/two-board is stale.
+> **Architecture pivot (2026-09).** The design went through three stages:
+> 1. **Original (superseded):** two boards — a main control board + a swappable
+>    chip module mated by a 60-pin Samtec — with 64 detectors read **serially**
+>    through a 64:1 analog MUX → one TIA → the FPGA's single XADC, and 64
+>    emitters driven as an 8×8 matrix. The MUX, XADC, ADA4530 TIA, Samtec J11 and
+>    8×8 matrix are all gone.
+> 2. **Single merged board (superseded):** "una sola placa, todo en paralelo" —
+>    one board, every channel parallel, but detectors read as **digital photon
+>    counts** (16× LMV339 comparator + MCP4725 threshold DAC → 64 FPGA
+>    counters), and the die treated as face-up with all 129 pads on F.Cu.
+> 3. **Two-PCB sandwich (current):** the die is a true **two-faced die with no
+>    TSVs** — it is clamped between a main board (emitter/bottom face on F.Cu)
+>    and a detector head (detector/top face on B.Cu), and readout is the **4×
+>    AD7616 parallel ADC** (digitises every channel's waveform, not just a
+>    threshold crossing). The 9-wire AD7616 SPI crosses J12. RTL and Qiskit
+>    software are unchanged from the parallel pivot.
+> Any residual reference to MUX/XADC/J11/8×8, to the single merged board, to
+> LMV339/MCP4725 photon-counting, or to all 129 die pads on F.Cu is stale.
 >
 > **Emitter-driver refinement (2026-09).** The first parallel pivot drove the 64
 > emitters with 8× 74HCT240 buffers + 64× AO3401A P-MOS high-side switches on a
@@ -58,31 +76,29 @@ Xilinx constraints are [`../fpga/constraints.xdc`](../fpga/constraints.xdc).
 
 ## 1. System Overview
 
-The design is **one PCB**: a **6-layer HDI board** (210 × 140 mm) carrying the
-FPGA, the quantum die, the 64-channel detector front-end, the 64-channel
-emitter driver, the RF chain, power, USB and config flash — all on one board.
-There is no board-to-board connector, no second board, no Samtec.
+The design is **two PCBs sandwiching the die**:
+- **Main board** — a **6-layer HDI board** (210 × 140 mm) below the die,
+  carrying the FPGA, the 64-channel emitter driver, the RF chain, power, USB
+  and config flash, and contacting the die BOTTOM (emitter) face on F.Cu via
+  ACF pressure contact.
+- **Detector head** — a **4-layer board** (150 × 140 mm) above the die,
+  carrying the 64-channel TIA front-end + 4× AD7616 ADC, and contacting the die
+  TOP (detector) face on B.Cu via ACF. Head origin = main origin + (60, 0) mm.
+- **J12** — a 2×10 (2.54 mm) board-to-board connector joining the two boards,
+  carrying the 9-wire AD7616 SPI (`adc_convst/sclk/miso/busy/resetn/cs0..3`) +
+  GND/+3V3/+5V. Every SPI signal is GND-flanked for a clean return path.
 
-**On-board active components:**
+**On-board active components (main board):**
 
 - **U1 — Xilinx Artix-7 XC7A35T-1CSG324C** FPGA (system controller; CSG324 BGA,
-  0.8 mm pitch, ~210 user-IO). The hard XADC block is **not used** for detector
-  readout in this design — readout is digital (64 LVCMOS inputs + 64 fabric
-  counters). VCCINT = +1V0, VCCAUX = +1V8, VCCO = +3V3.
-- **U-chip — QSSC_Chip die** (128 pads, 20 × 20 mm): 64 detector pads
-  (`DET0..DET63`) on the top edge + 64 emitter pads (`EM0..EM63`) on the bottom
-  edge, 0.30 mm pitch, 0.15 × 0.30 mm wire-bond pads. Placed board-centre.
-- **64-channel detector front-end (digital photon-counting):**
-  - **16× TLV9004** quad op-amp (TSSOP-14) — one TIA per detector channel
-    (Rf 1 MΩ ‖ Cf 1 pF), 4 channels per chip → 64 channels.
-  - **16× LMV339** quad comparator (SOIC-14) — one comparator per channel,
-    threshold from a shared DAC, 4 channels per chip → 64 channels.
-  - **1× MCP4725** I²C DAC → `DET_THR` (the shared comparator threshold).
-  - **DET_REF** = 10 k/10 k divider = 1.65 V (the TIA virtual-ground reference).
-  - ~256 passives (Rf, Cf, Rpu 10 k pull-up, Rref, decoupling) in 0603.
-  - Path: `DET_IN{i}` → TIA (−IN, +IN=`DET_REF`) → `DET_TIA{i}` → comparator
-    (+IN, −IN=`DET_THR`) → open-collector + 10 k pull-up to +3V3 → `DET_DIG{i}`
-    → FPGA LVCMOS33 input → 16-bit photon counter.
+  0.8 mm pitch, ~210 user-IO). The hard XADC block is **not used** — readout
+  is the 4× AD7616 parallel ADC across J12. VCCINT = +1V0, VCCAUX = +1V8,
+  VCCO = +3V3.
+- **U-chip — QSSC_Chip_EM die face** (129 pads, 20 × 20 mm): 64 emitter
+  cathode pads (`emitter_cat{i}`) + 1 `EM_ANODE` pad on the die BOTTOM face,
+  contacted on the main board F.Cu via ACF (no F.Paste — contact interface).
+  Placed at (80, 55).
+- **J12 — BTB_HOST** 2×10 pin header (the board-to-board connector host side).
 - **64-channel emitter driver (3× TLC5947 constant-current sink):**
   - **3× TLC5947** 24-channel 12-bit PWM constant-current LED driver
     (HTSSOP-32-1EP, VCC=+3V3), daisy-chained SIN→SOUT for 72 channels (64 used;
@@ -108,20 +124,40 @@ There is no board-to-board connector, no second board, no Samtec.
 - **J1/J10** USB-UART (FT232RL + USB-C), **J2** 5 V barrel power, **J3** SMA RF
   output, **J7** reset button, **J8** MW-gate header, **J9** 2×5 JTAG header.
 
+**On-board active components (detector head):**
+
+- **U-chip — QSSC_Chip_DET die face** (64 pads, 20 × 20 mm): 64 detector pads
+  (`DET_IN{i}`) on the die TOP face, contacted on the head B.Cu + B.Mask via ACF
+  (no B.Paste — contact interface). Placed at (20, 55).
+- **64-channel detector front-end (parallel ADC readout):**
+  - **16× TLV9004** quad op-amp (TSSOP-14) — one TIA per detector channel
+    (Rf 1 MΩ ‖ Cf 1 pF), 4 channels per chip → 64 channels.
+  - **4× AD7616** 16-channel simultaneous-sampling 16-bit ADC (LQFP-80) — 4 ICs
+    × 16 ch = 64 channels. Each TIA output `DET_TIA{i}` feeds one AD7616 analog
+    input. Replaces the old 16× LMV339 comparator + MCP4725 threshold DAC — the
+    ADC digitises the full per-channel waveform, not just a threshold crossing.
+  - **DET_REF** = 10 k/10 k divider = 1.65 V (the TIA virtual-ground reference).
+  - **+5V_A rail:** +5V from J12 → FB_A 600 Ω ferrite → +5V_A → the 4 AD7616
+    analog VCC; C_Abulk 10 µF + C_ahf 100 nF decouple it locally.
+  - Path: `DET_IN{i}` (die top, head B.Cu) → TIA (−IN, +IN=`DET_REF`) →
+    `DET_TIA{i}` → AD7616 V{j} → 9-wire SPI (`adc_*`) across J12 → FPGA.
+- **J12 — BTB_DAUGHTER** 2×10 socket (the connector daughter side). +3V3/+5V
+  arrive here (no local regulator), so `#FLG9/10/11` PWR_FLAGs silence ERC.
+
 The FPGA runs four concurrent functions: (1) a UART text command parser
 (`command_parser.v`), (2) 64-emitter 12-bit PWM grayscale drive over the
 4-wire TLC5947 shift interface with millisecond timing (`emitter_array.v` +
-`tlc5947_ctrl.v`, `em_sclk/sin/xlat/blank`), (3) **64 parallel photon counters**
-clocked by the 64 comparator outputs (`photon_counter_array.v`, one 16-bit
-counter per channel, rising-edge increment), and (4) ADF4351 register sequencing
-over SPI (`adf4351_ctrl.v`, `spi_master.v`). The 1 kHz `mod_sync` lock-in
-reference is still generated for the host-side demodulation.
+`tlc5947_ctrl.v`, `em_sclk/sin/xlat/blank`), (3) the **4× AD7616 parallel-ADC
+SPI master** (`adc_*`, 64 channels digitised at the head, the 9-wire bus
+crosses J12), and (4) ADF4351 register sequencing over SPI (`adf4351_ctrl.v`,
+`spi_master.v`). The 1 kHz `mod_sync` lock-in reference is still generated for
+the host-side demodulation.
 
 ### Block Diagram
 
 ```mermaid
 flowchart TD
-    subgraph Board["QSSC single merged board (6-layer HDI, 210x140 mm)"]
+    subgraph Main["QSSC MAIN board (6-layer HDI, 210x140 mm) -- below die"]
         J2["J2 Barrel 5V / J10 USB-C VBUS"] --> F1["F1 PTC 2A"] --> REG1["REG1 LDO 3.3V"]
         REG1 --> REG2["REG2 LDO 1.8V"]
         REG1 --> REG3["REG3 AP2127K-1.0V"]
@@ -136,14 +172,20 @@ flowchart TD
         U5 -->|"50Ω"| J3["J3 SMA"]
         U1 -->|"em_sclk/sin/xlat/blank 4-wire"| TLC["3x TLC5947 24-ch 12-bit PWM sink (daisy, 72ch/64used)"]
         J4["J4 Barrel 12V / F2 PTC 1A / C85+C86"] -->|"+12V_EMIT"| ANODE["EM_ANODE common anode pad"]
-        TLC -->|"emitter_cat[63:0] cathode sink"| CHIP_EM["U-chip: 64 CQD emitters (bottom edge)"]
+        TLC -->|"emitter_cat[63:0] cathode sink"| CHIP_EM["U-chip EM face: 64 CQD emitters (die bottom, F.Cu ACF)"]
         ANODE --> CHIP_EM
-        U1 -->|"DET_DIG[63:0] LVCMOS"| CNT["64x 16-bit photon counters (fabric)"]
-        DET["U-chip: 64 graphene detectors (top edge)"] -->|"DET_IN[63:0]"| TIA["16x TLV9004 TIA (Rf 1M, Cf 1p)"]
-        TIA -->|"DET_TIA[63:0]"| CMP["16x LMV339 comparator"]
-        DAC["UDAC MCP4725 -> DET_THR"] --> CMP
-        CMP -->|"open-collector + 10k pullup to +3V3"| CNT
+        U1 -->|"adc_convst/sclk/miso/busy/resetn/cs0..3"| J12H["J12 BTB_HOST 2x10"]
+        J12H -->|"+3V3 / +5V / GND"| J12H
     end
+    subgraph Head["QSSC DETECTOR HEAD (4-layer, 150x140 mm) -- above die"]
+        J12D["J12 BTB_DAUGHTER 2x10"] --> ADC["4x AD7616 16-ch 16-bit ADC (LQFP-80)"]
+        J12D -->|"+5V"| FBA["FB_A ferrite -> +5V_A"]
+        FBA --> ADC
+        ADC -->|"9-wire SPI"| J12D
+        DET["U-chip DET face: 64 detectors (die top, B.Cu ACF)"] -->|"DET_IN[63:0]"| TIA["16x TLV9004 TIA (Rf 1M, Cf 1p)"]
+        TIA -->|"DET_TIA[63:0]"| ADC
+    end
+    J12H -.->|"mates"| J12D
     J3 --> A1["A1 Loop/CPW Antenna"]
     A1 -->|"MW 2.87/3.46GHz"| Sub["CVD diamond / hBN / SiC host"]
     CHIP_EM -->|"green pump + SU-8/PDMS waveguide"| Sub
@@ -153,30 +195,31 @@ flowchart TD
 ### 1A. Supported FPGA boards & programming cable
 
 The RTL in `fpga/rtl/` is **vendor-neutral Verilog** — the detector readout is
-now **digital** (64 LVCMOS inputs + 64 fabric counters), so there is **no
-Xilinx-hard-ADC dependency** any more. The parallel photon-counter array ports
-to any FPGA with ≥68 free GPIO (64 detector inputs + 4-wire TLC5947 emitter
-shift interface + SPI/UART/clk/reset/I²C). Everything — UART, SPI/ADF4351,
-emitter driver, command parser, 64-channel photon counters — is plain Verilog.
-The only board-specific file is **`constraints.xdc`** (pin + IOSTANDARD
-assignments), written for the **CSG324** package of the target FPGA.
+the **4× AD7616 parallel-ADC SPI master** (a 9-wire `adc_*` bus: convst/sclk/
+miso/busy/resetn/cs0..3), so there is **no Xilinx-hard-ADC dependency** at all
+(the ADCs are external, on the detector head). The firmware ports to any FPGA
+with a modest GPIO budget: ~9 ADC SPI + 4-wire TLC5947 emitter shift +
+SPI/UART/clk/reset. Everything — UART, SPI/ADF4351, emitter driver, command
+parser, AD7616 SPI master — is plain Verilog. The only board-specific file is
+**`constraints.xdc`** (pin + IOSTANDARD assignments), written for the **CSG324**
+package of the target FPGA.
 
 Consequence: **the same firmware runs unchanged on any FPGA with enough GPIO** —
 only the `.xdc` pin map is re-done per board. The custom QSSC PCB uses the
-CSG324 package directly. For prototyping, a Digilent Arty A7-35T (XC7A35T
-**CSG324**) has 4 Pmods (32) + Arduino header (24) = 56 exposed pins — enough
-for a subset of channels (e.g. 16 detectors + the 4-wire emitter interface +
-control) but **not the full 64-channel parallel detector build**; the full
-64-detector parallel design needs the custom PCB (or a GPIO-rich carrier).
+CSG324 package directly. The readout's 64 channels are multiplexed over a
+9-wire SPI bus (not 64 parallel GPIO), so even a GPIO-poor carrier can drive
+the full 64-channel build; the custom PCB is still preferred for the integrated
+emitter driver + RF + the BTB connector to the detector head.
 
 **Toolchain:** Xilinx **Vivado** (the free WebPACK/Lite licence covers the
 XC7A35T) for synthesis, place-and-route, bitstream generation and flash
 programming. No paid licence is required.
 
-**Non-Xilinx FPGAs** (Lattice iCE40, Intel Cyclone, Gowin) now port cleanly —
-the XADC dependency was removed in the parallel pivot. The only requirement is
-128+ GPIO and a 100 MHz-capable fabric. The `xadc_behavioral` stub and all
-XADC wiring were deleted from `top_level.v`.
+**Non-Xilinx FPGAs** (Lattice iCE40, Intel Cyclone, Gowin) port cleanly — there
+is no XADC dependency (the parallel-ADC pivot moved readout off the FPGA's
+hard ADC entirely onto the external AD7616). The only requirement is a handful
+of GPIO and a 100 MHz-capable fabric. The `xadc_behavioral` stub and all XADC
+wiring were deleted from `top_level.v`.
 
 **Host cable (always):** a USB cable from the PC to the board's USB-UART bridge
 (FT232RL). The host speaks the ASCII UART protocol in section 5 at 115200-8-N-1;
@@ -185,12 +228,16 @@ backend connects.
 
 ### 1B. Physical assembly (montaje)
 
-Everything mounts on the **one board**. The chip stack (emitter array +
-detectors + diamond host + waveguides) is bonded onto the **QSSC_Chip die**
-sitting board-centre, with the 64-channel TIA/comparator front-end fanned out
-above the die (top detector edge) and the 3× TLC5947 constant-current emitter
-driver fanned out below (bottom emitter edge). The FPGA sits to one side; the RF chain, USB,
-power and config flash occupy the board periphery. The diagram reads top →
+The die is **sandwiched between two PCBs**. The chip stack (emitter array +
+detectors + diamond host + waveguides) is bonded onto the **two-faced QSSC
+die**: the die BOTTOM (emitter) face contacts the **main board F.Cu** (above
+the FPGA-side logic) via ACF; the die TOP (detector) face contacts the
+**detector head B.Cu** via ACF. The 64-channel TIA + 4× AD7616 front-end is on
+the head board above the die (top detector face); the 3× TLC5947 constant-current
+emitter driver is on the main board below (bottom emitter face). The two boards
+are joined at the edge by the **J12** 2×10 connector (which carries the 9-wire
+AD7616 SPI + power and sets the stacking height). The FPGA, RF chain, USB,
+power and config flash occupy the main-board periphery. The diagram reads top →
 bottom (chip side down to the control logic).
 
 ```mermaid
@@ -202,23 +249,25 @@ flowchart TB
 
   ANT["**MW loop / CPW antenna** (over the host)"]:::mw
   ENC["Encapsulation (PMMA / epoxy)"]:::chip
-  DET["Graphene/MoS2 detector array (64 electrodes, top edge)"]:::chip
+  DET["Graphene/MoS2 detector array (64 electrodes, TOP face)"]:::chip
   FILT["650 nm long-pass filter"]:::chip
   HOST["CVD diamond NV- host (64 sites)"]:::chip
   WG["SU-8 / PDMS waveguides"]:::chip
-  EM["64x CQD ASE/LED emitters (bottom edge)"]:::chip
+  EM["64x CQD ASE/LED emitters (BOTTOM face)"]:::chip
   SUB["ITO glass substrate + Cu contacts"]:::chip
-  TIA["16x TLV9004 TIA + 16x LMV339 comparator + MCP4725 DAC"]:::fe
+  HEAD["**Detector head** (4-layer) -- 16x TLV9004 TIA + 4x AD7616 ADC (die top on B.Cu ACF)"]:::fe
   DRV["3x TLC5947 24-ch 12-bit PWM constant-current sink (72ch/64used) + Riref 4.87k"]:::fe
-  PCB["**QSSC single board** — Artix-7 CSG324 + ADF4351 + GVA-84+ + FT232 + LDOs + W25Q128"]:::pcb
+  PCB["**QSSC main board** (6-layer HDI) — Artix-7 CSG324 + ADF4351 + GVA-84+ + FT232 + LDOs + W25Q128 (die bottom on F.Cu ACF)"]:::pcb
+  J12["J12 BTB 2x10 (9-wire SPI + power)"]:::fe
   USB["USB-UART to host PC (FT232RL + USB-C, 115200)"]:::pcb
   SMA["J3 SMA -> MW antenna feed"]:::pcb
 
   ANT -. "2.87 GHz MW field" .-> HOST
   ENC --- DET --- FILT --- HOST --- WG --- EM --- SUB
-  SUB --- TIA
+  SUB --- HEAD
   SUB --- DRV
-  TIA -->|"DET_DIG[63:0]"| PCB
+  HEAD -->|"DET_TIA[63:0] -> 4x AD7616 -> 9-wire SPI"| J12
+  J12 -->|"adc_* across BTB"| PCB
   DRV <-->|"em_sclk/sin/xlat/blank + +12V_EMIT"| PCB
   SUB --> PCB
   PCB --> USB
@@ -228,54 +277,60 @@ flowchart TB
 The chip stack (encapsulation → detector → filter → diamond host → waveguides
 → emitter → ITO substrate) is the optical/electrode assembly from the
 fabrication protocol; the **front-end** drives the emitters (FPGA → 3× TLC5947
-constant-current sink → pixel cathodes; common anode on +12V_EMIT) and reads
-the detectors (electrode → TIA → comparator → FPGA
-counter), the **board** delivers the microwave (SMA → antenna) and sinks the
-heat (Peltier/cold plate under the substrate). No camera, no alignment jig —
-every readout signal is an electrical connection on one board.
+constant-current sink → pixel cathodes; common anode on +12V_EMIT, all on the
+main board) and reads the detectors (die top → head TIA → 4× AD7616 → 9-wire
+SPI across J12 → FPGA), the **main board** delivers the microwave (SMA →
+antenna) and sinks the heat (Peltier/cold plate under the substrate). No camera,
+no alignment jig — every readout signal is an electrical connection across the
+two-board sandwich.
 
 ---
 
 ## 2. Bill of Materials (BOM)
 
-| №  | Component                        | Ref      | Value / Model                  | Qty | Function                                                       | Footprint                     | Notes |
-|----|----------------------------------|----------|--------------------------------|-----|----------------------------------------------------------------|-------------------------------|-------|
-| 1  | Xilinx Artix-7 FPGA              | U1       | XC7A35T-1CSG324C               | 1   | Central control: UART, emitter timing, 64 photon counters, SPI | CSG324 BGA 0.8 mm             | 1.0 V core, 1.8 V aux, 3.3 V I/O; **XADC not used** — readout is digital. Package CSG324 (0.8 mm pitch), footprint `Package_BGA:Xilinx_CSG324` |
-| 2  | Quantum die                      | U-chip   | QSSC_Chip (64 DET + 64 EM)     | 1   | 64 graphene detectors (top edge) + 64 CQD emitters (bottom edge) | On-chip (128 wire-bond pads)  | 20 × 20 mm, 0.30 mm pad pitch, 0.15 × 0.30 mm pads; bonded on-board |
-| 3  | Microwave PLL synthesizer        | U3       | ADF4351BCPZ                    | 1   | RF synthesis 35 MHz–4.4 GHz (2.87/3.46 GHz)                    | LFCSP-32 5×5 mm               | 3.3 V, SPI, REF_IN ≤250 MHz, ~0 dBm out |
-| 4  | TIA (per detector channel)        | UT0–UT15 | TLV9004 (quad op-amp)          | 16  | 64× transimpedance amplifier, Rf 1 MΩ ‖ Cf 1 pF per channel    | TSSOP-14 4.4×5 mm P0.65        | +3V3, 4 channels/chip → 64 channels; converts detector photocurrent → voltage |
-| 5  | Comparator (per detector channel) | UC0–UC15 | LMV339 (quad comparator)      | 16  | 64× Schmitt comparator → `DET_DIG{i}` digital photon pulses    | SOIC-14 3.9×8.7 mm P1.27      | +3V3, open-collector + 10 k pull-up to +3V3; threshold from shared DAC |
-| 6  | Threshold DAC                    | UDAC     | MCP4725                        | 1   | I²C 12-bit DAC → `DET_THR` shared comparator threshold         | SOT-23-6                      | +3V3; sets the photon-event detection level for all 64 channels |
-| 7  | Emitter LED driver (constant-current sink) | UE0–UE2 | TLC5947 (24-ch 12-bit PWM) | 3   | 64 CQD emitter cathodes `emitter_cat{i}` → OUTn; daisy-chained 72 ch (64 used) | HTSSOP-32-1EP 6.1×11 mm P0.65 | +3V3 VCC; OUT sinks up to 33 V/38 mA; 4-wire `em_sclk/sin/xlat/blank`; internal GS oscillator (no Gsclk) |
-| 8  | Emitter current-set resistor      | Riref0–2 | 4.87 kΩ 1%                  | 3   | I_OUT = 41×1.20/R_IREF ≈ 10.1 mA per channel (one per TLC5947) | 0603                          | Sets the constant-current sink; inside CQD 2–20 mA/pixel spec |
-| 9  | TIA feedback R/C (per channel)    | Rf, Cf   | 1 MΩ / 1 pF                   | 64/64 | Transimpedance gain + bandwidth: A=Rf=1 MΩ, BW≈1/(2π·Rf·Cf)    | 0603                          | 1 MΩ → 1 V/µA; 1 pF → ~106 kHz |
-| 10 | Comparator pull-up (per channel)  | Rpu0–63  | 10 kΩ                         | 64  | Open-collector → +3V3 pull-up on each `DET_DIG{i}`             | 0603                          | — |
-| 11 | +12V_EMIT anode supply input      | J4 / F2  | Barrel 5.5×2.1 / 1 A PTC     | 1/1 | 12 V LED supply for the common emitter anode (`EM_ANODE` → +12V_EMIT) | PJ-102AH / 1206 | Separate from +5V logic (CQD EL turn-on 4–8 V > 5 V); TLC5947 OUT tolerates 33 V |
-| 12 | +12V_EMIT rail decoupling + TLC5947 VCC dec | C85/C86 / Cem0–2 | 22 µF + 100 nF / 100 nF | 2/3 | Bulk + HF decouple the 12 V anode rail at the die; 100 nF on each TLC5947 VCC | 1206/0603 / 0603 | CQD is capacitive; 22 µF bulk handles in-rush |
-| 13 | DET_REF divider                   | Rref1/Rref2 | 10 kΩ / 10 kΩ               | 2   | +3V3 divider → DET_REF = 1.65 V (TIA virtual-ground reference) | 0603                          | + Cref 100 nF bypass |
-| 14 | RF decoupling caps               | C1–C20   | 100 nF X7R 16 V                | 20  | High-frequency decoupling at every IC VCC pin                  | 0603                          | As close as possible to each pin |
-| 15 | Bulk caps                        | C21–C30  | 10 µF X7R 16 V                 | 10  | Rail stabilization / bulk energy                               | 1206/1210                     | Near regulators & FPGA |
-| 16 | PLL loop filter C1/C2/C3         | C31/C32/C33 | 220 pF / 10 nF / 220 pF     | 3   | 3rd-order loop filter (with R67/R68)                           | 0603                          | ~50 kHz BW |
-| 17 | Master clock oscillator          | Y1       | 100 MHz TCXO ±2.5 ppm          | 1   | FPGA master clock; divided to 25 MHz (ADF4351 REF)             | SMD 3225/5032                 | TCXO for stability |
-| 18 | 3.3 V LDO                        | REG1     | AMS1117-3.3                    | 1   | 3.3 V rail: I/O, ADF4351, FT232, detector front-end             | SOT-223                       | ≥1 A |
-| 19 | 1.8 V LDO                        | REG2     | AMS1117-1.8                    | 1   | 1.8 V FPGA aux                                                 | SOT-223                       | ≥1 A |
-| 20 | 1.0 V LDO                        | REG3     | AP2127K-1.0 (Diodes Inc)       | 1   | 1.0 V FPGA core (VCCINT)                                       | SOT-23-5                      | AMS1117 has NO 1.0 V option; AP2127K-1.0 600 mA |
-| 21 | USB-UART bridge                  | J1/J10   | USB-C (GCT USB4105) + FT232RL  | 1   | PC serial link + 5 V VBUS                                       | USB-C 16P / SSOP-28           | FT232RL SSOP-28; USB-C UFP with R71/R72 5.1 k on CC1/CC2 |
-| 22 | Config flash (FPGA boot)        | U8       | W25Q128JVSIQ (Winbond)         | 1   | Artix-7 QSPI x4 config boot (`SPI_BUSWIDTH 4`)                 | SOIC-8 3.9×4.9 mm             | CS/CLK/DIO0-3 → FPGA config balls; HOLD/WP pulled to +3V3 |
-| 23 | Power connector                  | J2       | Barrel 5.5×2.1 mm              | 1   | 5 VDC input (alternative to USB-C VBUS)                         | PJ-102AH (CUI)                | 5 V 3 A source |
-| 24 | PTC resettable fuse              | F1       | 2 A PTC                        | 1   | Input overcurrent protection                                   | 1206                          | — |
-| 25 | Power LED                        | LED1     | Green 0603                     | 1   | Power-on indicator                                             | LED_0603                      | Series R70 330 Ω |
-| 26 | RF output connector              | J3       | SMA female edge-mount          | 1   | ADF4351 RF out (post-amp) to antenna                           | SMA edge                      | 50 Ω |
-| 27 | RF amplifier                     | U5       | GVA-84+ (Mini-Circuits)        | 1   | RF power amplification, DC-7 GHz, +18.4 dB @2 GHz, self-biased +5V | SOT-89-3                      | +5V_RF via L2 100nH choke |
-| 28 | +5V→+5V_RF filter                | FB1      | Ferrite bead 600Ω@100MHz       | 1   | π-filter (FB1 + C45/C46 + C47/C48) from +5V to +5V_RF          | 0603                          | Replaces old REG4 AMS1117-5.0 (sat in dropout) |
-| 29 | RF amp choke inductor            | L2       | 100 nH ±10%                    | 1   | DC bias choke on RF output                                     | 0603                          | Bias decoupling |
-| 30 | Microwave antenna                | A1       | Loop / CPW resonator (custom)  | 1   | MW delivery to the host                                        | Custom SMD/wire               | 2–3 GHz, 50 Ω |
-| 31 | Long-pass optical filter         | OPT      | 650 nm long-pass               | 1   | Block green CQD pump, pass NV PL (637–800 nm)                  | On-chip / holder              | Non-electronic on-chip part (ref F2 now = the +12V_EMIT PTC fuse) |
-| 32 | SU-8/PDMS waveguide layer        | —        | SU-8/PDMS optical waveguides    | 1   | Couple CQD emission + site PL into the detector electrodes      | On-chip (non-electronic)      | Part of the chip stack |
-| 33 | ESD protection diodes            | D1–D10   | TVS ESD5V0                     | 10  | ESD on USB/RF/sensitive I/O                                    | SOD-923                       | Clamp 5 V |
-| 34 | LED series resistor              | R70      | 330 Ω ±1%                      | 1   | LED1 current limit                                             | 0603                          | — |
-| 35 | Host substrate (canonical)       | —        | CVD diamond plate (NV⁻)        | 1   | Canonical compute host: 12C-enriched CVD diamond, NV centres   | Optical plate (non-electronic)| T₂ ≈ 1.8 ms @ 300 K — "compute at 300 K: YES" |
-| 36 | Host substrate (sensor variants) | —        | hBN (V_B⁻) / SiC (V_Si)        | —   | Sensor variants; same board, MW freq + substrate change        | Optical plate                 | hBN T₂ ~2 µs (sensor, not compute) |
+> **Authoritative BOM:** `hardware/datasheets/BOM.csv` — regenerated from the
+> actual generator components, with a **Board** column (`main` / `head`) and
+> MPN/datasheet links. The summary table below highlights the active ICs and
+> connectors; see BOM.csv for the full passive count per board.
+
+| №  | Board | Component                        | Ref      | Value / Model                  | Qty | Function                                                       | Footprint                     | Notes |
+|----|------|----------------------------------|----------|--------------------------------|-----|----------------------------------------------------------------|-------------------------------|-------|
+| 1  | main  | Xilinx Artix-7 FPGA              | U1       | XC7A35T-1CSG324C               | 1   | Central control: UART, emitter timing, AD7616 SPI master, PLL SPI | CSG324 BGA 0.8 mm             | 1.0 V core, 1.8 V aux, 3.3 V I/O; **XADC not used** — readout is the external 4× AD7616. footprint `Package_BGA:Xilinx_CSG324` |
+| 2  | both  | Quantum die (two-faced, no TSV)   | U-chip   | QSSC_Chip_EM (main) + QSSC_Chip_DET (head) | 1 die | 64 graphene detectors (TOP face) + 64 CQD emitters (BOTTOM face); contacted by ACF on each board | 20 × 20 mm, 129 pads, 0.30 mm pitch | EM face on main F.Cu, DET face on head B.Cu; no F/B.Paste (contact interface) |
+| 3  | main  | Microwave PLL synthesizer        | U3       | ADF4351BCPZ                    | 1   | RF synthesis 35 MHz–4.4 GHz (2.87/3.46 GHz)                    | LFCSP-32 5×5 mm               | 3.3 V, SPI, REF_IN ≤250 MHz, ~0 dBm out |
+| 4  | head  | TIA (per detector channel)        | UT0–UT15 | TLV9004 (quad op-amp)          | 16  | 64× transimpedance amplifier, Rf 1 MΩ ‖ Cf 1 pF per channel    | TSSOP-14 4.4×5 mm P0.65        | +3V3, 4 channels/chip → 64 channels; converts detector photocurrent → voltage |
+| 5  | head  | Parallel ADC (16-ch per chip)     | UAD0–UAD3 | AD7616 (16-bit simultaneous)   | 4   | 4×16 = 64 ch digitised → 9-wire SPI across J12 to FPGA         | LQFP-80 14×14 mm P0.65         | VCC=+5V_A, VDRIVE=+3V3; replaces old 16× LMV339 + MCP4725 (full waveform, not 1-bit threshold) |
+| 6  | both  | Board-to-board connector          | J12      | BTB_HOST (main) / BTB_DAUGHTER (head) | 1/1 | 2×10 (2.54 mm) carries the 9-wire `adc_*` SPI + GND/+3V3/+5V | 2×10 THT 2.54 mm | Würth 61302011121 (host) / 61002021121 (daughter); long pins set stacking height |
+| 7  | main  | Emitter LED driver (constant-current sink) | UE0–UE2 | TLC5947 (24-ch 12-bit PWM) | 3   | 64 CQD emitter cathodes `emitter_cat{i}` → OUTn; daisy-chained 72 ch (64 used) | HTSSOP-32-1EP 6.1×11 mm P0.65 | +3V3 VCC; OUT sinks up to 33 V/38 mA; 4-wire `em_sclk/sin/xlat/blank`; internal GS oscillator (no Gsclk) |
+| 8  | main  | Emitter current-set resistor      | Riref0–2 | 4.87 kΩ 1%                  | 3   | I_OUT = 41×1.20/R_IREF ≈ 10.1 mA per channel (one per TLC5947) | 0603                          | Sets the constant-current sink; inside CQD 2–20 mA/pixel spec |
+| 9  | head  | TIA feedback R/C (per channel)    | Rf, Cf   | 1 MΩ / 1 pF                   | 64/64 | Transimpedance gain + bandwidth: A=Rf=1 MΩ, BW≈1/(2π·Rf·Cf)    | 0603                          | 1 MΩ → 1 V/µA; 1 pF → ~106 kHz |
+| 10 | head  | +5V_A analog-rail ferrite + decoupling | FB_A / C_Abulk / C_ahf | 600 Ω / 10 µF / 100 nF | 1/1/1 | +5V from J12 → FB_A → +5V_A → AD7616 analog VCC; local decoupling | 0603 / 1206 / 0603 | Replaces old 64× comparator pull-up Rpu (no comparators now) |
+| 11 | main  | +12V_EMIT anode supply input      | J4 / F2  | Barrel 5.5×2.1 / 1 A PTC     | 1/1 | 12 V LED supply for the common emitter anode (`EM_ANODE` → +12V_EMIT) | PJ-102AH / 1206 | Separate from +5V logic (CQD EL turn-on 4–8 V > 5 V); TLC5947 OUT tolerates 33 V |
+| 12 | main  | +12V_EMIT rail decoupling + TLC5947 VCC dec | C85/C86 / Cem0–2 | 22 µF + 100 nF / 100 nF | 2/3 | Bulk + HF decouple the 12 V anode rail at the die; 100 nF on each TLC5947 VCC | 1206/0603 / 0603 | CQD is capacitive; 22 µF bulk handles in-rush |
+| 13 | head  | DET_REF divider                   | Rref1/Rref2 | 10 kΩ / 10 kΩ               | 2   | +3V3 divider → DET_REF = 1.65 V (TIA virtual-ground reference) | 0603                          | + Cref 100 nF bypass |
+| 14 | main  | RF decoupling caps               | C1–C20   | 100 nF X7R 16 V                | 20  | High-frequency decoupling at every IC VCC pin                  | 0603                          | As close as possible to each pin |
+| 15 | main  | Bulk caps                        | C21–C30  | 10 µF X7R 16 V                 | 10  | Rail stabilization / bulk energy                               | 1206/1210                     | Near regulators & FPGA |
+| 16 | main  | PLL loop filter C1/C2/C3         | C31/C32/C33 | 220 pF / 10 nF / 220 pF     | 3   | 3rd-order loop filter (with R67/R68)                           | 0603                          | ~50 kHz BW |
+| 17 | main  | Master clock oscillator          | Y1       | 100 MHz TCXO ±2.5 ppm          | 1   | FPGA master clock; divided to 25 MHz (ADF4351 REF)             | SMD 3225/5032                 | TCXO for stability |
+| 18 | main  | 3.3 V LDO                        | REG1     | AMS1117-3.3                    | 1   | 3.3 V rail: I/O, ADF4351, FT232, head via J12                  | SOT-223                       | ≥1 A |
+| 19 | main  | 1.8 V LDO                        | REG2     | AMS1117-1.8                    | 1   | 1.8 V FPGA aux                                                 | SOT-223                       | ≥1 A |
+| 20 | main  | 1.0 V LDO                        | REG3     | AP2127K-1.0 (Diodes Inc)       | 1   | 1.0 V FPGA core (VCCINT)                                       | SOT-23-5                      | AMS1117 has NO 1.0 V option; AP2127K-1.0 600 mA |
+| 21 | main  | USB-UART bridge                  | J1/J10   | USB-C (GCT USB4105) + FT232RL  | 1   | PC serial link + 5 V VBUS                                       | USB-C 16P / SSOP-28           | FT232RL SSOP-28; USB-C UFP with R71/R72 5.1 k on CC1/CC2 |
+| 22 | main  | Config flash (FPGA boot)        | U8       | W25Q128JVSIQ (Winbond)         | 1   | Artix-7 QSPI x4 config boot (`SPI_BUSWIDTH 4`)                 | SOIC-8 3.9×4.9 mm             | CS/CLK/DIO0-3 → FPGA config balls; HOLD/WP pulled to +3V3 |
+| 23 | main  | Power connector                  | J2       | Barrel 5.5×2.1 mm              | 1   | 5 VDC input (alternative to USB-C VBUS)                         | PJ-102AH (CUI)                | 5 V 3 A source |
+| 24 | main  | PTC resettable fuse              | F1       | 2 A PTC                        | 1   | Input overcurrent protection                                   | 1206                          | — |
+| 25 | main  | Power LED                        | LED1     | Green 0603                     | 1   | Power-on indicator                                             | LED_0603                      | Series R70 330 Ω |
+| 26 | main  | RF output connector              | J3       | SMA female edge-mount          | 1   | ADF4351 RF out (post-amp) to antenna                           | SMA edge                      | 50 Ω |
+| 27 | main  | RF amplifier                     | U5       | GVA-84+ (Mini-Circuits)        | 1   | RF power amplification, DC-7 GHz, +18.4 dB @2 GHz, self-biased +5V | SOT-89-3                      | +5V_RF via L2 100nH choke |
+| 28 | main  | +5V→+5V_RF filter                | FB1      | Ferrite bead 600Ω@100MHz       | 1   | π-filter (FB1 + C45/C46 + C47/C48) from +5V to +5V_RF          | 0603                          | Replaces old REG4 AMS1117-5.0 (sat in dropout) |
+| 29 | main  | RF amp choke inductor            | L2       | 100 nH ±10%                    | 1   | DC bias choke on RF output                                     | 0603                          | Bias decoupling |
+| 30 | main  | Microwave antenna                | A1       | Loop / CPW resonator (custom)  | 1   | MW delivery to the host                                        | Custom SMD/wire               | 2–3 GHz, 50 Ω |
+| 31 | on-chip | Long-pass optical filter         | OPT      | 650 nm long-pass               | 1   | Block green CQD pump, pass NV PL (637–800 nm)                  | On-chip / holder              | Non-electronic on-chip part |
+| 32 | on-chip | SU-8/PDMS waveguide layer        | —        | SU-8/PDMS optical waveguides    | 1   | Couple CQD emission + site PL into the detector electrodes      | On-chip (non-electronic)      | Part of the chip stack |
+| 33 | main  | ESD protection diodes            | D1–D10   | TVS ESD5V0                     | 10  | ESD on USB/RF/sensitive I/O                                    | SOD-923                       | Clamp 5 V |
+| 34 | main  | LED series resistor              | R70      | 330 Ω ±1%                      | 1   | LED1 current limit                                             | 0603                          | — |
+| 35 | on-chip | Host substrate (canonical)       | —        | CVD diamond plate (NV⁻)        | 1   | Canonical compute host: 12C-enriched CVD diamond, NV centres   | Optical plate (non-electronic)| T₂ ≈ 1.8 ms @ 300 K — "compute at 300 K: YES" |
+| 36 | on-chip | Host substrate (sensor variants) | —        | hBN (V_B⁻) / SiC (V_Si)        | —   | Sensor variants; same board, MW freq + substrate change        | Optical plate                 | hBN T₂ ~2 µs (sensor, not compute) |
 
 > **Removed vs. the pre-pivot (two-board) BOM:** the ADG732BCPZ 64:1 analog MUX
 > (U1/U2) + 74LVC1G04 inverter, the ADA4530-1 TIA, the 8×8 emitter matrix
@@ -283,9 +338,11 @@ every readout signal is an electrical connection on one board.
 > J11 board-to-board connector, the second chip-module PCB, the TIA→XADC
 > level-shift divider (R84/R85/C66), the TIA +5V_TIA isolation (FB1/C85/C86),
 > the `DET_BIAS`/`THRM`/`TIA_REF`/`TIA_OUT`/`TIA_ADC` nets, and the XADC
-> analog chain. **Added (parallel pivot):** 16× TLV9004, 16× LMV339, 1× MCP4725,
-> and ~256 front-end passives. The detector path went from 1 shared TIA+XADC
-> (serial) to 64 individual TIA+comparator→digital (parallel).
+> analog chain. **Added (parallel pivot):** 16× TLV9004 TIA, 4× AD7616 ADC,
+> 64× Rf/Cf, the DET_REF divider, the +5V_A ferrite rail, and the J12 BTB
+> connector. The detector path went from 1 shared TIA+XADC (serial) to 64
+> individual TIA → 4× AD7616 (parallel, simultaneous-sampling, full 16-bit
+> waveform) → 9-wire SPI across J12.
 >
 > **Removed vs. the first parallel pivot (P-MOS emitter stage):** the 8× 74HCT240
 > buffer, the 64× AO3401A P-MOS high-side switches, the 64× 220 Ω set resistors
@@ -323,12 +380,14 @@ VCC) runs on **+3V3**, while the 64 CQD emitter anodes ride a separate
 **+12V_EMIT** rail (J4 12 V barrel → F2 1 A PTC → C85/C86) — the CQD EL turn-on
 is 4–8 V, so +5 V left no headroom for the constant-current sink and a dedicated
 12 V LED supply is used instead (the TLC5947 OUT pins tolerate 33 V). The
-64-channel detector front-end (16× TLV9004 + 16× LMV339 + MCP4725) runs on
-**+3V3**.
+64-channel detector front-end (16× TLV9004 TIA + 4× AD7616 ADC) is on the
+**head board**: the TIAs run on **+3V3** (VDRIVE), the AD7616 analog VCC runs
+on **+5V_A** (derived on-head from the +5 V arriving on J12 via ferrite FB_A);
+both rails cross J12 from the main board.
 
 | Rail  | Reg  | Tolerance | Use                                  | Notes |
 |-------|------|-----------|--------------------------------------|-------|
-| 3.3 V | REG1 | ±3%       | FPGA VCCO, ADF4351, FT232, detector front-end (TIA/comparator/DAC) | Main I/O rail, ≥1 A; 32 front-end ICs + 256 passives |
+| 3.3 V | REG1 | ±3%       | FPGA VCCO, ADF4351, FT232, +3V3 to head via J12 (TIA VDRIVE) | Main I/O rail, ≥1 A; also feeds the head front-end |
 | 1.8 V | REG2 | ±3%       | FPGA VCCAUX / VCCAUX_IO              | ≥1 A |
 | 1.0 V | REG3 | ±3%       | FPGA VCCINT (core)                   | AP2127K-1.0 600 mA; XC7A35T VCCINT peak well under that (synth uses ~10% of LUTs) |
 | 5.0 V | (barrel) | ±—    | FB1 input (+5V_RF filter) | ≥1 A; no longer powers the emitter driver (moved to +12V_EMIT) |
@@ -353,15 +412,18 @@ sequence on this board is:
 within 3 mm. Bulk 10 µF (C21–C30) sits at each regulator output and at the FPGA
 VCCINT/VCCAUX/VCCO banks. The 1.0 V rail to the FPGA core additionally gets a
 22 µF–47 µF tantalum/ceramic near the BGA for transient supply. Each of the 32
-front-end ICs (16× TLV9004, 16× LMV339) gets its own 100 nF decoupling
-(`Cut{j}`, `Cuc{j}`); the 3× TLC5947 each get 100 nF on +3V3 (`Cem{j}`), and the
-+12V_EMIT anode rail gets 22 µF bulk + 100 nF HF (C85/C86) at the die fanout.
+front-end ICs (16× TLV9004 TIA, 4× AD7616 ADC, on the head board) gets its
+own 100 nF decoupling (`Cut{j}` for the TIAs, `Cua{j}`/`CuaB`/`Cud`/`Cur` for
+the AD7616 analog/digital/ref rails); the 3× TLC5947 each get 100 nF on +3V3
+(`Cem{j}`), and the +12V_EMIT anode rail gets 22 µF bulk + 100 nF HF (C85/C86)
+at the die fanout.
 
 **Power estimation (rough).** FPGA ~0.3–0.5 W (1.0 V × ~0.3 A), 1.8 V aux ~30 mA,
-3.3 V I/O ~120 mA + detector front-end ~80 mA (32 ICs + 64 pull-ups ~6 mA),
-ADF4351 ~30 mA, GVA-84+ ~65 mA at 5 V, emitter driver ~10 mA/emitter at 12 V
-(one/few firing; 64×10 mA full-on ≈ 640 mA on the separate +12V_EMIT rail). The
-+3V3 rail now also carries only the 3× TLC5947 VCC (logic, ~5 mA each), not the
+3.3 V I/O ~120 mA + head front-end via J12 (~80 mA: 16× TLV9004 + 4× AD7616
+~5 mA each, plus 64 Rf — no pull-ups, no comparators), ADF4351 ~30 mA,
+GVA-84+ ~65 mA at 5 V, emitter driver ~10 mA/emitter at 12 V (one/few firing;
+64×10 mA full-on ≈ 640 mA on the separate +12V_EMIT rail). The +3V3 rail now
+also carries only the 3× TLC5947 VCC (logic, ~5 mA each) + the head +3V3, not the
 old 8× 74HCT240 + 64 P-MOS gate drive. Total 5 V/3 A logic budget is well
 within source; the 12 V emitter budget is on its own J4 input.
 
@@ -375,15 +437,15 @@ within source; the 12 V emitter budget is on its own J4 input.
   ADF4351 `REF_IN` (top_level.v: 2-bit counter). With R-counter = 1, doubler
   off, RDIV2 off, the ADF4351 PFD frequency is **25 MHz**.
 - The FPGA derives the **1 kHz lock-in modulation reference** (`mod_sync`) from
-  `sys_clk` in `photon_counter_array.v` (toggle every 50 000 cycles at 100 MHz).
-  The host / MW chain modulates the microwave drive at this 1 kHz and the host
-  lock-in-demodulates the per-channel photon-count rate to reject background
+  `sys_clk` in `adc_top.v` (toggle every 50 000 cycles at 100 MHz). The host /
+  MW chain modulates the microwave drive at this 1 kHz and the host
+  lock-in-demodulates the per-channel ADC sample stream to reject background
   light. There is no external pixel clock and no separate clock domain — the
   whole readout path runs on `sys_clk`, so no CDC false-paths are needed.
 - A 100 MHz TCXO (rather than a simple crystal) is chosen for frequency
   stability, which matters because the ADF4351 RF output accuracy is directly
-  derived from it. The 64 photon counters also run on `sys_clk`, so the count
-  snapshot is coherent across all 64 channels.
+  derived from it. The 4× AD7616 `adc_convst` (simultaneous sample) is also
+  driven from `sys_clk`, so the 64-channel frame is time-coherent.
 
 ---
 
@@ -513,13 +575,15 @@ keeping the 12 V switching local and off the FPGA's 3.3 V digital lines.
 
 ---
 
-## 8. On-chip Photodetector Readout (64 parallel TIA + comparator → digital photon counting)
+## 8. On-chip Photodetector Readout (64 parallel TIA → 4× AD7616 ADC → 9-wire SPI)
 
 The die integrates **64 individual graphene/MoS₂ photodetectors**, one per
-qubit site, each on its own top-edge pad `DET{i}` → net `DET_IN{i}`. Readout is
-fully on-chip and electrical; there is no camera, no lens, no imaging, and **no
-analog multiplexer** — every channel has its own TIA + comparator and is read
-**in parallel** as a digital photon count.
+qubit site, each on its own TOP-face pad `DET{i}` → net `DET_IN{i}` (contacted
+on the detector head B.Cu via ACF). Readout is fully on-chip and electrical;
+there is no camera, no lens, no imaging, and **no analog multiplexer** — every
+channel has its own TIA and is digitised **in parallel** by 4× AD7616
+simultaneous-sampling ADCs on the detector head, then streamed to the FPGA over
+a 9-wire SPI that crosses J12.
 
 - **Detector bias — photovoltaic / zero-bias TIA.** The graphene/MoS₂
   electrodes are read at virtual ground (photovoltaic mode): each TIA (TLV9004)
@@ -531,35 +595,43 @@ analog multiplexer** — every channel has its own TIA + comparator and is read
   array, blocking the ~520–540 nm green CQD pump while passing the NV⁻ red/near-IR
   PL, improving readout SNR.
 - **64× TIA (16× TLV9004, Rf 1 MΩ ‖ Cf 1 pF).** One op-amp channel per detector
-  (4 per chip × 16 chips = 64). Transimpedance gain A = Rf = 1 MΩ → 1 V/µA =
-  1 mV/nA; feedback bandwidth ≈ 1/(2π·1 MΩ·1 pF) ≈ 106 kHz. The TIA output
-  `DET_TIA{i}` is a voltage proportional to the channel photocurrent.
-- **64× comparator (16× LMV339, threshold from MCP4725).** One comparator
-  channel per detector (4 per chip × 16 chips = 64). `DET_TIA{i}` → comparator
-  +IN; the shared DAC threshold `DET_THR` → comparator −IN. The comparator
-  fires when the TIA voltage crosses the threshold (a photon-event burst). The
-  open-collector output is pulled to +3V3 by `Rpu{i}` 10 k → `DET_DIG{i}`, a
-  clean LVCMOS digital pulse train into the FPGA.
-- **64× FPGA photon counters (`photon_counter_array.v`).** Each `DET_DIG{i}`
-  feeds a **16-bit free-running counter** that increments on every rising edge
-  (one photon-event burst). The 64 counters run simultaneously on `sys_clk`;
-  `READ_DETECTORS` snapshots all 64 in one go. This is the digital replacement
-  for the pre-pivot serial MUX→TIA→XADC sweep: 64 channels, parallel, no analog
-  ADC, no sweep time, no MUX on-resistance error.
-- **Threshold DAC (MCP4725, I²C).** Generates `DET_THR`; the host sets the
-  detection threshold over I²C to tune photon-event sensitivity. `I2C_SDA`/`I2C_SCL`
-  with 4.7 k pull-ups to +3V3; `Cdac` 100 nF bypass on `DET_THR`.
+  (4 per chip × 16 chips = 64), on the head board. Transimpedance gain A = Rf =
+  1 MΩ → 1 V/µA = 1 mV/nA; feedback bandwidth ≈ 1/(2π·1 MΩ·1 pF) ≈ 106 kHz.
+  The TIA output `DET_TIA{i}` is a voltage proportional to the channel
+  photocurrent.
+- **4× AD7616 16-channel simultaneous-sampling 16-bit ADC (on the head).** 4
+  ICs × 16 channels = 64. Each TIA output `DET_TIA{i}` feeds one AD7616 analog
+  input; the AD7616 samples all 16 of its channels simultaneously on a single
+  `adc_convst` edge, so all 64 channels are digitised in lockstep. This
+  **replaces the old 16× LMV339 comparator + MCP4725 threshold DAC**: instead
+  of thresholding the TIA voltage into a 1-bit photon pulse, the ADC captures
+  the full per-channel waveform (16-bit), so the host can do thresholding,
+  integration, or lock-in demodulation in software. VCC = +5V_A (the local
+  ferrite-isolated rail), VDRIVE = +3V3 (logic).
+- **9-wire SPI back to the FPGA (`adc_*`).** `adc_convst` (start), `adc_sclk`,
+  `adc_miso` (data back), `adc_busy` (conversion done), `adc_resetn`, and
+  `adc_cs0..3` (one chip-select per ADC) — these five control + four CS lines
+  are the 9-wire bus that crosses the J12 BTB connector to the FPGA on the main
+  board. The FPGA is the SPI master; `READ_DETECTORS` asserts convst, waits on
+  busy, then clocks all 4 ADCs' 16×16-bit samples out over the shared miso.
+- **Why parallel ADC over the old photon-counter.** The AD7616 digitises the
+  waveform at up to 1 MSPS/channel with true simultaneous sampling (no skew
+  between channels), which the old single-bit comparator + FPGA counter could
+  not do — the host now sees the analog shape of every detector pulse, not just
+  a count of threshold crossings, so lock-in demodulation, integration gating
+  and background subtraction all improve. The 9-wire bus also collapses 64 FPGA
+  GPIO into 9, easing the fanout.
 - **1 kHz lock-in.** The microwave drive is modulated at 1 kHz (`mod_sync`,
-  derived from `sys_clk` in `photon_counter_array.v`). The host
-  lock-in-demodulates each channel's photon-count rate at this reference to
-  reject background light. A pumped, bright site (ms=0 spin state) gives a high
-  count rate; a resonant MW flip to the dark ms=±1 state dips the count rate
-  (ODMR dip). The host thresholds the demodulated count to a bit, per channel.
+  derived from `sys_clk`). The host lock-in-demodulates each channel's ADC
+  sample stream at this reference to reject background light. A pumped, bright
+  site (ms=0 spin state) gives a high signal level; a resonant MW flip to the
+  dark ms=±1 state dips it (ODMR dip). The host thresholds the demodulated
+  amplitude to a bit, per channel.
 - **Calibration.** `CALIBRATE` fires each emitter in turn and snapshots all 64
-  photon counters, recording the channel with the maximum modulated count rate
-  per emitter into an emitter→detector LUT. This is the on-chip replacement for
-  the old camera + alignment-jig calibration: no micron alignment is needed
-  because the emitter and detector arrays are co-integrated on the die.
+  ADC channels, recording the channel with the maximum modulated amplitude per
+  emitter into an emitter→detector LUT. This is the on-chip replacement for the
+  old camera + alignment-jig calibration: no micron alignment is needed because
+  the emitter and detector arrays are co-integrated on the die.
 
 ---
 
@@ -598,22 +670,26 @@ analog multiplexer** — every channel has its own TIA + comparator and is read
 - **SPI to ADF4351** (LE/CLK/DATA): short (≤50 mm), 50 Ω-ish single-ended,
   CLK kept away from analog (loop filter, VCO tune). CLK rise/fall tuned via
   DRIVE/SLEW in the XDC.
-- **64× detector analog (`DET_IN{i}` → TIA, `DET_TIA{i}` → comparator)**: keep
-  each analog trace short, on the top layer over solid GND, guarded by a ground
-  ring/via fence, away from the emitter-driver switching nets and the digital
-  `DET_DIG{i}` bus / 4-wire `em_sclk/sin/xlat/blank` emitter interface. The 64 `DET_IN{i}` are the most
-  noise-sensitive nets on the board — they carry nA–µA photocurrents. The
-  fanout from the 0.30 mm-pitch die pads is a staggered dog-bone (see §13).
-- **64× comparator digital outputs (`DET_DIG{i}`)**: single-ended LVCMOS to the
-  FPGA; keep away from the `DET_IN{i}` analog inputs (crosstalk would feed the
-  counters).
+- **64× detector analog (`DET_IN{i}` → TIA, `DET_TIA{i}` → AD7616)**: keep
+  each analog trace short, on the head top layer over solid GND (head In1.Cu),
+  guarded by a ground ring/via fence, away from the 9-wire `adc_*` SPI and the
+  emitter-driver switching nets. The 64 `DET_IN{i}` are the most
+  noise-sensitive nets on the head — they carry nA–µA photocurrents from the
+  die top face (B.Cu). The fanout from the 0.30 mm-pitch die pads is a
+  staggered dog-bone (see §13).
+- **9-wire ADC SPI (`adc_convst/sclk/miso/busy/resetn/cs0..3`)**: LVCMOS SPI
+  from the 4 head AD7616s across J12 to the main-board FPGA; `adc_sclk` runs
+  far above the 1 kHz lock-in modulation, keep it away from the `DET_IN{i}`
+  analog inputs and the TIA→ADC short traces. GND-flanked pins on J12 give a
+  clean return.
 - **4-wire emitter shift interface (`em_sclk/sin/xlat/blank`)**: FAST slew,
   8 mA drive; `em_sclk` ≤30 MHz, series 22–33 Ω termination optional to tame
   overshoot. Keep away from the detector analog. The 64 high-current cathode
   sinks (`emitter_cat{i}`) and the +12V_EMIT anode are Chip-netclass die-pad
   nets — keep their return off the detector analog ground.
-- **`DET_THR` / `I2C_SDA` / `I2C_SCL`**: slow single-ended analog/control;
-  SLOW slew, away from the detector analog and the RF chain.
+- **`DET_REF` (1.65 V TIA virtual ground)**: slow single-ended analog reference;
+  SLOW slew, clean, well-decoupled (Cref 100 nF), star from the 10 k/10 k
+  divider on the head; away from the detector analog and the RF chain.
 - **No clock traces under analog** (loop filter, VCO tune, detector TIA inputs,
   bias chokes).
 
@@ -632,11 +708,15 @@ analog multiplexer** — every channel has its own TIA + comparator and is read
 - **GVA-84+ RF amp (U5)**: self-biased from +5V_RF via the L2 100 nH RF choke
   to pin 3; DC-block 100 pF on RFIN (C34) and RFOUT (C35); rail decoupling is the
   FB1 π-filter (C45/C46 +5V side, C47/C48 +5V_RF side). No VGG bias.
-- **Detector front-end (16× TLV9004 + 16× LMV339)**: each IC gets its own 100 nF
-  on +3V3 (`Cut{j}` for the TIAs, `Cuc{j}` for the comparators) — the 32 ICs
-  cluster above the die; star the +3V3 from the plane, keep the analog supply
-  return separate from the emitter-driver +5 V switching return. The
-  per-channel Rf/Cf sit right at each TIA input.
+- **Detector front-end (head board — 16× TLV9004 TIA + 4× AD7616 ADC)**: each
+  IC gets its own 100 nF on its rail — `Cut{j}` on +3V3 for the 16 TIAs,
+  `Cua{j}`/`CuaB`/`Cud`/`Cur` on +5V_A/+3V3 (VDRIVE) for the 4 AD7616 (follow
+  the AD7616 datasheet: separate AVDD/DVDD/REF decoupling, 10 µF + 100 nF on
+  each supply, REF gets its own 10 µF + 100 nF). The 20 ICs cluster around the
+  die on the head; star the +3V3 from the head PWR plane, keep the analog
+  supply return separate from the +5V_A / emitter switching. The per-channel
+  Rf/Cf sit right at each TIA input. The +5V_A rail is derived on-head from
+  the +5 V on J12 via ferrite FB_A + C_Abulk (10 µF) + C_ahf (100 nF).
 - **Emitter driver (3× TLC5947 + +12V_EMIT rail)**: 100 nF (`Cem{j}`) at each
   TLC5947 VCC pin on +3V3 + 22 µF bulk / 100 nF HF on the +12V_EMIT anode rail
   (C85/C86) at the die fanout. The TLC5947 OUT pins switch the 64 cathode
@@ -644,29 +724,41 @@ analog multiplexer** — every channel has its own TIA + comparator and is read
   the +12V_EMIT / emitter-driver GND return separately to the GND plane, not
   through the TIA ground island). The HTSSOP exposed pad (EP=GND) needs thermal
   vias to the inner GND plane.
-- **MCP4725 DAC**: 100 nF on +3V3 and on `DET_THR` (`Cdac`); the threshold node
-  is analog — keep it quiet.
+- **AD7616 reference + VDRIVE**: the AD7616 REFIO/REFCAP pins get 10 µF + 100 nF
+  per the datasheet (internal 4.096 V ref with external decoupling — do NOT
+  drive REFIO externally unless a ratiometric external ref is wanted);
+  VDRIVE=+3V3 decoupled 100 nF; the `adc_*` SPI is digital, decouple VDRIVE
+  separately from the +5V_A analog AVDD.
 - **FPGA per-rail 4.7 µF bulk (UG393)**: C52 (+3V3) / C53 (+1V8) / C54 (+1V0) —
   the round-robin C1–C20 100 nF is the HF local decoupling; these are the
   per-rail LF bulk. AMS1117 stability bulk C49/C50 22 µF on +3V3/+1V8.
 
 ---
 
-## 12. PCB Layer Stackup (6-Layer HDI, adopted)
+## 12. PCB Layer Stackup (two boards: 6-layer HDI main + 4-layer head)
 
-The merged single board is **6 layers** (1.6 mm FR4). The reason is structural:
-the XC7A35T-1CSG324C BGA is 0.8 mm pitch with ~210 user-IO, the 128-pad quantum
-die is 0.30 mm pitch, and the 64-channel front-end + driver add hundreds of
-nets. Two **pad-free inner signal layers** (In3.Cu / In4.Cu) give the interior
-BGA balls and the chip dog-bone escapes a via-in-pad THROUGH escape channel
-that F.Cu/B.Cu alone could not fit. No blind/buried vias are needed — a plated
-THROUGH via-in-pad (0.20 mm / 0.10 mm drill) reaches every layer.
+The two-board sandwich has **two different stacks**. The **main board** is
+6-layer HDI (1.6 mm FR4): the XC7A35T-1CSG324C BGA is 0.8 mm pitch with ~210
+user-IO, the 128-pad quantum die is 0.30 mm pitch, and the RF + power + emitter
+driver add hundreds of nets. Two **pad-free inner signal layers** (In3.Cu /
+In4.Cu) give the interior BGA balls and the chip dog-bone escapes a via-in-pad
+THROUGH escape channel that F.Cu/B.Cu alone could not fit. No blind/buried
+vias are needed — a plated THROUGH via-in-pad (0.20 mm / 0.10 mm drill) reaches
+every layer.
+
+The **detector head** is a much simpler 4-layer board (1.6 mm FR4): it has no
+FPGA and no dense BGA — only 16× TSSOP-14 TIAs + 4× LQFP-80 ADCs + 64× Rf/Cf
++ the BTB connector. Two signal layers + a GND plane + a PWR plane are
+enough; the die's 64 detector pads land on **B.Cu** (the head sits above the
+die, B.Cu faces down to the die top face — ACF pressure contact, no B.Paste).
+
+### 12.0 Main board — 6-layer HDI (qssc.kicad_pcb)
 
 | Layer | KiCad name | Function        | Notes |
 |-------|------------|-----------------|-------|
-| 1     | F.Cu       | Signal + RF     | 50 Ω microstrip RF, component pads, critical signals; 64 detector analog + chip dog-bone fanout |
+| 1     | F.Cu       | Signal + RF     | 50 Ω microstrip RF, component pads, critical signals; 64 EM cathode + EM_ANODE die pads (die bottom face, ACF contact) + chip dog-bone fanout |
 | 2     | In1.Cu     | GND (solid)     | Continuous reference plane for RF and signals; no splits under RF or detector analog |
-| 3     | In2.Cu     | +3V3 (PWR)      | Solid +3V3 plane (the front-end rail). Surface +3V3 pads reach it via stitching vias |
+| 3     | In2.Cu     | +3V3 (PWR)      | Solid +3V3 plane (the main-board logic rail). Surface +3V3 pads reach it via stitching vias |
 | 4     | In3.Cu     | Signal          | Pad-free inner signal layer — interior BGA ball escape channel (row-parity) |
 | 5     | In4.Cu     | Signal          | Pad-free inner signal layer — interior BGA ball escape channel (alt row-parity) |
 | 6     | B.Cu       | Signal + GND pour | Routing, control signals, chip dog-bone B.Cu escapes; GND flood pour for return continuity |
@@ -688,38 +780,67 @@ width near 0.30 mm (RF netclass) over the GND plane — DRC does not enforce
 impedance, the width encodes the intent; final verification is a GUI solver
 step (§15).
 
-### 12a. Plane rules
+### 12.1 Detector head — 4-layer (chip_module.kicad_pcb)
+
+| Layer | KiCad name | Function        | Notes |
+|-------|------------|-----------------|-------|
+| 1     | F.Cu       | Signal + components | 16× TLV9004 TIA + 4× AD7616 + 64× Rf/Cf + J12 BTB; analog routing, TIA→ADC short traces |
+| 2     | In1.Cu     | GND (solid)     | Continuous reference plane under all analog; no splits under the TIA/ADC analog region |
+| 3     | In2.Cu     | PWR (+3V3 / +5V_A) | Power plane for the +3V3 (VDRIVE) and +5V_A (AD7616 analog VCC) rails arriving via J12 |
+| 4     | B.Cu       | Signal + die contact | 64 DET die pads (die top face, ACF contact, no B.Paste) + DET_IN dog-bone escape; analog routing |
+
+Adopted 1.6 mm FR4 head stackup (`HEAD_LAYER_STACK` / `HEAD_STACK_UP`, copper
+0.035 mm outer / 0.0175 mm inner):
+
+```
+F.Cu  0.035  ── dielectric 1  0.20 mm prepreg ──
+In1.Cu 0.0175 (GND)  ── dielectric 2  0.20 mm ──
+In2.Cu 0.0175 (PWR)  ── dielectric 3  1.07 mm core ──
+B.Cu  0.035
+```
+
+The head has no FPGA and no RF, so the two pad-free inner signal layers of the
+main board are not needed — In1.Cu (GND) + In2.Cu (PWR) give a clean,
+low-inductance reference for the 64-channel analog front-end and the 4 ADCs.
+The DET pads on B.Cu face down toward the die; F.Cu carries the SMD analog.
+
+### 12a. Plane rules (both boards)
 
 - **In1.Cu = solid GND** under all RF, clock, and detector analog. No splits.
-- **In2.Cu = solid +3V3.** +3V3 sits directly under the GND plane — a tight
-  0.15 mm GND→+3V3 laminate that gives the +3V3 plane a low-inductance reference
-  and lets the FPGA +3V3 BGA balls via-in-pad straight to it. Surface +3V3 pads
-  (decoupling caps, regulators, front-end ICs) reach the plane through
-  GND-stitched return vias placed by `route_qssc_pcb.py`.
+  (Main: under RF/clock/emitter. Head: under the whole TIA/ADC analog region.)
+- **In2.Cu = solid power plane.** Main: +3V3 (the logic rail). Head: PWR
+  (+3V3 VDRIVE + +5V_A analog VCC, both arriving through J12). The plane sits
+  directly under the GND plane — a tight GND→PWR laminate gives the power a
+  low-inductance reference and lets BGA/IC power pads via-in-pad straight to
+  it. Surface power pads reach the plane through GND-stitched return vias
+  placed by `route_qssc_pcb.py`.
 - **No F.Cu / B.Cu GND floods in the routing area** — those layers are signal
-  now. B.Cu keeps a GND flood pour only outside the routing area for return
-  continuity.
-- **+1V0 / +1V8 / +5V / +5V_RF / +5V_IN have NO pours.** Their pad-bboxes
-  massively overlap (the decoupling caps cluster and interleave in the
-  FPGA-adjacent region), so full-board per-rail rectangles would short the
-  overlapping nets. They are wired as **0.50 mm Power-netclass tracks**
-  longest-span-first by `route_signals.py` (tracks-only preserves the
-  no-overlap / no-short property and is verifiable headless). GND and +3V3 are
-  the only plane nets.
+  now. Main B.Cu keeps a GND flood pour only outside the routing area for
+  return continuity. Head B.Cu is the die-contact + analog-routing layer (no
+  pour over the die pad field).
+- **Main-board +1V0 / +1V8 / +5V / +5V_RF / +5V_IN / +12V_EMIT have NO pours.**
+  Their pad-bboxes massively overlap (the decoupling caps cluster and
+  interleave in the FPGA-adjacent region), so full-board per-rail rectangles
+  would short the overlapping nets. They are wired as **0.50 mm Power-netclass
+  tracks** longest-span-first by `route_signals.py` (tracks-only preserves the
+  no-overlap / no-short property and is verifiable headless). GND and the PWR
+  plane are the only plane nets. **Head +5V_A** is derived locally from the
+  +5V arriving on J12 through ferrite FB_A, then decoupled (C_Abulk/C_ahf) and
+  fed to the AD7616 analog VCC; the head PWR plane carries +3V3 and +5V_A.
 - **GND mesh:** In1.Cu solid plane + GND via-in-pad on every BGA GND ball
-  (fanout step) + GND stitching vias on a clearance-checked grid for non-BGA
-  GND pads (caps, connectors, regulators, front-end ICs) — every copper layer
-  tied to one ground reference.
+  (main fanout step) + GND stitching vias on a clearance-checked grid for
+  non-BGA GND pads (caps, connectors, regulators, front-end ICs, head ADCs) —
+  every copper layer tied to one ground reference.
 
-> **Current build — re-verified 2026-09-04.** The committed merged board carries
-> this 6-layer stack (verified: `GetCopperLayerCount()==6`, In1.Cu="GND",
-> In2.Cu="PWR"=+3V3), the copper-plane foundation (In1.Cu GND + In2.Cu +3V3 +
-> B.Cu GND flood + GND stitching mesh), and a committed first-pass routing of
-> the merged single board that is **DRC-clean** — `kicad-cli pcb drc` in project
-> reports **0 violations / 0 unconnected / 0 footprint errors**. The router is
+> **Current build — re-verified 2026-09-04.** Both boards are DRC/ERC-clean.
+> Main: `GetCopperLayerCount()==6`, In1.Cu="GND", In2.Cu="PWR"=+3V3, planes
+> + first-pass routing committed, `kicad-cli pcb drc` = **0/0/0**. Head:
+> `GetCopperLayerCount()==4`, In1.Cu="GND", In2.Cu="PWR", QSSC_Chip_DET on
+> B.Cu + 4× AD7616 + 16× TLV9004 + J12, also **0/0/0**. The router is
 > DRC-clean by construction (per-netclass pad keepout + via-footprint check +
 > multi_keepout/multi_vip guards — cannot short by construction). What is not
-> yet routed is a line-router completeness limit, not a bug — see §15.
+> yet routed is a line-router completeness limit handed to FreeRouting, not a
+> bug — see §15.
 
 ---
 
@@ -736,11 +857,10 @@ step (§15).
 | GVA-84+ DC bias (L2 choke → pin 3) | F.Cu | L2 100 nH RFC from +5V_RF to pin 3; rail decoupling is the FB1 π-filter. No VGG. |
 | SPI LE/CLK/DATA          | F.Cu     | ≤50 mm, CLK away from analogue, matched loosely |
 | USB D+/D− (`USB_DP`/`USB_DM`) | F.Cu | 90 Ω diff, length-matched, guard via fence. Skew-tuning serpentine = GUI. |
-| **64× detector analog `DET_IN{i}`** (die top edge → TIA) | F.Cu dog-bone → B.Cu escape | 0.30 mm-pitch staggered dog-bone fanout (0.15 mm F.Cu stub + 0.20 mm through-via, even pads 0.5 mm out, odd 1.0 mm out); Chip netclass 0.10 mm clearance; over solid GND, guarded, away from digital + emitter |
-| **64× TIA output `DET_TIA{i}`** (TIA → comparator) | F.Cu | short, analog, away from `DET_DIG{i}` |
-| **64× comparator digital `DET_DIG{i}`** (comparator → FPGA) | F.Cu / inner sig | LVCMOS to FPGA; away from `DET_IN{i}` analog (crosstalk feeds counters) |
-| `DET_THR` (DAC threshold) / `I2C_SDA` / `I2C_SCL` | F.Cu | slow analog/control, SLOW slew, away from detector analog + RF |
-| `DET_REF` (1.65 V TIA virtual ground) | F.Cu | clean, well-decoupled (Cref 100 nF), star from the divider |
+| **64× detector analog `DET_IN{i}`** (head: die top face → TIA) | head B.Cu dog-bone → F.Cu escape | 0.30 mm-pitch staggered dog-bone fanout (0.15 mm B.Cu stub + 0.20 mm through-via, even pads 0.5 mm out, odd 1.0 mm out); Chip netclass 0.10 mm clearance; over solid GND, guarded, away from digital + emitter. DET pads on head B.Cu (die top face, ACF contact, no B.Paste) |
+| **64× TIA output `DET_TIA{i}`** (head: TIA → AD7616 analog in) | head F.Cu | short, analog, away from `DET_IN{i}` and the SPI/digital; feeds AD7616 Vx{i} (16 ch / ADC, 4 ADCs) |
+| **9-wire ADC SPI `adc_convst/sclk/miso/busy/resetn/cs0..3`** (head ADCs → J12 → main FPGA) | head F.Cu → J12 → main F.Cu/inner sig | LVCMOS SPI; `adc_convst` simultaneously samples all 4 AD7616; `adc_sclk` far above 1 kHz modulation; GND-flanked pins on J12 for return; away from detector analog |
+| `DET_REF` (1.65 V TIA virtual ground) | head F.Cu | clean, well-decoupled (Cref 100 nF), star from the 10 k/10 k divider; head-only |
 | **4-wire emitter shift `em_sclk/sin/xlat/blank`** (FPGA → TLC5947 chain) | F.Cu / inner sig | FAST slew, 8 mA, `em_sclk` ≤30 MHz, optional 22 Ω series; away from detector analog |
 | **64× emitter cathode `emitter_cat{i}`** (TLC5947 OUTn → die) | F.Cu dog-bone → B.Cu escape | 0.30 mm-pitch staggered dog-bone (as `DET_IN{i}`); Chip netclass 0.10 mm; constant-current sink, away from detector analog |
 | **`EM_ANODE`** (+12V_EMIT common anode → die left-edge pad) | F.Cu | 12 V, wide low-impedance feed from J4/F2/C85/C86; Chip netclass at the die pad; keep return off the detector analog ground |
@@ -754,9 +874,13 @@ step (§15).
 > FPGA ballmap ports are `tx`/`rx`; `fpga_net_map()` aliases `tx`→`UART_TX`,
 > `rx`→`UART_RX` so the bridge and FPGA share one net.
 
-> **Chip dog-bone fanout (0.30 mm pitch).** The 128 die pads fan out as a
-> staggered dog-bone: 0.15 mm F.Cu stub → 0.20 mm through-via, even pads 0.5 mm
-> out, odd pads 1.0 mm out, escaped on B.Cu. Neighbour-to-neighbour edge
+> **Chip dog-bone fanout (0.30 mm pitch).** The 128 die pads are split across
+> the two boards by face: 64 EM cathodes + EM_ANODE on **main F.Cu** (die bottom
+> face), 64 DET on **head B.Cu** (die top face). Each face fans out as a
+> staggered dog-bone: 0.15 mm stub on the pad's own layer → 0.20 mm through-via,
+> even pads 0.5 mm out, odd pads 1.0 mm out, escaped on the opposite layer
+> (main: B.Cu escape; head: F.Cu escape — the router derives stub/escape from
+> the pad's own layer, so the head's B.Cu DET pads escape on F.Cu). Neighbour-to-neighbour edge
 > clearance is 0.125 mm (copper) / 0.175 mm (drill-to-copper) — below the 0.15 mm
 > Default netclass. A dedicated **Chip netclass** (clearance 0.10 mm,
 > track 0.15 mm, via 0.20/0.10 mm) relaxes **only chip↔chip**; the board
@@ -813,21 +937,27 @@ through-cut outline carries 4 bridges so the freed part is retained by the stock
 
 ---
 
-## 15. KiCad Project — 6-layer ERC-clean schematic + DRC-clean board, copper planes, headless BGA fanout + signal/power routing
+## 15. KiCad Project — two ERC-clean schematics + DRC-clean boards, copper planes, headless BGA fanout + signal/power routing
 
-The KiCad 8 project lives at [`hardware/pcb/`](pcb/) (`qssc.kicad_pro`,
-`qssc.kicad_sch`, `qssc.kicad_pcb`, `qssc-lib.kicad_sym`). It is regenerated
-deterministically by [`tools/gen_qssc_kicad.py`](../tools/gen_qssc_kicad.py)
-from the BOM (§2), the impedance rules (§10), the **6-layer stackup (§12)**,
-the critical nets (§13), and the FPGA CSG324 pinout in `fpga/constraints.xdc` —
-re-running that script rewrites all four files reproducibly. The camera / VCSEL
-/ Toshiba-TORX / ADG732-MUX / XADC / second-board artefacts that used to live
-here are gone; the project reflects the **single-board parallel digital**
-design only (64× TIA + 64× comparator → 64 FPGA counters; 3× TLC5947
-constant-current emitter driver on +12V_EMIT; no MUX, no XADC, no J11). **Verified component datasheets + pinouts live
-in [`hardware/datasheets/`](datasheets/DATASHEETS.md)** (cross-check reference
-for every pin number the generators emit); the BOM is
-[`datasheets/BOM.csv`](datasheets/BOM.csv).
+The KiCad 8 project lives at [`hardware/pcb/`](pcb/) as **two boards**:
+- **Main board** `qssc.{kicad_pro,kicad_sch,kicad_pcb}` — 6-layer HDI, FPGA +
+  emitter + RF + USB + power + the die bottom (emitter) face on F.Cu + BTB HOST J12.
+- **Detector head** `chip_module.{kicad_pro,kicad_sch,kicad_pcb}` — 4-layer,
+  16× TIA + 4× AD7616 + the die top (detector) face on B.Cu + BTB DAUGHTER J12.
+
+Both are regenerated deterministically by
+[`tools/gen_qssc_kicad.py`](../tools/gen_qssc_kicad.py) from the BOM (§2), the
+impedance rules (§10), the **two stackups (§12)**, the critical nets (§13),
+and the FPGA CSG324 pinout in `fpga/constraints.xdc` — re-running that script
+rewrites both board sets + `qssc-lib.kicad_sym` reproducibly. The camera /
+VCSEL / Toshiba-TORX / ADG732-MUX / XADC / single-board artefacts that used to
+live here are gone; the project reflects the **two-board sandwich** design:
+64× TIA → 4× AD7616 (16-bit simultaneous, full waveform) → 9-wire SPI across
+J12 → FPGA; 3× TLC5947 constant-current emitter driver on +12V_EMIT; no MUX,
+no XADC, no J11, no comparators, no threshold DAC. **Verified component
+datasheets + pinouts live in [`hardware/datasheets/`](datasheets/DATASHEETS.md)**
+(cross-check reference for every pin number the generators emit); the BOM is
+[`datasheets/BOM.csv`](datasheets/BOM.csv) (with a Board column).
 
 > **Reproducibility — `pins.json`.** The generators call `std_pins("lib","sym")`
 > which reads `.tmpwork/pins.json` at import (the standard-KiCad-symbol pin
@@ -931,12 +1061,14 @@ headlessly:
 > - **Per-IC power/ground audit (re-verified 2026-09-04):** every active IC has
 >   a real power AND ground path. U1 (FPGA CSG324): +1V0 VCCINT (16 balls) +
 >   +1V8 VCCAUX (5) + +3V3 VCCO (29) + GND (51), all via-in-pad to their planes;
->   16× TLV9004 + 16× LMV339 + MCP4725: +3V3 + GND each; 3× TLC5947: VCC=+3V3 +
->   EP=GND (thermal vias) each, OUTn sinking `emitter_cat{i}` from +12V_EMIT;
+>   16× TLV9004 TIA (head): +3V3 + GND each; 4× AD7616 (head): VCC=+5V_A +
+>   VDRIVE=+3V3 + GND each; 3× TLC5947 (main): VCC=+3V3 + EP=GND (thermal vias)
+>   each, OUTn sinking `emitter_cat{i}` from +12V_EMIT;
 >   ADF4351/W25Q128/FT232: +3V3 + GND; GVA-84+: biased via the L2 RF choke from
 >   +5V_RF (MMIC, no dedicated VCC pin, by design); USB-C J10 = VBUS_USB, barrel
->   J2 = +5V_IN, barrel J4 = +12V_EMIT (→ F2 → C85/C86 → EM_ANODE). **The board
->   works electrically.**
+>   J2 = +5V_IN, barrel J4 = +12V_EMIT (→ F2 → C85/C86 → EM_ANODE); J12 BTB
+>   carries GND/+3V3/+5V to the head + the 9-wire `adc_*` SPI back. **Both
+>   boards work electrically.**
 > - **REG4 fixed.** The AMS1117-5.0 that sat in dropout is **replaced by FB1**
 >   (ferrite bead) + C45/C46/C47/C48 π-filter from +5V → +5V_RF.
 > - **RF amp replaced.** The HMC441LP3E (wrong band) + its unnetted custom
@@ -948,26 +1080,31 @@ headlessly:
 >   alias. All verified at PCB pad level via pcbnew.
 
 > **Honest status — what is NOT done (re-verified 2026-09-04):**
-> - **445 of 498 non-plane nets still unrouted** — the headless line router's
->   ceiling. The router is DRC-correct but its completeness is limited: the
->   via-footprint + multi_vip guards are provably no-short but conservative (a
->   THROUGH via-up needs its full 0.6 mm footprint clear on all four signal
->   layers, which the dense BGA + 0.30 mm die escape rarely affords), so the L/Z
->   router places a clean subset (53 nets) and leaves the rest. These are the
->   64 `DET_DIG{i}` comparator→FPGA ties, the 4-wire `em_sclk/sin/xlat/blank`
+> - **First-pass routing leaves unrouted nets on both boards** — the headless
+>   line router is DRC-correct but its completeness is limited (the
+>   via-footprint + multi_vip guards are provably no-short but conservative: a
+>   THROUGH via-up needs its full footprint clear on all signal layers, which
+>   the dense 0.8 mm BGA + 0.30 mm die escape rarely affords), so it places a
+>   clean subset and leaves the rest for **FreeRouting**. The remaining nets are
+>   the 9-wire `adc_*` SPI across J12, the 4-wire `em_sclk/sin/xlat/blank`
 >   FPGA→TLC5947 ties, the 64 `DET_IN{i}`/`DET_TIA{i}` analog fanout-to-TIA ties,
->   the 64 `emitter_cat{i}` TLC5947-OUT→die-cathode ties + `EM_ANODE`, the USB diff
->   pair, the interior BGA signal balls (`SPI_*`, `TCK`, `CONF_*`, `I2C_*`), and
+>   the 64 `emitter_cat{i}` TLC5947-OUT→die-cathode ties + `EM_ANODE`, the USB
+>   diff pair, the interior BGA signal balls (`SPI_*`, `TCK`, `CONF_*`), and
 >   the status/reference lines. They are left **honestly unrouted**
->   (`unconnected_items` demoted to `ignore`), not force-routed.
+>   (`unconnected_items` demoted to `ignore`), not force-routed, then closed by
+>   FreeRouting (see the FreeRouting pipeline below).
+> - **FreeRouting pipeline (headless, resource-capped):** although `kicad-cli`
+>   has no DSN/SES I/O, the **`pcbnew` Python API** does —
+>   `pcbnew.ExportSpecctraDSN(board, dsn)` + `pcbnew.ImportSpecctraSES(board,
+>   ses)` (note: pass the `board` object, not `str(board)`). `tools/bin/freerouting.jar`
+>   (v2.1.0) runs headless under `xvfb-run` + `systemd-run` (capped 2000 M /
+>   40 % CPU) to close the unrouted nets per board; the SES is imported back and
+>   the board re-saved, then a final DRC confirms 0 violations.
 > - **Still deferred to one GUI/manual session:** USB D+/D− length-skew
 >   serpentine tuning; RF 50 Ω **impedance verification with a field solver**
 >   (the 0.30 mm width encodes the intent over the 0.15 mm F.Cu→In1.Cu
->   dielectric, but final verification is interactive); the 445 unrouted nets
->   (BGA/die escape + dense 64-wide buses a line router cannot place cleanly —
->   a real maze/ripup autorouter or one GUI session finishes it); silkscreen/
->   assembly cleanup. KiCad 8 `kicad-cli` cannot export a Specctra DSN / import
->   an SES session (GUI-only in `pcbnew`), so the final copper is interactive.
+>   dielectric, but final verification is interactive); silkscreen/assembly
+>   cleanup; the stacking-height / ACF bond force for the two-board sandwich.
 > - **`unconnected_items` is deliberately `ignore` — and why that is honest,
 >   not a cover.** Promoting it to `error` reports many unconnected items, but
 >   those are almost entirely **same-net items joined only through an inner
@@ -978,9 +1115,9 @@ headlessly:
 >   disconnection; the **real connectivity bar is the per-IC power/ground audit
 >   above + DRC 0 violations**, both met.
 
-Consistent with the README honesty note, the FPGA RTL and this PCB are
-**design artefacts** (synthesised / placed-and-netted but not routed to copper
-or fabricated), not a finished hardware product.
+Consistent with the README honesty note, the FPGA RTL and these two PCBs are
+**design artefacts** (synthesised / placed-and-netted, routed first-pass +
+FreeRouting-closed, but not fabricated), not a finished hardware product.
 
 **Regenerate + verify (headless):**
 
@@ -1048,9 +1185,12 @@ errors, DRC 0 violations / 0 unconnected / 0 footprint errors**.
   `top_level.v` `input reset`, used by every submodule). `R83` 10 k pulls
   `reset` to GND (defines released = 0); `C68` 100 nF + R83 = 1 ms RC debounce
   on the release edge. Pressed → reset=+3V3.
-- **Front-end decoupling.** 32× 100 nF (one per TLV9004 + one per LMV339,
-  `Cut{j}`/`Cuc{j}`) on +3V3; 3× 100 nF on each TLC5947 VCC (`Cem{j}`) on +3V3;
-  `Cref` 100 nF on `DET_REF`; `Cdac` 100 nF on `DET_THR`.
+- **Front-end decoupling (head board).** 16× 100 nF on the TLV9004 TIAs
+  (`Cut{j}`) on +3V3; 4× AD7616 decoupling per the datasheet — `Cua{j}`/`CuaB`
+  on +5V_A (AVDD), `Cud` on +3V3 (VDRIVE), `Cur` on REFIO (10 µF + 100 nF each);
+  3× 100 nF on each TLC5947 VCC (`Cem{j}`) on +3V3 (main board); `Cref` 100 nF
+  on `DET_REF` (head); the +5V_A rail gets `C_Abulk` 10 µF + `C_ahf` 100 nF
+  after ferrite `FB_A`.
 - **+12V_EMIT anode rail decoupling.** `C85` 22 µF bulk + `C86` 100 nF HF at the
   `EM_ANODE` die fanout; `F2` 1 A PTC from `J4` 12 V barrel. The CQD stack is
   capacitive, so the 22 µF bulk handles in-rush when channels enable.
@@ -1059,15 +1199,17 @@ errors, DRC 0 violations / 0 unconnected / 0 footprint errors**.
   fires during power-up or FPGA config. (No gate pull-ups — the constant-current
   sinks are open until `em_blank` goes LOW, unlike the old floating P-MOS gates.)
 
-> **Removed in the single-board pivot (no longer on the BOM):** the TIA→XADC
-> level-shift divider (R84/R85/C66 — no XADC), the TIA +5V_TIA isolation
-> (FB1/C85/C86 — no ADA4530), the `TIA_REF` 2.5 V reference + C87 bulk, the
-> thermistor filter (C88/TH1 — `THRM` net removed), the 8×8 N-MOS column-sink
-> gate pulls (R96–R103 — no N-MOS columns). **Removed in the TLC5947 emitter
-> refinement:** the 8× 74HCT240 buffer, 64× AO3401A P-MOS, 64× 220 Ω set R
-> (`Re0..63`), 64× 100 k gate pull-up (`Rg0..63`) — 208 parts → 3 TLC5947 +
-> 3 R_IREF + 3 Cem. The detector front-end runs on +3V3 (TLV9004/LMV339 are 3 V
-> parts), not the +5V the old ADA4530-1 electrometer needed.
+> **Removed in the parallel-AD7616 pivot (no longer on the BOM):** the 16×
+> LMV339 comparators, the MCP4725 threshold DAC, the 64× comparator pull-ups
+> `Rpu`, and the `DET_DIG{i}`/`DET_THR`/`I2C_SDA`/`I2C_SCL` nets — the detector
+> path is now 64× TIA → 4× AD7616 (full 16-bit waveform) → 9-wire `adc_*` SPI.
+> **Removed in the single-board pivot (earlier):** the TIA→XADC level-shift
+> divider, the TIA +5V_TIA isolation, `TIA_REF`, the thermistor filter, the 8×8
+> N-MOS column-sink gate pulls. **Removed in the TLC5947 emitter refinement:**
+> the 8× 74HCT240 buffer, 64× AO3401A P-MOS, 64× 220 Ω set R, 64× 100 k gate
+> pull-up — 208 parts → 3 TLC5947 + 3 R_IREF + 3 Cem. The detector front-end
+> runs on +3V3 (TLV9004) + +5V_A (AD7616 AVDD), both fed via J12 from the main
+> board; the AD7616 VDRIVE is +3V3.
 
 All added parts carry real LCSC/JLC sourcing in `hardware/datasheets/BOM.csv`.
 
@@ -1081,20 +1223,28 @@ components the die needs to connect to the FPGA, or whether it goes direct.
 emitter path need an active analog/driver stage on the board between the die and
 the FPGA. The numbers below size every resistor in that interface.
 
-### C1. Photodetector path: die → TIA → comparator → FPGA counter
+### C1. Photodetector path: die → TIA → 4× AD7616 ADC → 9-wire SPI → FPGA
 
 The 64 graphene/MoS₂ photodetectors each produce a **photocurrent** (`I_ph`,
 pA–nA under the site's NV PL, 637–800 nm). An FPGA **cannot read a photocurrent
 directly**: an LVCMOS input is a high-impedance digital threshold (~1.4 V) with
-no current-to-voltage conversion, and (in the parallel pivot) **the XADC is no
-longer used** — readout is digital photon counting. The required chain (per
-channel, ×64 in parallel) is:
+no current-to-voltage conversion. The readout chain is now **fully parallel
+and digitised** — each channel has its own TIA, and 64 channels are digitised
+simultaneously by **4× AD7616** (16-channel, 16-bit simultaneous-sampling ADC),
+then streamed to the FPGA on a shared 9-wire SPI bus that crosses the BTB
+connector J12. The chain (per channel, ×64 in parallel):
 
 ```
-electrode DET_IN{i} → TLV9004 TIA (-IN, +IN=DET_REF 1.65V, Rf 1MΩ‖Cf 1pF)
-  → DET_TIA{i} → LMV339 comparator (+IN, -IN=DET_THR DAC)
-  → open-collector + 10k pull-up to +3V3 → DET_DIG{i} → FPGA LVCMOS counter
+electrode DET_IN{i} (head B.Cu, die top face)
+  → TLV9004 TIA (-IN, +IN=DET_REF 1.65V, Rf 1MΩ‖Cf 1pF)  [head board]
+  → DET_TIA{i} → AD7616 analog input Vx{i}  (16 ch / ADC, 4 ADCs)
+  → AD7616 SAR 16-bit simultaneous sample
+  → 9-wire SPI (adc_convst/sclk/miso/busy/resetn/cs0..3) across J12
+  → FPGA SPI master (adc_top.v) → 64-wide 16-bit sample register
 ```
+
+The whole detector chain lives on the **head board**; only the 9-wire digital
+SPI + power cross the BTB connector to the main board's FPGA.
 
 **Transimpedance (Rf, Cf).** Zero-bias / photovoltaic TIA (TLV9004, V+ = +3V3,
 ref = DET_REF 1.65 V = the 10 k/10 k divider):
@@ -1110,29 +1260,46 @@ ref = DET_REF 1.65 V = the 10 k/10 k divider):
 input noise — so the analog floor is set by the feedback resistor, as expected.
 Photocurrents down to ~pA produce a resolvable TIA output voltage.
 
-**Comparator threshold (DET_THR, MCP4725).** The TIA output `DET_TIA{i}` sits at
-`DET_REF` = 1.65 V and swings above/below it with photocurrent. The LMV339
-comparator fires when `DET_TIA{i}` crosses the shared DAC threshold `DET_THR`,
-producing a clean digital edge. The MCP4725 (12-bit I²C) sets `DET_THR` so the
-host can tune the photon-event sensitivity across all 64 channels simultaneously
-(one shared threshold; per-channel offset is handled in firmware by the counter
-snapshot). `Cdac` 100 nF bypasses `DET_THR`.
+**Parallel digitisation (4× AD7616).** The 64 TIA outputs feed 4× AD7616
+(AD7616BSTZ, LQFP-80), 16 channels each. The AD7616 is a **true
+simultaneous-sampling** ADC — all 16 channels sample at the same instant on
+the `CONVST` edge, so the 64-channel frame is time-coherent with no
+per-channel skew (critical for the 1 kHz lock-in demodulation). Each channel
+is 16-bit, ±10 V / ±5 V software-selectable range; here the TIA output sits
+around DET_REF = 1.65 V so the ±5 V range is used. VCC (analog) = +5V_A
+(derived locally on the head from the +5V on J12 via ferrite FB_A); VDRIVE =
++3V3 (logic, also from J12). The 4 ADCs share one SPI bus: `adc_convst`
+(starts a simultaneous sample on all 4), `adc_sclk`/`adc_miso` (the data
+readback, daisy-friendly), `adc_busy` (conversion done), `adc_resetn`, and a
+chip-select per ADC (`adc_cs0..3`) so the FPGA addresses one ADC's 16 channels
+at a time. That is the **9-wire bus** that crosses J12:
 
-**Digital photon counting.** Each `DET_DIG{i}` is a LVCMOS pulse train (one
-edge per photon-event burst above threshold) feeding a **16-bit free-running
-counter** in `photon_counter_array.v` (rising-edge increment, 64 simultaneous
-counters on `sys_clk`). The host reads a 64-wide snapshot (`READ_DETECTORS`) —
-no ADC, no sweep, no MUX on-resistance error, 64 channels in parallel. The
-quantization is 1 count = 1 detected event; the lock-in demodulation of the
-count rate at 1 kHz rejects background light.
+```
+adc_convst | adc_sclk | adc_miso | adc_busy | adc_resetn | adc_cs0 | adc_cs1 | adc_cs2 | adc_cs3
+```
 
-> **Why digital, not the old XADC.** The pre-pivot design multiplexed 64
-> detectors into one TIA → one XADC and swept them serially (one channel at a
-> time, 64 sweeps per frame). "Todo en paralelo" demands 64 simultaneous
-> channels, which a single XADC cannot do. Digital photon counting gives 64
-> truly parallel channels with one TIA + one comparator + one counter each —
-> no MUX, no analog ADC, and the count is a direct photon-event number rather
-> than a noisy 12-bit voltage code.
+**FPGA SPI master.** `adc_top.v` (was `photon_counter_array.v` in the
+comparator era) is an SPI master that asserts `adc_convst`, waits
+`adc_busy` deasserted, then clocks out the 16-bit word per channel under the
+selected `adc_cs{n}`. A 64-wide 16-bit sample register holds one full frame;
+the host reads it via `READ_DETECTORS`. There is no on-board comparator, no
+threshold DAC, no 1-bit quantisation — the FPGA receives the **full 16-bit
+waveform** per channel, so the host can do the lock-in demodulation in
+software (Qiskit layer, unchanged) with the full SNR of a 16-bit SAR ADC rather
+than a 1-bit count.
+
+> **Why 4× AD7616, not the old 64× comparator / photon-counter.** The
+> pre-pivot design used 16× LMV339 comparators + an MCP4725 threshold DAC to
+> reduce each channel to a 1-bit digital pulse train, then counted edges in
+> the FPGA ("digital photon counting"). That throws away the analog amplitude
+> and ties sensitivity to a single shared threshold. The AD7616 pivot keeps
+> the **full 16-bit waveform** per channel — the host recovers the photocurrent
+> amplitude directly and can apply any threshold / lock-in window digitally,
+> post-hoc, with no DAC to tune and no comparator drift. 64 channels stay
+> truly parallel (4 ADCs × 16 simultaneous channels, all sampled on one
+> `CONVST` edge); the only serialisation is the SPI readback, which the FPGA
+> drives at SCLK speeds far above the 1 kHz modulation. The RTL is
+> vendor-neutral SPI (`adc_*`), and the Qiskit layer is unchanged.
 
 ### C2. Emitter path: FPGA → 3× TLC5947 constant-current sink → pixel cathode
 
@@ -1182,14 +1349,21 @@ no floating-gate hazard.
 
 ### C3. Die size & pad pitch
 
-The QSSC_Chip die is **20 × 20 mm** with **128 wire-bond pads at 0.30 mm
-pitch** (64 DET top edge + 64 EM bottom edge, 0.15 × 0.30 mm pads) plus one
-**EM_ANODE** pad on the left edge (the shared common anode, clear of both
-dog-bone fields). The 64 EM pads are per-pixel cathodes (`emitter_cat{i}`);
-EM_ANODE is the +12V_EMIT common anode. 0.30 mm pitch needs a staggered dog-bone
-fanout (0.15 mm F.Cu stub + 0.20 mm through-via, even pads 0.5 mm out, odd 1.0
-mm out, escaped on B.Cu) — an HDI escape handled by the 6-layer stack + the
-Chip netclass (0.10 mm clearance).
+The QSSC_Chip die is **20 × 20 mm**, a **two-faced die, no TSVs**: **64
+detector electrodes on the TOP face** + **64 emitter cathodes on the BOTTOM
+face** + one **EM_ANODE** pad on the bottom face (the shared common anode,
+clear of the dog-bone field). Both faces use **0.30 mm pitch** (0.15 × 0.30 mm
+pads). The die is **clamped between the two PCBs** — it is NOT wire-bonded.
+The head board's **B.Cu** contacts the die TOP (detector) face via ACF
+pressure contact (no B.Paste — it is a contact interface, not a solder
+joint); the main board's **F.Cu** contacts the die BOTTOM (emitter) face the
+same way. The 64 EM pads are per-pixel cathodes (`emitter_cat{i}`); EM_ANODE
+is the +12V_EMIT common anode. 0.30 mm pitch needs a staggered dog-bone
+fanout (0.15 mm stub on the pad's own layer + 0.20 mm through-via, even pads
+0.5 mm out, odd 1.0 mm out, escaped on the opposite layer — main EM escapes
+on B.Cu, head DET escapes on F.Cu) — an HDI escape handled by the main 6-layer
+stack + the Chip netclass (0.10 mm clearance). The head 4-layer stack is
+enough for its 64 DET pads (no FPGA, no dense BGA).
 The board (210 × 140 mm) fits the die + the 64-channel front-end above + the
 64-channel driver below + the FPGA/RF/USB/power with DRC-clean courtyards.
 
@@ -1200,14 +1374,19 @@ The board (210 × 140 mm) fits the die + the 64-channel front-end above + the
 - ADF4351 data sheet (Rev. A), Analog Devices — register map and loop-filter
   design: <https://www.analog.com/media/en/technical-documentation/data-sheets/adf4351.pdf>
 - Xilinx XC7A35T data sheet / UG475 packaging and pinout (Artix-7 family, CSG324
-  package). The XADC (UG480) hard block is **not used** in this design —
-  readout is digital photon counting (§8).
+  package). The XADC (UG480) hard block is **not used** — readout is 4× AD7616
+  parallel ADC over a 9-wire SPI (§8).
 - GVA-84+ RF MMIC amplifier data sheet, Mini-Circuits (replaces the HMC441LP3E,
   which was the wrong band 6.5–13.5 GHz and had an unnetted custom symbol).
 - TLV9004 quad op-amp data sheet, Texas Instruments (TIA, 1.8 V–5.5 V supply —
-  runs on +3V3).
-- LMV339 quad comparator data sheet, Texas Instruments (open-collector, +3V3).
-- MCP4725 I²C 12-bit DAC data sheet, Microchip (detector threshold `DET_THR`).
+  runs on +3V3, head board):
+  <https://www.ti.com/lit/ds/symlink/tlv9004.pdf>
+- AD7616 16-channel 16-bit simultaneous-sampling ADC data sheet, Analog
+  Devices (AD7616BSTZ, LQFP-80) — 4× devices digitise the 64 TIA outputs, 9-wire
+  SPI across J12: <https://www.analog.com/media/en/technical-documentation/data-sheets/ad7616.pdf>
+- Würth 61302011121 (BTB host, 2×10 SMT pin header) + 61002021121 (BTB daughter,
+  2×10 THT socket), 2.54 mm — the J12 board-to-board connector carrying the
+  9-wire SPI + GND/+3V3/+5V.
 - TLC5947 24-channel 12-bit PWM constant-current LED driver data sheet, Texas
   Instruments (SBVS114B) — 64-channel CQD emitter cathode sink, 3× daisy-chained:
   <https://www.ti.com/lit/ds/symlink/tlc5947.pdf>
@@ -1273,11 +1452,11 @@ zero inferred latches + zero blackboxes + "fits XC7A35T").
 | I/O buffer      |     33 |                          250 |      13.2 % |
 | Global clock BUFG |    1 |                           32 |       3.1 % |
 
-The 64-wide `photon_counter_array` adds 64×16-bit counters (≈1024 FF + LUT
-logic for the rising-edge detect + count) — still ≪ the 41 600 FF / 20 800 LUT
-budget, so the parallel design fits the smallest Artix-7 35T with a large
-margin. (Re-run `run_synth.sh` for the exact post-pivot numbers; the gate
-remains "fits XC7A35T".)
+The `adc_top` SPI master + the 64-wide × 16-bit sample register add ≈1024 FF
++ the SPI shift/state logic — still ≪ the 41 600 FF / 20 800 LUT budget, so the
+parallel design fits the smallest Artix-7 35T with a large margin. (Re-run
+`run_synth.sh` for the exact post-pivot numbers; the gate remains "fits
+XC7A35T".)
 
 **Logic-quality gates — all clean:**
 
