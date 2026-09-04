@@ -5,33 +5,71 @@ Usage: python3 tools/freeroute.py <board.kicad_pcb> [--jar <freerouting.jar>]
 
 Resource-capped by the caller (systemd-run, ~2000M). Uses system python3 (pcbnew).
 
-Why -mt 0: FreeRouting 2.1.0/2.4.1 crashes in the shove-trace OPTIMIZER
-(`MazeShoveTraceAlgo.check_shove_trace_line` ArrayIndexOutOfBounds) when the
-optimizer runs with >0 threads (-mt 2). The config default is
-`multi_threading=false`; -mt 2 overrides it and trips the off-by-one. -mt 0
-disables the crashing optimizer entirely -- the autorouter (-mp) still runs
-and produces a complete SES; we lose only post-route pull-tight/length-tuning
-(GUI-optimize later). Verified against the head board that crashed at 47 min on -mt 2. NB: the 2.4.1 jar needs Java 25 (class v69); this box has Java 21/23, so we run the Java-21-built 2.1.0 jar (tools/bin/freerouting.jar) with -mt 0.
+Jar / Java selection:
+  - Default jar = tools/bin/freerouting-2.4.1.jar (FreeRouting 2.4.1, built with
+    Java 25 -> class v69). Override with --jar <path> or the JAR env var.
+  - Default java = the portable Temurin JDK 25 at ~/.local/jdk25/jdk-25*/bin/java
+    (no system install; outside the repo so it never touches git). Override with
+    the JAVA env var (a path to a java executable). Falls back to system `java`
+    only if neither is set/found -- but system java is 21/23 and CANNOT run the
+    2.4.1 jar (UnsupportedClassVersionError), so set JAVA or keep the portable
+    JDK 25 in place.
+
+Why -mt 0: FreeRouting 2.1.0 crashes on BOTH -mt 2 (MazeShoveTraceAlgo.
+check_shove_trace_line ArrayIndexOutOfBounds in the shove-trace OPTIMIZER) and
+-mt 0 (maze_search_algo.find_connection NullPointerException, target_shape
+null, in the autorouter itself). 2.4.1 on Java 25 is the path that actually
+runs. -mt 1 runs the SINGLE-thread shove-trace optimizer (push-and-shove):
+it closes dense fans in few passes AND cleans the clearance violations the
+bare maze autorouter leaves behind. The 2.1.0 crash was specifically the
+2-THREAD optimizer (-mt 2, MazeShoveTraceAlgo off-by-one); -mt 1 avoids that
+race, and 2.4.1's autorouter is already proven (pass 1 completes). -mt 0
+(bare maze, no optimizer) is TOO SLOW (~92 min/pass at 40% cap) and leaves
+hundreds of unfixable violations -- do not use it for a real route. Override
+with MT=0 only to probe the autorouter alone.
+
+2.4.1 CLI flags (from -help): -de <dsn> load, -do <ses> save session at end,
+-mp <passes> max AUTO-ROUTING passes (THIS is what makes it route -- without
+-mp it just loads + exits), -mt <threads> route-OPTIMIZATION thread pool
+(default cores-1; 0 = no optimization, just the maze autorouter). NB: -drc
+<file> in 2.4.1 means "write a DRC report and EXIT" (DRC-only mode) -- do NOT
+pass it when you want to autoroute, or it skips routing entirely.
 """
-import os, sys, subprocess
+import os, sys, subprocess, glob
 from pathlib import Path
 import pcbnew
 
 board_path = Path(sys.argv[1]).resolve()
-# Optimizer thread count. Default -mt 0 (disable the shove-trace optimizer that
-# crashes on -mt 2: MazeShoveTraceAlgo.check_shove_trace_line off-by-one). The
-# optimizer is the powerful push-and-shove router needed for dense fans (the
-# 0.30 mm die field); -mt 0's bare maze router leaves the 64 chip nets unrouted.
-# Override with MT=1 to TEST whether the single-thread optimizer avoids the
-# 2-thread crash and closes the chip nets.
-MT = os.environ.get("MT", "0")
-jar = (Path(sys.argv[2]).resolve() if len(sys.argv) > 2
-       else Path(__file__).resolve().parent / "bin" / "freerouting.jar")
+MT = os.environ.get("MT", "1")
+# Auto-routing passes (-mp): the autorouter loop count. 64 is enough for a
+# dense fan (head ~150 nets, main ~120); raise via MP= if unrouted remain.
+MP = os.environ.get("MP", "64")
+
+# ---- jar: 2.4.1 by default, override via arg2 or JAR env ----
+_here = Path(__file__).resolve().parent
+if len(sys.argv) > 2 and not sys.argv[2].startswith("--"):
+    jar = Path(sys.argv[2]).resolve()
+elif os.environ.get("JAR"):
+    jar = Path(os.environ["JAR"]).resolve()
+else:
+    j24 = _here / "bin" / "freerouting-2.4.1.jar"
+    jar = j24 if j24.exists() else (_here / "bin" / "freerouting.jar")
+
+# ---- java: portable JDK 25 by default, override via JAVA env ----
+def _find_java():
+    env_java = os.environ.get("JAVA")
+    if env_java and Path(env_java).exists():
+        return env_java
+    # portable Temurin JDK 25 extracted under ~/.local/jdk25
+    for p in sorted(glob.glob(str(Path.home() / ".local" / "jdk25" / "jdk-25*" / "bin" / "java"))):
+        if Path(p).exists():
+            return p
+    return "java"  # fallback (system; will fail on the 2.4.1 jar)
+java_exe = _find_java()
 stem = board_path.with_suffix("")
 dsn = stem.with_suffix(".dsn")
 ses = stem.with_suffix(".ses")
 log = stem.with_suffix(".freeroute.log")
-drc = stem.with_suffix(".freeroute.drc.json")
 
 print(f"== loading {board_path.name} ==")
 board = pcbnew.LoadBoard(str(board_path))
@@ -43,12 +81,14 @@ print("  ExportSpecctraDSN ->", ok, "size:",
 if not dsn.exists():
     sys.exit("DSN export failed")
 
-# FreeRouting 2.4.1 CLI: -de <dsn> -do <ses>.  -mt 0 disables the crashing
-# shove-trace optimizer (autorouter -mp still runs).  -drc captures remaining
-# unconnected nets for a targeted cleanup pass.
-print(f"== FreeRouting ({jar.name}) ==")
-cmd = ["xvfb-run", "-a", "java", "-jar", str(jar),
-       "-de", str(dsn), "-do", str(ses), "-mt", MT, "-drc", str(drc)]
+# FreeRouting 2.4.1 CLI: -de <dsn> -do <ses> -mp <passes> -mt <threads>.
+# -mp makes it autoroute (without -mp it loads + exits). -mt 1 = single-thread
+# shove-trace optimizer (closes dense fans + cleans violations; avoids the
+# 2.1.0 -mt 2 two-thread crash). Do NOT pass -drc here: in 2.4.1 that means
+# "DRC-only and exit" and skips routing.
+print(f"== FreeRouting ({jar.name}) java={java_exe} ==")
+cmd = ["xvfb-run", "-a", java_exe, "-jar", str(jar),
+       "-de", str(dsn), "-do", str(ses), "-mt", MT, "-mp", MP]
 print("  ", " ".join(map(str, cmd)))
 with open(log, "w") as lf:
     p = subprocess.run(cmd, stdout=lf, stderr=subprocess.STDOUT)

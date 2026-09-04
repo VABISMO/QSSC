@@ -125,8 +125,10 @@ hardware/pcb/t*.kicad_sch
 
 # FreeRouting (Specctra DSN/SES) + freeroute.py build artifacts -- derived from
 # the committed .kicad_pcb on demand by `python3 tools/freeroute.py`. The
-# freerouting.jar binary itself lives in /tools/bin/ (ignored above); see
-# tools/freeroute.py for how to obtain the pinned 2.1.0 jar.
+# freerouting.jar binary itself lives in /tools/bin/ (ignored above): put
+# tools/bin/freerouting-2.4.1.jar there (FreeRouting 2.4.1, build-date
+# 2026-09-03) + extract a portable Temurin JDK 25 to ~/.local/jdk25/ -- see
+# tools/freeroute.py for the exact versions/URLs. (2.1.0 crashes on this box.)
 hardware/pcb/*.dsn
 hardware/pcb/*.ses
 hardware/pcb/*.freeroute.log
