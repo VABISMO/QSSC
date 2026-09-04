@@ -2,7 +2,7 @@
 """DRC gate test for the routed main board (``hardware/pcb/qssc.kicad_pcb``).
 
 This is the PRIMARY regression gate for the 6-layer HDI rewrite: a board that
-routes more nets but fails DRC is *worse* than an honestly-partial board. It
+routes more nets but fails DRC is *worse* than an partial board. It
 runs the actual ``kicad-cli pcb drc`` headlessly and asserts the committed board
 is clean: 0 clearance/shorting violations, 0 footprint errors.
 

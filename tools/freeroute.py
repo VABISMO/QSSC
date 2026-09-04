@@ -13,11 +13,18 @@ disables the crashing optimizer entirely -- the autorouter (-mp) still runs
 and produces a complete SES; we lose only post-route pull-tight/length-tuning
 (GUI-optimize later). Verified against the head board that crashed at 47 min on -mt 2. NB: the 2.4.1 jar needs Java 25 (class v69); this box has Java 21/23, so we run the Java-21-built 2.1.0 jar (tools/bin/freerouting.jar) with -mt 0.
 """
-import sys, subprocess
+import os, sys, subprocess
 from pathlib import Path
 import pcbnew
 
 board_path = Path(sys.argv[1]).resolve()
+# Optimizer thread count. Default -mt 0 (disable the shove-trace optimizer that
+# crashes on -mt 2: MazeShoveTraceAlgo.check_shove_trace_line off-by-one). The
+# optimizer is the powerful push-and-shove router needed for dense fans (the
+# 0.30 mm die field); -mt 0's bare maze router leaves the 64 chip nets unrouted.
+# Override with MT=1 to TEST whether the single-thread optimizer avoids the
+# 2-thread crash and closes the chip nets.
+MT = os.environ.get("MT", "0")
 jar = (Path(sys.argv[2]).resolve() if len(sys.argv) > 2
        else Path(__file__).resolve().parent / "bin" / "freerouting.jar")
 stem = board_path.with_suffix("")
@@ -41,7 +48,7 @@ if not dsn.exists():
 # unconnected nets for a targeted cleanup pass.
 print(f"== FreeRouting ({jar.name}) ==")
 cmd = ["xvfb-run", "-a", "java", "-jar", str(jar),
-       "-de", str(dsn), "-do", str(ses), "-mt", "0", "-drc", str(drc)]
+       "-de", str(dsn), "-do", str(ses), "-mt", MT, "-drc", str(drc)]
 print("  ", " ".join(map(str, cmd)))
 with open(log, "w") as lf:
     p = subprocess.run(cmd, stdout=lf, stderr=subprocess.STDOUT)

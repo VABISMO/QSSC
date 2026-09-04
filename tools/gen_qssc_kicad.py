@@ -1100,6 +1100,12 @@ def build_main_board():
     # Power chain (left column)
     add("J2", "qssc:Barrel_Jack", "5V Barrel", "Connector_BarrelJack:BarrelJack_CUI_PJ-102AH_Horizontal",
         30, 30, pins={"1": "+5V_IN", "2": "GND"})
+    # +5V_IN input bulk decoupling: the barrel-jack input rail (J2.1 -> F1.1) had
+    # NO decoupling cap -- 4 loads (J2, F1, USB diode-OR D4, PWR_FLAG) and 0 caps.
+    # Per standard practice a 10 uF bulk cap at the barrel input absorbs source
+    # ripple / hot-plug transient before the polyfuse + regulators.
+    add("C_in", "qssc:C", "10uF", "Capacitor_SMD:C_0805_2012Metric",
+        43, 38, pins={"1": "+5V_IN", "2": "GND"})
     add("F1", "qssc:Polyfuse", "2A PTC", "Fuse:Fuse_1206_3216Metric",
         55, 30, pins={"1": "+5V_IN", "2": "+5V"})
     add("REG1", "qssc:AMS1117-3.3", "AMS1117-3.3", "Package_TO_SOT_SMD:SOT-223-3_TabPin2",
@@ -1223,7 +1229,14 @@ def build_main_board():
                         "21": "GND", "22": "RSET", "23": "GND", "24": "VREF", "26": "+3V3",
                         "27": "GND", "28": "+3V3", "29": "refclk_25m", "30": "ADF_MUXOUT",
                         "31": "GND", "32": "+3V3", "33": "GND", "8": "GND",
-                        "19": "ADF_TEMP"},
+                        "19": "ADF_TEMP",
+                        # The QFN-32-1EP footprint models the 3.45x3.45 mm exposed
+                        # pad as ONE named pad "33" (netted GND above) PLUS a 3x3
+                        # grid of 9 numberless "" sub-pads (paste/copper apertures
+                        # under the EP). Per ADF4351 datasheet the EP MUST be tied to
+                        # GND (thermal + electrical return); net the sub-pads GND too
+                        # so none of the EP copper floats. fp_net_pads matches "".
+                        "": "GND"},
         nc_pins=["5", "13", "14", "15", "25"])
     # ADF4351 pin-tie rationale (verified vs ADI ADF4351 datasheet, 32-lead LFCSP):
     #   pin 20 VTUNE  -> LF_OUT  (loop-filter output drives the VCO tuning input;
@@ -1488,6 +1501,11 @@ def build_detector_analog():
     # The AD7616 VCC is 5 V analog; isolating it from the main +5V rail with a
     # 600-ohm ferrite + bulk/HF decoupling keeps the ADC's sampling transients
     # off the digital +5V (and vice-versa).  VDRIVE is +3V3 (logic levels).
+    # Head +5V (from BTB J12 pins 17/18) feeds FB_A; it had NO decoupling (2
+    # loads, 0 caps). Add a 10 uF bulk cap on the +5V side of the ferrite as the
+    # LDO/feed decoupling per standard practice.
+    add("C_5V", "qssc:C", "10uF", "Capacitor_SMD:C_0805_2012Metric", 0, 0,
+        pins={"1": "+5V", "2": "GND"})
     add("FB_A", "qssc:L", "600Ω@100MHz", "Inductor_SMD:L_0603_1608Metric", 0, 0,
         pins={"1": "+5V", "2": "+5V_A"})
     add("C_Abulk", "qssc:C", "10uF", "Capacitor_SMD:C_0805_2012Metric", 0, 0,
@@ -1557,7 +1575,10 @@ def build_detector_analog():
         # (56) is the second serial output, unused in 1-wire mode (all data on
         # SDOA = pin 57).  All declared (no_connect) per datasheet.
         add(f"UAD{j}", "qssc:AD7616", "AD7616", AD7616_FP, 0, 0, pins=p,
-            nc_pins=["41", "42", "43", "44", "47", "48", "53", "54", "55", "56"])
+            nc_pins=["41", "42", "43", "44", "47", "48", "53", "54", "55", "56"]
+                 + ([] if j == 0 else ["67"]))
+        # j>0 BUSY (pin 67) is unused: BUSY is push-pull (no wire-OR), only chip0's
+        # BUSY is read by the FPGA, so chip1-3 BUSY is left NC per datasheet.
         # per-chip decoupling (datasheet ref/reg/supply caps):
         add(f"Cua{j}", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
             pins={"1": "+5V_A", "2": "GND"})              # VCC HF
@@ -1590,7 +1611,13 @@ def build_emitter_driver():
               "Mask4.11x4.36mm_ThermalVias")
     for j in range(3):
         pins = {"1": "GND", "2": "em_blank", "3": "em_sclk",
-                "30": "em_xlat", "31": f"em_iref{j}", "32": "+3V3", "33": "GND"}
+                "30": "em_xlat", "31": f"em_iref{j}", "32": "+3V3", "33": "GND",
+                # The HTSSOP-32-1EP_ThermalVias footprint models the EP as 38
+                # plated-thermal-via pads named "33" (netted GND above) PLUS 13
+                # numberless "" EP copper sub-pads. Per TLC5947 datasheet the EP
+                # (DAP) MUST be tied to GND (thermal + electrical); net the
+                # sub-pads GND so no EP copper floats. fp_net_pads matches "".
+                "": "GND"}
         # SIN: chip0 takes em_sin from the FPGA; chip1/2 take the prior chip SOUT.
         pins["4"] = "em_sin" if j == 0 else f"em_sout{j-1}"
         # SOUT: chip0/1 cascade to the next chip's SIN; chip2 SOUT left NC.
@@ -1637,6 +1664,10 @@ def build_detector_head():
     # +3V3 / +5V arrive through J12 (passive pins) -> flag so ERC sees a driver.
     add("#FLG10", "power:PWR_FLAG", "PWR_FLAG", "", 30, 12, pins={"1": "+3V3"})
     add("#FLG11", "power:PWR_FLAG", "PWR_FLAG", "", 34, 12, pins={"1": "+5V"})
+    # GND also arrives through J12 (passive pins) -> flag so the AD7616 / TLV9004
+    # power-input GND pins (V*GND, V-) see an external driver (else ERC
+    # power_pin_not_driven on every VGND pin). The main board sources GND.
+    add("#FLG12", "power:PWR_FLAG", "PWR_FLAG", "", 38, 12, pins={"1": "GND"})
     # +5V_A driven through FB_A (passive ferrite) from +5V -> flag (like +5V_RF).
     add("#FLG9", "power:PWR_FLAG", "PWR_FLAG", "", 80, 132, pins={"1": "+5V_A"})
 
@@ -2051,7 +2082,7 @@ def emit_pro():
     # the 0.5 mm-pitch CSG324 BGA and 0.30 mm-pitch QSSC_Chip dog-bone fanout, and
     # 0.40 mm / 0.20 mm drill routing vias for general signal escape. A 0.45 mm /
     # 0.10 mm floor (a non-HDI assumption) would flag every one of those as a
-    # via_diameter / annular_width violation. 0.20 mm / 0.05 mm is the honest HDI
+    # via_diameter / annular_width violation. 0.20 mm / 0.05 mm is the HDI
     # floor: the 0.40 mm routing vias clear it with margin, the 0.20 mm VIPs sit
     # exactly on it (KiCad uses >=), and the 0.05 mm annular is the via-in-pad
     # figure (the pad copper, not the via ring, provides the annular -- VIPs are
@@ -2223,6 +2254,11 @@ def assign_pcb_positions():
     fixed = {
         # power (top-left)
         "J2": (10, 10, 180), "F1": (24, 10, 0), "R70": (20, 16, 0), "LED1": (26, 16, 0),
+        # C_in = +5V_IN input bulk decoupling (10uF 0805) right at the barrel-jack
+        # input rail (J2.1 -> C_in -> F1).  Top-left, clear of the J2/F1/R70/LED1
+        # row (y=10/16) and of the default C1-30 cap grid (x>=50).  Without this it
+        # fell through to the (50,50) default and collided with C37.
+        "C_in": (46, 8, 0),
         "REG1": (34, 14, 0), "REG2": (34, 26, 0), "REG3": (34, 38, 0), "FB1": (34, 50, 0),
         # REG3 (AP2127K-1.0) decoupling, around (34,38)
         "C42": (28, 36, 0), "C41": (40, 34, 0), "C43": (40, 42, 0), "C44": (28, 42, 0),
@@ -2265,6 +2301,12 @@ def assign_pcb_positions():
         "R67": (84, 26, 0), "C31": (84, 30, 0), "R68": (84, 34, 0),
         "C32": (100, 26, 0), "C33": (100, 30, 0), "R73": (100, 34, 0),
         "C34": (100, 40, 0), "C35": (110, 34, 0), "C36": (110, 40, 0), "L2": (110, 46, 0),
+        # C37 = ADF4351 pin-19 TEMP decoupling (ADF_TEMP node); sits just below-right
+        # of U3 (clear of the QFN-32 keepout x[88.5,95.5] y[26.5,33.5] and of
+        # C33@(100,30)/C34@(100,40)/C35@(110,34)).  Without an explicit placement it
+        # fell through assign_pcb_positions()'s else-branch to the (50,50) default
+        # cell and collided with C_in -> DRC shorting_items +5V_IN/ADF_TEMP.
+        "C37": (104, 36, 0),
         "J7": (10, 40, 0), "J9": (10, 26, 0),
         # ---- production-hardening pass 2026-09 (see add() block + §16) ----
         # USB VBUS Schottky + bulk near the USB-C bottom edge (left of the die).

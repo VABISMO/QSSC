@@ -9,7 +9,7 @@ MB, many minutes) -- it froze the host. A line router is O(track length) per
 net: no exploration, no big dicts, so it runs in seconds at ~50 MB. It places a
 clean L (one corner) or Z (two corners, a detour) shape, collision-checked
 against pads + already-routed copper; BGA via-in-pad nets escape on B.Cu. Nets
-it cannot place cleanly are left HONESTLY unrouted, never force-routed.
+it cannot place cleanly are left unrouted, never force-routed.
 
 DRC-clean by construction:
   * pad keepout = clearance + half-track-width, so a track CENTRE kept outside
@@ -102,10 +102,10 @@ ROUTING_VIA_DIAM_NM = 400_000
 ROUTING_VIA_DRILL_NM = 200_000
 MARK_RADIUS = 3
 
-# Nets the autorouter must NOT touch -- left honestly unrouted for a manual GUI
+# Nets the autorouter must NOT touch -- left unrouted for a manual GUI
 # session. The USB-C diff pair (USB_DP/USB_DM) needs 90-ohm controlled-impedance
 # geometry + length-skew tuning a line router cannot do, and its USB-C edge pads
-# (J10 at the 85 mm board edge) defeat via-up -- so it is honestly GUI. (Pad
+# (J10 at the 85 mm board edge) defeat via-up -- so it is GUI. (Pad
 # keepout alone is not enough: the 0.5 mm-pitch SMD pads sit so close that a
 # track leaving one clips the other.)
 EXCLUDE_NETS = {"USB_DP", "USB_DM"}
@@ -941,7 +941,7 @@ def _route_power(board, nc, net, pads, rail_lay, master, own_keepout, routed,
     with no clean L/Z (e.g. two 5V rails' decoupling caps interleaved in the cap
     bank cross on the shared B.Cu layer) is SKIPPED. A tie via is placed ONLY for
     a pad that is an endpoint of a successfully-routed MST edge (no isolated
-    dangling vias). Skipped pads/edges are left honestly to GUI. Nothing is
+    dangling vias). Skipped pads/edges are left to GUI. Nothing is
     placed until the dry-run resolves which edges route (a half-placed rail would
     pollute the shared layer for the next rail). Returns
     (n_tracks, n_vias, n_skip_pad, n_skip_edge): n_skip==0 -> the whole rail
@@ -1407,8 +1407,31 @@ def _chip_fanout(board, x0, y0, routed, fps=None):
             for gx_ in range(min(ixp, ix), max(ixp, ix) + 1):
                 for gy_ in range(min(iyp, iy), max(iyp, iy) + 1):
                     _mark(routed, gx_, gy_, lay, BGA_VIP_MARK_RADIUS)
+        # Short outward escape on the opposite surface, clear of the 0.30 mm die
+        # pad field, to a BREAKOUT point FreeRouting routes from. FreeRouting
+        # 2.1.0's shove-trace maze crashes (ArrayIndexOutOfBounds in
+        # MazeShoveTraceAlgo.check_shove_trace_line) the moment its maze enters the
+        # 0.30 mm-pitch die pad field; this 3 mm escape puts the net's free end
+        # well clear of that field (>=3.5 mm from the die edge) so FreeRouting
+        # routes breakout->target in open area at standard 0.65 mm IC-pad density,
+        # which it handles without crashing. The escape is pre-routed copper
+        # (pad->stub->via->escape->breakout), so the chip net is never dangling.
+        esc = 3_000_000                       # 3.0 mm outward, away from the die
+        bx, by = int(vx + dx * esc), int(vy + dy * esc)
+        t = pcbnew.PCB_TRACK(board)
+        t.SetStart(pcbnew.VECTOR2I(int(vx), int(vy)))
+        t.SetEnd(pcbnew.VECTOR2I(bx, by))
+        t.SetNetCode(nc)
+        t.SetWidth(150_000)                   # 0.15 mm Chip-class
+        t.SetLayer(esc_lay)
+        board.Add(t)
+        bix, biy = int((bx - x0) // GRID_NM), int((by - y0) // GRID_NM)
+        for lay in (esc_lay,):
+            for gx_ in range(min(ix, bix), max(ix, bix) + 1):
+                for gy_ in range(min(iy, biy), max(iy, biy) + 1):
+                    _mark(routed, gx_, gy_, lay, BGA_VIP_MARK_RADIUS)
         via_pads.setdefault(nm, []).append(_PadProxy(
-            cx=vx, cy=vy, bx=vx - 100_000, by=vy - 100_000, bw=200_000, bh=200_000,
+            cx=bx, cy=by, bx=bx - 100_000, by=by - 100_000, bw=200_000, bh=200_000,
             netname=nm, netcode=nc, is_pth=False, layer=esc_lay,
             attrib=pcbnew.PAD_ATTRIB_SMD, has_hole=False))
 
@@ -1539,7 +1562,7 @@ def build(board) -> dict:
     # Routed before signals so each rail's 0.5 mm track claims the still-empty
     # rail layer. Span order (longest crossing first): the rail that must cross
     # the board (e.g. +5V_IN VBUS bottom->fuse top, +5V_RF FB1->RF section)
-    # claims B.Cu before shorter rails fill it. A failed rail is honestly left
+    # claims B.Cu before shorter rails fill it. A failed rail is left
     # to GUI; its BGA through-via barrels stay (not removed below).
     for net in sorted((n for n in net_pads if n in POWER_ROUTER_LAYER),
                       key=lambda n: -_span(net_pads[n])):
@@ -1570,7 +1593,7 @@ def build(board) -> dict:
         # NEVER returns None: skip_pad/skip_edge count pads/edges left to GUI.
         # nt==0  -> nothing routable at all .......................... fail
         # skip==0 -> whole rail routed ............................... done
-        # skip>0  -> partial (some pads/edges honestly GUI) ........... partial
+        # skip>0  -> partial (some pads/edges GUI) ........... partial
         nt_r, nv_r, skip_pad, skip_edge = r
         if nt_r == 0:
             fail.append(net)
@@ -1592,26 +1615,26 @@ def build(board) -> dict:
     # need long B.Cu runs and must claim the (still-empty) B.Cu before short
     # local nets fill it. Then non-BGA nets, shortest first. Power rails are
     # already routed above and skipped here.
+    # `structured_chip` lists the chip nets already closed by the deterministic
+    # _structured_bus_fanout (task #36, not yet implemented). Empty here => ALL
+    # chip nets are deferred (appended to `fail`) for FreeRouting / the future
+    # structured pass; the line router's 0.2 mm grid cannot do the long crossing
+    # breakout->target fan without blocking every short net.
+    structured_chip = set()
     for net in sorted(net_pads,
                       key=lambda n: (0 if n in vip_net else 1, -_span(net_pads[n]),
                                      len(net_pads[n]))):
         if net in POWER_ROUTER_LAYER:
             continue
-        if _is_chip_net(net):
-            # The 0.30 mm-pitch dog-bone field is beyond the 0.2 mm line-router
-            # grid: each dog-bone via marks a radius-2 (5-cell) block, and
-            # same-parity vias sit only 0.60 mm (3 cells) apart, so their mark
-            # blocks overlap by 2 cells. The own-keepout `allowed` override lets
-            # a net claim that overlap (its own via's block covers it) and route
-            # into the neighbour's via copper -- 2 Chip-clearance DRC violations
-            # (DET_IN62 escape track 0.025 mm from DET_IN60's via on In3.Cu).
-            # _chip_fanout already placed each pad's dog-bone (pad -> 0.15 mm
-            # F.Cu stub -> through-via), which is itself DRC-clean; only the
-            # via<->target ESCAPE is beyond this router. Leave all 128 chip nets
-            # unrouted for the FreeRouting pass (Task 17, continuous-copper
-            # routing that respects the 0.10 mm Chip clearance). The dog-bone
-            # vias are preserved by the chip_via_pos guard in the VIP-removal
-            # block below, so the fanout stays intact for FreeRouting to finish.
+        if _is_chip_net(net) and net not in structured_chip:
+            # Chip nets are closed by the deterministic _structured_bus_fanout
+            # (crossing-free by construction) BEFORE this loop; any chip net NOT
+            # in `structured_chip` was not pairable there and is left for
+            # FreeRouting. The line router's 0.2 mm grid cannot do the long
+            # crossing breakout->target fan (chip nets sort first as vip_net
+            # members and crisscross the board, blocking every short net), so do
+            # NOT attempt them here. The dog-bone vias are preserved by the
+            # chip_via_pos guard in the VIP-removal block below.
             fail.append(net)
             continue
         pads = net_pads[net]
