@@ -309,12 +309,17 @@ class _PadProxy:
 
 
 class _FpProxy:
-    """Plain-python snapshot of one footprint (reference + its pad snapshots)."""
-    __slots__ = ("ref", "pads")
+    """Plain-python snapshot of one footprint (reference + position + pad
+    snapshots).  Position is the footprint origin (die body centre for the
+    QSSC_Chip, the BGA array centre for the FPGA) -- captured BEFORE
+    _clear_tracks so swig still resolves GetPosition()."""
+    __slots__ = ("ref", "pads", "x", "y")
 
-    def __init__(self, ref, pads):
+    def __init__(self, ref, pads, x=0, y=0):
         self.ref = ref
         self.pads = pads
+        self.x = x
+        self.y = y
 
     def GetReference(self):
         return self.ref
@@ -329,6 +334,7 @@ def _capture_pads(board):
     fps = []
     for fp in board.GetFootprints():
         pads = []
+        fpos = fp.GetPosition()
         for p in fp.Pads():
             pos = p.GetPosition()
             bb = p.GetBoundingBox()
@@ -341,7 +347,7 @@ def _capture_pads(board):
                 attrib=p.GetAttribute(),
                 has_hole=(p.GetDrillSize().x > 0),
             ))
-        fps.append(_FpProxy(fp.GetReference(), pads))
+        fps.append(_FpProxy(fp.GetReference(), pads, fpos.x, fpos.y))
     return fps
 
 
@@ -1140,9 +1146,8 @@ def _bga_fanout(board, x0, y0, routed, fps=None):
     if fpga is None:
         return {}, {}, {}
     # Only the FPGA BGA (CSG324, 324 pads) gets HDI via-in-pad fanout. Guard on
-    # pad count: < 100 pads is not the FPGA BGA (the merged board has no second
-    # BGA -- the 128-pad QSSC_Chip is a fine-pitch QFN-style edge-pad die, handled
-    # by the chip fanout, not here).
+    # pad count: < 100 pads is not the FPGA BGA (the QSSC_Chip die faces are
+    # fine-pitch QFN-style edge-pad dies, handled by _chip_fanout, not here).
     if len(list(fpga.Pads())) < 100:
         return {}, {}, {}
     pads = list(fpga.Pads())
@@ -1287,15 +1292,25 @@ def _bga_fanout(board, x0, y0, routed, fps=None):
 
 
 def _chip_fanout(board, x0, y0, routed, fps=None):
-    """Staggered dog-bone fanout for the 128-pad QSSC_Chip die (0.30 mm pitch,
-    0.15x0.30 mm pads). The chip pads are too fine for the 0.2 mm line router: a
-    0.2 mm track at a pad centre clears the 0.30 mm-pitch neighbour pad by only
-    0.125 mm < the 0.15 mm netclass clearance, and the 0.3 mm PAD_KEEPOUT rings
-    of adjacent pads overlap and block the perpendicular exit. So each netted
-    pad gets a 0.15 mm F.Cu stub outward (perpendicular to the die edge: DET top
-    edge -> up, EM bottom edge -> down) to a staggered 0.20 mm through-via just
-    past the pad row; the line router then escapes the via on B.Cu (pad-free, the
-    cleanest jump layer) to the TIA / P-MOS target.
+    """Staggered dog-bone fanout for a QSSC_Chip die FACE (0.30 mm pitch,
+    0.15x0.30 mm pads). The main board carries QSSC_Chip_EM (64 EM cathodes on
+    F.Cu bottom edge + EM_ANODE on the F.Cu left edge); the detector head
+    carries QSSC_Chip_DET (64 DET electrodes on B.Cu top edge). The chip pads
+    are too fine for the 0.2 mm line router: a 0.2 mm track at a pad centre
+    clears the 0.30 mm-pitch neighbour by only 0.125 mm < the 0.15 mm netclass
+    clearance, and the 0.3 mm PAD_KEEPOUT rings of adjacent pads overlap and
+    block the perpendicular exit. So each netted pad gets a 0.15 mm stub on the
+    pad's OWN layer (F.Cu for EM, B.Cu for DET) outward, perpendicular to the
+    die edge it sits on, to a staggered 0.20 mm through-via just past the pad
+    row; the line router then escapes the via on the OPPOSITE surface (B.Cu for
+    EM, F.Cu for DET) to the TLC5947 sink / TIA input.
+
+    The escape direction + stub layer are derived per pad from the pad's own
+    layer + its position relative to the die centre (the 20x20 mm body centred
+    on the footprint origin): a pad further in y than x is on the top/bottom
+    edge (stub +/-y); a pad further in x than y is on the left/right edge (stub
+    +/-x). This handles the single-row split faces (all DET on one edge) that
+    the old pad-mean top/bot split collapsed to empty.
 
     Stagger (even pads 0.5 mm, odd pads 1.0 mm out) spaces the 0.20 mm vias on a
     ~0.58 mm diagonal so adjacent vias clear the 0.15 mm rule (same-row vias sit
@@ -1306,8 +1321,8 @@ def _chip_fanout(board, x0, y0, routed, fps=None):
         (the stub already connects the pad to its via; routing from the pad
         itself would duplicate the stub and hit the keepout overlap).
       via_pads: net_name -> [_PadProxy at the via position] -- a routing
-        endpoint the line router connects to the TIA/P-MOS pad, registered in
-        pad_vip so _route_pair escapes it on the inner/B.Cu jump layer.
+        endpoint the line router connects to the TLC5947/TIA pad, registered in
+        pad_vip so _route_pair escapes it on the opposite-surface jump layer.
       vip_net / pad_vip / vip_vias: same shape as _bga_fanout's, merged by the
         caller with the BGA fanout dicts.
     """
@@ -1316,29 +1331,30 @@ def _chip_fanout(board, x0, y0, routed, fps=None):
     if chip is None:
         return set(), {}, {}, {}, {}
     pads = list(chip.Pads())
-    if len(pads) < 100:                  # not the 128-pad die
+    if len(pads) < 60:                   # not a die face (64 DET / 65 EM+ANODE)
         return set(), {}, {}, {}, {}
-    cy = sum(p.GetPosition().y for p in pads) // len(pads)
+    # die centre = footprint origin (the 20x20 mm body is centred on it). The
+    # pad-mean the old 128-pad code used collapses to the single row y for a
+    # split face and breaks the edge split, so use the footprint origin from the
+    # captured _FpProxy (chip.x / chip.y).
+    cx0, cy0 = chip.x, chip.y
 
-    def _netted(edge):
-        return [p for p in edge if p.GetNetname() and p.GetNetname() not in PLANE_NETS]
+    def _netted(pads_list):
+        return [p for p in pads_list
+                if p.GetNetname() and p.GetNetname() not in PLANE_NETS]
 
-    top = _netted(sorted([p for p in pads if p.GetPosition().y < cy],
-                         key=lambda p: p.GetPosition().x))
-    bot = _netted(sorted([p for p in pads if p.GetPosition().y > cy],
-                         key=lambda p: p.GetPosition().x))
-
+    all_pads = _netted(pads)
     chip_pad_centers = set()
     via_pads = {}
     vip_net, pad_vip, vip_vias = {}, {}, {}
 
-    def _stub(px, py, vx, vy, nc):
+    def _stub(px, py, vx, vy, nc, lay):
         t = pcbnew.PCB_TRACK(board)
         t.SetStart(pcbnew.VECTOR2I(int(px), int(py)))
         t.SetEnd(pcbnew.VECTOR2I(int(vx), int(vy)))
         t.SetNetCode(nc)
         t.SetWidth(150_000)              # 0.15 mm fine stub (clears 0.30 mm neighbour)
-        t.SetLayer(pcbnew.F_Cu)
+        t.SetLayer(lay)                  # pad's own layer (F.Cu EM / B.Cu DET)
         board.Add(t)
 
     def _vip(vx, vy, nc):
@@ -1351,50 +1367,76 @@ def _chip_fanout(board, x0, y0, routed, fps=None):
         board.Add(v)
         return v
 
-    def _do(rank, p, dy):
+    def _do(rank, p):
         nm = p.GetNetname()
         nc = p.GetNetCode()
         px, py = p.GetPosition().x, p.GetPosition().y
+        pad_lay = p.GetLayer()                      # F_CU (EM face) or B_CU (DET face)
+        esc_lay = B_CU if pad_lay == F_CU else F_CU  # escape on the opposite surface
+        # stub outward perpendicular to the die edge the pad sits on.
+        ddx, ddy = px - cx0, py - cy0
+        if abs(ddy) >= abs(ddx):
+            dx, dy = 0, (1 if ddy > 0 else -1)       # top/bottom edge -> +/-y
+        else:
+            dx, dy = (1 if ddx > 0 else -1), 0       # left/right edge -> +/-x
         chip_pad_centers.add((int(px), int(py)))
         stub = 500_000 if (rank % 2 == 0) else 1_000_000      # 0.5 / 1.0 mm stagger
-        vx, vy = int(px), int(py + dy * stub)
-        _stub(px, py, vx, vy, nc)
+        vx, vy = int(px + dx * stub), int(py + dy * stub)
+        _stub(px, py, vx, vy, nc, pad_lay)
         v = _vip(vx, vy, nc)
-        esc_lay = B_CU                      # B.Cu is pad-free -> cleanest escape
         ix = int((vx - x0) // GRID_NM)
         iy = int((vy - y0) // GRID_NM)
         # The dog-bone via sits OUTSIDE the chip pad (offset by the stub), so the
         # pad keepout does NOT cover its barrel -- mark the through-barrel keepout
-        # on EVERY signal layer (incl. F.Cu) so other nets do not short to it.
+        # on EVERY signal layer (incl. the pad layer) so other nets do not short.
         for lay in SIGNAL_LAYERS:
             _mark(routed, ix, iy, lay, BGA_VIP_MARK_RADIUS)
         r = BGA_VIP_MARK_RADIUS
-        cells = {(ix + dx, iy + dy_, lay)
+        cells = {(ix + dx_, iy + dy_, lay)
                  for lay in SIGNAL_LAYERS
-                 for dx in range(-r, r + 1) for dy_ in range(-r, r + 1)}
+                 for dx_ in range(-r, r + 1) for dy_ in range(-r, r + 1)}
         vip_net.setdefault(nm, set()).add((ix, iy, esc_lay))
         vip_net[nm] |= cells
         pad_vip[(vx, vy)] = (esc_lay, cells)
         vip_vias.setdefault(nm, []).append(v)
-        # mark the 0.15 mm F.Cu stub cells so other nets' F.Cu routes avoid it.
+        # mark the 0.15 mm stub cells (on the pad's own layer) so other nets'
+        # routes on that layer avoid it.
         ixp = int((px - x0) // GRID_NM)
         iyp = int((py - y0) // GRID_NM)
-        for lay in (F_CU,):
-            for gy_ in range(min(iyp, iy), max(iyp, iy) + 1):
-                _mark(routed, ixp, gy_, lay, BGA_VIP_MARK_RADIUS)
+        for lay in (pad_lay,):
+            for gx_ in range(min(ixp, ix), max(ixp, ix) + 1):
+                for gy_ in range(min(iyp, iy), max(iyp, iy) + 1):
+                    _mark(routed, gx_, gy_, lay, BGA_VIP_MARK_RADIUS)
         via_pads.setdefault(nm, []).append(_PadProxy(
             cx=vx, cy=vy, bx=vx - 100_000, by=vy - 100_000, bw=200_000, bh=200_000,
-            netname=nm, netcode=nc, is_pth=False, layer=pcbnew.F_Cu,
+            netname=nm, netcode=nc, is_pth=False, layer=esc_lay,
             attrib=pcbnew.PAD_ATTRIB_SMD, has_hole=False))
 
-    for rank, p in enumerate(top):
-        _do(rank, p, -1)                     # DET top edge -> escape up (-y)
-    for rank, p in enumerate(bot):
-        _do(rank, p, +1)                     # EM bottom edge -> escape down (+y)
+    # x-sorted for a stable stagger; the per-pad edge derivation handles any
+    # edge uniformly (no top/bot split needed).
+    for rank, p in enumerate(sorted(all_pads, key=lambda q: (q.GetPosition().x,
+                                                             q.GetPosition().y))):
+        _do(rank, p)
     return chip_pad_centers, via_pads, vip_net, pad_vip, vip_vias
 
 
 def build(board) -> dict:
+    # Recompute the layer sets for THIS board's copper count. The main control
+    # board is 6-layer HDI (signal layers F.Cu/In3.Cu/In4.Cu/B.Cu, planes
+    # In1.Cu/In2.Cu); the detector head is 4-layer (signal layers F.Cu/B.Cu,
+    # planes In1.Cu/In2.Cu). The hardcoded 6-layer module globals would route on
+    # non-existent In3/In4 copper IDs on the head, so override them here. JUMP
+    # layers lose In3/In4 on the head (only B.Cu remains); the per-via escape
+    # layer is still added separately in _route_pair, so F.Cu<->B.Cu hops work.
+    global SIGNAL_LAYERS, PLANE_LAYERS, JUMP_LAYERS
+    if board.GetCopperLayerCount() <= 4:
+        SIGNAL_LAYERS = (F_CU, B_CU)
+        PLANE_LAYERS = (IN1_CU, IN2_CU)
+        JUMP_LAYERS = (B_CU,)
+    else:
+        SIGNAL_LAYERS = (F_CU, IN3_CU, IN4_CU, B_CU)
+        PLANE_LAYERS = (IN1_CU, IN2_CU)
+        JUMP_LAYERS = (B_CU, IN3_CU, IN4_CU)
     # Snapshot EVERYTHING read from the board BEFORE any mutation: KiCad's swig
     # binding returns bare SwigPyObjects (no .GetCenter/.Pads) for
     # board.GetFootprints()/fp.Pads() after board.Remove() runs in _clear_tracks.
@@ -1415,22 +1457,24 @@ def build(board) -> dict:
 
     routed = set()
     vip_net, pad_vip, vip_vias = _bga_fanout(board, x0, y0, routed, fps=fps)
-    # 128-pad QSSC_Chip die fanout: 0.15 mm stub + staggered through-via per pad,
-    # escaping on B.Cu. Adds via pseudo-pads (via_pads) and merges its vip dicts.
+    # QSSC_Chip die-face fanout: 0.15 mm stub (on the pad's own layer) + a
+    # staggered through-via per pad, escaping on the opposite surface. Adds via
+    # pseudo-pads (via_pads) and merges its vip dicts. Main board: 65 EM/ANODE
+    # pads on F.Cu escape B.Cu; head board: 64 DET pads on B.Cu escape F.Cu.
     chip_pad_centers, via_pads, cv_net, cv_pad_vip, cv_vias = _chip_fanout(
         board, x0, y0, routed, fps=fps)
     vip_net.update(cv_net)
     pad_vip.update(cv_pad_vip)
     for nm, vs in cv_vias.items():
         vip_vias.setdefault(nm, []).extend(vs)
-    # The 128 chip dog-bone vias are a COMPLETE fanout (pad -> 0.15 mm stub ->
-    # through-via) that the GUI finishes on B.Cu; unlike a BGA via-in-pad that
-    # never escaped (a true dangling barrel), a dog-bone via is a valid net tie
-    # the line router routes FROM. So the failed-net VIP removal block below
-    # must NEVER tear them down (else 128 dead stubs end in mid-air). Track them
-    # by (x,y) position (swig proxies re-wrap on access, so id() is unreliable)
-    # so the removal loop can skip them while still dropping BGA VIPs of nets
-    # that genuinely never escaped.
+    # The chip dog-bone vias are a COMPLETE fanout (pad -> 0.15 mm stub ->
+    # through-via) that the line router finishes on the escape surface; unlike a
+    # BGA via-in-pad that never escaped (a true dangling barrel), a dog-bone via
+    # is a valid net tie the line router routes FROM. So the failed-net VIP
+    # removal block below must NEVER tear them down (else dead stubs end in
+    # mid-air). Track them by (x,y) position (swig proxies re-wrap on access, so
+    # id() is unreliable) so the removal loop can skip them while still dropping
+    # BGA VIPs of nets that genuinely never escaped.
     chip_via_pos = {(int(v.GetX()), int(v.GetY()))
                     for vs in cv_vias.values() for v in vs}
     # BGA pad bounding box (nm) for the edge-escape phase 2b: the FPGA footprint
