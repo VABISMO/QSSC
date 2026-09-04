@@ -8,9 +8,13 @@ electrically pumped) and **64 individual graphene/MoS₂ photodetectors** (top
 edge), both read/driven **fully in parallel** — no analog multiplexer, no
 serial sweep. Detectors are read out as **digital photon counts**: 64×
 transimpedance amplifier + 64× comparator → 64 FPGA LVCMOS inputs → 64 parallel
-16-bit counters in the fabric. Emitters are driven individually by 64 FPGA
-GPIO through an 8× 74HCT240 level-shifting buffer + 64× P-MOS high-side
-switches. Microwave pulses for ODMR spin control (~2.87 GHz NV⁻, ~3.46 GHz hBN
+16-bit counters in the fabric. Emitters are driven individually by **3× TLC5947**
+24-channel 12-bit PWM constant-current LED drivers (daisy-chained, 72 channels,
+64 used): each emitter cathode sinks into one TLC5947 OUTn channel, and the 64
+emitters share a common **+12V_EMIT** anode rail (the CQD EL turn-on is 4–8 V,
+so a 12 V LED supply gives the constant-current sink headroom). All 64 emitters
+fire in parallel at independent 12-bit intensities over a 4-wire FPGA interface
+(em_sclk/em_sin/em_xlat/em_blank). Microwave pulses for ODMR spin control
 V_B⁻) are synthesised by an ADF4351 PLL + GVA-84+ MMIC amplifier. A host PC
 communicates over USB-UART (FT232). Master clock is a 100 MHz TCXO. Power is
 derived from a 5 V input through 3.3 V / 1.8 V / 1.0 V LDOs.
@@ -30,6 +34,15 @@ and MW frequency change).
 > placa, todo en paralelo": one board, every channel parallel, digital
 > photon-counting. This document describes the merged single-board parallel
 > design only; any residual reference to MUX/XADC/J11/8×8/two-board is stale.
+>
+> **Emitter-driver refinement (2026-09).** The first parallel pivot drove the 64
+> emitters with 8× 74HCT240 buffers + 64× AO3401A P-MOS high-side switches on a
+> +5 V anode (208 parts, 64 FPGA GPIO). That stage is **also superseded**: the
+> emitters are now driven by **3× TLC5947** 24-channel 12-bit PWM constant-current
+> LED drivers (daisy-chained, 72 ch / 64 used, 4-wire FPGA interface) sinking the
+> 64 cathodes, with the common anode on a separate **+12V_EMIT** rail. Any
+> residual reference to 74HCT240 / AO3401A / `em_gate` / `em_drain` / 220 Ω set
+> resistor / +5 V anode is stale.
 
 The FPGA firmware that matches this hardware lives under
 [`../fpga/rtl/`](../fpga/rtl); the Verilog top level is `top_level.v`. The
@@ -70,12 +83,21 @@ There is no board-to-board connector, no second board, no Samtec.
   - Path: `DET_IN{i}` → TIA (−IN, +IN=`DET_REF`) → `DET_TIA{i}` → comparator
     (+IN, −IN=`DET_THR`) → open-collector + 10 k pull-up to +3V3 → `DET_DIG{i}`
     → FPGA LVCMOS33 input → 16-bit photon counter.
-- **64-channel emitter driver:**
-  - **8× 74HCT240** octal inverting buffer (TSSOP-20, VCC=+5 V) — 64 FPGA
-    `EM_DRV{i}` GPIO → 64 `em_gate{i}` gate drives, level-shifted 3.3 V→5 V.
-  - **64× AO3401A** P-MOS high-side switches (SOT-23): gate=`em_gate{i}`,
-    source=+5 V, drain=`em_drain{i}` → 220 Ω → `emitter_anode{i}` → chip EM pad.
-  - 64× 100 k gate pull-ups to +5 V (P-MOS off-default) + 64× 220 Ω set R.
+- **64-channel emitter driver (3× TLC5947 constant-current sink):**
+  - **3× TLC5947** 24-channel 12-bit PWM constant-current LED driver
+    (HTSSOP-32-1EP, VCC=+3V3), daisy-chained SIN→SOUT for 72 channels (64 used;
+    channels 64–71 = 0). Replaces the old 8× 74HCT240 + 64× AO3401A P-MOS matrix
+    (208 parts → 3 chips) and frees ~60 FPGA GPIO.
+  - **4-wire FPGA interface:** `em_sclk`/`em_sin`/`em_xlat`/`em_blank` (the
+    64 individual enable/timing is now 12-bit grayscale data shifted in, not 64
+    GPIO). All 64 emitters fire in parallel at independent intensities.
+  - **Common-anode topology:** each CQD emitter cathode `emitter_cat{i}` sinks
+    into one TLC5947 OUTn; the 64 anodes share one `EM_ANODE` die pad → the
+    **+12V_EMIT** rail (separate 12 V LED supply — the CQD EL turn-on is 4–8 V,
+    so a +5 V anode left no headroom for the constant-current sink; the TLC5947
+    OUT pins tolerate 33 V, so 12 V is textbook compliance).
+  - **R_IREF = 4.87 kΩ** (×3, `Riref0-2`) → I_OUT ≈ 41×1.20/4.87k ≈ 10.1 mA per
+    channel (inside the CQD 2–20 mA/pixel spec). 3× `Cem` 100 nF VCC decoupling.
 - **U3 — ADF4351BCPZ** wideband PLL synthesizer (microwave generation).
 - **U5 — GVA-84+** RF MMIC amplifier (RF power boost; self-biased +5 V).
 - **U8 — W25Q128JVSIQ** config flash (Artix-7 QSPI x4 boot).
@@ -87,8 +109,9 @@ There is no board-to-board connector, no second board, no Samtec.
   output, **J7** reset button, **J8** MW-gate header, **J9** 2×5 JTAG header.
 
 The FPGA runs four concurrent functions: (1) a UART text command parser
-(`command_parser.v`), (2) individual 64-emitter enable with millisecond timing
-(`emitter_array.v`, `emitter_en[63:0]`), (3) **64 parallel photon counters**
+(`command_parser.v`), (2) 64-emitter 12-bit PWM grayscale drive over the
+4-wire TLC5947 shift interface with millisecond timing (`emitter_array.v` +
+`tlc5947_ctrl.v`, `em_sclk/sin/xlat/blank`), (3) **64 parallel photon counters**
 clocked by the 64 comparator outputs (`photon_counter_array.v`, one 16-bit
 counter per channel, rising-edge increment), and (4) ADF4351 register sequencing
 over SPI (`adf4351_ctrl.v`, `spi_master.v`). The 1 kHz `mod_sync` lock-in
@@ -111,9 +134,10 @@ flowchart TD
         U3 -->|"RF_OUT 0dBm"| U5["U5 GVA-84+ MMIC + L2 choke"]
         FB1 -->|"+5V_RF"| U5
         U5 -->|"50Ω"| J3["J3 SMA"]
-        U1 -->|"EM_DRV[63:0]"| BUF["8x 74HCT240 (+5V, invert)"]
-        BUF -->|"em_gate[63:0]"| MOS["64x AO3401A P-MOS (S=+5V)"]
-        MOS -->|"em_drain -> 220R -> emitter_anode[63:0]"| CHIP_EM["U-chip: 64 CQD emitters (bottom edge)"]
+        U1 -->|"em_sclk/sin/xlat/blank 4-wire"| TLC["3x TLC5947 24-ch 12-bit PWM sink (daisy, 72ch/64used)"]
+        J4["J4 Barrel 12V / F2 PTC 1A / C85+C86"] -->|"+12V_EMIT"| ANODE["EM_ANODE common anode pad"]
+        TLC -->|"emitter_cat[63:0] cathode sink"| CHIP_EM["U-chip: 64 CQD emitters (bottom edge)"]
+        ANODE --> CHIP_EM
         U1 -->|"DET_DIG[63:0] LVCMOS"| CNT["64x 16-bit photon counters (fabric)"]
         DET["U-chip: 64 graphene detectors (top edge)"] -->|"DET_IN[63:0]"| TIA["16x TLV9004 TIA (Rf 1M, Cf 1p)"]
         TIA -->|"DET_TIA[63:0]"| CMP["16x LMV339 comparator"]
@@ -131,19 +155,19 @@ flowchart TD
 The RTL in `fpga/rtl/` is **vendor-neutral Verilog** — the detector readout is
 now **digital** (64 LVCMOS inputs + 64 fabric counters), so there is **no
 Xilinx-hard-ADC dependency** any more. The parallel photon-counter array ports
-to any FPGA with ≥128 free GPIO (64 detector inputs + 64 emitter outputs +
-SPI/UART/clk/reset). Everything — UART, SPI/ADF4351, emitter driver, command
-parser, 64-channel photon counters — is plain Verilog. The only board-specific
-file is **`constraints.xdc`** (pin + IOSTANDARD assignments), written for the
-**CSG324** package of the target FPGA.
+to any FPGA with ≥68 free GPIO (64 detector inputs + 4-wire TLC5947 emitter
+shift interface + SPI/UART/clk/reset/I²C). Everything — UART, SPI/ADF4351,
+emitter driver, command parser, 64-channel photon counters — is plain Verilog.
+The only board-specific file is **`constraints.xdc`** (pin + IOSTANDARD
+assignments), written for the **CSG324** package of the target FPGA.
 
 Consequence: **the same firmware runs unchanged on any FPGA with enough GPIO** —
 only the `.xdc` pin map is re-done per board. The custom QSSC PCB uses the
 CSG324 package directly. For prototyping, a Digilent Arty A7-35T (XC7A35T
 **CSG324**) has 4 Pmods (32) + Arduino header (24) = 56 exposed pins — enough
-for a subset of channels (e.g. 16 detectors + 16 emitters + control) but **not
-the full 128-channel parallel build**; the full 64+64 parallel design needs the
-custom PCB (or a GPIO-rich carrier). 
+for a subset of channels (e.g. 16 detectors + the 4-wire emitter interface +
+control) but **not the full 64-channel parallel detector build**; the full
+64-detector parallel design needs the custom PCB (or a GPIO-rich carrier).
 
 **Toolchain:** Xilinx **Vivado** (the free WebPACK/Lite licence covers the
 XC7A35T) for synthesis, place-and-route, bitstream generation and flash
@@ -164,8 +188,8 @@ backend connects.
 Everything mounts on the **one board**. The chip stack (emitter array +
 detectors + diamond host + waveguides) is bonded onto the **QSSC_Chip die**
 sitting board-centre, with the 64-channel TIA/comparator front-end fanned out
-above the die (top detector edge) and the 64-channel P-MOS emitter driver fanned
-out below (bottom emitter edge). The FPGA sits to one side; the RF chain, USB,
+above the die (top detector edge) and the 3× TLC5947 constant-current emitter
+driver fanned out below (bottom emitter edge). The FPGA sits to one side; the RF chain, USB,
 power and config flash occupy the board periphery. The diagram reads top →
 bottom (chip side down to the control logic).
 
@@ -185,7 +209,7 @@ flowchart TB
   EM["64x CQD ASE/LED emitters (bottom edge)"]:::chip
   SUB["ITO glass substrate + Cu contacts"]:::chip
   TIA["16x TLV9004 TIA + 16x LMV339 comparator + MCP4725 DAC"]:::fe
-  DRV["8x 74HCT240 + 64x AO3401A P-MOS + 64x 220R/100k"]:::fe
+  DRV["3x TLC5947 24-ch 12-bit PWM constant-current sink (72ch/64used) + Riref 4.87k"]:::fe
   PCB["**QSSC single board** — Artix-7 CSG324 + ADF4351 + GVA-84+ + FT232 + LDOs + W25Q128"]:::pcb
   USB["USB-UART to host PC (FT232RL + USB-C, 115200)"]:::pcb
   SMA["J3 SMA -> MW antenna feed"]:::pcb
@@ -195,7 +219,7 @@ flowchart TB
   SUB --- TIA
   SUB --- DRV
   TIA -->|"DET_DIG[63:0]"| PCB
-  DRV <-->|"EM_DRV[63:0]"| PCB
+  DRV <-->|"em_sclk/sin/xlat/blank + +12V_EMIT"| PCB
   SUB --> PCB
   PCB --> USB
   PCB --> SMA --> ANT
@@ -203,8 +227,9 @@ flowchart TB
 
 The chip stack (encapsulation → detector → filter → diamond host → waveguides
 → emitter → ITO substrate) is the optical/electrode assembly from the
-fabrication protocol; the **front-end** drives the emitters (FPGA → 74HCT240 →
-P-MOS → pixels) and reads the detectors (electrode → TIA → comparator → FPGA
+fabrication protocol; the **front-end** drives the emitters (FPGA → 3× TLC5947
+constant-current sink → pixel cathodes; common anode on +12V_EMIT) and reads
+the detectors (electrode → TIA → comparator → FPGA
 counter), the **board** delivers the microwave (SMA → antenna) and sinks the
 heat (Peltier/cold plate under the substrate). No camera, no alignment jig —
 every readout signal is an electrical connection on one board.
@@ -221,12 +246,12 @@ every readout signal is an electrical connection on one board.
 | 4  | TIA (per detector channel)        | UT0–UT15 | TLV9004 (quad op-amp)          | 16  | 64× transimpedance amplifier, Rf 1 MΩ ‖ Cf 1 pF per channel    | TSSOP-14 4.4×5 mm P0.65        | +3V3, 4 channels/chip → 64 channels; converts detector photocurrent → voltage |
 | 5  | Comparator (per detector channel) | UC0–UC15 | LMV339 (quad comparator)      | 16  | 64× Schmitt comparator → `DET_DIG{i}` digital photon pulses    | SOIC-14 3.9×8.7 mm P1.27      | +3V3, open-collector + 10 k pull-up to +3V3; threshold from shared DAC |
 | 6  | Threshold DAC                    | UDAC     | MCP4725                        | 1   | I²C 12-bit DAC → `DET_THR` shared comparator threshold         | SOT-23-6                      | +3V3; sets the photon-event detection level for all 64 channels |
-| 7  | Emitter driver buffer             | UB0–UB7  | 74HCT240 (octal inverting buf) | 8   | 64× FPGA `EM_DRV{i}` → `em_gate{i}`, 3.3 V→5 V level shift     | TSSOP-20 4.4×6.5 mm P0.65     | +5V; HCT TTL thresholds read 3.3 V LVCMOS; 8 channels/chip → 64 |
-| 8  | Emitter high-side switch          | Q0–Q63   | AO3401A (P-MOS)               | 64  | 64× high-side switch: gate=`em_gate{i}`, src=+5V, drain→220R→emitter | SOT-23                       | One P-MOS per emitter; 100 k gate pull-up to +5V = off-default |
+| 7  | Emitter LED driver (constant-current sink) | UE0–UE2 | TLC5947 (24-ch 12-bit PWM) | 3   | 64 CQD emitter cathodes `emitter_cat{i}` → OUTn; daisy-chained 72 ch (64 used) | HTSSOP-32-1EP 6.1×11 mm P0.65 | +3V3 VCC; OUT sinks up to 33 V/38 mA; 4-wire `em_sclk/sin/xlat/blank`; internal GS oscillator (no Gsclk) |
+| 8  | Emitter current-set resistor      | Riref0–2 | 4.87 kΩ 1%                  | 3   | I_OUT = 41×1.20/R_IREF ≈ 10.1 mA per channel (one per TLC5947) | 0603                          | Sets the constant-current sink; inside CQD 2–20 mA/pixel spec |
 | 9  | TIA feedback R/C (per channel)    | Rf, Cf   | 1 MΩ / 1 pF                   | 64/64 | Transimpedance gain + bandwidth: A=Rf=1 MΩ, BW≈1/(2π·Rf·Cf)    | 0603                          | 1 MΩ → 1 V/µA; 1 pF → ~106 kHz |
 | 10 | Comparator pull-up (per channel)  | Rpu0–63  | 10 kΩ                         | 64  | Open-collector → +3V3 pull-up on each `DET_DIG{i}`             | 0603                          | — |
-| 11 | Emitter set resistor (per channel)| Re0–63   | 220 Ω 1%                      | 64  | Per-emitter current set: (5−Vpixel)/Ipixel ≈ (5−2.8)/10mA ≈ 220 Ω | 0603                          | In the P-MOS drain leg of each emitter |
-| 12 | Emitter gate pull-up (per channel)| Rg0–63   | 100 kΩ                        | 64  | P-MOS gate → +5V = OFF until the FPGA drives it                 | 0603                          | Off-default; 74HCT240 active drive overrides it |
+| 11 | +12V_EMIT anode supply input      | J4 / F2  | Barrel 5.5×2.1 / 1 A PTC     | 1/1 | 12 V LED supply for the common emitter anode (`EM_ANODE` → +12V_EMIT) | PJ-102AH / 1206 | Separate from +5V logic (CQD EL turn-on 4–8 V > 5 V); TLC5947 OUT tolerates 33 V |
+| 12 | +12V_EMIT rail decoupling + TLC5947 VCC dec | C85/C86 / Cem0–2 | 22 µF + 100 nF / 100 nF | 2/3 | Bulk + HF decouple the 12 V anode rail at the die; 100 nF on each TLC5947 VCC | 1206/0603 / 0603 | CQD is capacitive; 22 µF bulk handles in-rush |
 | 13 | DET_REF divider                   | Rref1/Rref2 | 10 kΩ / 10 kΩ               | 2   | +3V3 divider → DET_REF = 1.65 V (TIA virtual-ground reference) | 0603                          | + Cref 100 nF bypass |
 | 14 | RF decoupling caps               | C1–C20   | 100 nF X7R 16 V                | 20  | High-frequency decoupling at every IC VCC pin                  | 0603                          | As close as possible to each pin |
 | 15 | Bulk caps                        | C21–C30  | 10 µF X7R 16 V                 | 10  | Rail stabilization / bulk energy                               | 1206/1210                     | Near regulators & FPGA |
@@ -245,7 +270,7 @@ every readout signal is an electrical connection on one board.
 | 28 | +5V→+5V_RF filter                | FB1      | Ferrite bead 600Ω@100MHz       | 1   | π-filter (FB1 + C45/C46 + C47/C48) from +5V to +5V_RF          | 0603                          | Replaces old REG4 AMS1117-5.0 (sat in dropout) |
 | 29 | RF amp choke inductor            | L2       | 100 nH ±10%                    | 1   | DC bias choke on RF output                                     | 0603                          | Bias decoupling |
 | 30 | Microwave antenna                | A1       | Loop / CPW resonator (custom)  | 1   | MW delivery to the host                                        | Custom SMD/wire               | 2–3 GHz, 50 Ω |
-| 31 | Long-pass optical filter         | F2       | 650 nm long-pass               | 1   | Block green CQD pump, pass NV PL (637–800 nm)                  | On-chip / holder              | Sits between host PL and detector |
+| 31 | Long-pass optical filter         | OPT      | 650 nm long-pass               | 1   | Block green CQD pump, pass NV PL (637–800 nm)                  | On-chip / holder              | Non-electronic on-chip part (ref F2 now = the +12V_EMIT PTC fuse) |
 | 32 | SU-8/PDMS waveguide layer        | —        | SU-8/PDMS optical waveguides    | 1   | Couple CQD emission + site PL into the detector electrodes      | On-chip (non-electronic)      | Part of the chip stack |
 | 33 | ESD protection diodes            | D1–D10   | TVS ESD5V0                     | 10  | ESD on USB/RF/sensitive I/O                                    | SOD-923                       | Clamp 5 V |
 | 34 | LED series resistor              | R70      | 330 Ω ±1%                      | 1   | LED1 current limit                                             | 0603                          | — |
@@ -258,10 +283,18 @@ every readout signal is an electrical connection on one board.
 > J11 board-to-board connector, the second chip-module PCB, the TIA→XADC
 > level-shift divider (R84/R85/C66), the TIA +5V_TIA isolation (FB1/C85/C86),
 > the `DET_BIAS`/`THRM`/`TIA_REF`/`TIA_OUT`/`TIA_ADC` nets, and the XADC
-> analog chain. **Added:** 16× TLV9004, 16× LMV339, 1× MCP4725, 64× AO3401A
-> (one per emitter, was 8), 64× 220 R + 64× 100 k gate pull-up (was 8+8), and
-> ~256 front-end passives. The detector path went from 1 shared TIA+XADC
+> analog chain. **Added (parallel pivot):** 16× TLV9004, 16× LMV339, 1× MCP4725,
+> and ~256 front-end passives. The detector path went from 1 shared TIA+XADC
 > (serial) to 64 individual TIA+comparator→digital (parallel).
+>
+> **Removed vs. the first parallel pivot (P-MOS emitter stage):** the 8× 74HCT240
+> buffer, the 64× AO3401A P-MOS high-side switches, the 64× 220 Ω set resistors
+> and 64× 100 k gate pull-ups (208 parts, 64 FPGA `EM_DRV` GPIO), and the +5 V
+> emitter anode. **Added (TLC5947 refinement):** 3× TLC5947 constant-current LED
+> driver, 3× R_IREF 4.87 kΩ, 3× Cem 100 nF, and the +12V_EMIT anode rail (J4
+> barrel + F2 1 A PTC + C85 22 µF + C86 100 nF). The emitter driver went from 64
+> FPGA GPIO + 208 discrete parts to a 4-wire shift register + 13 parts, with
+> 12-bit PWM grayscale per channel and a 12 V compliance headroom.
 
 > **Passives are commodity-spec (intentional, no fabricated MPNs).** The ICs,
 > regulators, connectors, ferrite/PTC, transistors, and RF amp all carry real
@@ -285,17 +318,22 @@ AP2127K-1.0 (SOT-23-5) because the AMS1117 family has no 1.0 V option. The RF
 amp runs on **+5V_RF**, which is the +5V rail filtered through **FB1** (ferrite
 bead + C45/C46/C47/C48 π-filter) — not a separate regulator (the old REG4
 AMS1117-5.0 fed from the +5V rail it was meant to regulate, so it sat in
-dropout; replaced 2026-09). The 64-channel emitter driver runs directly on the
-**+5 V** rail (64× P-MOS high-side switches); the 64-channel detector front-end
-(16× TLV9004 + 16× LMV339 + MCP4725) runs on **+3V3**.
+dropout; replaced 2026-09). The 64-channel emitter driver logic (3× TLC5947
+VCC) runs on **+3V3**, while the 64 CQD emitter anodes ride a separate
+**+12V_EMIT** rail (J4 12 V barrel → F2 1 A PTC → C85/C86) — the CQD EL turn-on
+is 4–8 V, so +5 V left no headroom for the constant-current sink and a dedicated
+12 V LED supply is used instead (the TLC5947 OUT pins tolerate 33 V). The
+64-channel detector front-end (16× TLV9004 + 16× LMV339 + MCP4725) runs on
+**+3V3**.
 
 | Rail  | Reg  | Tolerance | Use                                  | Notes |
 |-------|------|-----------|--------------------------------------|-------|
 | 3.3 V | REG1 | ±3%       | FPGA VCCO, ADF4351, FT232, detector front-end (TIA/comparator/DAC) | Main I/O rail, ≥1 A; 32 front-end ICs + 256 passives |
 | 1.8 V | REG2 | ±3%       | FPGA VCCAUX / VCCAUX_IO              | ≥1 A |
 | 1.0 V | REG3 | ±3%       | FPGA VCCINT (core)                   | AP2127K-1.0 600 mA; XC7A35T VCCINT peak well under that (synth uses ~10% of LUTs) |
-| 5.0 V | (barrel) | ±—    | 64-ch emitter driver (P-MOS high-side) + FB1 input | ≥1 A; 64 emitters can fire in parallel, but typical use is one/few at a time → ~10 mA each |
+| 5.0 V | (barrel) | ±—    | FB1 input (+5V_RF filter) | ≥1 A; no longer powers the emitter driver (moved to +12V_EMIT) |
 | +5V_RF | FB1 (filter) | — | GVA-84+ RF amplifier | π-filtered from +5V; not a regulator |
+| +12V_EMIT | J4 (barrel) / F2 | ±— | 64 CQD emitter common anode (EM_ANODE) | Separate 12 V LED supply; CQD EL turn-on 4–8 V > 5 V; TLC5947 OUT tolerates 33 V; 64×10 mA full-on ≈ 640 mA, F2 1 A PTC |
 
 **Sequencing.** Artix-7 requires VCCINT (1.0 V) and VCCAUX (1.8 V) to be present
 before VCCO (3.3 V) is applied, or at worst to ramp together. The recommended
@@ -316,12 +354,16 @@ within 3 mm. Bulk 10 µF (C21–C30) sits at each regulator output and at the FP
 VCCINT/VCCAUX/VCCO banks. The 1.0 V rail to the FPGA core additionally gets a
 22 µF–47 µF tantalum/ceramic near the BGA for transient supply. Each of the 32
 front-end ICs (16× TLV9004, 16× LMV339) gets its own 100 nF decoupling
-(`Cut{j}`, `Cuc{j}`); the 8× 74HCT240 each get 100 nF on +5V (`Cub{j}`).
+(`Cut{j}`, `Cuc{j}`); the 3× TLC5947 each get 100 nF on +3V3 (`Cem{j}`), and the
++12V_EMIT anode rail gets 22 µF bulk + 100 nF HF (C85/C86) at the die fanout.
 
 **Power estimation (rough).** FPGA ~0.3–0.5 W (1.0 V × ~0.3 A), 1.8 V aux ~30 mA,
 3.3 V I/O ~120 mA + detector front-end ~80 mA (32 ICs + 64 pull-ups ~6 mA),
-ADF4351 ~30 mA, GVA-84+ ~65 mA at 5 V, emitter driver ~10 mA/emitter (one/few
-firing). Total budget within a 5 V/3 A source.
+ADF4351 ~30 mA, GVA-84+ ~65 mA at 5 V, emitter driver ~10 mA/emitter at 12 V
+(one/few firing; 64×10 mA full-on ≈ 640 mA on the separate +12V_EMIT rail). The
++3V3 rail now also carries only the 3× TLC5947 VCC (logic, ~5 mA each), not the
+old 8× 74HCT240 + 64 P-MOS gate drive. Total 5 V/3 A logic budget is well
+within source; the 12 V emitter budget is on its own J4 input.
 
 ---
 
@@ -414,43 +456,60 @@ high-Q.
 
 The die integrates **64 individual CQD ASE/LED emitters** (~520–540 nm,
 ITO/PEDOT:PSS/CQD–PVA/ZnO/Ag stack), one per qubit site, each on its own bottom
-edge pad `EM{i}`. Each pixel needs a few mA at a couple of volts — more than a
-3.3 V FPGA pin should source directly — so the FPGA **does not drive the pixels
-directly**. It drives each emitter **individually** through `EM_DRV{i}`
-(64 FPGA GPIO, `emitter_en[63:0]` in `emitter_array.v`). Any subset of the 64
-emitters can fire in parallel; typical use is one or a few at a time.
+edge pad `EM{i}`. The CQD stack is **common-anode** (ITO shared anode at the
+bottom, Ag per-pixel cathode at the top): the 64 `EM{i}` pads are the
+**per-pixel cathodes** (`emitter_cat{i}`) and one `EM_ANODE` pad on the left
+edge is the shared anode. Each pixel needs a few mA at a few volts (EL turn-on
+4–8 V, drive 2–20 mA/pixel per `docs/FABRICATION_PROTOCOL.md`) — more than a
+3.3 V FPGA pin should source, and above the +5 V rail — so the FPGA drives the
+emitters through a **constant-current LED driver IC**, not directly.
 
-**Driver-stage design — 64× P-MOS high-side switches on +5 V.** The simplest
-functional per-channel switch: no boost, no DAC, no constant-current LED driver
-IC. **8× 74HCT240** octal inverting buffers (VCC=+5 V) do the inversion and the
-3.3 V→5 V level shift in one part each — HCT has TTL input thresholds (VIH=2 V)
-so it reliably reads the FPGA's 3.3 V LVCMOS outputs while running on a 5 V
-supply and outputting 0/5 V. Each 74HCT240 drives 8 P-MOS gates; the 8 chips
-drive all 64. Each `EM_DRV{i}` → 74HCT240 input → inverting output `em_gate{i}`
-→ **AO3401A P-MOS** gate; the P-MOS source is +5 V, drain is `em_drain{i}`
-→ 220 Ω → `emitter_anode{i}` → chip `EM{i}` pad. Because the 74HCT240 inverts,
-an active-HIGH `EM_DRV{i}` drives `em_gate{i}` LOW → Vgs = −5 V → P-MOS ON. Both
-`/OE` pins tied to GND (always enabled). A 100 k gate pull-up to +5 V holds each
-P-MOS OFF until the FPGA drives it (and during power-up before the 74HCT240
-outputs are alive — a floating gate could spuriously fire a pixel).
+**Driver-stage design — 3× TLC5947 constant-current sink + +12V_EMIT anode.**
+The emitter driver is a **3× TLC5947** daisy chain (24-channel 12-bit PWM
+constant-current LED driver, HTSSOP-32-1EP, VCC=+3V3). The 64 cathodes
+`emitter_cat{i}` each sink into one TLC5947 OUTn channel (72 channels available,
+64 used, channels 64–71 = 0); the single `EM_ANODE` pad rides the **+12V_EMIT**
+rail. This replaces the first-pivot 8× 74HCT240 + 64× AO3401A P-MOS matrix (208
+parts, 64 FPGA GPIO) with 3 chips + 4 FPGA wires, and adds per-channel **12-bit
+PWM grayscale** (independent intensity on any subset of the 64 emitters) instead
+of binary on/off.
 
-A per-emitter **220 Ω set resistor** (Re{i}) limits the current:
+**4-wire FPGA interface** (`em_sclk`/`em_sin`/`em_xlat`/`em_blank`,
+`tlc5947_ctrl.v`, `emitter_array.v`): the FPGA shifts 864 grayscale bits into
+the daisy chain (ch71 MSB first → ch0 LSB last) on `em_sclk`, latches them with
+`em_xlat`, and gates the outputs with `em_blank` (LOW = outputs enabled). There
+is **no Gsclk pin** — the TLC5947 has an internal 4 MHz grayscale oscillator, so
+the PWM dimming is free-running once latched; only `em_blank` and the grayscale
+data are FPGA-controlled. `em_sclk` max 30 MHz. This frees ~60 FPGA GPIO vs the
+old 64-line `EM_DRV` bus.
+
+**Per-channel current** is set once per chip by the IREF pin resistor:
 
 ```
-R_set = (Vdrive − Vpixel) / I_pixel = (5 − 2.8) / 10 mA ≈ 220 Ω
+I_OUT = 41 × 1.20 V / R_IREF   →   Riref0-2 = 4.87 kΩ  →  ~10.1 mA/channel
 ```
 
-Pixel path when firing emitter i: +5 V → Q{i} P-MOS → `em_drain{i}` → Re{i}
-220 Ω → `emitter_anode{i}` → chip `EM{i}` anode → pixel → chip GND return,
-~9 mA at ~2.2 V headroom. The exact value is sized for the CQD pixel V_f.
+10.1 mA sits inside the CQD 2–20 mA/pixel spec. The TLC5947 regulates this
+constant current into each cathode regardless of the anode voltage (within
+compliance), so unlike the old 220 Ω set resistor the current does not drift
+with the pixel V_f.
 
-Because each emitter has its own P-MOS, the 64 emitters are fully independent
-— the FPGA can fire any combination in parallel (unlike the pre-pivot 8×8
-matrix, which addressed one pixel at a time). Peak emitter-rail current is the
-sum of the firing pixels' currents (~9 mA each); the +5 V rail and the 64×
-P-MOS fanout handle this trivially. The emitter driver sits on the same board,
-below the die, keeping the 0/5 V switching local and off the FPGA's 3.3 V
-digital lines.
+**Anode rail.** The CQD EL turn-on is 4–8 V (visible by ~10 V), so a +5 V anode
+left no headroom for the constant-current sink. The **+12V_EMIT** rail (J4 12 V
+barrel → F2 1 A PTC → C85 22 µF + C86 100 nF) gives compliance for any CQD V_f
+up to ~11 V. The TLC5947 OUT pins tolerate up to 33 V independent of VCC, so a
+12 V anode with 3.3 V logic is the textbook application circuit. At low V_f the
+TLC5947 burns the excess (≤ ~2 W/IC at 64×10 mA full-on); the HTSSOP exposed pad
++ thermal vias handle typical PWM duty.
+
+Pixel path when firing emitter i: +12V_EMIT → `EM_ANODE` (die) → pixel →
+`emitter_cat{i}` (die cathode pad) → TLC5947 OUTn → internal constant-current
+sink → GND. All 64 emitters are fully independent — any combination fires in
+parallel at independent 12-bit intensities (unlike the pre-pivot 8×8 matrix,
+which addressed one pixel at a time). Peak +12V_EMIT current is the sum of the
+firing channels' currents (~10 mA each; 64×10 mA full-on ≈ 640 mA, well under
+the F2 1 A PTC). The emitter driver sits on the same board, below the die,
+keeping the 12 V switching local and off the FPGA's 3.3 V digital lines.
 
 ---
 
@@ -542,14 +601,17 @@ analog multiplexer** — every channel has its own TIA + comparator and is read
 - **64× detector analog (`DET_IN{i}` → TIA, `DET_TIA{i}` → comparator)**: keep
   each analog trace short, on the top layer over solid GND, guarded by a ground
   ring/via fence, away from the emitter-driver switching nets and the digital
-  `DET_DIG{i}`/`EM_DRV{i}` buses. The 64 `DET_IN{i}` are the most
+  `DET_DIG{i}` bus / 4-wire `em_sclk/sin/xlat/blank` emitter interface. The 64 `DET_IN{i}` are the most
   noise-sensitive nets on the board — they carry nA–µA photocurrents. The
   fanout from the 0.30 mm-pitch die pads is a staggered dog-bone (see §13).
 - **64× comparator digital outputs (`DET_DIG{i}`)**: single-ended LVCMOS to the
   FPGA; keep away from the `DET_IN{i}` analog inputs (crosstalk would feed the
   counters).
-- **64× emitter enables (`EM_DRV{i}`)**: FAST slew, 8 mA drive; series 22–33 Ω
-  termination optional to tame overshoot. Keep away from the detector analog.
+- **4-wire emitter shift interface (`em_sclk/sin/xlat/blank`)**: FAST slew,
+  8 mA drive; `em_sclk` ≤30 MHz, series 22–33 Ω termination optional to tame
+  overshoot. Keep away from the detector analog. The 64 high-current cathode
+  sinks (`emitter_cat{i}`) and the +12V_EMIT anode are Chip-netclass die-pad
+  nets — keep their return off the detector analog ground.
 - **`DET_THR` / `I2C_SDA` / `I2C_SCL`**: slow single-ended analog/control;
   SLOW slew, away from the detector analog and the RF chain.
 - **No clock traces under analog** (loop filter, VCO tune, detector TIA inputs,
@@ -575,11 +637,13 @@ analog multiplexer** — every channel has its own TIA + comparator and is read
   cluster above the die; star the +3V3 from the plane, keep the analog supply
   return separate from the emitter-driver +5 V switching return. The
   per-channel Rf/Cf sit right at each TIA input.
-- **Emitter driver (8× 74HCT240 + 64× P-MOS)**: 100 nF (`Cub{j}`) at each
-  74HCT240 VCC pin + 10 µF bulk on the +5 V emitter rail. Keep the 64-P-MOS
-  switching return currents off the detector analog ground (route the
-  emitter-driver GND return separately to the GND plane, not through the TIA
-  ground island).
+- **Emitter driver (3× TLC5947 + +12V_EMIT rail)**: 100 nF (`Cem{j}`) at each
+  TLC5947 VCC pin on +3V3 + 22 µF bulk / 100 nF HF on the +12V_EMIT anode rail
+  (C85/C86) at the die fanout. The TLC5947 OUT pins switch the 64 cathode
+  currents — keep that switching return off the detector analog ground (route
+  the +12V_EMIT / emitter-driver GND return separately to the GND plane, not
+  through the TIA ground island). The HTSSOP exposed pad (EP=GND) needs thermal
+  vias to the inner GND plane.
 - **MCP4725 DAC**: 100 nF on +3V3 and on `DET_THR` (`Cdac`); the threshold node
   is analog — keep it quiet.
 - **FPGA per-rail 4.7 µF bulk (UG393)**: C52 (+3V3) / C53 (+1V8) / C54 (+1V0) —
@@ -677,10 +741,11 @@ step (§15).
 | **64× comparator digital `DET_DIG{i}`** (comparator → FPGA) | F.Cu / inner sig | LVCMOS to FPGA; away from `DET_IN{i}` analog (crosstalk feeds counters) |
 | `DET_THR` (DAC threshold) / `I2C_SDA` / `I2C_SCL` | F.Cu | slow analog/control, SLOW slew, away from detector analog + RF |
 | `DET_REF` (1.65 V TIA virtual ground) | F.Cu | clean, well-decoupled (Cref 100 nF), star from the divider |
-| **64× emitter enable `EM_DRV{i}`** (FPGA → 74HCT240) | F.Cu / inner sig | FAST slew, 8 mA, optional 22 Ω series; away from detector analog |
-| **64× emitter gate `em_gate{i}` / drain `em_drain{i}` / `emitter_anode{i}`** | F.Cu | 0/5 V switching, Chip netclass for the die-pad nets; keep return off the detector analog ground |
+| **4-wire emitter shift `em_sclk/sin/xlat/blank`** (FPGA → TLC5947 chain) | F.Cu / inner sig | FAST slew, 8 mA, `em_sclk` ≤30 MHz, optional 22 Ω series; away from detector analog |
+| **64× emitter cathode `emitter_cat{i}`** (TLC5947 OUTn → die) | F.Cu dog-bone → B.Cu escape | 0.30 mm-pitch staggered dog-bone (as `DET_IN{i}`); Chip netclass 0.10 mm; constant-current sink, away from detector analog |
+| **`EM_ANODE`** (+12V_EMIT common anode → die left-edge pad) | F.Cu | 12 V, wide low-impedance feed from J4/F2/C85/C86; Chip netclass at the die pad; keep return off the detector analog ground |
 | `mod_sync` (1 kHz)       | F.Cu     | slow, away from analog |
-| Power rails (+1V0/+1V8/+5V/+5V_RF/+5V_IN) | 0.50 mm tracks, no pours | star at regulators, longest-span-first; **no per-rail pours** (overlapping bboxes would short). +3V3 is a plane (In2.Cu). |
+| Power rails (+1V0/+1V8/+5V/+5V_RF/+5V_IN/+12V_EMIT) | 0.50 mm tracks, no pours | star at regulators, longest-span-first; **no per-rail pours** (overlapping bboxes would short). +3V3 is a plane (In2.Cu). +12V_EMIT is a separate J4 input, not from the 5 V rail. |
 | +5V → +5V_RF (FB1 π-filter) | F.Cu | ferrite bead FB1 + C45/C46 (+5V side) + C47/C48 (+5V_RF side). |
 | GND                      | In1.Cu (solid) + vias | continuous, no splits under RF/clock/detector analog; via-in-pad on BGA GND balls + stitching mesh |
 
@@ -758,8 +823,8 @@ the critical nets (§13), and the FPGA CSG324 pinout in `fpga/constraints.xdc` �
 re-running that script rewrites all four files reproducibly. The camera / VCSEL
 / Toshiba-TORX / ADG732-MUX / XADC / second-board artefacts that used to live
 here are gone; the project reflects the **single-board parallel digital**
-design only (64× TIA + 64× comparator → 64 FPGA counters; 64× P-MOS emitter
-driver; no MUX, no XADC, no J11). **Verified component datasheets + pinouts live
+design only (64× TIA + 64× comparator → 64 FPGA counters; 3× TLC5947
+constant-current emitter driver on +12V_EMIT; no MUX, no XADC, no J11). **Verified component datasheets + pinouts live
 in [`hardware/datasheets/`](datasheets/DATASHEETS.md)** (cross-check reference
 for every pin number the generators emit); the BOM is
 [`datasheets/BOM.csv`](datasheets/BOM.csv).
@@ -866,11 +931,12 @@ headlessly:
 > - **Per-IC power/ground audit (re-verified 2026-09-04):** every active IC has
 >   a real power AND ground path. U1 (FPGA CSG324): +1V0 VCCINT (16 balls) +
 >   +1V8 VCCAUX (5) + +3V3 VCCO (29) + GND (51), all via-in-pad to their planes;
->   16× TLV9004 + 16× LMV339 + MCP4725: +3V3 + GND each; 8× 74HCT240: +5V + GND
->   each; 64× AO3401A P-MOS: source on +5V; ADF4351/W25Q128/FT232: +3V3 + GND;
->   GVA-84+: biased via the L2 RF choke from +5V_RF (MMIC, no dedicated VCC pin,
->   by design); USB-C J10 = VBUS_USB, barrel J2 = +5V_IN. **The board works
->   electrically.**
+>   16× TLV9004 + 16× LMV339 + MCP4725: +3V3 + GND each; 3× TLC5947: VCC=+3V3 +
+>   EP=GND (thermal vias) each, OUTn sinking `emitter_cat{i}` from +12V_EMIT;
+>   ADF4351/W25Q128/FT232: +3V3 + GND; GVA-84+: biased via the L2 RF choke from
+>   +5V_RF (MMIC, no dedicated VCC pin, by design); USB-C J10 = VBUS_USB, barrel
+>   J2 = +5V_IN, barrel J4 = +12V_EMIT (→ F2 → C85/C86 → EM_ANODE). **The board
+>   works electrically.**
 > - **REG4 fixed.** The AMS1117-5.0 that sat in dropout is **replaced by FB1**
 >   (ferrite bead) + C45/C46/C47/C48 π-filter from +5V → +5V_RF.
 > - **RF amp replaced.** The HMC441LP3E (wrong band) + its unnetted custom
@@ -888,9 +954,9 @@ headlessly:
 >   THROUGH via-up needs its full 0.6 mm footprint clear on all four signal
 >   layers, which the dense BGA + 0.30 mm die escape rarely affords), so the L/Z
 >   router places a clean subset (53 nets) and leaves the rest. These are the
->   64 `DET_DIG{i}` comparator→FPGA ties, the 64 `EM_DRV{i}` FPGA→buffer ties,
->   the 64 `DET_IN{i}`/`DET_TIA{i}` analog fanout-to-TIA ties, the 64
->   `em_gate{i}`/`em_drain{i}`/`emitter_anode{i}` driver ties, the USB diff
+>   64 `DET_DIG{i}` comparator→FPGA ties, the 4-wire `em_sclk/sin/xlat/blank`
+>   FPGA→TLC5947 ties, the 64 `DET_IN{i}`/`DET_TIA{i}` analog fanout-to-TIA ties,
+>   the 64 `emitter_cat{i}` TLC5947-OUT→die-cathode ties + `EM_ANODE`, the USB diff
 >   pair, the interior BGA signal balls (`SPI_*`, `TCK`, `CONF_*`, `I2C_*`), and
 >   the status/reference lines. They are left **honestly unrouted**
 >   (`unconnected_items` demoted to `ignore`), not force-routed.
@@ -983,21 +1049,25 @@ errors, DRC 0 violations / 0 unconnected / 0 footprint errors**.
   `reset` to GND (defines released = 0); `C68` 100 nF + R83 = 1 ms RC debounce
   on the release edge. Pressed → reset=+3V3.
 - **Front-end decoupling.** 32× 100 nF (one per TLV9004 + one per LMV339,
-  `Cut{j}`/`Cuc{j}`) on +3V3; 8× 100 nF on the 74HCT240 +5V (`Cub{j}`); `Cref`
-  100 nF on `DET_REF`; `Cdac` 100 nF on `DET_THR`.
-- **MOSFET gate pull-ups (off-default).** `Rg0..63` 100 k pull each P-MOS gate
-  to +5 V = OFF. Without these, the gates float during power-up (before the
-  74HCT240 outputs are alive) and a floating gate can spuriously fire an
-  emitter pixel. 100 k is easily overridden by the 74HCT240 active drive once
-  it powers up.
+  `Cut{j}`/`Cuc{j}`) on +3V3; 3× 100 nF on each TLC5947 VCC (`Cem{j}`) on +3V3;
+  `Cref` 100 nF on `DET_REF`; `Cdac` 100 nF on `DET_THR`.
+- **+12V_EMIT anode rail decoupling.** `C85` 22 µF bulk + `C86` 100 nF HF at the
+  `EM_ANODE` die fanout; `F2` 1 A PTC from `J4` 12 V barrel. The CQD stack is
+  capacitive, so the 22 µF bulk handles in-rush when channels enable.
+- **TLC5947 off-default.** `em_blank` is pulled HIGH (outputs blanked = OFF)
+  until the FPGA drives it LOW after shifting in grayscale data, so no emitter
+  fires during power-up or FPGA config. (No gate pull-ups — the constant-current
+  sinks are open until `em_blank` goes LOW, unlike the old floating P-MOS gates.)
 
 > **Removed in the single-board pivot (no longer on the BOM):** the TIA→XADC
 > level-shift divider (R84/R85/C66 — no XADC), the TIA +5V_TIA isolation
 > (FB1/C85/C86 — no ADA4530), the `TIA_REF` 2.5 V reference + C87 bulk, the
 > thermistor filter (C88/TH1 — `THRM` net removed), the 8×8 N-MOS column-sink
-> gate pulls (R96–R103 — no N-MOS columns, 64 individual P-MOS now). The
-> detector front-end runs on +3V3 (TLV9004/LMV339 are 3 V parts), not the +5V
-> the old ADA4530-1 electrometer needed.
+> gate pulls (R96–R103 — no N-MOS columns). **Removed in the TLC5947 emitter
+> refinement:** the 8× 74HCT240 buffer, 64× AO3401A P-MOS, 64× 220 Ω set R
+> (`Re0..63`), 64× 100 k gate pull-up (`Rg0..63`) — 208 parts → 3 TLC5947 +
+> 3 R_IREF + 3 Cem. The detector front-end runs on +3V3 (TLV9004/LMV339 are 3 V
+> parts), not the +5V the old ADA4530-1 electrometer needed.
 
 All added parts carry real LCSC/JLC sourcing in `hardware/datasheets/BOM.csv`.
 
@@ -1064,49 +1134,62 @@ count rate at 1 kHz rejects background light.
 > no MUX, no analog ADC, and the count is a direct photon-event number rather
 > than a noisy 12-bit voltage code.
 
-### C2. Emitter path: FPGA → 74HCT240 → P-MOS → 220 R → pixel
+### C2. Emitter path: FPGA → 3× TLC5947 constant-current sink → pixel cathode
 
 Each of the 64 CQD emitters (ITO/PEDOT:PSS/CQD–PVA/ZnO/Ag, ~520–540 nm) needs a
-few mA at a couple of volts. The FPGA **cannot drive the pixels directly**:
-(a) FPGA LVCMOS is 3.3 V — below the ~2.2–2.8 V pixel V_f plus headroom, and
-unable to reach a 5 V drive; (b) there is no current limiting — a direct pin
-would either damage the pixel or give uncontrolled brightness; (c) the FPGA
-cannot source the 5 V emitter current safely. The required chain (per channel,
-×64 in parallel) is:
+few mA at a few volts (EL turn-on 4–8 V, drive 2–20 mA/pixel). The FPGA
+**cannot drive the pixels directly**: (a) FPGA LVCMOS is 3.3 V — below the CQD
+turn-on; (b) there is no current limiting — a direct pin would damage the pixel
+or give uncontrolled brightness; (c) the FPGA cannot source the emitter current
+safely. The driver is a **3× TLC5947** 24-channel 12-bit PWM constant-current
+LED driver daisy chain (72 channels, 64 used). The CQD stack is common-anode,
+so the chain is a **cathode sink**, not a high-side switch:
 
 ```
-FPGA EM_DRV{i} (3.3 V) → 74HCT240 (invert + level shift 3.3→5 V)
-  → em_gate{i} → AO3401A P-MOS gate (S=+5V, D=em_drain{i})
-  → 220 R set resistor → emitter_anode{i} → chip EM{i} pixel
++12V_EMIT (J4→F2→C85/C86) → EM_ANODE (die, shared) → pixel
+  → emitter_cat{i} (die cathode pad) → TLC5947 OUTn → internal const-current sink → GND
+
+FPGA: em_sclk/em_sin (shift 864 GS bits) → em_xlat (latch) → em_blank LOW (enable)
 ```
 
-**Set resistor (Re{i}, 220 R).** Limits the per-emitter current:
+**Constant-current sink (TLC5947, 3× daisy-chained).** Each OUTn pin regulates
+I_OUT into the cathode regardless of the anode voltage (within compliance), so
+the per-channel current does **not** drift with the pixel V_f (unlike the old
+220 Ω set resistor). The current is set once per chip by the IREF pin resistor:
 
 ```
-R_set = (V_drive − V_pixel) / I_pixel = (5 − 2.8) / 10 mA ≈ 220 Ω
-I_pixel = (5 − V_f) / R_set  →  V_f=2.0 V: 13.6 mA,  V_f=2.2 V: 12.7 mA,
-                                 V_f=2.8 V: 10.0 mA   (~9–13 mA over V_f)
+I_OUT = 41 × 1.20 V / R_IREF   →   Riref0-2 = 4.87 kΩ  →  10.1 mA/channel
 ```
 
-Because each emitter has its own P-MOS, the 64 emitters are independent — the
-FPGA can fire any combination in parallel (the pre-pivot 8×8 matrix could only
-address one pixel at a time). Peak emitter-rail current is the sum of the
-firing pixels' ~9–13 mA each — trivial for the +5 V rail, no boost needed.
+10.1 mA sits inside the CQD 2–20 mA/pixel spec. VCC = +3V3 (logic); the OUT pins
+tolerate up to 33 V independent of VCC, so the 12 V anode is textbook
+compliance. There is **no Gsclk** — an internal 4 MHz grayscale oscillator
+free-runs the 12-bit PWM dimming; the FPGA only shifts grayscale data
+(`em_sclk`/`em_sin`), latches (`em_xlat`), and gates the outputs (`em_blank`).
 
-**Gate pull-up (Rg{i}, 100 k).** Before the 74HCT240 powers up its outputs are
-high-Z; a floating P-MOS gate can spuriously turn an emitter on. `Rg{i}` 100 k
-pulls the gate to +5 V = OFF (V_gs = 0). 100 k is weak enough that the
-74HCT240's active drive (~±20 mA, output impedance ≪ 100 k) cleanly overrides
-it once alive. Pulled gates also harden the driver against single-event /
-power-sequencing glitches.
+Because each emitter has its own constant-current channel, the 64 emitters are
+independent — the FPGA can fire any combination in parallel at independent
+12-bit intensities (the pre-pivot 8×8 matrix could only address one pixel at a
+time, and the first-pivot P-MOS stage was binary on/off). Peak +12V_EMIT
+current is the sum of the firing channels' ~10 mA each (64×10 mA full-on ≈
+640 mA, under the F2 1 A PTC).
+
+**Off-default (`em_blank`).** The TLC5947 outputs are blanked (OFF) while
+`em_blank` is HIGH, so no emitter fires during power-up or before the FPGA
+configures and shifts in grayscale data. This replaces the old 100 k P-MOS
+gate pull-ups — the constant-current sinks are simply open until enabled, with
+no floating-gate hazard.
 
 ### C3. Die size & pad pitch
 
 The QSSC_Chip die is **20 × 20 mm** with **128 wire-bond pads at 0.30 mm
-pitch** (64 DET top edge + 64 EM bottom edge, 0.15 × 0.30 mm pads). 0.30 mm
-pitch needs a staggered dog-bone fanout (0.15 mm F.Cu stub + 0.20 mm
-through-via, even pads 0.5 mm out, odd 1.0 mm out, escaped on B.Cu) — an HDI
-escape handled by the 6-layer stack + the Chip netclass (0.10 mm clearance).
+pitch** (64 DET top edge + 64 EM bottom edge, 0.15 × 0.30 mm pads) plus one
+**EM_ANODE** pad on the left edge (the shared common anode, clear of both
+dog-bone fields). The 64 EM pads are per-pixel cathodes (`emitter_cat{i}`);
+EM_ANODE is the +12V_EMIT common anode. 0.30 mm pitch needs a staggered dog-bone
+fanout (0.15 mm F.Cu stub + 0.20 mm through-via, even pads 0.5 mm out, odd 1.0
+mm out, escaped on B.Cu) — an HDI escape handled by the 6-layer stack + the
+Chip netclass (0.10 mm clearance).
 The board (210 × 140 mm) fits the die + the 64-channel front-end above + the
 64-channel driver below + the FPGA/RF/USB/power with DRC-clean courtyards.
 
@@ -1125,8 +1208,9 @@ The board (210 × 140 mm) fits the die + the 64-channel front-end above + the
   runs on +3V3).
 - LMV339 quad comparator data sheet, Texas Instruments (open-collector, +3V3).
 - MCP4725 I²C 12-bit DAC data sheet, Microchip (detector threshold `DET_THR`).
-- AO3401A P-MOS data sheet, Alpha & Omega (64× high-side emitter switch).
-- 74HCT240 octal inverting buffer data sheet, Nexperia/TI (3.3→5 V level shift).
+- TLC5947 24-channel 12-bit PWM constant-current LED driver data sheet, Texas
+  Instruments (SBVS114B) — 64-channel CQD emitter cathode sink, 3× daisy-chained:
+  <https://www.ti.com/lit/ds/symlink/tlc5947.pdf>
 - Full verified pinouts + canonical datasheet URLs for every active component
   are in [`hardware/datasheets/DATASHEETS.md`](datasheets/DATASHEETS.md); the
   BOM is [`datasheets/BOM.csv`](datasheets/BOM.csv).
@@ -1166,11 +1250,13 @@ needed. The flow is also wired into CI (the `fpga` job downloads a pinned
 oss-cad-suite with caching, runs the synth, and gates on the COMPLETE banner +
 zero inferred latches + zero blackboxes + "fits XC7A35T").
 
-> **Port count after the parallel pivot.** The top-level now exposes
-> `det_in[63:0]` (64 detector inputs) + `emitter_en[63:0]` (64 emitter outputs)
-> + SPI/UART/clk/reset/refclk_out/mod_sync ≈ **138 user IO**, up from the
-> pre-pivot ~33. The CSG324 package (~210 user IO) fits this with margin; the
-> old CPG236 (~125) did not, which is why the package was bumped (Phase 2).
+> **Port count after the parallel pivot + TLC5947 refinement.** The top-level
+> now exposes `det_in[63:0]` (64 detector inputs) + the 4-wire TLC5947 emitter
+> interface (`em_sclk/sin/xlat/blank`) + SPI/UART/clk/reset/refclk_out/mod_sync
+> ≈ **78 user IO** — down from the first-pivot ~138 (the 64-line `EM_DRV` bus
+> collapsed to 4 wires). The CSG324 package (~210 user IO) fits this with wide
+> margin; the old CPG236 (~125) was bumped for the 64-detector parallel inputs,
+> which remain the dominant IO load.
 > Re-run `fpga/synth/run_synth.sh` for the post-pivot resource numbers (the
 > table below is the pre-pivot baseline; the 64-wide counter array adds LUTs
 > for the counters but still fits the XC7A35T-1CSG324C with large margin).

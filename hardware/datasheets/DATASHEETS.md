@@ -278,93 +278,44 @@ PDFs already fetched locally are in `./pdfs/`.  The BOM is in `BOM.csv`.
 
 ---
 
-## Chip module  (swappable, mates via J1 = main-board J11)
+## Quantum die (on-board — no second board, no Samtec)
 
-### U1 / U2 — ADG732BCPZ  (Analog Devices 32:1 analog multiplexer) x2
-- **Function:** 64:1 cascade selecting one of 64 detector electrodes into the
-  TIA summing node.  U2 enabled by MUX_EN2 to extend U1's 32 channels to 64.
-- **Package:** QFN-48-1EP, 7x7 mm, 0.5 mm pitch (pad 49 = EP = GND).
-- **Datasheet:** https://www.analog.com/media/en/technical-documentation/data-sheets/ADG732.pdf
-- **Local PDF:** not fetched (ADI blocks headless).
-- **Verified pinout (key pads, pad# from PCB probe):**
-  - 1-12, 25-40 — DET_IN0..DET_IN31 (U1) / DET_IN32..63 (U2): the 32 channel inputs.
-  - 13, 14 — +3V3 (VDD).  20, 21, 23, 24 — GND.  49 — GND (EP).
-  - 15-19 — det_mux_sel0..4.  22 — det_mux_sel5 (U1) / MUX_EN2 (U2).
-  - 43 — TIA_IN (the mux drain output -> ADA4530 -IN).
-  - 41, 42, 44 — NC (no internal connection; verified unnetted is correct).
-  - "" (unnumbered sub-pad) — NC.
-
-### U3 — ADA4530-1  (Analog Devices electrometer op-amp / TIA)
-- **Function:** transimpedance amplifier for the selected photodetector
-  electrode.  Rf = 1M, Cf = 1.5p.  Output -> XADC VauxP0.
-- **Package:** SOIC-8 3.9x4.9 mm.
-- **Datasheet:** https://www.analog.com/media/en/technical-documentation/data-sheets/ADA4530-1.pdf
-- **Local PDF:** not fetched (ADI blocks headless).
-- **Verified pinout (SOIC-8):**
-
-| pad | name      | net on QSSC | note |
-|----:|-----------|-------------|------|
-| 1   | +IN       | TIA_REF     | non-inverting = 2.5V mid-supply reference |
-| 2   | IN_GUARD  | TIA_REF     | input guard (driven at virtual-ground ref) |
-| 3   | IC        | NC          | internal connection — leave open |
-| 4   | V-        | GND         | |
-| 5   | V+        | +5V         | **min supply 5V — was +3V3 (out of spec), fixed 2026-09** |
-| 6   | OUT       | TIA_OUT     | -> XADC |
-| 7   | IN_GUARD  | TIA_REF     | input guard |
-| 8   | -IN       | TIA_IN      | inverting = summing node <- mux drain (pad 43) |
-- **TIA_REF reference generator:** R10 10k (+5V -> TIA_REF) + R11 10k
-  (TIA_REF -> GND) = 2.5V mid-supply + C11 100nF bypass.  The prior net was
-  floating on both boards (J1 pin 49 crossed it but nothing drove it); now
-  generated locally on the module (electrometer reference must stay local).
-
-### U4 — 74LVC1G04  (single inverter, Nexperia SOT-23-5)
-- **Function:** logic inversion in the MUX select path.
-- **Package:** SOT-23-5.  **BOM must specify the Nexperia pinout variant.**
-- **Datasheet:** https://www.ti.com/lit/ds/symlink/sn74lvc1g04.pdf
-- **Local PDF:** `pdfs/74LVC1G04.pdf`
-- **Verified pinout:** 2 = A (input), 3 = GND, 4 = Y (output), 5 = VCC.
-
-### U6 / U7 — 74HCT240  (octal inverting 3-state buffer) x2
-- **Function:** level-shift + invert the FPGA's 3.3V one-hot emitter enables
-  to 0/5V MOSFET gate drives.  U6 drives P-MOS row gates (low=on), U7 drives
-  N-MOS col gates (high=on).  /OE tied low (always enabled).
-- **Package:** TSSOP-20.
-- **Datasheet:** https://www.ti.com/lit/ds/symlink/sn74hct240.pdf
-- **Local PDF:** `pdfs/74HCT240.pdf`
-- **Verified pinout (Nexperia 74HC/HCT240):** 1=1OE, 2=1A0, 4=1A1, 6=1A2,
-  8=1A3, 11=2A3, 13=2A2, 15=2A1, 17=2A0, 19=2OE (inputs);
-  3=2Y0, 5=2Y1, 7=2Y2, 9=2Y3, 12=1Y3, 14=1Y2, 16=1Y1, 18=1Y0 (outputs);
-  20=VCC (+5V), 10=GND.
-
-### Q1-Q8 — AO3401A  (P-channel MOSFET, SOT-23-3) x8
-- **Function:** high-side row switches — anode enable to +5V (Vgs=-5V = on).
-- **Datasheet:** https://aosmd.com/res/data_sheets/AO3401A.pdf
-- **Local PDF:** not fetched (AOS blocks headless).
-- **Verified pinout:** 1 = G (gate), 2 = S (source), 3 = D (drain).
-
-### Q9-Q16 — AO3400A  (N-channel MOSFET, SOT-23-3) x8
-- **Function:** low-side column sinks — cathode pull-down (Vgs=+5V = on).
-- **Datasheet:** https://aosmd.com/res/data_sheets/AO3400A.pdf
-- **Local PDF:** not fetched.
-- **Verified pinout:** 1 = G (gate), 2 = S (source), 3 = D (drain).
-
-### U5 — QSSC_Chip  (custom photodetector die)
-- **Function:** the 64-electrode solid-state chip itself (no commercial
-  datasheet — it is the project's own fabricated die).  80-pad custom
-  footprint; electrode pads route to the ADG732 channels via the module.
-
-### Passives / misc (chip module)
-- R1-R8 220R — MOSFET gate resistors.  R10/R11 10k — TIA_REF divider.
-  Rf 1M, Cf 1.5p — TIA feedback.  R_THM 10k + TH1 10k NTC — thermistor divider.
-- C1-C5, C7-C11 — decoupling.  J1 — Samtec LSHM-130 mezzanine (mates main J11).
+### Uchip — QSSC_Chip  (custom CQD photodetector + emitter die)
+- **Function:** the project's own fabricated quantum die — 64 top-edge
+  detector electrodes + 64 bottom-edge emitter electrodes, driven and read
+  in PARALLEL (no ADG732 MUX, no serial sweep, no XADC).  No commercial
+  datasheet.  See `docs/FABRICATION_PROTOCOL.md` for the CQD stack
+  (ITO shared anode / Ag per-pixel cathode) and EL specs (turn-on 4-8 V,
+  drive 2-20 mA/pixel, ~520-540 nm green).
+- **Die:** 20 x 20 mm, 128 pads @ 0.30 mm pitch (0.15 x 0.30 mm F.Cu SMD):
+  64 DET pads on the top edge + 64 EM pads on the bottom edge + 1 EM_ANODE
+  pad on the LEFT edge (the shared common anode, clear of both dog-bone
+  via fields).
+- **Topology (common-anode, validated against the fab protocol):** the 64 EM
+  pads are per-pixel CATHODES (net `emitter_cat{i}`), each sunk by one
+  TLC5947 OUTn constant-current channel (3-chip daisy chain, 72 ch, 64 used).
+  The single EM_ANODE pad is the shared common anode on the **+12V_EMIT**
+  rail — a separate 12 V LED supply (J4 barrel + F2 1A PTC + C85/C86), because
+  the CQD EL turn-on is 4-8 V and the old +5V anode left no headroom; the
+  TLC5947 OUT pins tolerate 33 V, so 12 V is textbook headroom.
+- **Detector path:** the 64 DET pads (`DET_IN{i}`) -> 16x TLV9004 TIA
+  (per-channel Rf/Cf) -> 16x LMV339 Schmitt comparator (shared MCP4725
+  threshold `DET_THR`) -> 64 FPGA LVCMOS inputs -> 64 parallel photon
+  counters in the fabric.
+- **Netclass:** "Chip" 0.10 mm clearance (the 0.30 mm-pitch dog-bone fanout
+  requires it).  Fanout: 0.15 mm F.Cu stub -> 0.20 mm through-via per pad,
+  staggered even/odd (0.5 / 1.0 mm out), escaped on B.Cu / inner signal
+  layers.  The dense 0.30 mm field is beyond the 0.2 mm line-router grid, so
+  the via<->target escapes are routed by FreeRouting (Task 17); the dog-bone
+  fanout itself (pad -> stub -> via) is DRC-clean and in place.
 
 ---
 
 ## KiCad footprints & 3D models
 
-All 2D footprints used by both boards are present in the installed KiCad 8
+All 2D footprints used by the single merged board are present in the installed KiCad 8
 libraries at `/usr/share/kicad/footprints/` (verified — no custom .pretty
-needed except the FPGA BGA `Xilinx_CPG236` and the `QSSC_Chip` die, both
+needed except the FPGA BGA `Xilinx_CSG324` and the `QSSC_Chip` die, both
 generated into the project lib).  **No 3D `.step`/`.wrl` models are
 installed**; they are optional (visualisation only, not needed for DRC or
 fabrication).  If wanted, fetch from
