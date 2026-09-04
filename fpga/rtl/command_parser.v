@@ -6,7 +6,11 @@
 // uart_rx, buffers a line up to '\n', then parses and dispatches the parallel
 // on-chip control/readout command set (no camera, no analog MUX):
 //
-//   DRIVE_EMITTER <index> <duration_ms>     -> fire one of 64 emitters, OK\n
+//   DRIVE_EMITTER <index> <duration_ms>     -> pump one emitter at full, OK\n
+//   SET_EMITTER <index> <level 0..4095>     -> arm emitter grayscale, OK\n
+//   DRIVE_PATTERN <duration_ms>             -> fire ALL armed emitters in
+//                                               parallel for duration_ms, OK\n
+//   CLEAR_EMITTERS                         -> disarm all emitters (gs=0), OK\n
 //   APPLY_PULSE <qubit> <freq_khz> <amp> <duration_ns> <phase>
 //                                          -> program ADF4351 + gate RF, OK\n
 //   READ_DETECTOR <site>                   -> read one of 64 photon counters,
@@ -18,6 +22,13 @@
 //   CALIBRATE                              -> for each emitter: clear, pump,
 //                                               read_all, store brightest det
 //                                               -> cal_lut[em], then OK\n
+//
+// The emitter commands drive a 3x TLC5947 constant-current LED driver over a
+// 4-wire SPI: SET_EMITTER arms per-channel 12-bit grayscale, DRIVE_PATTERN
+// fires every armed channel simultaneously (parallel multi-emitter), and
+// DRIVE_EMITTER is the single-emitter convenience wrapper. CALIBRATE still
+// pumps one emitter at a time (it must isolate which emitter maps to which
+// detector), using DRIVE_EMITTER internally.
 //
 // Unknown / malformed commands reply "ERR\n". Numbers are decimal integers
 // (optionally signed). Detector counts are 16-bit (0..65535) sent as ASCII
@@ -38,9 +49,13 @@ module command_parser #(
     output reg [7:0]  tx_byte,
     output reg        tx_start,
     input             tx_busy,
-    // Emitter array (64 individual enables)
-    output reg        em_drive,
+    // Emitter array (64 parallel CQD emitters via 3x TLC5947)
+    output reg        em_cmd_drive,    // pump one emitter `index`, duration_ms
+    output reg        em_cmd_set,      // set gs[index] = level
+    output reg        em_cmd_pattern,  // fire all armed emitters, duration_ms
+    output reg        em_cmd_clear,    // zero all 64 grayscale levels
     output reg [5:0]  em_index,
+    output reg [11:0] em_level,
     output reg [31:0] em_duration_ms,
     input             em_busy,
     // ADF4351 PLL
@@ -84,6 +99,9 @@ module command_parser #(
     localparam [3:0] CMD_CLEAR     = 4'd5;   // CLEAR_DETECTORS (0 args)
     localparam [3:0] CMD_THRESH    = 4'd6;   // SET_THRESHOLD (1 arg)
     localparam [3:0] CMD_ERR       = 4'd7;
+    localparam [3:0] CMD_SET       = 4'd8;   // SET_EMITTER (2 args: index, level)
+    localparam [3:0] CMD_PATTERN   = 4'd9;   // DRIVE_PATTERN (1 arg: duration_ms)
+    localparam [3:0] CMD_CLEAR_EM  = 4'd10;  // CLEAR_EMITTERS (0 args)
 
     // ---- FSM states --------------------------------------------------------
     localparam [3:0] S_IDLE          = 4'd0;
@@ -102,6 +120,10 @@ module command_parser #(
     localparam [3:0] S_CAL_STORE     = 4'd13;  // calibrate: store LUT, next pixel
     localparam [3:0] S_PULSE_WAIT    = 4'd14;  // APPLY_PULSE: wait PLL done, arm gate
     localparam [3:0] S_THRESH_WAIT   = 4'd15;  // SET_THRESHOLD: wait I2C done
+    // SET/CLEAR_EMITTER: wait for the TLC5947 load to finish, then reply OK.
+    // (The 4-bit FSM was full at 0..15, so the state reg is widened to 5 bits
+    //  and this state lives above the original range.)
+    localparam [4:0] S_EM_WAIT       = 5'd16;
 
     // ---- Line buffer ------------------------------------------------------
     reg [7:0] cmd_buffer [0:63];
@@ -109,7 +131,7 @@ module command_parser #(
     reg       line_ready;
 
     // ---- Parser registers --------------------------------------------------
-    reg [3:0]  fsm;
+    reg [4:0]  fsm;
     reg [6:0]  parse_idx;
     reg [7:0]  cmd_str [0:15];
     reg [3:0]  cmd_len;
@@ -135,9 +157,10 @@ module command_parser #(
     // ---- Read-one / read-all mode flag ------------------------------------
     reg        read_all_mode;
 
-    // ---- APPLY_PULSE / SET_THRESHOLD: wait for the peripheral to finish -----
+    // ---- APPLY_PULSE / SET_THRESHOLD / SET_EMITTER: wait for the peripheral --
     reg        pll_busy_seen;
     reg        i2c_busy_seen;
+    reg        em_busy_seen;
 
     // ---- Calibration helpers ----------------------------------------------
     reg [15:0] cal_max_code;
@@ -212,9 +235,14 @@ module command_parser #(
         cal_max_code   = 16'd0;
         cal_max_det    = 6'd0;
         cal_em         = 6'd0;
-        em_drive       = 1'b0;
+        em_cmd_drive   = 1'b0;
+        em_cmd_set     = 1'b0;
+        em_cmd_pattern = 1'b0;
+        em_cmd_clear   = 1'b0;
         em_index       = 6'd0;
+        em_level       = 12'd0;
         em_duration_ms = 32'd0;
+        em_busy_seen   = 1'b0;
         pll_start      = 1'b0;
         pll_freq_khz   = 32'd0;
         det_read_one   = 1'b0;
@@ -293,9 +321,14 @@ module command_parser #(
             code_is_last   <= 1'b0;
             read_all_mode  <= 1'b0;
             cal_em         <= 6'd0;
-            em_drive       <= 1'b0;
+            em_cmd_drive   <= 1'b0;
+            em_cmd_set     <= 1'b0;
+            em_cmd_pattern <= 1'b0;
+            em_cmd_clear   <= 1'b0;
             em_index       <= 6'd0;
+            em_level       <= 12'd0;
             em_duration_ms <= 32'd0;
+            em_busy_seen   <= 1'b0;
             pll_start      <= 1'b0;
             pll_freq_khz   <= 32'd0;
             det_read_one   <= 1'b0;
@@ -317,7 +350,10 @@ module command_parser #(
         end else begin
             // Default one-cycle pulses
             tx_load        <= 1'b0;
-            em_drive       <= 1'b0;
+            em_cmd_drive   <= 1'b0;
+            em_cmd_set     <= 1'b0;
+            em_cmd_pattern <= 1'b0;
+            em_cmd_clear   <= 1'b0;
             pll_start      <= 1'b0;
             det_read_one   <= 1'b0;
             det_read_all   <= 1'b0;
@@ -367,6 +403,15 @@ module command_parser #(
                             cmd_str[12]=="R" && cmd_str[13]=="S") begin
                             cmd_id <= CMD_READ_ALL; arg_count <= 3'd0;
                             fsm    <= S_DISPATCH;
+                        end else if (cmd_len == 4'd14 &&
+                            // CLEAR_EMITTERS (14 chars: C L E A R _ E M I T T E R S)
+                            cmd_str[0]=="C" && cmd_str[1]=="L" && cmd_str[2]=="E" &&
+                            cmd_str[3]=="A" && cmd_str[4]=="R" && cmd_str[5]=="_" &&
+                            cmd_str[6]=="E" && cmd_str[7]=="M" && cmd_str[8]=="I" &&
+                            cmd_str[9]=="T" && cmd_str[10]=="T" && cmd_str[11]=="E" &&
+                            cmd_str[12]=="R" && cmd_str[13]=="S") begin
+                            cmd_id <= CMD_CLEAR_EM; arg_count <= 3'd0;
+                            fsm    <= S_DISPATCH;
                         end else if (cmd_len == 4'd15 &&
                             // CLEAR_DETECTORS (15 chars)
                             cmd_str[0]=="C" && cmd_str[1]=="L" && cmd_str[2]=="E" &&
@@ -388,6 +433,22 @@ module command_parser #(
                                     fsm       <= S_ARGSP;
                                 end else begin
                                     cmd_id <= CMD_ERR;   // DRIVE_EMITTER needs args
+                                    fsm    <= S_DISPATCH;
+                                end
+                            end else if (cmd_str[0]=="D" && cmd_str[1]=="R" &&
+                                         cmd_str[2]=="I" && cmd_str[3]=="V" &&
+                                         cmd_str[4]=="E" && cmd_str[5]=="_" &&
+                                         cmd_str[6]=="P" && cmd_str[7]=="A" &&
+                                         cmd_str[8]=="T" && cmd_str[9]=="T" &&
+                                         cmd_str[10]=="E" && cmd_str[11]=="R" &&
+                                         cmd_str[12]=="N") begin
+                                // DRIVE_PATTERN (13 chars) -- parallel fire
+                                cmd_id <= CMD_PATTERN; arg_count <= 3'd1;
+                                if (!is_eol && ch == 8'h20) begin
+                                    parse_idx <= parse_idx + 7'd1;
+                                    fsm       <= S_ARGSP;
+                                end else begin
+                                    cmd_id <= CMD_ERR;   // DRIVE_PATTERN needs args
                                     fsm    <= S_DISPATCH;
                                 end
                             end else if (cmd_str[0]=="R" && cmd_str[1]=="E" &&
@@ -424,17 +485,36 @@ module command_parser #(
                                 cmd_id <= CMD_ERR;
                                 fsm    <= S_DISPATCH;
                             end
-                        end else if (cmd_len == 4'd11 &&
-                            cmd_str[0]=="A" && cmd_str[1]=="P" && cmd_str[2]=="P" &&
-                            cmd_str[3]=="L" && cmd_str[4]=="Y" && cmd_str[5]=="_" &&
-                            cmd_str[6]=="P" && cmd_str[7]=="U" && cmd_str[8]=="L" &&
-                            cmd_str[9]=="S" && cmd_str[10]=="E") begin
-                            cmd_id <= CMD_PULSE; arg_count <= 3'd5;
-                            if (!is_eol && ch == 8'h20) begin
-                                parse_idx <= parse_idx + 7'd1;
-                                fsm       <= S_ARGSP;
+                        end else if (cmd_len == 4'd11) begin
+                            if (cmd_str[0]=="A" && cmd_str[1]=="P" && cmd_str[2]=="P" &&
+                                cmd_str[3]=="L" && cmd_str[4]=="Y" && cmd_str[5]=="_" &&
+                                cmd_str[6]=="P" && cmd_str[7]=="U" && cmd_str[8]=="L" &&
+                                cmd_str[9]=="S" && cmd_str[10]=="E") begin
+                                cmd_id <= CMD_PULSE; arg_count <= 3'd5;
+                                if (!is_eol && ch == 8'h20) begin
+                                    parse_idx <= parse_idx + 7'd1;
+                                    fsm       <= S_ARGSP;
+                                end else begin
+                                    cmd_id <= CMD_ERR;     // APPLY_PULSE needs args
+                                    fsm    <= S_DISPATCH;
+                                end
+                            end else if (cmd_str[0]=="S" && cmd_str[1]=="E" &&
+                                         cmd_str[2]=="T" && cmd_str[3]=="_" &&
+                                         cmd_str[4]=="E" && cmd_str[5]=="M" &&
+                                         cmd_str[6]=="I" && cmd_str[7]=="T" &&
+                                         cmd_str[8]=="T" && cmd_str[9]=="E" &&
+                                         cmd_str[10]=="R") begin
+                                // SET_EMITTER (11 chars) -- arm one emitter gs
+                                cmd_id <= CMD_SET; arg_count <= 3'd2;
+                                if (!is_eol && ch == 8'h20) begin
+                                    parse_idx <= parse_idx + 7'd1;
+                                    fsm       <= S_ARGSP;
+                                end else begin
+                                    cmd_id <= CMD_ERR;   // SET_EMITTER needs args
+                                    fsm    <= S_DISPATCH;
+                                end
                             end else begin
-                                cmd_id <= CMD_ERR;     // APPLY_PULSE needs args
+                                cmd_id <= CMD_ERR;
                                 fsm    <= S_DISPATCH;
                             end
                         end else if (cmd_len == 4'd9 &&
@@ -504,8 +584,9 @@ module command_parser #(
                     buf_idx    <= 7'd0;
                     case (cmd_id)
                         CMD_DRIVE : begin
-                            // index 0..63, duration_ms >= 0. Out-of-range index
-                            // used to silently wrap; now reply ERR.
+                            // DRIVE_EMITTER <index> <duration_ms>: pump one
+                            // emitter at full (gs=4095) for duration_ms. The
+                            // pump runs in the background; reply OK now.
                             if ($signed(arg_vals[0]) < 0 || $signed(arg_vals[0]) >= N_DET ||
                                 $signed(arg_vals[1]) < 0) begin
                                 reply_ok <= 1'b0;            // ERR
@@ -513,10 +594,47 @@ module command_parser #(
                             end else begin
                                 em_index       <= arg_vals[0][5:0];
                                 em_duration_ms <= arg_vals[1];
-                                em_drive       <= 1'b1;
+                                em_cmd_drive   <= 1'b1;
                                 reply_ok       <= 1'b1;
                                 fsm            <= S_REPLY_LOAD;
                             end
+                        end
+                        CMD_SET : begin
+                            // SET_EMITTER <index> <level 0..4095>: arm one
+                            // emitter's 12-bit grayscale. Wait for the TLC5947
+                            // load to finish before replying (serialized, like
+                            // SET_THRESHOLD).
+                            if ($signed(arg_vals[0]) < 0 || $signed(arg_vals[0]) >= N_DET ||
+                                $signed(arg_vals[1]) < 0 || $signed(arg_vals[1]) > 32'd4095) begin
+                                reply_ok <= 1'b0;            // ERR
+                                fsm      <= S_REPLY_LOAD;
+                            end else begin
+                                em_index     <= arg_vals[0][5:0];
+                                em_level     <= arg_vals[1][11:0];
+                                em_cmd_set   <= 1'b1;
+                                em_busy_seen <= 1'b0;
+                                fsm          <= S_EM_WAIT;
+                            end
+                        end
+                        CMD_PATTERN : begin
+                            // DRIVE_PATTERN <duration_ms>: fire every armed
+                            // emitter (gs>0) in parallel for duration_ms. The
+                            // pump runs in the background; reply OK now.
+                            if ($signed(arg_vals[0]) < 0) begin
+                                reply_ok <= 1'b0;            // ERR
+                                fsm      <= S_REPLY_LOAD;
+                            end else begin
+                                em_duration_ms <= arg_vals[0];
+                                em_cmd_pattern <= 1'b1;
+                                reply_ok       <= 1'b1;
+                                fsm            <= S_REPLY_LOAD;
+                            end
+                        end
+                        CMD_CLEAR_EM : begin
+                            // CLEAR_EMITTERS: zero all 64 grayscale levels.
+                            em_cmd_clear   <= 1'b1;
+                            em_busy_seen   <= 1'b0;
+                            fsm            <= S_EM_WAIT;
                         end
                         CMD_PULSE : begin
                             // qubit 0..N_DET-1, freq_khz > 0, amp/duration >= 0.
@@ -670,7 +788,7 @@ module command_parser #(
                     det_clear      <= 1'b1;          // zero all 64 counters
                     em_index       <= cal_em;
                     em_duration_ms <= 32'd1;        // 1 ms pump pulse
-                    em_drive       <= 1'b1;
+                    em_cmd_drive   <= 1'b1;          // pump this one emitter (TLC5947)
                     cal_max_code   <= 16'd0;
                     cal_max_det    <= 6'd0;
                     fsm            <= S_CAL_WAIT_EM;
@@ -729,6 +847,18 @@ module command_parser #(
                 S_THRESH_WAIT : begin
                     if (i2c_busy)        i2c_busy_seen <= 1'b1;
                     if (i2c_busy_seen && !i2c_busy) begin
+                        reply_ok <= 1'b1;
+                        fsm      <= S_REPLY_LOAD;
+                    end
+                end
+
+                // ---- SET_EMITTER / CLEAR_EMITTERS: wait for the TLC5947
+                // grayscale load to finish, then reply OK. The busy-seen
+                // guard avoids racing on a momentary !busy before the
+                // emitter_array has asserted busy.
+                S_EM_WAIT : begin
+                    if (em_busy)        em_busy_seen <= 1'b1;
+                    if (em_busy_seen && !em_busy) begin
                         reply_ok <= 1'b1;
                         fsm      <= S_REPLY_LOAD;
                     end

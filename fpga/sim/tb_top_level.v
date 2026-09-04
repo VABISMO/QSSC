@@ -7,7 +7,7 @@
 // for fixed real-time windows, so it runs fast under the FAST_SIM define
 // (CLKS_PER_BIT=8, emitter 1 ms = 10 clk) as well as at production timing.
 //
-//   1. DRIVE_EMITTER <index> <ms>  -> one-hot emitter_en[index], OK\n
+//   1. DRIVE_EMITTER <index> <ms>  -> TLC5947 gs[index]=4095 + em_blank low, OK\n
 //   2. DRIVE_EMITTER 64 <ms>       -> out-of-range index, ERR\n
 //   3. drive 12 rising edges on det_in[63:0] -> READ_DETECTOR 5 = "12\n"
 //   4. READ_DETECTORS             -> "12 12 ... 12\n" (64 codes, 192 bytes)
@@ -15,8 +15,10 @@
 //   6. SET_THRESHOLD 2048         -> OK\n (MCP4725 I2C write completes)
 //   7. APPLY_PULSE ...            -> OK\n + mw_gate pulse
 //   8. APPLY_PULSE freq=0         -> ERR\n
-//   9. CALIBRATE                  -> OK\n (64-pixel clear/pump/read_all sweep)
-// No camera, no analog MUX, no XADC: 64 parallel photon counters.
+//   9. SET_EMITTER / DRIVE_PATTERN -> parallel: arm 3 emitters, fire in parallel
+//  10. CALIBRATE                  -> OK\n (64-pixel clear/pump/read_all sweep)
+// Emitters are 64 parallel CQD channels driven by 3x TLC5947 over 4-wire SPI
+// (em_sclk/sin/xlat/blank) -- no 64-line emitter_en bus anymore.
 //============================================================================
 module tb_top_level;
 `ifdef FAST_SIM
@@ -24,10 +26,10 @@ module tb_top_level;
     localparam integer   CLKS_PER_BIT = 8;          // fast UART in sim
     localparam integer   BIT_TIME     = CLK_PERIOD * CLKS_PER_BIT;
     // fixed inter-test waits, in clock cycles (emitter finish, etc.)
-    localparam integer   W_EM_DONE    = 3000;       // > emitter pulse (1000 cyc)
+    localparam integer   W_EM_DONE    = 8000;       // > TLC load (~1728) + pump + end-load
     localparam integer   W_GENERIC    = 50000;      // command dispatch + reply
-    localparam integer   W_CAL        = 200000;    // 64-pixel calibrate sweep
-    localparam integer   W_SAFE       = 400000;     // safety timeout
+    localparam integer   W_CAL        = 600000;    // 64-pixel calibrate (each w/ TLC load)
+    localparam integer   W_SAFE       = 1200000;    // safety timeout
 `else
     localparam integer   CLK_PERIOD   = 10;
     localparam integer   CLKS_PER_BIT = 868;        // 100 MHz / 115200
@@ -44,7 +46,10 @@ module tb_top_level;
     reg         rx         = 1'b1;       // UART idle
     wire        tx;
     reg  [63:0] det_in     = 64'd0;      // 64 comparator outputs (stimulus)
-    wire [63:0] emitter_en;
+    wire        em_sclk;
+    wire        em_sin;
+    wire        em_xlat;
+    wire        em_blank;
     wire        mod_sync;
     wire        mw_gate;
     wire [3:0]  spi_pins;
@@ -71,7 +76,10 @@ module tb_top_level;
         .rx         (rx),
         .tx         (tx),
         .det_in     (det_in),
-        .emitter_en (emitter_en),
+        .em_sclk    (em_sclk),
+        .em_sin     (em_sin),
+        .em_xlat    (em_xlat),
+        .em_blank   (em_blank),
         .mod_sync   (mod_sync),
         .spi_pins   (spi_pins),
         .refclk_out (refclk_out),
@@ -176,11 +184,14 @@ module tb_top_level;
         $display("TB: sending DRIVE_EMITTER 3 100");
         for (c=0;c<20;c=c+1) uart_send_byte(cmd_bytes[c]);
         wait_for_bytes(3, W_GENERIC);       // OK\n
-        $display("TB: emitter_en = 0x%016h (expect bit 3 set, one-hot)", emitter_en);
-        if (emitter_en[3] === 1'b1 && (emitter_en & ~64'h8) === 64'd0) begin
-            ok_count = ok_count + 1;  $display("TB: emitter_en one-hot on bit 3  (PASS)");
+        // The pump runs in the background after OK. The TLC5947 grayscale
+        // register for channel 3 must be full (4095) and em_blank low (on).
+        // (Hierarchical ref into the emitter_array -> tlc5947_ctrl gs array.)
+        $display("TB: gs[3]=%0d em_blank=%b (expect 4095, 0)", dut.em_inst.tlc_inst.gs[3], em_blank);
+        if (dut.em_inst.tlc_inst.gs[3] === 12'd4095 && em_blank === 1'b0) begin
+            ok_count = ok_count + 1;  $display("TB: TLC5947 gs[3]=4095 + blank low  (PASS)");
         end else begin
-            err_count = err_count + 1; $display("TB: FAIL emitter_en pattern");
+            err_count = err_count + 1; $display("TB: FAIL emitter drive (gs[3] or blank)");
         end
         if (rx_log_cnt >= 3 &&
             rx_log[0] === 8'h4F && rx_log[1] === 8'h4B && rx_log[2] === 8'h0A) begin
@@ -367,7 +378,107 @@ module tb_top_level;
                      rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
         end
 
-        // ---- 9) CALIBRATE -> OK -----------------------------------------
+        // ---- 9) SET_EMITTER + DRIVE_PATTERN: parallel multi-emitter -------
+        // Arm emitters 0, 10 and 20 at full grayscale, then DRIVE_PATTERN to
+        // fire all three SIMULTANEOUSLY (the parallel-at-FPGA-speed check).
+        // SET_EMITTER 0 4095
+        rx_log_cnt = 0;
+        cmd_bytes[0]="S";  cmd_bytes[1]="E";  cmd_bytes[2]="T";  cmd_bytes[3]="_";
+        cmd_bytes[4]="E";  cmd_bytes[5]="M";  cmd_bytes[6]="I";  cmd_bytes[7]="T";
+        cmd_bytes[8]="T";  cmd_bytes[9]="E";  cmd_bytes[10]="R"; cmd_bytes[11]=" ";
+        cmd_bytes[12]="0"; cmd_bytes[13]=" "; cmd_bytes[14]="4"; cmd_bytes[15]="0";
+        cmd_bytes[16]="9"; cmd_bytes[17]="5"; cmd_bytes[18]=8'h0A;
+        $display("TB: sending SET_EMITTER 0 4095");
+        for (c=0;c<19;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(3, W_GENERIC);        // OK\n (after TLC load)
+        if (rx_log_cnt >= 3 &&
+            rx_log[0] === 8'h4F && rx_log[1] === 8'h4B && rx_log[2] === 8'h0A) begin
+            ok_count = ok_count + 1;  $display("TB: SET_EMITTER 0 = OK\\n  (PASS)");
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL SET_EMITTER 0 reply (got %0d bytes, first=0x%02h)",
+                     rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
+        end
+        // SET_EMITTER 10 4095
+        rx_log_cnt = 0;
+        cmd_bytes[0]="S";  cmd_bytes[1]="E";  cmd_bytes[2]="T";  cmd_bytes[3]="_";
+        cmd_bytes[4]="E";  cmd_bytes[5]="M";  cmd_bytes[6]="I";  cmd_bytes[7]="T";
+        cmd_bytes[8]="T";  cmd_bytes[9]="E";  cmd_bytes[10]="R"; cmd_bytes[11]=" ";
+        cmd_bytes[12]="1"; cmd_bytes[13]="0"; cmd_bytes[14]=" "; cmd_bytes[15]="4";
+        cmd_bytes[16]="0"; cmd_bytes[17]="9"; cmd_bytes[18]="5"; cmd_bytes[19]=8'h0A;
+        $display("TB: sending SET_EMITTER 10 4095");
+        for (c=0;c<20;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(3, W_GENERIC);
+        if (rx_log_cnt >= 3 &&
+            rx_log[0] === 8'h4F && rx_log[1] === 8'h4B && rx_log[2] === 8'h0A)
+            ok_count = ok_count + 1;
+        else begin
+            err_count = err_count + 1; $display("TB: FAIL SET_EMITTER 10 reply");
+        end
+        // SET_EMITTER 20 4095
+        rx_log_cnt = 0;
+        cmd_bytes[0]="S";  cmd_bytes[1]="E";  cmd_bytes[2]="T";  cmd_bytes[3]="_";
+        cmd_bytes[4]="E";  cmd_bytes[5]="M";  cmd_bytes[6]="I";  cmd_bytes[7]="T";
+        cmd_bytes[8]="T";  cmd_bytes[9]="E";  cmd_bytes[10]="R"; cmd_bytes[11]=" ";
+        cmd_bytes[12]="2"; cmd_bytes[13]="0"; cmd_bytes[14]=" "; cmd_bytes[15]="4";
+        cmd_bytes[16]="0"; cmd_bytes[17]="9"; cmd_bytes[18]="5"; cmd_bytes[19]=8'h0A;
+        $display("TB: sending SET_EMITTER 20 4095");
+        for (c=0;c<20;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(3, W_GENERIC);
+        if (rx_log_cnt >= 3 &&
+            rx_log[0] === 8'h4F && rx_log[1] === 8'h4B && rx_log[2] === 8'h0A)
+            ok_count = ok_count + 1;
+        else begin
+            err_count = err_count + 1; $display("TB: FAIL SET_EMITTER 20 reply");
+        end
+        // DRIVE_PATTERN 100 -> fire all three armed emitters in parallel
+        rx_log_cnt = 0;
+        cmd_bytes[0]="D";  cmd_bytes[1]="R";  cmd_bytes[2]="I";  cmd_bytes[3]="V";
+        cmd_bytes[4]="E";  cmd_bytes[5]="_";  cmd_bytes[6]="P";  cmd_bytes[7]="A";
+        cmd_bytes[8]="T";  cmd_bytes[9]="T";  cmd_bytes[10]="E"; cmd_bytes[11]="R";
+        cmd_bytes[12]="N"; cmd_bytes[13]=" "; cmd_bytes[14]="1"; cmd_bytes[15]="0";
+        cmd_bytes[16]="0"; cmd_bytes[17]=8'h0A;
+        $display("TB: sending DRIVE_PATTERN 100 (3 emitters in parallel)");
+        for (c=0;c<18;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(3, W_GENERIC);        // OK\n (pump runs in background)
+        // The parallel check: gs[0]=gs[10]=gs[20]=4095 AND em_blank low, all at
+        // once -- multiple emitters armed and firing simultaneously.
+        $display("TB: gs[0]=%0d gs[10]=%0d gs[20]=%0d blank=%b (expect 4095 each, 0)",
+                 dut.em_inst.tlc_inst.gs[0], dut.em_inst.tlc_inst.gs[10],
+                 dut.em_inst.tlc_inst.gs[20], em_blank);
+        if (rx_log_cnt >= 3 &&
+            rx_log[0] === 8'h4F && rx_log[1] === 8'h4B && rx_log[2] === 8'h0A &&
+            dut.em_inst.tlc_inst.gs[0]  === 12'd4095 &&
+            dut.em_inst.tlc_inst.gs[10] === 12'd4095 &&
+            dut.em_inst.tlc_inst.gs[20] === 12'd4095 &&
+            em_blank === 1'b0) begin
+            ok_count = ok_count + 1;  $display("TB: 3 emitters fire in parallel  (PASS)");
+        end else begin
+            err_count = err_count + 1; $display("TB: FAIL parallel DRIVE_PATTERN");
+        end
+        repeat(W_EM_DONE) @(posedge clk_100mhz);   // let the pattern pump finish
+        // CLEAR_EMITTERS -> OK, all gs back to 0
+        rx_log_cnt = 0;
+        cmd_bytes[0]="C";  cmd_bytes[1]="L";  cmd_bytes[2]="E";  cmd_bytes[3]="A";
+        cmd_bytes[4]="R";  cmd_bytes[5]="_";  cmd_bytes[6]="E";  cmd_bytes[7]="M";
+        cmd_bytes[8]="I";  cmd_bytes[9]="T";  cmd_bytes[10]="T"; cmd_bytes[11]="E";
+        cmd_bytes[12]="R"; cmd_bytes[13]="S"; cmd_bytes[14]=8'h0A;
+        $display("TB: sending CLEAR_EMITTERS");
+        for (c=0;c<15;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(3, W_GENERIC);        // OK\n (after TLC load of all-zero)
+        if (rx_log_cnt >= 3 &&
+            rx_log[0] === 8'h4F && rx_log[1] === 8'h4B && rx_log[2] === 8'h0A &&
+            dut.em_inst.tlc_inst.gs[0]  === 12'd0 &&
+            dut.em_inst.tlc_inst.gs[10] === 12'd0 &&
+            dut.em_inst.tlc_inst.gs[20] === 12'd0) begin
+            ok_count = ok_count + 1;  $display("TB: CLEAR_EMITTERS = OK, gs=0  (PASS)");
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL CLEAR_EMITTERS (got %0d bytes, gs0=%0d)",
+                     rx_log_cnt, dut.em_inst.tlc_inst.gs[0]);
+        end
+
+        // ---- 10) CALIBRATE -> OK -----------------------------------------
         // 64 pixels * (clear + 1-ms-equivalent pump + 64-channel internal
         // read_all sweep). Under FAST_SIM the whole sweep is a few thousand
         // cycles; under real timing it is ~65 ms (wait_for_bytes with a large

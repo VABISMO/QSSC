@@ -118,17 +118,19 @@ EXCLUDE_NETS = {"USB_DP", "USB_DM"}
 _RF_NETS = {"RF_OUT", "RF_OUT_N", "RF_IN", "RF_AMP_OUT", "J3_SIG", "LF_CP", "LF_MID",
             "LF_OUT", "CPout", "VTUNE", "refclk_25m"}
 _USB_NETS = {"USB_DP", "USB_DM"}
-_ANALOG_NETS = {"TIA_OUT", "TIA_OUT_N", "DET_BIAS", "VREFP", "VREFN", "TIA_REF",
-                "VauxP0", "VauxN0"}
-# Chip die-pad nets (DET_IN0..63, emitter_anode0..63) get the 0.10 mm-clearance
+_ANALOG_NETS = {"VREFP", "VREFN"}   # TIA/XADC analog nets removed in the
+                                    # single-board parallel pivot.
+# Chip die-pad nets (DET_IN0..63, emitter_cat0..63) get the 0.10 mm-clearance
 # "Chip" netclass authored in gen_qssc_kicad so the 0.30 mm-pitch dog-bone vias
 # (0.125 mm neighbour clearance) pass DRC. Mirror gen_qssc_kicad._is_chip_net.
+# NOTE: the nets are emitter_cat{i} (per-pixel CATHODES sunk by the TLC5947),
+# NOT emitter_anode -- the anode is the single shared EM_ANODE -> +12V_EMIT pad.
 _NETCLASS_WIDTH_NM = {"Default": 200_000, "RF": 300_000, "Power": 500_000,
                       "USB": 200_000, "Analog": 200_000, "Chip": 150_000}
 
 
 def _is_chip_net(net):
-    return net.startswith("DET_IN") or net.startswith("emitter_anode")
+    return net.startswith("DET_IN") or net.startswith("emitter_cat")
 
 
 def _net_class(net):
@@ -187,7 +189,8 @@ BGA_VIA_DRILL_NM = 100_000         # 0.10 mm HDI drill
 # In3/In4/B.Cu thus carry only ~27 through-VIPs (11 power + ~16 shadowed
 # signals), not 117 -- sparse enough for the line router to thread escapes.
 PLANE_NETS = {"GND", "+3V3"}
-POWER_NETS = {"+1V0", "+1V8", "+5V", "+5V_RF", "+5V_IN"}
+POWER_NETS = {"+1V0", "+1V8", "+5V", "+5V_RF", "+5V_IN",
+              "+12V_EMIT", "+12V_EMIT_IN"}
 # Fixed rail layer for the two non-plane FPGA power rails (no plane of their
 # own -- Task 7 routes them as 0.5 mm tracks on this layer). +1V0 on In3, +1V8
 # on In4 keeps the two rails on separate layers so their through-via barrels do
@@ -204,7 +207,8 @@ POWER_RAIL_LAYER = {"+1V0": IN3_CU, "+1V8": IN4_CU}
 # longest crossing claims the (empty) layer first; later rails L/Z-detour the
 # earlier ones' marks.
 POWER_ROUTER_LAYER = {"+1V0": IN3_CU, "+1V8": IN4_CU,
-                      "+5V": B_CU, "+5V_RF": B_CU, "+5V_IN": B_CU}
+                      "+5V": B_CU, "+5V_RF": B_CU, "+5V_IN": B_CU,
+                      "+12V_EMIT": B_CU, "+12V_EMIT_IN": B_CU}
 # BGA through-VIPs are 0.20 mm (0.10 mm radius) -- smaller than the 0.40 mm
 # routing vias -- so their keepout on the ESCAPE layer is tighter (radius 2 =
 # 0.4 mm). A 0.2 mm track can then pass between two same-layer VIPs at 1.0 mm

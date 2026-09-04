@@ -124,7 +124,15 @@ def std_pins(libname, sym):
 # --------------------------------------------------------------------------
 POWER_PINS = {  # power symbols: single power_in pin at origin, no body
     "+3V3": ("power_in", 90), "+1V8": ("power_in", 90), "+1V0": ("power_in", 90),
-    "+5V": ("power_in", 90), "+5V_RF": ("power_in", 90), "GND": ("power_in", 270),
+    "+5V": ("power_in", 90), "+5V_RF": ("power_in", 90),
+    # +12V_EMIT: dedicated higher-voltage rail for the 64 CQD emitters' common
+    # anode. The fabrication protocol (docs/FABRICATION_PROTOCOL.md) gives CQD
+    # EL turn-on 4-8 V (visible by ~10 V) at 2-20 mA/pixel, so a +5V anode is
+    # marginal/insufficient. The TLC5947 OUT pins sink up to 33 V independent of
+    # VCC (3.3 V logic), so a standard separate 12 V LED supply gives guaranteed
+    # headroom for any CQD V_f up to ~11 V -- the textbook TLC5947 app circuit.
+    "+12V_EMIT": ("power_in", 90),
+    "GND": ("power_in", 270),
 }
 
 
@@ -200,16 +208,17 @@ def custom_symbol_def(lib, name, refpref, pins, body, value=None):
 # which is generated from the official KiCad symbol
 # FPGA_Xilinx_Artix7:XC7A35T-CSG324 (every pad named, DS181/UG475).  CSG324
 # supersedes the CPG236 (238 pads, ~125 user IO): the parallel 64-ch readout
-# (64 DET_DIG inputs) + 64-ch emitter drive (64 EM_DRV outputs) + ~13 control
-# nets need ~141 user IO, which exceeds the CPG236.  CSG324 has 215 user IO.
-# The 128 parallel nets are side-assigned by the ballmap generator:
+# (64 DET_DIG inputs) + 4-wire TLC5947 emitter drive (em_sclk/sin/xlat/blank)
+# + ~13 control nets need ~81 user IO, well within the CPG236 -- but CSG324 is
+# kept for routing room / spare IO.  The parallel nets are side-assigned by the
+# ballmap generator:
 #   * 64 DET_DIG  -> right-edge balls (high column) toward the comparator
-#                    front-end at board x>=144 (right of the FPGA)
-#   * 64 EM_DRV   -> bottom-edge balls (high row) toward the 74HCT240 buffers
-#                    + P-MOS drivers below the die (board y>=80)
+#                    front-end (above the die, board y<44)
+#   * 4 em_SPI    -> bottom-edge balls toward the 3x TLC5947 LED driver below
+#                    the die (board y>66)
 #   * control     -> remaining IO; clk_100mhz + refclk_25m on MRCC balls.
-# The old det_mux_sel*/emitter_rows*/emitter_cols* signals are gone (no MUX,
-# no row/col matrix in the parallel architecture).  Every power/ground/config/
+# The old det_mux_sel*/emitter_rows*/emitter_cols* AND 64x EM_DRV GPIO signals
+# are gone (no MUX, no row/col matrix, TLC5947 drives 64 emitters over 4 wires).
 # JTAG pad is netted; spare IO is left NC (correct for unused BGA IO).
 _FPGA_MAP = json.loads((ROOT / ".tmpwork" / "fpga_csg324_map.json").read_text())
 
@@ -235,8 +244,8 @@ _FPGA_INPUT_NETS = {"clk_100mhz", "reset", "UART_RX", "TCK", "TMS", "TDI",
 def fpga_net_map():
     """{ball_name: net} for every FPGA pad that carries a net.
 
-    All power/ground/config/JTAG pads plus the 141 used user-IO signals (64
-    DET_DIG inputs + 64 EM_DRV outputs + 13 control) are netted.  Spare
+    All power/ground/config/JTAG pads plus the 81 used user-IO signals (64
+    DET_DIG inputs + 4 em_SPI + 13 control) are netted.  Spare
     general-purpose IO balls are intentionally LEFT OUT (no net = NC), which
     is correct practice for unused BGA IO (the pad is still soldered for
     mechanical integrity, just carries no signal).  XADC VP/VN stay NC -- the
@@ -285,8 +294,8 @@ def fpga_pin_list():
             bot.append((ball, net, "power_in"))
         elif net in _FPGA_INPUT_NETS or net.startswith("DET_DIG"):
             # detector photon-count inputs (DET_DIG0..63) sit on the LEFT
-            # column alongside the other FPGA inputs; emitter drivers
-            # (EM_DRV0..63) and control fall through to the RIGHT column.
+            # column alongside the other FPGA inputs; the 4 TLC5947 em_SPI
+            # lines and control fall through to the RIGHT column.
             left.append((ball, net, "bidirectional"))
         else:
             right.append((ball, net, "bidirectional"))
@@ -324,14 +333,17 @@ def fpga_pin_list():
 # flip-chip area array).  The 2026-09 single-board pivot merges the old chip
 # module onto THIS board and makes every channel PARALLEL: 64 detector pads
 # DET0..DET63 on the TOP edge (-> the TIA/comparator front-end above the die) and
-# 64 emitter pads EM0..EM63 on the BOTTOM edge (-> the P-MOS driver below the
-# die).  Two opposite-edge rows let all 128 nets escape outward on F.Cu -- no
+# 64 emitter pads EM0..EM63 on the BOTTOM edge (-> the 3x TLC5947 constant-
+# current LED driver below the die).  Two opposite-edge rows let all 128 nets
+# escape outward on F.Cu -- no
 # MUX, no 8x8 matrix, no Samtec mezzanine.  Symbol pin NUMBER == footprint pad
 # name (DET0..DET63 / EM0..EM63) so fp_net_pads nets every pad by name.
 def chip_pin_list():
-    """Schematic pins for the 128-pad die: 64 DET on the top edge, 64 EM on the
-    bottom edge.  1.0 mm SYMBOL pitch (independent of the 0.30 mm PCB pad pitch
-    -- the symbol is just the schematic representation)."""
+    """Schematic pins for the die: 64 DET on the top edge, 64 EM cathodes on the
+    bottom edge, + 1 EM_ANODE common-anode pad (the 64 CQD emitters share a
+    common anode rail -> +12V_EMIT; the 64 EM pads are the per-pixel cathodes
+    sunk by the TLC5947 LED driver). 1.0 mm SYMBOL pitch (independent of the
+    0.30 mm PCB pad pitch -- the symbol is just the schematic representation)."""
     pins = []
     sp = 1.0
     x0 = -sp * 63 / 2                       # 64 pins centered -> -31.5..+31.5
@@ -341,26 +353,40 @@ def chip_pin_list():
     for i in range(64):
         pins.append(dict(number=f"EM{i}", name=f"EM{i}", etype="passive",
                          x=round(x0 + i * sp, 2), y=12.7, rot=270, length=2.54))
+    # common anode rail for the 64 emitters (one shared electrode on-die /
+    # die-attach; the 64 EM pads are the individual cathodes). power_in so ERC
+    # treats it as a driven rail once +12V_EMIT is connected. Fed from a
+    # dedicated 12 V input (J4) -- the CQD EL turn-on is 4-8 V per the fab
+    # protocol, so the anode rail sits above the worst-case V_f with headroom
+    # for the TLC5947 constant-current sink (OUT tolerates 33 V).
+    pins.append(dict(number="EM_ANODE", name="EM_ANODE", etype="power_in",
+                     x=0, y=15.24, rot=270, length=2.54))
     return pins
 
 
 def chip_net_map():
-    """{pad_name: net} for the 128-pad die -- one net per channel, all parallel.
-    DET{i} -> DET_IN{i}  (analog input to the TIA/comparator front-end, Phase 1b)
-    EM{i}  -> emitter_anode{i}  (P-MOS high-side driver drain, Phase 1b)."""
+    """{pad_name: net} for the die -- one net per channel, all parallel.
+    DET{i}     -> DET_IN{i}        (analog input to the TIA/comparator front-end)
+    EM{i}      -> emitter_cat{i}   (per-pixel cathode -> TLC5947 constant-current
+                                    sink output; common-anode topology)
+    EM_ANODE   -> +12V_EMIT        (the 64 emitters' shared anode rail -> the
+                                    dedicated 12 V LED supply; CQD V_f 4-8 V)."""
     m = {}
     for i in range(64):
         m[f"DET{i}"] = f"DET_IN{i}"
-        m[f"EM{i}"] = f"emitter_anode{i}"
+        m[f"EM{i}"] = f"emitter_cat{i}"
+    m["EM_ANODE"] = "+12V_EMIT"
     return m
 
 
 def chip_footprint():
     """Inline (footprint ...) sexp for the merged-board QSSC die: 128 perimeter
-    wire-bond pads on F.Cu.  20x20 mm die, 0.30 mm pad pitch, 0.15x0.30 mm pads
-    (0.15 mm gap == board min_clearance, so adjacent DIFFERENT-net pads pass DRC).
-    64 DET pads on the top edge (y=-10), 64 EM pads on the bottom edge (y=+10),
-    both centered x = -9.45..+9.45."""
+    wire-bond pads on F.Cu + 1 EM_ANODE pad on the left edge.  20x20 mm die,
+    0.30 mm pad pitch, 0.15x0.30 mm pads (0.15 mm gap == board min_clearance, so
+    adjacent DIFFERENT-net pads pass DRC).  64 DET pads on the top edge (y=-10),
+    64 EM pads on the bottom edge (y=+10), both centered x = -9.45..+9.45.
+    EM_ANODE (the 64 emitters' shared common anode -> +12V_EMIT) sits on the
+    LEFT edge at (-10, 0) so its fanout via clears the top/bottom dog-bone fields."""
     def pad(name, x, y):
         return L(A("pad"), S(name), A("smd"), A("rect"),
                  L(A("at"), A(round(x, 3)), A(round(y, 3))),
@@ -372,7 +398,20 @@ def chip_footprint():
     for i in range(64):
         pads.append(pad(f"DET{i}", x0 + i * pitch, -10.0))   # top edge
     for i in range(64):
-        pads.append(pad(f"EM{i}", x0 + i * pitch, 10.0))     # bottom edge
+        pads.append(pad(f"EM{i}", x0 + i * pitch, 10.0))     # bottom edge (cathodes)
+    # EM_ANODE: a single bond pad for the 64 emitters' shared anode rail
+    # (common-anode topology -> +12V_EMIT; the 64 EM pads are the per-pixel
+    # cathodes). Placed on the LEFT edge of the die at mid-height -- NOT on the
+    # bottom edge next to the EM row, because a pad there (and its fanout via)
+    # would sit in the 0.30 mm-pitch EM dog-bone via field and short to the
+    # emitter_cat nets. The left/right edges carry no perimeter pads, so the
+    # anode fanout via lands clear of both the DET (top) and EM (bottom) dog-bone
+    # fields. 0.30x1.0 mm vertical, F.Cu, at (-10, 0) (within the +-10.2 fab box,
+    # 0.33 mm clear of EM0 at x=-9.45).
+    pads.append(L(A("pad"), S("EM_ANODE"), A("smd"), A("rect"),
+                  L(A("at"), A(-10.0), A(0)),
+                  L(A("size"), A(0.30), A(1.0)),
+                  L(A("layers"), S("F.Cu"), S("F.Paste"), S("F.Mask"))))
     return L(A("footprint"), S("qssc:QSSC_Chip"),
              L(A("layer"), S("F.Cu")),
              L(A("version"), A(20240108)),
@@ -443,34 +482,38 @@ def mcp4725_pin_list():
             dict(number="6", name="ADDR", etype="input", x=-7.62, y=1.27, rot=0, length=2.54)]
 
 
-def ao3401a_pin_list():
-    """AO3401A P-channel MOSFET, SOT-23 (AOS). 1=G 2=S 3=D. High-side emitter
-    switch: G=em_gate, S=+5V, D=em_drain -> 220R -> emitter_anode."""
-    return [dict(number="1", name="G", etype="input", x=-5.08, y=0, rot=0, length=2.54),
-            dict(number="2", name="S", etype="passive", x=2.54, y=3.81, rot=270, length=2.54),
-            dict(number="3", name="D",etype="passive", x=2.54, y=-3.81, rot=90, length=2.54)]
-
-
-def hct240_pin_list():
-    """74HCT240 octal inverting 3-state buffer, TSSOP-20 (Nexperia). 8 channels;
-    /1OE,/2OE tied low (always on). VCC=+5V level-shifts FPGA 3V3->5V."""
-    L = [("2", "1A0", "input"), ("4", "1A1", "input"), ("6", "1A2", "input"), ("8", "1A3", "input"),
-         ("17", "2A0", "input"), ("15", "2A1", "input"), ("13", "2A2", "input"), ("11", "2A3", "input")]
-    R = [("18", "1Y0", "output"), ("16", "1Y1", "output"), ("14", "1Y2", "output"), ("12", "1Y3", "output"),
-         ("3", "2Y0", "output"), ("5", "2Y1", "output"), ("7", "2Y2", "output"), ("9", "2Y3", "output")]
+def tlc5947_pin_list():
+    """TLC5947 24-channel 12-bit PWM constant-current LED driver, HTSSOP-32 (TI
+    SBVS114B).  Internal 4 MHz grayscale oscillator -> NO GSCLK pin.  Pinout
+    verified against the TI datasheet PDF (extracted text):
+        1=GND  2=BLANK  3=SCLK  4=SIN  5..28=OUT0..OUT23  29=SOUT
+        30=XLAT  31=IREF  32=VCC  33=thermal pad (DAP)=GND
+    VCC=3.0-5.5 V (run +3V3); OUT pins sink up to 33 V / 38 mA INDEPENDENT of VCC
+    (emitter anode rail = +12V_EMIT, cathodes = OUTn -- the CQD EL turn-on is
+    4-8 V per docs/FABRICATION_PROTOCOL.md, so a 12 V LED supply gives headroom
+    for the constant-current sink at any CQD V_f up to ~11 V).  Output current
+    I_OUT = 41 * 1.20 / R_IREF -> R_IREF = 4.87 kOhm for ~10.1 mA (in the CQD
+    2-20 mA/pixel spec).  Interface: SCLK/SIN/XLAT/BLANK (SIN->SOUT cascades
+    chip-to-chip; 3 chips => 72 channels, 64 used)."""
     pins = []
+    # Right column: the 24 constant-current sink outputs OUT0..OUT23 (pins 5..28)
+    R = [(str(5 + k), f"OUT{k}") for k in range(24)]
+    yR = 2.54 * (len(R) - 1) / 2
+    for i, (n, nm) in enumerate(R):
+        pins.append(dict(number=n, name=nm, etype="passive", x=10.16,
+                         y=round(yR - i * 2.54, 2), rot=180, length=2.54))
+    # Left column: control + power (8 pins). Order top->bottom for readability.
+    L = [("32", "VCC", "power_in"), ("31", "IREF", "bidirectional"),
+         ("30", "XLAT", "input"), ("29", "SOUT", "output"),
+         ("4", "SIN", "input"), ("3", "SCLK", "input"),
+         ("2", "BLANK", "input"), ("1", "GND", "power_in")]
     yL = 2.54 * (len(L) - 1) / 2
     for i, (n, nm, et) in enumerate(L):
         pins.append(dict(number=n, name=nm, etype=et, x=-10.16,
                          y=round(yL - i * 2.54, 2), rot=0, length=2.54))
-    yR = 2.54 * (len(R) - 1) / 2
-    for i, (n, nm, et) in enumerate(R):
-        pins.append(dict(number=n, name=nm, etype=et, x=10.16,
-                         y=round(yR - i * 2.54, 2), rot=180, length=2.54))
-    pins.append(dict(number="1", name="1OE", etype="input", x=-5.08, y=-10.16, rot=90, length=2.54))
-    pins.append(dict(number="19", name="2OE", etype="input", x=5.08, y=-10.16, rot=90, length=2.54))
-    pins.append(dict(number="20", name="VCC", etype="power_in", x=0, y=-10.16, rot=90, length=2.54))
-    pins.append(dict(number="10", name="GND", etype="power_in", x=0, y=10.16, rot=270, length=2.54))
+    # Thermal pad (pin 33) -> GND, on the bottom edge of the symbol body.
+    pins.append(dict(number="33", name="EP", etype="power_in", x=0, y=10.16,
+                     rot=270, length=2.54))
     return pins
 
 
@@ -528,13 +571,13 @@ def authored_symbols():
     """All custom/minimal symbol definitions we embed in lib_symbols."""
     syms = []
     # power symbols
-    for n in ["+3V3", "+1V8", "+1V0", "+5V", "+5V_RF", "GND"]:
+    for n in ["+3V3", "+1V8", "+1V0", "+5V", "+5V_RF", "+12V_EMIT", "GND"]:
         syms.append(power_symbol_def(n))
     syms.append(PWR_FLAG_def())
-    # FPGA -- real 324-pad CSG324 pinout (power/ground/config/JTAG + 141 IO:
-    # 64 DET_DIG inputs + 64 EM_DRV outputs + 13 control).  Body box spans the
-    # 1.27 mm-pitched pin columns; the left/right columns now hold ~73/~80 pins
-    # (the 128 parallel nets), so the body is tall (~+/-55 mm).
+    # FPGA -- real 324-pad CSG324 pinout (power/ground/config/JTAG + 81 IO:
+    # 64 DET_DIG inputs + 4 em_SPI + 13 control).  Body box spans the
+    # 1.27 mm-pitched pin columns; the left column holds the 64 DET_DIG inputs
+    # (+ other inputs), the right the 4 em_SPI + control, so the body is tall.
     syms.append(custom_symbol_def("qssc", "XC7A35T_CSG324", "U", fpga_pin_list(),
                                   (-50.8, -55.0, 50.8, 55.0), value="XC7A35T-1CSG324C"))
     # QSSC_Chip -- the merged-board quantum die: 128 pads (64 DET top + 64 EM
@@ -549,10 +592,12 @@ def authored_symbols():
                                   (-7.62, -7.62, 7.62, 7.62), value="LMV339"))
     syms.append(custom_symbol_def("qssc", "MCP4725", "U", mcp4725_pin_list(),
                                   (-5.08, -5.08, 5.08, 5.08), value="MCP4725"))
-    syms.append(custom_symbol_def("qssc", "AO3401A", "Q", ao3401a_pin_list(),
-                                  (-5.08, -5.08, 5.08, 5.08), value="AO3401A"))
-    syms.append(custom_symbol_def("qssc", "74HCT240", "U", hct240_pin_list(),
-                                  (-7.62, -12.7, 7.62, 12.7), value="74HCT240"))
+    # TLC5947 24-ch 12-bit PWM constant-current LED driver (HTSSOP-32, TI
+    # SBVS114B). Replaces the old 8x 74HCT240 + 64x AO3401A P-MOS emitter driver
+    # (208 parts -> 3 chips): 64 emitter cathodes sink into 3 daisy-chained
+    # TLC5947 OUT0..23, common anode = +12V_EMIT.  Body spans the 24-wide OUT column.
+    syms.append(custom_symbol_def("qssc", "TLC5947", "U", tlc5947_pin_list(),
+                                  (-7.62, -16.51, 7.62, 16.51), value="TLC5947"))
     # W25Q128 config flash (SOIC-8, datasheet pinout).  QSPI x4 boot to the FPGA
     # dedicated config balls D00..D03 / FCS_B / CCLK.
     syms.append(custom_symbol_def("qssc", "W25Q128JVS", "U", [
@@ -664,7 +709,7 @@ SYM_NAME = {
     "qssc:R": "R", "qssc:C": "C", "qssc:L": "L", "qssc:LED": "LED",
     "qssc:Polyfuse": "Polyfuse", "qssc:D": "D",
     "qssc:TLV9004": "TLV9004", "qssc:LMV339": "LMV339", "qssc:MCP4725": "MCP4725",
-    "qssc:AO3401A": "AO3401A", "qssc:74HCT240": "74HCT240",
+    "qssc:TLC5947": "TLC5947",
 }
 
 # authored pin coords lookup (lib_id -> {pin_number: (x,y,rot)})
@@ -687,7 +732,8 @@ def build_pincoords():
                         coords[num[1][1]] = (float(at[1][1]), float(at[2][1]), int(at[3][1]))
         _PINCOORDS[lib_id] = coords
     # power symbols: single pin "1" at (0,0)
-    for n in ["+3V3", "+1V8", "+1V0", "+5V", "+5V_RF", "GND", "PWR_FLAG"]:
+    for n in ["+3V3", "+1V8", "+1V0", "+5V", "+5V_RF", "+12V_EMIT", "GND",
+              "PWR_FLAG"]:
         _PINCOORDS[f"power:{n}"] = {"1": (0.0, 0.0, 90 if n != "GND" else 270)}
 
 
@@ -754,6 +800,24 @@ add("C47", "qssc:C", "10uF", "Capacitor_SMD:C_0805_2012Metric",
     92, 90, pins={"1": "+5V_RF", "2": "GND"})
 add("C48", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
     92, 98, pins={"1": "+5V_RF", "2": "GND"})
+# ---- +12V_EMIT emitter anode supply (separate 12 V LED input) -------------
+# The 64 CQD emitters share a common anode (EM_ANODE -> +12V_EMIT). Per
+# docs/FABRICATION_PROTOCOL.md the CQD EL turn-on is 4-8 V (visible by ~10 V)
+# at 2-20 mA/pixel, so a +5V rail is insufficient headroom for the TLC5947
+# constant-current sink. The TLC5947 OUT pins tolerate 33 V independent of VCC,
+# so a standard separate 12 V supply gives guaranteed compliance for any CQD
+# V_f up to ~11 V. J4 is a 2.1 mm barrel (12 V wall wart); F2 a 1 A PTC; C85
+# 22 uF bulk + C86 100 nF HF decouple the rail at the die anode pad fanout.
+add("J4", "qssc:Barrel_Jack", "12V LED", "Connector_BarrelJack:BarrelJack_CUI_PJ-102AH_Horizontal",
+    30, 60, pins={"1": "+12V_EMIT_IN", "2": "GND"})
+add("F2", "qssc:Polyfuse", "1A PTC", "Fuse:Fuse_1206_3216Metric",
+    55, 60, pins={"1": "+12V_EMIT_IN", "2": "+12V_EMIT"})
+add("C85", "qssc:C", "22uF", "Capacitor_SMD:C_0805_2012Metric",
+    68, 60, pins={"1": "+12V_EMIT", "2": "GND"})
+add("C86", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
+    68, 68, pins={"1": "+12V_EMIT", "2": "GND"})
+add("#FLG7", "power:PWR_FLAG", "PWR_FLAG", "", 45, 60, pins={"1": "+12V_EMIT_IN"})
+add("#FLG8", "power:PWR_FLAG", "PWR_FLAG", "", 70, 60, pins={"1": "+12V_EMIT"})
 add("R70", "qssc:R", "330", "Resistor_SMD:R_0603_1608Metric",
     110, 30, pins={"1": "+3V3", "2": "LED_ANODE"})
 add("LED1", "qssc:LED", "Green", "LED_SMD:LED_0603_1608Metric",
@@ -849,10 +913,10 @@ add("J3", "qssc:Conn_Coaxial", "SMA", "Connector_Coaxial:SMA_Amphenol_132289_Edg
 # emitter crossbar.  That is GONE: the FPGA and the die are now on ONE board
 # and every channel is parallel.  The 128-pad bare die (64 DET top edge + 64 EM
 # bottom edge, 0.30 mm wire-bond pitch) is placed board-centre; its 64 DET_IN{i}
-# analog inputs fan UP to the TIA/comparator front-end and its 64 emitter_anode{i}
-# pads fan DOWN to the P-MOS driver (both added in Phase 1b).  In this Phase-1a
-# skeleton the 128 nets dangle at the die (ERC warnings, not errors) until the
-# front-end/driver are placed -- this step just shows the die placement.
+# analog inputs fan UP to the TIA/comparator front-end (above the die) and its
+# 64 emitter_cat{i} cathode pads fan DOWN to the 3x TLC5947 constant-current
+# LED driver (below the die) -- the common +12V_EMIT anode rail is the EM_ANODE pad.
+# The 128 nets escape outward on F.Cu (top edge up, bottom edge down).
 # ==========================================================================
 add("Uchip", "qssc:QSSC_Chip", "QSSC_Chip", "qssc:QSSC_Chip",
     80, 55, pins=chip_net_map())
@@ -996,12 +1060,13 @@ add("C68", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
 # Detector path (per channel i=0..63):  chip DET_IN{i} -> TLV9004 TIA (-IN,
 # +IN=DET_REF bias) -> DET_TIA{i} -> LMV339 comparator (+IN, -IN=DET_THR DAC)
 # -> open-collector OUT pulled to +3V3 -> DET_DIG{i} -> FPGA LVCMOS33 input.
-# Emitter path  (per channel i=0..63):  FPGA EM_DRV{i} -> 74HCT240 inverting
-# buffer (VCC=+5V, level-shifts) -> em_gate{i} -> AO3401A P-MOS gate; P-MOS
-# source=+5V, drain=em_drain{i} -> 220R -> emitter_anode{i} -> chip EM{i}.
-# 100k gate pull-up to +5V keeps the P-MOS off until the FPGA drives it.
-# All front-end runs on +3V3; the emitter driver on +5V (level-shifted from
-# the FPGA's 3V3 logic by the 74HCT240).
+# Emitter path:  FPGA 4-wire SPI (em_sclk/sin/xlat/blank) -> 3x TLC5947
+# daisy-chained constant-current LED driver (SIN->SOUT, 72 ch, 64 used).  Each
+# emitter cathode emitter_cat{i} sinks into a TLC5947 OUTn; the 64 emitters
+# share a common +12V_EMIT anode rail (chip EM_ANODE pad).  12-bit PWM grayscale per
+# channel -> any combination of emitters fires in parallel at independent
+# intensity (the old 64-GPIO + 74HCT240 + P-MOS one-at-a-time design is gone).
+# All front-end runs on +3V3; the TLC5947 logic (VCC) on +3V3, OUT sinks from +5V.
 def build_chip_frontend_and_driver():
     # TLV9004 channel k -> (out, in-, in+) pin numbers (TSSOP-14 datasheet)
     TIA_CH = {0: ("1", "2", "3"), 1: ("7", "6", "5"),
@@ -1057,31 +1122,39 @@ def build_chip_frontend_and_driver():
             pins={"1": "+3V3", "2": "GND"})      # TLV9004 decoupling
         add(f"Cuc{j}", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
             pins={"1": "+3V3", "2": "GND"})      # LMV339 decoupling
-    # ---- 8x 74HCT240 (inverting buffer, VCC=+5V) ---------------------------
-    BUF_CH = {0: ("2", "18"), 1: ("4", "16"), 2: ("6", "14"), 3: ("8", "12"),
-              4: ("17", "3"), 5: ("15", "5"), 6: ("13", "7"), 7: ("11", "9")}
-    for j in range(8):
-        bp = {"1": "GND", "19": "GND", "20": "+5V", "10": "GND"}
-        for m in range(8):
-            i = 8 * j + m
-            inp, out = BUF_CH[m]
-            bp[inp] = f"EM_DRV{i}"      # FPGA -> buffer input
-            bp[out] = f"em_gate{i}"     # buffer output -> P-MOS gate
-        add(f"UB{j}", "qssc:74HCT240", "74HCT240",
-            "Package_SO:TSSOP-20_4.4x6.5mm_P0.65mm", 0, 0, pins=bp)
-    # ---- 64x AO3401A P-MOS high-side switch + 220R + 100k gate pull-up ------
-    for i in range(64):
-        add(f"Q{i}", "qssc:AO3401A", "AO3401A",
-            "Package_TO_SOT_SMD:SOT-23", 0, 0,
-            pins={"1": f"em_gate{i}", "2": "+5V", "3": f"em_drain{i}"})
-        add(f"Re{i}", "qssc:R", "220R", "Resistor_SMD:R_0603_1608Metric", 0, 0,
-            pins={"1": f"em_drain{i}", "2": f"emitter_anode{i}"})
-        add(f"Rg{i}", "qssc:R", "100k", "Resistor_SMD:R_0603_1608Metric", 0, 0,
-            pins={"1": f"em_gate{i}", "2": "+5V"})
-    # ---- per-buffer decoupling --------------------------------------------
-    for j in range(8):
-        add(f"Cub{j}", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
-            pins={"1": "+5V", "2": "GND"})
+    # ---- 3x TLC5947 constant-current LED driver (daisy-chained, 64 emitters) --
+    # Replaces the old 8x 74HCT240 + 64x AO3401A P-MOS + 128 passives (208 parts)
+    # with 3 chips + 3 Riref + 3 decoupling caps (9 parts).  Each TLC5947 has 24
+    # constant-current sink outputs (OUT0..OUT23 = pins 5..28); 3 chips chain to
+    # 72 channels, of which 64 are used (chip2 uses only OUT0..OUT15).  The 64
+    # emitter cathodes (emitter_cat0..63, chip bottom-edge pads) sink into the
+    # TLC5947 OUTn; the emitters share a common +12V_EMIT anode rail (EM_ANODE pad).
+    # FPGA interface is 4 wires: em_sclk/em_sin/em_xlat/em_blank; SIN->SOUT
+    # cascades chip-to-chip (chip2 SOUT left NC).  VCC=+3V3; IREF set by
+    # Riref=4.87k -> I_OUT = 41*1.20/4.87k ~= 10.1 mA per channel.
+    TLC_FP = ("Package_SO:HTSSOP-32-1EP_6.1x11mm_P0.65mm_EP5.2x11mm_"
+              "Mask4.11x4.36mm_ThermalVias")
+    for j in range(3):
+        pins = {"1": "GND", "2": "em_blank", "3": "em_sclk",
+                "30": "em_xlat", "31": f"em_iref{j}", "32": "+3V3", "33": "GND"}
+        # SIN: chip0 takes em_sin from the FPGA; chip1/2 take the prior chip SOUT.
+        pins["4"] = "em_sin" if j == 0 else f"em_sout{j-1}"
+        # SOUT: chip0/1 cascade to the next chip's SIN; chip2 SOUT left NC.
+        if j < 2:
+            pins["29"] = f"em_sout{j}"
+        # OUT0..OUT23 (pins 5..28) -> emitter_cat{24*j+k}; only the 64 used
+        # channels are netted (chip2 OUT16..OUT23 stay NC).
+        for k in range(24):
+            i = 24 * j + k
+            if i < 64:
+                pins[str(5 + k)] = f"emitter_cat{i}"
+        add(f"UE{j}", "qssc:TLC5947", "TLC5947", TLC_FP, 0, 0, pins=pins)
+        # Riref: IREF -> GND, sets the per-channel constant current.
+        add(f"Riref{j}", "qssc:R", "4.87k", "Resistor_SMD:R_0603_1608Metric", 0, 0,
+            pins={"1": f"em_iref{j}", "2": "GND"})
+        # per-chip VCC decoupling (+3V3).
+        add(f"Cem{j}", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric", 0, 0,
+            pins={"1": "+3V3", "2": "GND"})
 
 
 build_chip_frontend_and_driver()
@@ -1095,19 +1168,20 @@ RF_NETS = {"RF_OUT", "RF_OUT_N", "RF_IN", "RF_AMP_OUT", "J3_SIG", "LF_CP", "LF_M
 USB_NETS = {"USB_DP", "USB_DM", "USB_DP_F", "USB_DM_F"}
 ANALOG_NETS = {"VREFP", "VREFN"}   # TIA/XADC/DET_BIAS analog nets removed in the
                                    # single-board pivot.
-POWER_NETS = {"+3V3", "+1V8", "+1V0", "+5V", "+5V_RF", "+5V_IN", "+5V_TIA", "GND",
-              "3V3OUT", "VBUS_USB"}
+POWER_NETS = {"+3V3", "+1V8", "+1V0", "+5V", "+5V_RF", "+5V_IN", "+5V_TIA",
+              "+12V_EMIT", "+12V_EMIT_IN", "GND", "3V3OUT", "VBUS_USB"}
 
 
 def _is_chip_net(net):
     """The 128 QSSC_Chip die-pad nets: DET_IN0..63 (top edge -> TIA inputs) and
-    emitter_anode0..63 (bottom edge -> P-MOS drains). These fan out as staggered
-    0.30 mm-pitch dog-bone vias (0.15 mm stub + 0.20 mm through-via) whose
-    neighbour-to-neighbour edge clearance is 0.125 mm < the 0.15 mm Default
-    clearance. KiCad DRC takes the MAX of the two nets' netclass clearances, so
-    a Chip class at 0.10 mm relaxes ONLY chip<->chip (the dog-bone case, 0.125 mm
-    >= 0.10 mm) while chip<->everything-else stays 0.15 mm (max 0.10, 0.15)."""
-    return net.startswith("DET_IN") or net.startswith("emitter_anode")
+    emitter_cat0..63 (bottom edge -> TLC5947 constant-current sink outputs).
+    These fan out as staggered 0.30 mm-pitch dog-bone vias (0.15 mm stub +
+    0.20 mm through-via) whose neighbour-to-neighbour edge clearance is 0.125 mm
+    < the 0.15 mm Default clearance. KiCad DRC takes the MAX of the two nets'
+    netclass clearances, so a Chip class at 0.10 mm relaxes ONLY chip<->chip
+    (the dog-bone case, 0.125 mm >= 0.10 mm) while chip<->everything-else stays
+    0.15 mm (max 0.10, 0.15)."""
+    return net.startswith("DET_IN") or net.startswith("emitter_cat")
 
 
 def net_class(net):
@@ -1135,7 +1209,7 @@ def all_nets():
 # Schematic emitter
 # --------------------------------------------------------------------------
 ROOT_UUID = "00000000-0000-0000-0000-000000000001"
-POWER_SYMS = {"+3V3", "+1V8", "+1V0", "+5V", "+5V_RF", "GND"}
+POWER_SYMS = {"+3V3", "+1V8", "+1V0", "+5V", "+5V_RF", "+12V_EMIT", "GND"}
 
 
 def emit_schematic():
@@ -1484,7 +1558,7 @@ def emit_pro():
                "diff_pair_width": 0.2, "line_style": 0, "microvia_diameter": 0.2, "microvia_drill": 0.1,
                "name": "Analog", "pcb_color": "rgba(255, 255, 0, 0.000)", "schematic_color": "rgba(0, 0, 0, 0.000)",
                "track_width": 0.2, "via_diameter": 0.6, "via_drill": 0.3, "wire_width": 6})
-    # Chip netclass: the 128 QSSC_Chip die-pad nets (DET_IN0..63, emitter_anode0..63)
+    # Chip netclass: the 128 QSSC_Chip die-pad nets (DET_IN0..63, emitter_cat0..63)
     # fan out as 0.30 mm-pitch dog-bone vias whose neighbour edge clearance is 0.125
     # mm. A 0.10 mm clearance (vs the 0.15 mm board default) relaxes ONLY chip<->chip
     # so the dog-bones pass DRC; chip<->other nets keep 0.15 mm (KiCad takes the max
@@ -1506,10 +1580,10 @@ def emit_pro():
 # --------------------------------------------------------------------------
 # PCB placement plan (mm) — assigns pcb_x/pcb_y to each component
 # --------------------------------------------------------------------------
-BOARD_W, BOARD_H = 210, 140   # widened 200->210 for Phase 1b: the 64-ch parallel
-                              # front-end (32 ICs + ~200 passives) + 64-ch driver
-                              # (8 buffers + 64 P-MOS + ~200 passives) need room. Die
-                              # centre, FPGA right, front-end band above, driver below.
+BOARD_W, BOARD_H = 210, 140   # widened for the single-board parallel pivot: the
+                              # 64-ch detector front-end (32 ICs + ~200 passives) +
+                              # 3x TLC5947 constant-current emitter driver need room.
+                              # Die centre, FPGA right, front-end band above, TLC5947 below.
 
 # Copper layer stack for the MAIN control board (6-layer HDI). Each entry:
 # (kicad_layer_id, name, type, user_label_or_None). Stackup:
@@ -1560,8 +1634,8 @@ def assign_pcb_positions():
     #   right         FPGA CSG324 (324-ball BGA, moved off-centre to clear the die) + config flash
     #   top           power chain (left) + RF chain (ADF4351 -> GVA-84 -> SMA right edge)
     #   bottom        USB (FT232 + USB-C bottom edge) + reset/JTAG (left edge)
-    #   above die     (reserved) 64-ch TIA/comparator front-end  (Phase 1b)
-    #   below die     (reserved) 64-ch P-MOS emitter driver       (Phase 1b)
+    #   above die     (reserved) 64-ch TIA/comparator front-end
+    #   below die     3x TLC5947 constant-current LED driver (UE0/1/2 + Riref/Cem)
     # Edge-mount connectors sit at the board edge by design:
     #   J2 barrel jack  -> left edge (rot 180, opening faces -x)
     #   J10 USB-C       -> bottom edge (rot 180, opening overhangs +y)
@@ -1576,6 +1650,13 @@ def assign_pcb_positions():
         "C42": (28, 36, 0), "C41": (40, 34, 0), "C43": (40, 42, 0), "C44": (28, 42, 0),
         # FB1 (ferrite bead) +5V -> +5V_RF pi filter, around (34,50)
         "C45": (28, 50, 0), "C46": (28, 56, 0), "C47": (40, 50, 0), "C48": (40, 56, 0),
+        # ---- +12V_EMIT emitter anode supply (left edge, below the 5V chain) ----
+        # J4 12V barrel (left edge, rot 180 opening -x) -> F2 1A PTC. The rail
+        # runs on B.Cu up to y~55 and across to the die EM_ANODE pad on the LEFT
+        # edge (70,55) -- mid-height, clear of the DET (top) and EM (bottom)
+        # dog-bone via fields. C85/C86 bulk+HF decouple it right at the anode
+        # fanout (just left of the die courtyard x69.5, y~52/58).
+        "J4": (10, 72, 180), "F2": (24, 72, 0), "C85": (64, 52, 0), "C86": (64, 58, 0),
         # ---- quantum die (centre) + FPGA (moved right off the die) ----
         "Uchip": (80, 55, 0),
         # FPGA CSG324 (~17 mm BGA, courtyard x[119.5,136.5] y[46.5,63.5]) right of
@@ -1608,8 +1689,8 @@ def assign_pcb_positions():
         "C52": (58, 40, 0), "C53": (58, 46, 0), "C54": (58, 52, 0),
         # FT232 decoupling (column x62: clear of the die courtyard left x69.5)
         "C55": (62, 60, 0), "C56": (62, 64, 0), "C57": (62, 56, 0),
-        # TCXO + W25Q128 Vdd/VCC decoupling (C59 moved off the die right edge)
-        "C58": (76, 22, 0), "C59": (100, 72, 0),
+        # TCXO + W25Q128 Vdd/VCC decoupling (C59 at x116: clear of TLC5947 UE2 @ x100)
+        "C58": (76, 22, 0), "C59": (116, 68, 0),
         # ADF4351 per-supply 100nF (around U3 keepout x[88,96] y[26,34]: above & below)
         "C60": (84, 22, 0), "C61": (88, 22, 0), "C62": (96, 22, 0), "C63": (100, 22, 0),
         "C64": (88, 38, 0), "C65": (96, 38, 0),
@@ -1636,17 +1717,16 @@ def assign_pcb_positions():
             c["pcb_x"] = 50 + i * 4
             c["pcb_y"] = 16
             c["pcb_rot"] = 0
-        # ---- Phase 1b procedural grids (board widened to 210x140; the Phase
-        # 1a die@(80,55) + FPGA@(128,55) layout is kept unchanged).  All spacing
-        # is sized to the largest courtyard half-extent in each block so nothing
-        # overlaps: TSSOP-14 x+/-3.85/y+/-2.75, SOIC-14 x+/-3.7/y+/-4.58,
-        # TSSOP-20 x+/-3.85/y+/-3.5, SOT-23 x+/-1.92/y+/-1.7, 0603 ~+/-0.9.
-        # Front-end lives in the right zone x[144,200] (8 cols @ 8mm) stacked
-        # TIA -> TIA-decoupling -> comparator -> cmp-decoupling -> feedback ->
-        # pull-ups, with the threshold-DAC group on the far right edge x=205.
-        # Emitter driver lives below the die: 8x 74HCT240 in a row at y=80
-        # (left + right of the USB), 64 P-MOS below-left, 64 emitter/gate R
-        # below-right, each with its decoupling.
+        # ---- Phase 1b procedural grids (board 210x140; die@(80,55) +
+        # FPGA@(128,55) layout kept).  All spacing is sized to the largest
+        # courtyard half-extent in each block so nothing overlaps: TSSOP-14
+        # x+/-3.85/y+/-2.75, SOIC-14 x+/-3.7/y+/-4.58, HTSSOP-32 x+/-4/y+/-6.5,
+        # 0603 ~+/-0.9.  Front-end lives in the right zone x[144,200] (8 cols @
+        # 8mm) stacked TIA -> TIA-decoupling -> comparator -> cmp-decoupling ->
+        # feedback -> pull-ups, with the threshold-DAC group at x=205.  The
+        # emitter driver (3x TLC5947 + 3x Riref + 3x Cem, 9 parts) lives BELOW
+        # the die at y=78..86 (EM bottom-edge pads fan down to the TLC5947 OUTn
+        # sinks); the old 208-part P-MOS driver that filled this zone is gone.
         elif c["ref"].startswith("UT"):          # 16x TLV9004 TIA  (8 cols x 2 rows)
             j = int(c["ref"][2:]); r, col = j // 8, j % 8
             c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 144 + col * 8, 24 + r * 8, 0
@@ -1682,23 +1762,18 @@ def assign_pcb_positions():
             c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 205, 120, 0
         elif c["ref"] == "Cdac":
             c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 205, 124, 0
-        elif c["ref"].startswith("UB"):          # 8x 74HCT240 buffer (4 left + 4 right of USB)
-            j = int(c["ref"][2:])
-            xs = [10, 20, 30, 40, 100, 112, 124, 136]
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = xs[j], 80, 0
-        elif c["ref"].startswith("Q"):            # 64x AO3401A P-MOS (8 cols x 8 rows, left)
-            i = int(c["ref"][1:]); r, col = i // 8, i % 8
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 6 + col * 5.5, 92 + r * 5, 0
-        elif c["ref"].startswith("Re"):           # 64x 220R emitter R (8 cols x 8 rows, right)
-            i = int(c["ref"][2:]); r, col = i // 8, i % 8
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 97 + col * 5, 92 + r * 6, 0
-        elif c["ref"].startswith("Rg"):           # 64x 100k gate pull-up (same cols, +3mm y)
-            i = int(c["ref"][2:]); r, col = i // 8, i % 8
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 97 + col * 5, 95 + r * 6, 0
-        elif c["ref"].startswith("Cub"):          # 8x 74HCT240 decoupling (under each buffer)
+        elif c["ref"].startswith("UE"):          # 3x TLC5947 LED driver (row below the die)
+            j = int(c["ref"][2:])                 # UE0..2 -> x 40/60/100, y=78
+            xs = [40, 60, 100]
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = xs[j], 78, 0
+        elif c["ref"].startswith("Riref"):       # 3x IREF set resistor (below each TLC5947)
+            j = int(c["ref"][5:])
+            xs = [40, 60, 100]
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = xs[j], 86, 0
+        elif c["ref"].startswith("Cem"):         # 3x TLC5947 VCC decoupling (right of each Riref)
             j = int(c["ref"][3:])
-            xs = [10, 20, 30, 40, 100, 112, 124, 136]
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = xs[j], 85, 0
+            xs = [45, 65, 105]
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = xs[j], 86, 0
         else:
             c.setdefault("pcb_x", 50)
             c.setdefault("pcb_y", 50)
@@ -1712,15 +1787,16 @@ def assign_sch_positions():
     net (verified: 19k 'Output+Output' ERC errors).  Grid them out on the A1
     sheet right of the existing (x<350) schematic content.  Spacing > 2x the
     symbol pin reach (~10mm) so no two distinct nets share a pin endpoint."""
-    pre = ("UT", "UC", "UB", "UDAC", "Q", "Rf", "Cf", "Rpu", "Re", "Rg",
-           "Cut", "Cuc", "Cub", "Cdac", "Cref", "Rref1", "Rref2", "R_I2C_SDA",
-           "R_I2C_SCL")
+    pre = ("UT", "UC", "UDAC", "Rf", "Cf", "Rpu",
+           "Cut", "Cuc", "Cdac", "Cref", "Rref1", "Rref2", "R_I2C_SDA",
+           "R_I2C_SCL", "UE", "Riref", "Cem")
     new = [c for c in COMPONENTS if c["ref"] == "UDAC" or c["ref"] == "Rref1"
            or c["ref"] == "Rref2" or c["ref"] == "Cdac" or c["ref"] == "Cref"
            or c["ref"] == "R_I2C_SDA" or c["ref"] == "R_I2C_SCL"
            or any(c["ref"].startswith(p) and c["ref"][len(p):].isdigit()
-                  for p in ("UT", "UC", "UB", "Q", "Rf", "Cf", "Rpu", "Re",
-                            "Rg", "Cut", "Cuc", "Cub"))]
+                  for p in ("UT", "UC", "Rf", "Cf", "Rpu",
+                            "Cut", "Cuc", "Cdac", "Cref",
+                            "UE", "Riref", "Cem"))]
     cols, step_x, step_y = 19, 22.0, 20.0
     for idx, c in enumerate(new):
         r, col = idx // cols, idx % cols

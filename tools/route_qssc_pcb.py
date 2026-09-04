@@ -222,8 +222,9 @@ def _pad_obstacle(board):
                 continue  # non-copper pad -- not a real obstacle
             pos = pad.GetCenter()
             sz = pad.GetSize()
+            is_pth = pad.GetAttribute() == pcbnew.PAD_ATTRIB_PTH
             pads.append((pos.x, pos.y, int(sz.x) / 2, int(sz.y) / 2,
-                         pad.GetNetCode()))
+                         pad.GetNetCode(), is_pth))
     return pads
 
 
@@ -468,9 +469,11 @@ def _add_rail_pad_vias(board, netcode, bga_xy, rail_pads, pads, sig_circles,
     # GND vias just placed and the stitching pass sees both.
 
     def _clears(vx, vy, sx, sy):
-        for ox, oy, hw, hh, onc in pads:
-            if onc == netcode:
-                continue  # same-net pad: the via may overlap it (no DRC issue)
+        for ox, oy, hw, hh, onc, opth in pads:
+            if onc == netcode and not opth:
+                continue  # same-net SMD pad: the via may overlap it (no DRC issue)
+            if onc == netcode and opth:
+                continue  # same-net PTH pad: own via-in-pad handles plane tie
             if abs(ox - sx) < self_eps and abs(oy - sy) < self_eps:
                 continue  # the pad being tied (defensive: also same net)
             if _rect_dist2(vx, vy, ox, oy, hw, hh) < via_pad2:
@@ -518,7 +521,7 @@ def _add_rail_pad_vias(board, netcode, bga_xy, rail_pads, pads, sig_circles,
         still checked against ALL signal vias, because a through via's land sits
         on F.Cu too."""
         trk_pad2 = (track_hw + gap) ** 2
-        for ox, oy, hw, hh, onc in pads:
+        for ox, oy, hw, hh, onc, opth in pads:
             if onc == netcode:
                 continue
             if abs(ox - sx) < self_eps and abs(oy - sy) < self_eps:
@@ -673,9 +676,19 @@ def _add_stitching_vias(board, netcode, bbox, pads, sig_circles, sig_segs,
         y = y0
         while y <= y1:
             clear = True
-            for px, py, hw, hh, onc in pads:
-                if onc == netcode:
-                    continue  # same-net (GND) pad: a GND stitching via may overlap
+            for px, py, hw, hh, onc, opth in pads:
+                if onc == netcode and not opth:
+                    continue  # same-net SMD pad: a GND stitching via may overlap
+                if onc == netcode and opth:
+                    # same-net PTH pad (e.g. UE1 HTSSOP thermal-pad vias): the pad
+                    # already carries its own drill + plane connection, so a
+                    # stitching via landing on it co-locates drills (hole_near_hole,
+                    # actual 0.0 mm). Require copper clearance so the via sits OFF
+                    # the pad instead of on its hole.
+                    if _rect_dist2(x, y, px, py, hw, hh) < via_pad2:
+                        clear = False
+                        break
+                    continue
                 if _rect_dist2(x, y, px, py, hw, hh) < via_pad2:
                     clear = False
                     break
@@ -736,7 +749,7 @@ def _add_stitching_vias(board, netcode, bbox, pads, sig_circles, sig_segs,
 # pad is detected ISOLATED via connectivity, so a re-run (which does NOT strip
 # +5V) skips an already-tied pad; a full pipeline re-run has route_signals
 # strip+rebuild the +5V rail first, so this re-ties.
-STRAGGLER_POWER_NETS = ("+5V", "+5V_RF", "+5V_IN")
+STRAGGLER_POWER_NETS = ("+5V", "+5V_RF", "+5V_IN", "+12V_EMIT", "+12V_EMIT_IN")
 
 
 def _seg_nearest(px, py, x1, y1, x2, y2):

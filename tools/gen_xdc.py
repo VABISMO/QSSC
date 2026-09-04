@@ -9,12 +9,12 @@ ports (fpga/rtl/top_level.v, after the Phase 3 refactor) are:
 
     clk_100mhz, reset, rx, tx,
     det_in[63:0]        # 64 comparator outputs -> FPGA LVCMOS33 inputs (DET_DIG)
-    emitter_en[63:0]    # 64 P-MOS emitter enables (EM_DRV)
+    em_sclk, em_sin, em_xlat, em_blank   # 4-wire TLC5947 LED driver (72-ch chain)
     mod_sync, mw_gate, spi_pins[3:0], refclk_out,
     i2c_sda, i2c_scl    # MCP4725 threshold DAC
 
 This maps the JSON signal names (SPI_LE/SPI_CLK/SPI_DATA/ADF_MUXOUT,
-DET_DIG*/EM_DRV*, I2C_SDA/I2C_SCL) to the RTL port convention and assigns
+DET_DIG*/em_*, I2C_SDA/I2C_SCL) to the RTL port convention and assigns
 every port to the datasheet-correct CSG324 ball.  All VCCO banks run at
 3.3 V -> LVCMOS33 everywhere.  clk_100mhz lands on an MRCC (clock-capable)
 pin of the CSG324 (see the ballmap).
@@ -65,10 +65,10 @@ def emit() -> str:
     L.append("# and verified against UG475 / DS181). All six VCCO banks are powered at")
     L.append("# 3.3 V (LVCMOS33). clk_100mhz is on a clock-capable (MRCC) pin.")
     L.append("#")
-    L.append("# Parallel architecture: 64 emitters driven individually (emitter_en[63:0])")
-    L.append("# and 64 photon-counting detector channels read in parallel (det_in[63:0],")
-    L.append("# comparator -> LVCMOS -> 64 fabric counters). No analog MUX, no row/col")
-    L.append("# matrix, no XADC. A MCP4725 DAC sets the comparator threshold over I2C.")
+    L.append("# Parallel architecture: 64 emitters driven by 3x TLC5947 constant-current")
+    L.append("# LED drivers over a 4-wire SPI (em_sclk/sin/xlat/blank), and 64 photon-")
+    L.append("# counting detector channels read in parallel (det_in[63:0], comparator ->")
+    L.append("# LVCMOS -> 64 fabric counters). No analog MUX, no row/col matrix, no XADC.")
     L.append("# =============================================================================")
     L.append("")
 
@@ -114,15 +114,22 @@ def emit() -> str:
     L.append("set_property IOSTANDARD LVCMOS33 [get_ports {det_in[*]}]")
     L.append("")
 
-    # ---- emitter enables (64 individual emitters) ----
-    L.append("# ---- 64 emitter enables (FPGA -> 74HCT240 -> P-MOS high-side driver) --------")
-    L.append("# emitter_en[i] drives emitter i's P-MOS gate through a 74HCT240 buffer;")
-    L.append("# 64 independent channels (no 8x8 matrix).")
-    for i in range(64):
-        L.append(f"set_property PACKAGE_PIN {sig[f'EM_DRV{i}']}  [get_ports {{emitter_en[{i}]}}]")
-    L.append("set_property IOSTANDARD LVCMOS33 [get_ports {emitter_en[*]}]")
-    L.append("set_property SLEW FAST [get_ports {emitter_en[*]}]")
-    L.append("set_property DRIVE 8   [get_ports {emitter_en[*]}]")
+    # ---- TLC5947 emitter driver (4-wire SPI, 72-ch chain, 64 used) ----
+    L.append("# ---- TLC5947 constant-current LED driver (FPGA -> 3x TLC5947, 64 emitters) --")
+    L.append("# 4-wire interface: em_sclk (shift clock), em_sin (data in), em_xlat (latch),")
+    L.append("# em_blank (global blank/PWM gate). 3x TLC5947 daisy-chain SIN->SOUT for 72")
+    L.append("# channels (64 used); each emitter cathode is a TLC5947 OUTn, anode = +5V.")
+    L.append("# 12-bit PWM grayscale per channel -> parallel multi-emitter drive.")
+    L.append(f"set_property PACKAGE_PIN {ball('em_sclk')}   [get_ports em_sclk]")
+    L.append(f"set_property PACKAGE_PIN {ball('em_sin')}   [get_ports em_sin]")
+    L.append(f"set_property PACKAGE_PIN {ball('em_xlat')}   [get_ports em_xlat]")
+    L.append(f"set_property PACKAGE_PIN {ball('em_blank')}   [get_ports em_blank]")
+    L.append("set_property IOSTANDARD LVCMOS33 [get_ports em_sclk]")
+    L.append("set_property IOSTANDARD LVCMOS33 [get_ports em_sin]")
+    L.append("set_property IOSTANDARD LVCMOS33 [get_ports em_xlat]")
+    L.append("set_property IOSTANDARD LVCMOS33 [get_ports em_blank]")
+    L.append("set_property SLEW FAST [get_ports em_sclk]")
+    L.append("set_property DRIVE 8   [get_ports em_sclk]")
     L.append("")
 
     # ---- mod_sync ----
@@ -203,10 +210,10 @@ def main() -> None:
     OUT.write_text(emit())
     m = json.loads(MAP.read_text())
     n_det = sum(1 for k in m["signals"] if k.startswith("DET_DIG"))
-    n_em = sum(1 for k in m["signals"] if k.startswith("EM_DRV"))
+    n_em = sum(1 for k in m["signals"] if k.startswith("em_"))
     print(f"wrote {OUT}")
     print(f"  CSG324: {len(m['signals'])} user-IO signals "
-          f"(det_in={n_det} emitter_en={n_em} control={len(m['signals']) - n_det - n_em})")
+          f"(det_in={n_det} em_SPI={n_em} control={len(m['signals']) - n_det - n_em})")
     print(f"  clk_100mhz -> {m['signals']['clk_100mhz']} (MRCC)")
     print(f"  refclk_out -> {m['signals']['refclk_out']}")
     print(f"  i2c_sda -> {m['signals']['I2C_SDA']}  i2c_scl -> {m['signals']['I2C_SCL']}")

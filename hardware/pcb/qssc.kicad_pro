@@ -352,6 +352,14 @@
     "netclass_patterns": [
       {
         "netclass": "Power",
+        "pattern": "+12V_EMIT"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "+12V_EMIT_IN"
+      },
+      {
+        "netclass": "Power",
         "pattern": "+1V0"
       },
       {
@@ -692,259 +700,259 @@
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode0"
+        "pattern": "emitter_cat0"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode1"
+        "pattern": "emitter_cat1"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode10"
+        "pattern": "emitter_cat10"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode11"
+        "pattern": "emitter_cat11"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode12"
+        "pattern": "emitter_cat12"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode13"
+        "pattern": "emitter_cat13"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode14"
+        "pattern": "emitter_cat14"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode15"
+        "pattern": "emitter_cat15"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode16"
+        "pattern": "emitter_cat16"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode17"
+        "pattern": "emitter_cat17"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode18"
+        "pattern": "emitter_cat18"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode19"
+        "pattern": "emitter_cat19"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode2"
+        "pattern": "emitter_cat2"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode20"
+        "pattern": "emitter_cat20"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode21"
+        "pattern": "emitter_cat21"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode22"
+        "pattern": "emitter_cat22"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode23"
+        "pattern": "emitter_cat23"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode24"
+        "pattern": "emitter_cat24"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode25"
+        "pattern": "emitter_cat25"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode26"
+        "pattern": "emitter_cat26"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode27"
+        "pattern": "emitter_cat27"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode28"
+        "pattern": "emitter_cat28"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode29"
+        "pattern": "emitter_cat29"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode3"
+        "pattern": "emitter_cat3"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode30"
+        "pattern": "emitter_cat30"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode31"
+        "pattern": "emitter_cat31"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode32"
+        "pattern": "emitter_cat32"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode33"
+        "pattern": "emitter_cat33"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode34"
+        "pattern": "emitter_cat34"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode35"
+        "pattern": "emitter_cat35"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode36"
+        "pattern": "emitter_cat36"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode37"
+        "pattern": "emitter_cat37"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode38"
+        "pattern": "emitter_cat38"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode39"
+        "pattern": "emitter_cat39"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode4"
+        "pattern": "emitter_cat4"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode40"
+        "pattern": "emitter_cat40"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode41"
+        "pattern": "emitter_cat41"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode42"
+        "pattern": "emitter_cat42"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode43"
+        "pattern": "emitter_cat43"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode44"
+        "pattern": "emitter_cat44"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode45"
+        "pattern": "emitter_cat45"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode46"
+        "pattern": "emitter_cat46"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode47"
+        "pattern": "emitter_cat47"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode48"
+        "pattern": "emitter_cat48"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode49"
+        "pattern": "emitter_cat49"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode5"
+        "pattern": "emitter_cat5"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode50"
+        "pattern": "emitter_cat50"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode51"
+        "pattern": "emitter_cat51"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode52"
+        "pattern": "emitter_cat52"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode53"
+        "pattern": "emitter_cat53"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode54"
+        "pattern": "emitter_cat54"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode55"
+        "pattern": "emitter_cat55"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode56"
+        "pattern": "emitter_cat56"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode57"
+        "pattern": "emitter_cat57"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode58"
+        "pattern": "emitter_cat58"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode59"
+        "pattern": "emitter_cat59"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode6"
+        "pattern": "emitter_cat6"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode60"
+        "pattern": "emitter_cat60"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode61"
+        "pattern": "emitter_cat61"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode62"
+        "pattern": "emitter_cat62"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode63"
+        "pattern": "emitter_cat63"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode7"
+        "pattern": "emitter_cat7"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode8"
+        "pattern": "emitter_cat8"
       },
       {
         "netclass": "Chip",
-        "pattern": "emitter_anode9"
+        "pattern": "emitter_cat9"
       },
       {
         "netclass": "RF",

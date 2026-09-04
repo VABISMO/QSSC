@@ -9,7 +9,7 @@ CPG236's ~125.  CSG324 has 215 user IO.
 
 Emits ``.tmpwork/fpga_csg324_map.json`` consumed by ``gen_qssc_kicad.py``::
 
-  { signals: {net: ball}     # control + 64 DET_DIG + 64 EM_DRV (side-assigned)
+  { signals: {net: ball}     # control + 64 DET_DIG + 4 em_SPI (side-assigned)
     power:   {rail: [balls]} # derived from symbol pin names (never drops a GND)
     config:  {name: ball}    # D00-D03/FCS_B/CCLK/DONE/INIT_B/PROGRAM_B/M0-M2
     jtag:    {name: ball}    # TCK/TMS/TDI/TDO
@@ -18,12 +18,13 @@ Emits ``.tmpwork/fpga_csg324_map.json`` consumed by ``gen_qssc_kicad.py``::
 Assignment (deterministic, routing-friendly):
   * clk_100mhz (in)  + refclk_25m (out, =refclk_out) -> MRCC clock-capable balls
   * 64 DET_DIG0-63   -> right-edge balls (high column) toward the comparator
-                        front-end that lives at board x>=144 (right of FPGA)
-  * 64 EM_DRV0-63    -> bottom-edge balls (high row) toward the 74HCT240
-                        buffers + P-MOS drivers below the die (board y>=80)
+                        front-end (above the die, board y<44)
+  * 4 em_SPI         -> bottom-edge balls toward the 3x TLC5947 constant-current
+                        LED driver below the die (em_sclk/sin/xlat/blank)
   * control nets     -> remaining general IO
-The old det_mux_sel*/emitter_rows*/emitter_cols* signals are gone (the
-parallel architecture has no MUX and no row/col matrix).
+The old det_mux_sel*/emitter_rows*/emitter_cols* signals AND the 64x EM_DRV
+GPIO are gone (the parallel architecture has no MUX, no row/col matrix, and the
+TLC5947 drives the 64 emitters over 4 SPI wires, not 64 GPIO).
 """
 from __future__ import annotations
 import re, json
@@ -186,13 +187,18 @@ def main() -> None:
     signals["refclk_out"] = mrcc[1]        # -> refclk_25m alias in net_map
     taken |= {mrcc[0], mrcc[1]}
 
-    # 3b. 64 EM_DRV outputs -> bottom-edge balls (high row), excluding taken.
+    # 3b. 4 TLC5947 SPI signals -> bottom-edge balls toward the 3x TLC5947
+    # constant-current LED driver that lives below the die. The old 64x EM_DRV
+    # GPIO is GONE: the TLC5947 daisy-chains 72 sink channels (64 used) over just
+    # 4 wires (SCLK/SIN/XLAT/BLANK, with SIN->SOUT cascading chip-to-chip), so
+    # the FPGA emitter interface collapses from 64 pins to 4. 60 user-IO balls
+    # are freed (spare).
     em_pool = sorted(
         (b for b in avail if b not in taken),
         key=lambda b: (-rowidx(b), col(b)))          # bottom rows first
-    em_balls = em_pool[:64]
-    for i, b in enumerate(em_balls):
-        signals[f"EM_DRV{i}"] = b
+    em_balls = em_pool[:4]
+    for name, b in zip(("em_sclk", "em_sin", "em_xlat", "em_blank"), em_balls):
+        signals[name] = b
     taken |= set(em_balls)
 
     # 3c. 64 DET_DIG inputs -> right-edge balls (high col), excluding taken.
@@ -228,13 +234,13 @@ def main() -> None:
     n_pow = sum(len(v) for v in power.values())
     n_sig = len(signals)
     n_det = sum(1 for k in signals if k.startswith("DET_DIG"))
-    n_em = sum(1 for k in signals if k.startswith("EM_DRV"))
+    n_em = sum(1 for k in signals if k.startswith("em_"))
     print(f"wrote {OUT}")
     print(f"  power balls: {n_pow} (GND={len(power['GND'])} "
           f"MGT_GND={len(power.get('MGT_GND', []))} "
           f"VCCINT={len(power['VCCINT'])} "
           f"VCCO banks={sum(1 for k in power if k.startswith('VCCO_'))})")
-    print(f"  signals: {n_sig}  (DET_DIG={n_det} EM_DRV={n_em} "
+    print(f"  signals: {n_sig}  (DET_DIG={n_det} em_SPI={n_em} "
           f"control={n_sig - n_det - n_em})")
     print(f"  config: {len(config)}  jtag: {len(jtag)}  xadc: {len(xadc)}")
     print(f"  spare IO: {len(avail) - len(taken)}")

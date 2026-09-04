@@ -6,7 +6,7 @@
 // control board. Single merged board, fully parallel readout/drive:
 //   * UART rx/tx           (115200 baud, 8-N-1)
 //   * command_parser       (text protocol over UART)
-//   * emitter_array        (64 individual emitter enables -> 74HCT240 -> P-MOS)
+//   * emitter_array        (64 parallel CQD emitters via 3x TLC5947, 4-wire SPI)
 //   * photon_counter_array (64 parallel photon counters, comparator->LVCMOS)
 //   * adf4351_ctrl         (microwave PLL register sequencer)
 //   * spi_master           (32-bit SPI for the ADF4351)
@@ -16,9 +16,11 @@
 // There is NO analog MUX and NO XADC: each of the 64 detectors has its own
 // TIA + Schmitt comparator on the board, and the 64 comparator outputs come
 // straight in as `det_in[63:0]` LVCMOS inputs, counted by a 64-wide counter
-// fabric. The 64 emitters are driven individually (`emitter_en[63:0]`), no
-// 8x8 row/col matrix. mod_sync is the 1 kHz lock-in reference (host-side
-// demodulation, as before).
+// fabric. The 64 CQD emitters are driven IN PARALLEL by 3x TLC5947 constant-
+// current LED drivers over a 4-wire SPI (em_sclk/sin/xlat/blank): each
+// channel has its own 12-bit grayscale word, so multiple emitters light
+// simultaneously at independent intensities. No 8x8 row/col matrix, no 64
+// FPGA GPIO. mod_sync is the 1 kHz lock-in reference (host-side demodulation).
 //
 // Port names match fpga/constraints.xdc.
 //============================================================================
@@ -30,8 +32,11 @@ module top_level (
     output            tx,
     // 64 detector photon-count inputs (board TIA + comparator -> LVCMOS33)
     input      [63:0] det_in,
-    // 64 individual emitter enables (FPGA -> 74HCT240 -> P-MOS high-side)
-    output [63:0]     emitter_en,
+    // 64 parallel CQD emitters via 3x TLC5947 (4-wire SPI, 72-ch chain, 64 used)
+    output            em_sclk,
+    output            em_sin,
+    output            em_xlat,
+    output            em_blank,
     // lock-in modulation reference (1 kHz)
     output            mod_sync,
     // ADF4351 SPI: {LE, CLK, DATA, MUXOUT}  (MUXOUT is an input from the PLL)
@@ -87,20 +92,31 @@ module top_level (
         .o_Tx_Done ()
     );
 
-    // ---- Emitter array (64 individual emitter enables) -------------------
-    wire        em_drive;
+    // ---- Emitter array (64 parallel CQD emitters via 3x TLC5947) ----------
+    wire        em_cmd_drive;
+    wire        em_cmd_set;
+    wire        em_cmd_pattern;
+    wire        em_cmd_clear;
     wire [5:0]  em_index;
+    wire [11:0] em_level;
     wire [31:0] em_duration_ms;
     wire        em_busy;
 
     emitter_array em_inst (
         .clk          (clk_100mhz),
         .reset        (reset_sync),
-        .drive        (em_drive),
+        .cmd_drive    (em_cmd_drive),
+        .cmd_set      (em_cmd_set),
+        .cmd_pattern  (em_cmd_pattern),
+        .cmd_clear    (em_cmd_clear),
         .index        (em_index),
+        .level        (em_level),
         .duration_ms  (em_duration_ms),
-        .emitter_en   (emitter_en),
-        .busy         (em_busy)
+        .busy         (em_busy),
+        .em_sclk      (em_sclk),
+        .em_sin       (em_sin),
+        .em_xlat      (em_xlat),
+        .em_blank     (em_blank)
     );
 
     // ---- ADF4351 PLL + SPI -------------------------------------------------
@@ -223,8 +239,12 @@ module top_level (
         .tx_byte          (tx_byte),
         .tx_start         (tx_start),
         .tx_busy          (tx_busy),
-        .em_drive         (em_drive),
+        .em_cmd_drive     (em_cmd_drive),
+        .em_cmd_set       (em_cmd_set),
+        .em_cmd_pattern   (em_cmd_pattern),
+        .em_cmd_clear     (em_cmd_clear),
         .em_index         (em_index),
+        .em_level         (em_level),
         .em_duration_ms   (em_duration_ms),
         .em_busy          (em_busy),
         .pll_start        (pll_start),
