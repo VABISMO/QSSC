@@ -2218,29 +2218,42 @@ STACK_UP = [
     ("B.Cu",         "copper",  0.035,  None),
 ]
 
-# Copper layer stack for the DETECTOR HEAD board (4-layer). The head carries
-# only the TIA + ADC analog front-end -- no FPGA BGA, no dense fanout -- so a
-# 4-layer stack is ample: F.Cu sig / In1.Cu GND plane / In2.Cu PWR plane /
-# B.Cu sig. B.Cu ALSO carries the 64 DET contact pads that face the die top
-# face (the head sits above the die, B.Cu down). Each entry:
-# (kicad_layer_id, name, type, user_label_or_None).
+# Copper layer stack for the DETECTOR HEAD board (6-layer). The head carries
+# the 64-channel TIA + 4xAD7616 analog front-end AND the dense 64-net die
+# detector bus (DET_IN die->TIA + DET_TIA TIA->ADC). On 4 layers that bus was
+# at the autorouter's density ceiling (only F.Cu/B.Cu signal, 2 layers); a
+# 6-layer stack adds In3.Cu/In4.Cu signal layers so route_signals' die
+# dog-bone fanout + the line router have 4 signal layers to spread the bus.
+# In1.Cu stays a solid GND plane (return for the TIA->ADC analog runs +
+# reference for the DET_REF bias), In2.Cu the PWR plane. B.Cu carries the 64
+# DET contact pads that face the die top face (head sits above the die, B.Cu
+# down). route_signals.build() auto-selects the 4-signal-layer set from
+# GetCopperLayerCount() (>4 -> F.Cu/In3.Cu/In4.Cu/B.Cu), no router edit needed.
 HEAD_LAYER_STACK = [
     (0,  "F.Cu",   "signal", None),
     (1,  "In1.Cu", "signal", "GND"),
     (2,  "In2.Cu", "power",  "PWR"),
+    (3,  "In3.Cu", "signal", None),
+    (4,  "In4.Cu", "signal", None),
     (31, "B.Cu",   "signal", None),
 ]
 
-# 4-layer 1.6 mm FR4 stackup for the head board. Symmetric build; In1.Cu is the
-# GND plane (return for the TIA->ADC analog runs + reference for the DET_REF
-# bias), In2.Cu is the PWR plane (+3V3 / +5V / +5V_A poured by net label).
+# 6-layer 1.6 mm FR4 stackup for the head board. In1.Cu (GND) is one 0.15 mm
+# prepreg below F.Cu so the TIA->ADC analog runs on F.Cu have a tight GND
+# reference (low-impedance return, minimal crosstalk); In2.Cu is the PWR
+# plane (+3V3 / +5V / +5V_A poured by net label). In3.Cu/In4.Cu are the extra
+# inner signal escape layers for the 64-net die bus. Symmetric-ish build.
 HEAD_STACK_UP = [
     ("F.Cu",         "copper",  0.035,  None),
-    ("dielectric 1", "prepreg", 0.50,   "FR4"),
-    ("In1.Cu",       "copper",  0.035,  None),
-    ("dielectric 2", "core",    0.50,   "FR4"),
-    ("In2.Cu",       "copper",  0.035,  None),
-    ("dielectric 3", "prepreg", 0.50,   "FR4"),
+    ("dielectric 1", "prepreg", 0.15,   "FR4"),
+    ("In1.Cu",       "copper",  0.0175, None),
+    ("dielectric 2", "prepreg", 0.15,   "FR4"),
+    ("In2.Cu",       "copper",  0.0175, None),
+    ("dielectric 3", "core",    0.50,   "FR4"),
+    ("In3.Cu",       "copper",  0.0175, None),
+    ("dielectric 4", "prepreg", 0.26,   "FR4"),
+    ("In4.Cu",       "copper",  0.0175, None),
+    ("dielectric 5", "core",    0.40,   "FR4"),
     ("B.Cu",         "copper",  0.035,  None),
 ]
 
