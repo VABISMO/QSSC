@@ -571,14 +571,14 @@
 			(pin bidirectional line
 				(at -50.8 8.25 0)
 				(length 2.54)
-				(name "clk_100mhz"
+				(name "adc_sclk"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "A8"
+				(number "B18"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -589,14 +589,14 @@
 			(pin bidirectional line
 				(at -50.8 6.98 0)
 				(length 2.54)
-				(name "adc_sclk"
+				(name "clk_100mhz"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "B18"
+				(number "B8"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -859,14 +859,14 @@
 			(pin bidirectional line
 				(at 50.8 11.43 180)
 				(length 2.54)
-				(name "UART_TX"
+				(name "refclk_25m"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "B1"
+				(number "A8"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -877,14 +877,14 @@
 			(pin bidirectional line
 				(at 50.8 10.16 180)
 				(length 2.54)
-				(name "refclk_25m"
+				(name "UART_TX"
 					(effects
 						(font
 							(size 1.27 1.27)
 						)
 					)
 				)
-				(number "B8"
+				(number "B1"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -10223,7 +10223,7 @@
 			(pin passive line
 				(at 7.62 3.81 180)
 				(length 2.54)
-				(name "BP"
+				(name "NC"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -11599,7 +11599,7 @@
 				)
 			)
 		)
-		(property "Value" "100MHz TCXO"
+		(property "Value" "100MHz XO"
 			(at 0 10.16 0)
 			(effects
 				(font

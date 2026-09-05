@@ -265,7 +265,7 @@ def fpga_net_map():
     # separately-named one-pin nets -> an ERC-silent disconnect (each net
     # dangles with a single endpoint) that the headless generator bypasses.
     NET_ALIAS = {
-        "refclk_out": "refclk_25m",   # FPGA 25 MHz out (A14) -> ADF4351 REFIN (pin 29)
+        "refclk_out": "refclk_25m",   # FPGA 25 MHz out (N-side MRCC ball, gen_fpga_ballmap_csg324.py) -> ADF4351 REFIN (pin 29)
         "tx": "UART_TX",              # FPGA TX (P18) -> FT232 RXD (pin 5, net UART_TX)
         "rx": "UART_RX",              # FPGA RX (P17) <- FT232 TXD (pin 1, net UART_RX)
     }
@@ -897,14 +897,18 @@ def ams1117_pins():
 # ---- AP2127K-1.0 (Diodes Inc, SOT-23-5) -- REAL 1.0 V LDO -------------------
 # AMS1117 has NO 1.0 V option (min fixed output 1.5 V); the prior "AMS1117-1.0"
 # was a non-existent part. VCCINT=1.0 V uses the AP2127K-1.0 (600 mA, SOT-23-5).
-# Pinout per Diodes Inc AP2127K datasheet: 1=VIN 2=GND 3=EN 4=BP 5=VOUT.
+# Pinout per Diodes Inc AP2127K datasheet (DS36478): fixed-output version is
+# 1=VIN 2=GND 3=EN(shutdown) 4=NC 5=VOUT.  Pin 4 is NC on every FIXED-output
+# AP2127K (it becomes ADJ only on the -ADJ version); there is NO bypass/noise-
+# pin on this LDO -- noise reduction is via the CIN/COUT ceramic caps (C42-C44).
+# The prior "BP" label + C41 10nF tied a cap to a floating NC pad (does nothing).
 def ap2127k_pins():
     return [
         dict(number="1", name="VIN", etype="power_in", x=-7.62, y=-3.81, rot=0),
         dict(number="3", name="EN", etype="input", x=-7.62, y=3.81, rot=0),
         dict(number="2", name="GND", etype="power_in", x=0, y=7.62, rot=270),
         dict(number="5", name="VOUT", etype="power_out", x=7.62, y=-3.81, rot=180),
-        dict(number="4", name="BP", etype="passive", x=7.62, y=3.81, rot=180),
+        dict(number="4", name="NC", etype="passive", x=7.62, y=3.81, rot=180),
     ]
 
 
@@ -998,7 +1002,7 @@ def authored_symbols():
                                   std_pins("Amplifier_Operational", "ADA4530-1"), value="ADA4530-1"))
     # ASE oscillator
     syms.append(replicated_symbol("qssc", "ASE_osc", "Y",
-                                  std_pins("Oscillator", "ASE-xxxMHz"), value="100MHz TCXO"))
+                                  std_pins("Oscillator", "ASE-xxxMHz"), value="100MHz XO"))
     # connectors
     syms.append(replicated_symbol("qssc", "Barrel_Jack", "J",
                                   std_pins("Connector", "Barrel_Jack"), value="5V Barrel"))
@@ -1151,10 +1155,10 @@ def build_main_board():
     add("REG2", "qssc:AMS1117-1.8", "AMS1117-1.8", "Package_TO_SOT_SMD:SOT-223-3_TabPin2",
         80, 50, pins={"1": "GND", "2": "+1V8", "3": "+5V"})
     add("REG3", "qssc:AP2127K-1.0", "AP2127K-1.0", "Package_TO_SOT_SMD:SOT-23-5",
-        80, 70, pins={"1": "+5V", "2": "GND", "3": "+5V", "4": "BP_1V0", "5": "+1V0"})
-    # REG3 (AP2127K-1.0) decoupling: 10uF in + 10uF/100nF out + 10nF bypass pin.
-    add("C41", "qssc:C", "10nF", "Capacitor_SMD:C_0603_1608Metric",
-        92, 70, pins={"1": "BP_1V0", "2": "GND"})
+        80, 70, pins={"1": "+5V", "2": "GND", "3": "+5V", "5": "+1V0"},
+        nc_pins=["4"])  # pin 4 = NC on the fixed AP2127K-1.0 (no bypass pin)
+    # REG3 (AP2127K-1.0) decoupling: 10uF in + 10uF/100nF out (per datasheet; no
+    # bypass cap -- pin 4 is NC, the prior C41 10nF on a floating pad is removed).
     add("C42", "qssc:C", "10uF", "Capacitor_SMD:C_0805_2012Metric",
         68, 70, pins={"1": "+5V", "2": "GND"})
     add("C43", "qssc:C", "10uF", "Capacitor_SMD:C_0805_2012Metric",
@@ -1224,28 +1228,34 @@ def build_main_board():
         215, 90, pins={"1": "VREFP", "2": "GND"})
 
     # Clock
-    add("Y1", "qssc:ASE_osc", "100MHz TCXO", "Oscillator:Oscillator_SMD_Abracon_ASE-4Pin_3.2x2.5mm",
+    add("Y1", "qssc:ASE_osc", "100MHz XO", "Oscillator:Oscillator_SMD_Abracon_ASE-4Pin_3.2x2.5mm",
         200, 30, pins={"1": "+3V3", "2": "GND", "3": "clk_100mhz", "4": "+3V3"})
 
     # USB-UART
     # FT232 USBDP/USBDM (pins 15/16) -> USB_DP_F/USB_DM_F -> R78/R79 27R series
     # damping -> USB_DP/USB_DM (ESD diodes D1/D2 + USB-C).  Series R dampens the
     # USB edge reflections; ESD stays on the connector side (correct clamp point).
-    # FT232RL pin-tie rationale (verified vs FTDI FT232RL datasheet, SSOP-28):
-    #   pin  1 RXD  -> UART_RX   pin  5 TXD  -> UART_TX
-    #   pin 15 USBDP -> USB_DP_F pin 16 USBDM -> USB_DM_F (series-damped via R78/R79)
-    #   pin  4 VCCIO -> +3V3 (I/O supply)    pin 17 3V3OUT -> 3V3OUT (reg o/p, dec by C57)
-    #   pin 20 VCC   -> +3V3 (core supply)  pin 24 VCC   -> +3V3 (core supply, 2nd pad)
-    #   pin 23 AGND  -> GND  (analog gnd)    pin 19 RESET#-> +3V3 (internal pull-up ok)
-    #   pins 7/18/21/25/26 GND -> GND (all bond-pad grounds tied)
+    # FT232RL pin-tie rationale (verified vs FTDI FT232R datasheet + KiCad
+    # Interface_USB:FT232RL symbol, SSOP-28 -- the symbol omits the 2 NC pads 8 & 24):
+    #   pin  1 TXD   -> UART_RX   (FT232 *output* -> FPGA RX ball P17; net named from
+    #                             FPGA side, so the TXD/RXD crossover is correct)
+    #   pin  5 RXD   -> UART_TX   (FPGA TX ball P18 -> FT232 *input*)
+    #   pin 15 USBDP -> USB_DP_F  pin 16 USBDM -> USB_DM_F (series-damped via R78/R79)
+    #   pin  4 VCCIO -> +3V3 (I/O supply)    pin 17 3V3OUT -> 3V3OUT (reg o/p, dec C55)
+    #   pin 20 VCC   -> +3V3 (the ONLY core supply pad on the SSOP-28)
+    #   pin 19 RESET#-> +3V3 (internal pull-up ok)
+    #   pin 25 AGND  -> GND (real analog ground; FT232R analog/regulator return)
+    #   pins 7/18/21/26 GND -> GND (digital + TEST bond-pad grounds tied)
+    #   pin 23 CBUS0 -> NC (configurable CBUS, default TXLED#; unused -> float)
+    #   pin 24 NC    -> NC (no internal bond on the SSOP-28; NOT a 2nd VCC pad)
     #   pins 2/3/6/9-14/22/27/28 -> NC (modem control, crystal, LED drive, TEST):
     #       unused per datasheet; emitted as (no_connect) below.
     add("J1", "qssc:FT232RL", "FT232RL", "Package_SO:SSOP-28_5.3x10.2mm_P0.65mm",
         300, 70, pins={"1": "UART_RX", "5": "UART_TX", "15": "USB_DP_F", "16": "USB_DM_F",
-                       "4": "+3V3", "17": "3V3OUT", "20": "+3V3", "23": "GND", "24": "+3V3",
+                       "4": "+3V3", "17": "3V3OUT", "20": "+3V3",
                        "7": "GND", "18": "GND", "21": "GND", "25": "GND",
                        "19": "+3V3", "26": "GND"},
-        nc_pins=["2", "3", "6", "9", "10", "11", "12", "13", "14", "22", "27", "28"])
+        nc_pins=["2", "3", "6", "9", "10", "11", "12", "13", "14", "22", "23", "24", "27", "28"])
     # USB-C VBUS is on its own VBUS_USB net; D_USB (Schottky, below) passes
     # USB -> +5V_IN only, blocking the barrel wall adapter from back-feeding +5V
     # into the USB host.  Barrel stays direct so the +5V rail keeps the full 5.0 V
@@ -1264,7 +1274,7 @@ def build_main_board():
         300, 150, pins={"1": "SPI_CLK", "2": "SPI_DATA", "3": "SPI_LE", "4": "+3V3",
                         "6": "+3V3", "7": "LF_CP", "9": "GND", "10": "+3V3", "11": "GND",
                         "12": "RF_OUT", "16": "+3V3", "17": "+3V3", "18": "GND", "20": "LF_OUT",
-                        "21": "GND", "22": "RSET", "23": "GND", "24": "VREF", "26": "+3V3",
+                        "21": "GND", "22": "RSET", "23": "ADF_VCOM", "24": "VREF", "26": "+3V3",
                         "27": "GND", "28": "+3V3", "29": "refclk_25m", "30": "ADF_MUXOUT",
                         "31": "GND", "32": "+3V3", "33": "GND", "8": "GND",
                         "19": "ADF_TEMP",
@@ -1284,6 +1294,10 @@ def build_main_board():
     #   pin 24 VREF   -> VREF    (internal reference node -- needs a DECOUPLING cap to
     #                             GND, NOT a direct tie; a direct GND tie shorts the
     #                             internal reference. Decoupled by C36 below.)
+    #   pin 23 VCOM   -> ADF_VCOM (internal compensation node, biased at HALF the
+    #                             tuning range -- needs a DECOUPLING cap to GND, NOT
+    #                             a direct tie; a direct GND tie shorts the half-range
+    #                             bias. Decoupled by C41 below. PDF p8 confirms.)
     #   pin 19 TEMP   -> ADF_TEMP (temperature-compensation OUTPUT; the ADF4351
     #                             has NO REFIN- pin -- the reference is single-ended
     #                             on REFIN pin 29.  Per datasheet Table 5, TEMP
@@ -1296,7 +1310,7 @@ def build_main_board():
     #   pin 14 RFOUTB+ -> NC     (unused RF output B; datasheet: leave floating)
     #   pin 15 RFOUTB- -> NC     (unused RF output B; datasheet: leave floating)
     #   pin 25 LD     -> NC      (lock-detect output, unused)
-    #   pin 29 REFIN  -> refclk_25m (FPGA 25 MHz out on ball A14, aliased in fpga_net_map)
+    #   pin 29 REFIN  -> refclk_25m (FPGA 25 MHz refclk_out on an N-side MRCC ball, aliased in fpga_net_map)
     add("R67", "qssc:R", "1k", "Resistor_SMD:R_0603_1608Metric", 250, 175, pins={"1": "LF_CP", "2": "LF_MID"})
     add("C31", "qssc:C", "220p", "Capacitor_SMD:C_0603_1608Metric", 240, 175, pins={"1": "LF_CP", "2": "GND"})
     add("C32", "qssc:C", "10n", "Capacitor_SMD:C_0603_1608Metric", 260, 190, pins={"1": "LF_MID", "2": "GND"})
@@ -1307,6 +1321,8 @@ def build_main_board():
         pins={"1": "VREF", "2": "GND"})  # ADF4351 pin 24 VREF decoupling (internal ref node)
     add("C37", "qssc:C", "100n", "Capacitor_SMD:C_0603_1608Metric", 315, 185,
         pins={"1": "ADF_TEMP", "2": "GND"})  # ADF4351 pin 19 TEMP decoupling (temp-comp output, datasheet Table 5)
+    add("C41", "qssc:C", "100n", "Capacitor_SMD:C_0603_1608Metric", 315, 195,
+        pins={"1": "ADF_VCOM", "2": "GND"})  # ADF4351 pin 23 VCOM decoupling (internal compensation node, biased at half tuning range -- decouple, NOT a direct GND tie which would short the half-range bias). Designator C41 reused: the old C41 was the AP2127K BP cap (deleted -- pin 4 is NC).
     add("C34", "qssc:C", "100p", "Capacitor_SMD:C_0603_1608Metric", 330, 150, pins={"1": "RF_OUT", "2": "RF_IN"})
     add("U5", "qssc:GVA-84", "GVA-84+", "Package_TO_SOT_SMD:SOT-89-3",
         360, 150, pins=GVA84_NETS)
@@ -1444,7 +1460,7 @@ def build_main_board():
         342, 272, pins={"1": "+3V3", "2": "GND"})
     add("C57", "qssc:C", "4.7uF", "Capacitor_SMD:C_0805_2012Metric",
         354, 272, pins={"1": "+3V3", "2": "GND"})
-    # TCXO + config flash Vdd/VCC local decoupling.
+    # XO (Abracon ASE) + config flash Vdd/VCC local decoupling.
     add("C58", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
         330, 288, pins={"1": "+3V3", "2": "GND"})   # Y1 pin4 Vdd
     add("C59", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
@@ -2319,7 +2335,7 @@ def assign_pcb_positions():
         "C_in": (46, 8, 0),
         "REG1": (34, 14, 0), "REG2": (34, 26, 0), "REG3": (34, 38, 0), "FB1": (34, 50, 0),
         # REG3 (AP2127K-1.0) decoupling, around (34,38)
-        "C42": (28, 36, 0), "C41": (40, 34, 0), "C43": (40, 42, 0), "C44": (28, 42, 0),
+        "C42": (28, 36, 0), "C43": (40, 42, 0), "C44": (28, 42, 0),
         # FB1 (ferrite bead) +5V -> +5V_RF pi filter, around (34,50)
         "C45": (28, 50, 0), "C46": (28, 56, 0), "C47": (40, 50, 0), "C48": (40, 56, 0),
         # ---- +12V_EMIT emitter anode supply (left edge, below the 5V chain) ----
@@ -2343,7 +2359,7 @@ def assign_pcb_positions():
         # cross the sandwich here.
         "J12": (110, 14, 0),
         # FPGA CSG324 (~17 mm BGA, courtyard x[119.5,136.5] y[46.5,63.5]) right of
-        # the die; ~29 mm gap for the 64 DET_DIG routes (Phase 4). TCXO above the die.
+        # the die; ~29 mm gap for the 64 DET_DIG routes (Phase 4). XO above the die.
         "U1": (128, 55, 0), "Y1": (70, 25, 0),
         # config flash W25Q128 + pull-ups in the die<->FPGA gap (x106-118); C40
         # VREFP decoupling just below-left of the FPGA.
@@ -2365,6 +2381,10 @@ def assign_pcb_positions():
         # fell through assign_pcb_positions()'s else-branch to the (50,50) default
         # cell and collided with C_in -> DRC shorting_items +5V_IN/ADF_TEMP.
         "C37": (104, 36, 0),
+        # C41 = ADF4351 pin-23 VCOM decoupling (ADF_VCOM node); sits next to the
+        # C36/C37 ADF decoupling cluster below U3.  Designator C41 reused: the old
+        # C41 was the AP2127K BP cap (deleted -- AP2127K-1.0 pin 4 is NC).
+        "C41": (104, 46, 0),
         "J7": (10, 40, 0), "J9": (10, 26, 0),
         # ---- production-hardening pass 2026-09 (see add() block + §16) ----
         # USB VBUS Schottky + bulk near the USB-C bottom edge (left of the die).
@@ -2378,7 +2398,7 @@ def assign_pcb_positions():
         "C52": (58, 40, 0), "C53": (58, 46, 0), "C54": (58, 52, 0),
         # FT232 decoupling (column x62: clear of the die courtyard left x69.5)
         "C55": (62, 60, 0), "C56": (62, 64, 0), "C57": (62, 56, 0),
-        # TCXO + W25Q128 Vdd/VCC decoupling (C59 at x116: clear of TLC5947 UE2 @ x100)
+        # XO + W25Q128 Vdd/VCC decoupling (C59 at x116: clear of TLC5947 UE2 @ x100)
         "C58": (76, 22, 0), "C59": (116, 68, 0),
         # ADF4351 per-supply 100nF (around U3 keepout x[88,96] y[26,34]: above & below)
         "C60": (84, 22, 0), "C61": (88, 22, 0), "C62": (96, 22, 0), "C63": (100, 22, 0),

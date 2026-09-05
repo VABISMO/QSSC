@@ -114,7 +114,7 @@
 	(net 9 "3V3OUT")
 	(net 10 "ADF_MUXOUT")
 	(net 11 "ADF_TEMP")
-	(net 12 "BP_1V0")
+	(net 12 "ADF_VCOM")
 	(net 13 "CC1")
 	(net 14 "CC2")
 	(net 15 "CONF_DONE")
@@ -240,7 +240,7 @@
 	(net 135 "refclk_25m")
 	(net 136 "reset")
 	(footprint "BarrelJack_CUI_PJ-102AH_Horizontal"
-		(uuid "de5f81aa-b1e2-41f2-806d-ef9325d5ab5b")
+		(uuid "5061aa1a-754b-4360-b004-5009f874ee0b")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -617,7 +617,7 @@
 		)
 	)
 	(footprint "C_0805_2012Metric"
-		(uuid "3f763bf3-8c98-4c7f-8445-074f72338e42")
+		(uuid "568e0bf0-8b96-4551-85ff-16b7eb8accbd")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -824,7 +824,7 @@
 		)
 	)
 	(footprint "Fuse_1206_3216Metric"
-		(uuid "8c912f73-824c-4b58-96eb-fd505b3b208d")
+		(uuid "3795f61b-825b-4ace-8c7f-945750a30e85")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -1031,7 +1031,7 @@
 		)
 	)
 	(footprint "SOT-223-3_TabPin2"
-		(uuid "9eee621a-23ef-40df-9c8b-3ff9df2f9a4e")
+		(uuid "5da494fa-bb84-4a97-a2ed-870761cf49b4")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -1299,7 +1299,7 @@
 		)
 	)
 	(footprint "SOT-223-3_TabPin2"
-		(uuid "285ad84b-59b5-4a21-8c22-5e748a8c7a73")
+		(uuid "bda8bf7c-9650-461a-aa55-8cd1f94a3c4d")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -1567,7 +1567,7 @@
 		)
 	)
 	(footprint "SOT-23-5"
-		(uuid "8f69ec3e-eec5-47e2-b907-cd6b37446608")
+		(uuid "e09e08a9-918b-4398-be1c-96a87964ba80")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -1818,7 +1818,6 @@
 			(at 1.1375 0.95)
 			(size 1.325 0.6)
 			(layers "F.Cu" "F.Paste" "F.Mask")
-			(net 12 "BP_1V0")
 			(roundrect_rratio 0.25)
 			(uuid "cbf7e184-f214-48e9-becb-835119b57823")
 		)
@@ -1842,215 +1841,8 @@
 			)
 		)
 	)
-	(footprint "C_0603_1608Metric"
-		(uuid "e3301e5c-b869-4df5-b052-6af084c94cc9")
-		(version 20240108)
-		(generator "pcbnew")
-		(generator_version "8.0")
-		(layer "F.Cu")
-		(at 40 34 0)
-		(descr "Capacitor SMD 0603 (1608 Metric), square (rectangular) end terminal, IPC_7351 nominal, (Body size source: IPC-SM-782 page 76, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf), generated with kicad-footprint-generator")
-		(tags "capacitor")
-		(property "Reference" "C41"
-			(at 0 -1.43 0)
-			(layer "F.SilkS")
-			(uuid "d8b50c90-0233-4120-8eb7-fd37553c1dae")
-			(effects
-				(font
-					(size 1 1)
-					(thickness 0.15)
-				)
-			)
-		)
-		(property "Value" "10nF"
-			(at 0 1.43 0)
-			(layer "F.Fab")
-			(uuid "4e5feb93-e33a-49c0-b9c5-ae5884f54838")
-			(effects
-				(font
-					(size 1 1)
-					(thickness 0.15)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 0 0 0)
-			(unlocked yes)
-			(layer "F.Fab")
-			(hide yes)
-			(uuid "5408f27c-25c0-4a7d-ae5a-dc80eae40b02")
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 0 0 0)
-			(unlocked yes)
-			(layer "F.Fab")
-			(hide yes)
-			(uuid "6a90d38b-7c8c-43cb-91d8-10c2d2b84580")
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 0 0 0)
-			(unlocked yes)
-			(layer "F.Fab")
-			(hide yes)
-			(uuid "e5c59a39-f1e6-4e58-b310-530517d201ee")
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(attr smd)
-		(fp_line
-			(start -0.14058 -0.51)
-			(end 0.14058 -0.51)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "b41d8c72-4918-46ee-8917-8ac27e2b9ac5")
-		)
-		(fp_line
-			(start -0.14058 0.51)
-			(end 0.14058 0.51)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "8759eb8b-d5d2-4193-bb44-b0d3205730c7")
-		)
-		(fp_line
-			(start -1.48 -0.73)
-			(end 1.48 -0.73)
-			(stroke
-				(width 0.05)
-				(type solid)
-			)
-			(layer "F.CrtYd")
-			(uuid "bc329fd9-c699-40fd-809e-176f9fd0c1d5")
-		)
-		(fp_line
-			(start -1.48 0.73)
-			(end -1.48 -0.73)
-			(stroke
-				(width 0.05)
-				(type solid)
-			)
-			(layer "F.CrtYd")
-			(uuid "40f7c129-7117-4932-921f-63d9649a8e3c")
-		)
-		(fp_line
-			(start 1.48 -0.73)
-			(end 1.48 0.73)
-			(stroke
-				(width 0.05)
-				(type solid)
-			)
-			(layer "F.CrtYd")
-			(uuid "4cdf0691-68d0-4b9c-a08d-e458d11a6264")
-		)
-		(fp_line
-			(start 1.48 0.73)
-			(end -1.48 0.73)
-			(stroke
-				(width 0.05)
-				(type solid)
-			)
-			(layer "F.CrtYd")
-			(uuid "c885676b-37fb-4c12-bfd6-27ae9c8dfd4f")
-		)
-		(fp_line
-			(start -0.8 -0.4)
-			(end 0.8 -0.4)
-			(stroke
-				(width 0.1)
-				(type solid)
-			)
-			(layer "F.Fab")
-			(uuid "06122ef5-5764-4a31-a1df-58f084862b1c")
-		)
-		(fp_line
-			(start -0.8 0.4)
-			(end -0.8 -0.4)
-			(stroke
-				(width 0.1)
-				(type solid)
-			)
-			(layer "F.Fab")
-			(uuid "864e65e5-cec8-4833-ae53-dec6136866be")
-		)
-		(fp_line
-			(start 0.8 -0.4)
-			(end 0.8 0.4)
-			(stroke
-				(width 0.1)
-				(type solid)
-			)
-			(layer "F.Fab")
-			(uuid "1d2a7865-4bae-407b-82ca-a2578f9efb73")
-		)
-		(fp_line
-			(start 0.8 0.4)
-			(end -0.8 0.4)
-			(stroke
-				(width 0.1)
-				(type solid)
-			)
-			(layer "F.Fab")
-			(uuid "3fe6a869-68b8-4f26-8354-3cc1c9697594")
-		)
-		(fp_text user "${REFERENCE}"
-			(at 0 0 0)
-			(layer "F.Fab")
-			(uuid "579d7eba-875c-4a83-94cf-9a0ffb7d4ec6")
-			(effects
-				(font
-					(size 0.4 0.4)
-					(thickness 0.06)
-				)
-			)
-		)
-		(pad "1" smd roundrect
-			(at -0.775 0)
-			(size 0.9 0.95)
-			(layers "F.Cu" "F.Paste" "F.Mask")
-			(net 12 "BP_1V0")
-			(roundrect_rratio 0.25)
-			(uuid "251ae9f1-97b4-42c7-a502-27edca1e9c60")
-		)
-		(pad "2" smd roundrect
-			(at 0.775 0)
-			(size 0.9 0.95)
-			(layers "F.Cu" "F.Paste" "F.Mask")
-			(net 18 "GND")
-			(roundrect_rratio 0.25)
-			(uuid "b3136c2f-02b9-49e1-a069-45a3c84854a1")
-		)
-		(model "${KICAD8_3DMODEL_DIR}/Capacitor_SMD.3dshapes/C_0603_1608Metric.wrl"
-			(offset
-				(xyz 0 0 0)
-			)
-			(scale
-				(xyz 1 1 1)
-			)
-			(rotate
-				(xyz 0 0 0)
-			)
-		)
-	)
 	(footprint "C_0805_2012Metric"
-		(uuid "a73fc57b-377f-4d94-af05-29481e4bbab8")
+		(uuid "98487d11-3330-4da7-8d29-9888843bfcbb")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -2257,7 +2049,7 @@
 		)
 	)
 	(footprint "C_0805_2012Metric"
-		(uuid "89917580-1296-4a14-b7a7-d36a52ea1c8e")
+		(uuid "d2d9080e-7393-4659-b434-bc89f2a17913")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -2464,7 +2256,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "854221bb-e829-4e77-8982-c0ba1bb7a335")
+		(uuid "83d6039d-3afe-4fe6-ba5e-5178c5632c7e")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -2671,7 +2463,7 @@
 		)
 	)
 	(footprint "L_0603_1608Metric"
-		(uuid "16f5d318-d78a-4bba-b753-cc0020272fb5")
+		(uuid "66f75786-9cba-4a76-a4a4-319fb4467dc0")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -2878,7 +2670,7 @@
 		)
 	)
 	(footprint "C_0805_2012Metric"
-		(uuid "553164c1-eff2-4400-b40a-d48269fb9c43")
+		(uuid "07558827-854a-499e-9cb8-0f9ae7e32551")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -3085,7 +2877,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "04264c37-63d3-4628-a33a-78199b55c1fb")
+		(uuid "b3a458d2-234f-4bf1-bc0a-4f827cd43fa6")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -3292,7 +3084,7 @@
 		)
 	)
 	(footprint "C_0805_2012Metric"
-		(uuid "62eef6a0-e100-4a86-b49d-a8a0b5c2743a")
+		(uuid "9299217c-adee-4c00-ab9a-3692f61d5cd4")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -3499,7 +3291,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "fe38fbb1-ff36-486f-9aad-a82c5e963ab9")
+		(uuid "371688d9-0488-454b-98ee-3940758e3765")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -3706,7 +3498,7 @@
 		)
 	)
 	(footprint "BarrelJack_CUI_PJ-102AH_Horizontal"
-		(uuid "51e7ecb4-283f-4ffd-96b9-2b5bc9fbfa80")
+		(uuid "e89d02b2-4978-4e23-908f-30075b5f8212")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -4083,7 +3875,7 @@
 		)
 	)
 	(footprint "Fuse_1206_3216Metric"
-		(uuid "efbdb265-2cf0-4129-a094-00456ebd6707")
+		(uuid "5cda6598-b37b-4038-b602-a36c9702f80f")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -4290,7 +4082,7 @@
 		)
 	)
 	(footprint "C_0805_2012Metric"
-		(uuid "c2b4e649-54c8-466d-a239-d0c379f7a56d")
+		(uuid "94ff0b5b-5b58-48d0-8336-f7d2fbbb867e")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -4497,7 +4289,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "1c0f3625-4e4e-41dd-b272-17fa74e52628")
+		(uuid "62aafcee-8af1-4427-a095-3d3be49630d8")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -4704,7 +4496,7 @@
 		)
 	)
 	(footprint "R_0603_1608Metric"
-		(uuid "cd5e10a7-a480-4507-95d7-cfbc0324f0b0")
+		(uuid "e0241dec-b93d-444b-aa6a-ccb57d6b9b20")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -4911,7 +4703,7 @@
 		)
 	)
 	(footprint "LED_0603_1608Metric"
-		(uuid "455a982c-aa24-424e-a29e-c85146965681")
+		(uuid "83c09b02-e9e1-404d-b4be-1eff03a43e52")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -5138,7 +4930,7 @@
 		)
 	)
 	(footprint "Xilinx_CSG324"
-		(uuid "e9351a2d-63de-4f2d-8c85-f843367b509b")
+		(uuid "d45d4341-2988-4598-b207-27f55168d020")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -5419,7 +5211,7 @@
 			(size 0.4 0.4)
 			(property pad_prop_bga)
 			(layers "F.Cu" "F.Paste" "F.Mask")
-			(net 59 "clk_100mhz")
+			(net 135 "refclk_25m")
 			(uuid "5a96cc6d-9d8f-4c00-899c-872bb1b718d9")
 		)
 		(pad "A9" smd circle
@@ -5551,7 +5343,7 @@
 			(size 0.4 0.4)
 			(property pad_prop_bga)
 			(layers "F.Cu" "F.Paste" "F.Mask")
-			(net 135 "refclk_25m")
+			(net 59 "clk_100mhz")
 			(uuid "a5744bb0-330f-4681-84bf-855c2196d1fd")
 		)
 		(pad "B9" smd circle
@@ -7782,7 +7574,7 @@
 		)
 	)
 	(footprint "SOIC-8_3.9x4.9mm_P1.27mm"
-		(uuid "79b723ab-b012-42cb-958b-7351b39177e9")
+		(uuid "3de1db89-938d-41a9-8086-a4c1d32aee64")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -8082,7 +7874,7 @@
 		)
 	)
 	(footprint "R_0603_1608Metric"
-		(uuid "0f7226c8-662e-40f6-b953-6ced522ad151")
+		(uuid "19a1ec60-6a97-461c-b787-d075de78b786")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -8289,7 +8081,7 @@
 		)
 	)
 	(footprint "R_0603_1608Metric"
-		(uuid "af4dd673-f1e7-4122-8b1f-060eb197892f")
+		(uuid "c1e1c258-6c69-490b-9f28-99084a6d7c2c")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -8496,7 +8288,7 @@
 		)
 	)
 	(footprint "R_0603_1608Metric"
-		(uuid "18b09bdc-b545-457c-97cd-5e029eb22560")
+		(uuid "7040dbc0-8ab0-4901-b4a5-a92e26e36fb7")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -8703,7 +8495,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "4f38e768-c7cb-416d-8610-cf5acf007dc1")
+		(uuid "0f047592-a5e8-432f-af2d-280c489f3d70")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -8910,7 +8702,7 @@
 		)
 	)
 	(footprint "Oscillator_SMD_Abracon_ASE-4Pin_3.2x2.5mm"
-		(uuid "f53d6066-7bb6-42e1-89e1-d25b8b7393fb")
+		(uuid "b035e9e7-0c28-490b-8636-30dccfce7019")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -8929,7 +8721,7 @@
 				)
 			)
 		)
-		(property "Value" "100MHz TCXO"
+		(property "Value" "100MHz XO"
 			(at 0 2.45 0)
 			(layer "F.Fab")
 			(uuid "d210aff9-e9f3-4512-88c8-ef75a823c4f8")
@@ -9223,7 +9015,7 @@
 		)
 	)
 	(footprint "SSOP-28_5.3x10.2mm_P0.65mm"
-		(uuid "c886dd34-fd14-444f-a677-22f5943bbb5a")
+		(uuid "0d51e6be-4c43-41a4-b14d-0ea51e1d8d98")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -9613,14 +9405,12 @@
 			(at 3.6 -0.975)
 			(size 1.75 0.45)
 			(layers "F.Cu" "F.Paste" "F.Mask")
-			(net 18 "GND")
 			(uuid "703d4146-6eb0-4098-843c-31dca29e2815")
 		)
 		(pad "24" smd rect
 			(at 3.6 -1.625)
 			(size 1.75 0.45)
 			(layers "F.Cu" "F.Paste" "F.Mask")
-			(net 5 "+3V3")
 			(uuid "d76e86f8-9dd8-488a-9253-24ee9d9b8021")
 		)
 		(pad "25" smd rect
@@ -9662,7 +9452,7 @@
 		)
 	)
 	(footprint "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal"
-		(uuid "3276d5b4-c2bd-4092-a720-f931fbb46733")
+		(uuid "0796f023-40ea-4e49-8045-629c1e17ce86")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -9998,7 +9788,7 @@
 		)
 	)
 	(footprint "R_0603_1608Metric"
-		(uuid "c10e7d69-25aa-430b-b808-b9d9cd005e58")
+		(uuid "f7918a40-7b15-4d86-8986-f390af7639a1")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -10205,7 +9995,7 @@
 		)
 	)
 	(footprint "R_0603_1608Metric"
-		(uuid "353f178c-86bb-409f-8497-7e61bf9c2f88")
+		(uuid "fe161c0d-b923-4b56-a557-36af9d97e89c")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -10412,7 +10202,7 @@
 		)
 	)
 	(footprint "QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm"
-		(uuid "9fad89be-ce40-45a0-abb4-519a6b18643f")
+		(uuid "0557c9e8-a152-4a26-9aba-48b48706ded6")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -10923,7 +10713,7 @@
 			(at 2.4375 -1.25)
 			(size 0.875 0.25)
 			(layers "F.Cu" "F.Paste" "F.Mask")
-			(net 18 "GND")
+			(net 12 "ADF_VCOM")
 			(roundrect_rratio 0.25)
 			(uuid "8e52e4cc-a048-4abc-8f8d-0573c71be434")
 		)
@@ -11020,7 +10810,7 @@
 		)
 	)
 	(footprint "R_0603_1608Metric"
-		(uuid "c715fd51-eaf7-4668-841f-c2cd7fb15acc")
+		(uuid "9ddd8578-d61a-4796-9d37-b680218b0086")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -11227,7 +11017,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "c9d69f34-4ae2-471c-9737-5dc5f9ee891e")
+		(uuid "ddb587df-61e2-4f3e-bd8b-fcff89ddfadf")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -11434,7 +11224,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "b16e4562-b8a1-4de9-bd9b-82f870699043")
+		(uuid "91cafa4d-57c3-4da2-a00d-61b5fd1d6569")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -11641,7 +11431,7 @@
 		)
 	)
 	(footprint "R_0603_1608Metric"
-		(uuid "1e90d6e2-cdf2-4831-b38f-097eb716da7d")
+		(uuid "fbb754a3-72bb-430c-8658-528b53371b0d")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -11848,7 +11638,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "fa059203-0205-4868-a437-c06bbab3f11e")
+		(uuid "48641526-75bb-4054-b8ed-b986ba8326af")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -12055,7 +11845,7 @@
 		)
 	)
 	(footprint "R_0603_1608Metric"
-		(uuid "48ca3186-10dc-4a0e-9eb7-44c93dbeccdc")
+		(uuid "7e4d56c6-cf3f-41cb-8201-b19943283de2")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -12262,7 +12052,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "f94e9b84-aa04-4572-aff4-e4f4a6810345")
+		(uuid "cbf78af5-6dac-47f8-9806-b13c6a9859b5")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -12469,7 +12259,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "f9975e73-71c5-4508-af67-543389b29cc8")
+		(uuid "68bde3c8-b571-48b9-a08f-df7642868079")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -12676,7 +12466,214 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "f7a8e2b1-f726-41a3-8e9f-8e7f930d2450")
+		(uuid "741f5a4c-ed3d-459f-91b5-abbd77b29fa7")
+		(version 20240108)
+		(generator "pcbnew")
+		(generator_version "8.0")
+		(layer "F.Cu")
+		(at 104 46 0)
+		(descr "Capacitor SMD 0603 (1608 Metric), square (rectangular) end terminal, IPC_7351 nominal, (Body size source: IPC-SM-782 page 76, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf), generated with kicad-footprint-generator")
+		(tags "capacitor")
+		(property "Reference" "C41"
+			(at 0 -1.43 0)
+			(layer "F.SilkS")
+			(uuid "d8b50c90-0233-4120-8eb7-fd37553c1dae")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Value" "100n"
+			(at 0 1.43 0)
+			(layer "F.Fab")
+			(uuid "4e5feb93-e33a-49c0-b9c5-ae5884f54838")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 0 0 0)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "5408f27c-25c0-4a7d-ae5a-dc80eae40b02")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 0 0 0)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "6a90d38b-7c8c-43cb-91d8-10c2d2b84580")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 0 0 0)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "e5c59a39-f1e6-4e58-b310-530517d201ee")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(attr smd)
+		(fp_line
+			(start -0.14058 -0.51)
+			(end 0.14058 -0.51)
+			(stroke
+				(width 0.12)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "b41d8c72-4918-46ee-8917-8ac27e2b9ac5")
+		)
+		(fp_line
+			(start -0.14058 0.51)
+			(end 0.14058 0.51)
+			(stroke
+				(width 0.12)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "8759eb8b-d5d2-4193-bb44-b0d3205730c7")
+		)
+		(fp_line
+			(start -1.48 -0.73)
+			(end 1.48 -0.73)
+			(stroke
+				(width 0.05)
+				(type solid)
+			)
+			(layer "F.CrtYd")
+			(uuid "bc329fd9-c699-40fd-809e-176f9fd0c1d5")
+		)
+		(fp_line
+			(start -1.48 0.73)
+			(end -1.48 -0.73)
+			(stroke
+				(width 0.05)
+				(type solid)
+			)
+			(layer "F.CrtYd")
+			(uuid "40f7c129-7117-4932-921f-63d9649a8e3c")
+		)
+		(fp_line
+			(start 1.48 -0.73)
+			(end 1.48 0.73)
+			(stroke
+				(width 0.05)
+				(type solid)
+			)
+			(layer "F.CrtYd")
+			(uuid "4cdf0691-68d0-4b9c-a08d-e458d11a6264")
+		)
+		(fp_line
+			(start 1.48 0.73)
+			(end -1.48 0.73)
+			(stroke
+				(width 0.05)
+				(type solid)
+			)
+			(layer "F.CrtYd")
+			(uuid "c885676b-37fb-4c12-bfd6-27ae9c8dfd4f")
+		)
+		(fp_line
+			(start -0.8 -0.4)
+			(end 0.8 -0.4)
+			(stroke
+				(width 0.1)
+				(type solid)
+			)
+			(layer "F.Fab")
+			(uuid "06122ef5-5764-4a31-a1df-58f084862b1c")
+		)
+		(fp_line
+			(start -0.8 0.4)
+			(end -0.8 -0.4)
+			(stroke
+				(width 0.1)
+				(type solid)
+			)
+			(layer "F.Fab")
+			(uuid "864e65e5-cec8-4833-ae53-dec6136866be")
+		)
+		(fp_line
+			(start 0.8 -0.4)
+			(end 0.8 0.4)
+			(stroke
+				(width 0.1)
+				(type solid)
+			)
+			(layer "F.Fab")
+			(uuid "1d2a7865-4bae-407b-82ca-a2578f9efb73")
+		)
+		(fp_line
+			(start 0.8 0.4)
+			(end -0.8 0.4)
+			(stroke
+				(width 0.1)
+				(type solid)
+			)
+			(layer "F.Fab")
+			(uuid "3fe6a869-68b8-4f26-8354-3cc1c9697594")
+		)
+		(fp_text user "${REFERENCE}"
+			(at 0 0 0)
+			(layer "F.Fab")
+			(uuid "579d7eba-875c-4a83-94cf-9a0ffb7d4ec6")
+			(effects
+				(font
+					(size 0.4 0.4)
+					(thickness 0.06)
+				)
+			)
+		)
+		(pad "1" smd roundrect
+			(at -0.775 0)
+			(size 0.9 0.95)
+			(layers "F.Cu" "F.Paste" "F.Mask")
+			(net 12 "ADF_VCOM")
+			(roundrect_rratio 0.25)
+			(uuid "251ae9f1-97b4-42c7-a502-27edca1e9c60")
+		)
+		(pad "2" smd roundrect
+			(at 0.775 0)
+			(size 0.9 0.95)
+			(layers "F.Cu" "F.Paste" "F.Mask")
+			(net 18 "GND")
+			(roundrect_rratio 0.25)
+			(uuid "b3136c2f-02b9-49e1-a069-45a3c84854a1")
+		)
+		(model "${KICAD8_3DMODEL_DIR}/Capacitor_SMD.3dshapes/C_0603_1608Metric.wrl"
+			(offset
+				(xyz 0 0 0)
+			)
+			(scale
+				(xyz 1 1 1)
+			)
+			(rotate
+				(xyz 0 0 0)
+			)
+		)
+	)
+	(footprint "C_0603_1608Metric"
+		(uuid "7407afbd-b16f-4d5b-89c6-0fcc64e86d0e")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -12883,7 +12880,7 @@
 		)
 	)
 	(footprint "SOT-89-3"
-		(uuid "d736c31d-c942-45b6-b295-18a65ad5567f")
+		(uuid "a8085213-523a-4e62-891f-2ae5e1c9dd1a")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -13160,7 +13157,7 @@
 		)
 	)
 	(footprint "L_0603_1608Metric"
-		(uuid "94c84da0-0e79-479e-8077-ada30d0c3db1")
+		(uuid "aa637176-e8b2-4e02-a8ad-385376e46133")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -13367,7 +13364,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "09c7d900-add6-40cd-9dc9-e3c845b900df")
+		(uuid "a6407d84-b01e-48fe-99eb-f3dca38dd9e2")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -13574,7 +13571,7 @@
 		)
 	)
 	(footprint "SMA_Amphenol_132289_EdgeMount"
-		(uuid "77ecf05c-660b-4249-9ffb-266f4113be55")
+		(uuid "71040689-e494-42ac-8beb-a2d1ffd623de")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -13950,7 +13947,7 @@
 		)
 	)
 	(footprint "qssc:Ironwood_SBT"
-		(uuid "91863c0a-7f03-4a59-b547-5ce5be512df9")
+		(uuid "d4748a0e-7645-47a7-8f6c-7dbae05fbc32")
 		(layer "F.Cu")
 		(at 80 55 0)
 		(version 20240108)
@@ -13983,7 +13980,7 @@
 			)
 			(fill none)
 			(layer "F.Fab")
-			(uuid "7e6f6cee-9bc7-4a19-a028-f970eb664ce0")
+			(uuid "5e85a3c1-6ca8-423a-88a4-e9273023add3")
 		)
 		(fp_rect
 			(start -12.5 -12.5)
@@ -13994,7 +13991,7 @@
 			)
 			(fill none)
 			(layer "F.SilkS")
-			(uuid "b92566e5-14ac-4c08-a478-95a6be6a80be")
+			(uuid "7538732f-18be-487d-af7f-d2b7e0ce9eb8")
 		)
 		(fp_rect
 			(start -13.5 -13.5)
@@ -14005,7 +14002,7 @@
 			)
 			(fill none)
 			(layer "F.CrtYd")
-			(uuid "3fd36e1f-073d-4689-9fe0-e5b015a76451")
+			(uuid "b616f670-5e78-4eb6-a328-687fcb922f5b")
 		)
 		(pad "EM0" smd rect
 			(at -8.75 -8.75)
@@ -14423,7 +14420,7 @@
 		)
 	)
 	(footprint "PinHeader_1x02_P2.54mm_Vertical"
-		(uuid "80cdaed5-99aa-46cb-8cc6-7f50509ba5c9")
+		(uuid "b8abae25-3ba4-4ca9-aaa8-1fe9f264e770")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -14682,7 +14679,7 @@
 		)
 	)
 	(footprint "SW_PUSH_6mm_H5mm"
-		(uuid "e238e888-8a76-48d6-9ef3-0affc02e14f2")
+		(uuid "7eb4370a-d25a-46d5-b508-02d91f4a41c3")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -15030,7 +15027,7 @@
 		)
 	)
 	(footprint "PinHeader_2x05_P2.54mm_Vertical"
-		(uuid "87b4c032-df95-435c-9779-3b485fc0ecd4")
+		(uuid "5151ec74-72a9-479a-b0a6-7065249624d9")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -15381,7 +15378,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "e3670616-8e8b-4153-9e3d-a35e44b77e5f")
+		(uuid "5c0ac3ed-2cd3-4081-a522-4e023c7867cc")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -15588,7 +15585,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "3803f858-bd15-438e-8007-07cfe84604e0")
+		(uuid "84194b54-741a-41bc-8e5e-af17f374d8a7")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -15795,7 +15792,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "e37470c1-7416-43a3-9bfb-3f8ea57b89b0")
+		(uuid "71c535b4-1c24-4fd8-bf42-085ac730638d")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -16002,7 +15999,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "568a1f8e-14cf-4777-8504-ead843b4b3da")
+		(uuid "cd65c926-36b6-4b19-9675-7ae578979f82")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -16209,7 +16206,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "86cd744b-6a39-41eb-8d29-3ec16a47663b")
+		(uuid "c7884aa8-34b5-4517-afc4-eea5acac630b")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -16416,7 +16413,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "94946426-98e0-4e87-a176-34cebb2741a1")
+		(uuid "d0d0d103-66cc-44d2-92d1-d6e5ddc17c99")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -16623,7 +16620,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "c1055048-a05f-4b7c-a358-4aca838bb5ec")
+		(uuid "a15751f8-c76f-4a5c-9e39-40b8c0ef0991")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -16830,7 +16827,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "03864b5e-1cdd-426a-9477-0f62284f2e5c")
+		(uuid "29314853-3ab1-434d-9446-c0b265552d22")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -17037,7 +17034,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "46c55629-de1a-4b9c-b4e3-656b37301bee")
+		(uuid "813412c0-beb6-4415-8041-c5c188fe151a")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -17244,7 +17241,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "ddea784b-9413-4bde-8707-c8399b3664c6")
+		(uuid "0a011edf-c9fd-4342-a25e-27514e67e3c3")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -17451,7 +17448,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "d67d2066-181b-41f1-a848-105e815e0bbd")
+		(uuid "06752863-5fec-43e3-955b-2060a450b052")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -17658,7 +17655,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "37149c91-0179-4942-af82-032cb77092a7")
+		(uuid "9a684adb-dbb2-47da-9319-1d375ea51b7a")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -17865,7 +17862,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "e18610f3-2956-4686-82cf-85ecc4953c78")
+		(uuid "bd0726c2-9184-4bf6-90a3-3c399f127af7")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -18072,7 +18069,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "d139e4ea-efe7-451f-b4ea-1b55d685964b")
+		(uuid "f8a83995-cabf-416c-86b1-9a72607da93e")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -18279,7 +18276,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "63c03eb7-6660-4a65-a357-92665bd508cf")
+		(uuid "72149317-9c82-4f2f-b56f-fb3733606030")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -18486,7 +18483,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "f02c172b-d5d7-4244-af0a-7e3672d048f5")
+		(uuid "dbb39853-8c6d-4686-8f8d-71b07a2ef1ee")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -18693,7 +18690,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "28ec2c7c-5caa-4205-ad2c-c2dc34504390")
+		(uuid "183a856a-0568-48fd-8a41-b4aec8e2e18f")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -18900,7 +18897,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "0e35d8d4-a0f1-4e9b-a697-41cbf456b490")
+		(uuid "aa0e74a4-8381-4514-9b6b-f904752fb76d")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -19107,7 +19104,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "9268745a-0158-4668-912d-c3105f762882")
+		(uuid "5e099119-7743-408c-a087-c952ecd58073")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -19314,7 +19311,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "a23e0f6e-7c03-4c93-8a82-7539263a3ed8")
+		(uuid "c8d3f177-a7ef-43ed-97d0-637176433b5a")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -19521,7 +19518,7 @@
 		)
 	)
 	(footprint "C_0805_2012Metric"
-		(uuid "33a8fb90-6f1f-4154-bfcc-6a83dc597905")
+		(uuid "5542f805-1cc4-4b3b-b226-c3c8066c2bed")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -19728,7 +19725,7 @@
 		)
 	)
 	(footprint "C_0805_2012Metric"
-		(uuid "464ec3bf-8367-4330-8507-71a9419ad1e8")
+		(uuid "785979dd-7313-450d-8bdd-775e6e728ff7")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -19935,7 +19932,7 @@
 		)
 	)
 	(footprint "C_0805_2012Metric"
-		(uuid "17be8093-5375-403a-8b29-efbdd2b01e31")
+		(uuid "37f62bde-8630-4ba1-9b53-117ca164f604")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -20142,7 +20139,7 @@
 		)
 	)
 	(footprint "C_0805_2012Metric"
-		(uuid "123eab06-be40-4b95-9382-0c29e3f88df2")
+		(uuid "2548d1a7-5502-4048-9dbc-894acfeaef0b")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -20349,7 +20346,7 @@
 		)
 	)
 	(footprint "C_0805_2012Metric"
-		(uuid "bdf4547a-0c48-4f7b-aeca-2f680fc19835")
+		(uuid "23021519-35ba-4181-8b1f-d34a38bbbc89")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -20556,7 +20553,7 @@
 		)
 	)
 	(footprint "C_0805_2012Metric"
-		(uuid "5619591b-2f20-4355-8537-fd6e818294e3")
+		(uuid "2ce48642-fd02-485d-bd1b-de8fa708b0f1")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -20763,7 +20760,7 @@
 		)
 	)
 	(footprint "C_0805_2012Metric"
-		(uuid "bbd74b27-68fc-42d1-afe9-1e20a3facf09")
+		(uuid "3e3ee84c-06f2-4900-883c-a7d0d4b0f6d4")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -20970,7 +20967,7 @@
 		)
 	)
 	(footprint "C_0805_2012Metric"
-		(uuid "7bcd1469-2b2e-4e8d-8bf9-dab16eb0d2c6")
+		(uuid "7b9e35d0-a8e2-4f12-822c-8dc4c3f41b8a")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -21177,7 +21174,7 @@
 		)
 	)
 	(footprint "C_0805_2012Metric"
-		(uuid "2380ce3d-e0c0-43e1-931c-fec44551d7c4")
+		(uuid "1f0a5db4-2908-42d1-bba8-4b2c32447227")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -21384,7 +21381,7 @@
 		)
 	)
 	(footprint "C_0805_2012Metric"
-		(uuid "91b5cae3-4b46-47b4-85bf-8515348ad1df")
+		(uuid "d759bbc3-cd3d-473a-b9e2-29dddbdf092d")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -21591,7 +21588,7 @@
 		)
 	)
 	(footprint "D_SOD-923"
-		(uuid "fc3057e3-3459-4660-943a-3c2ccf0fae9c")
+		(uuid "30da6255-4a82-4198-b47e-1961c4c6f180")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -21948,7 +21945,7 @@
 		)
 	)
 	(footprint "D_SOD-923"
-		(uuid "ca8051de-2010-4875-accb-75b0e7db2a70")
+		(uuid "7beda99a-819a-41a8-a0a8-3864c92de7ae")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -22305,7 +22302,7 @@
 		)
 	)
 	(footprint "D_SOD-923"
-		(uuid "04a513ce-2fce-4f9a-a5dc-907b549a2fad")
+		(uuid "d36cc390-711f-44a1-8259-77d37d546c05")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -22662,7 +22659,7 @@
 		)
 	)
 	(footprint "D_SOD-923"
-		(uuid "aa6026ba-b1ec-42a9-96c3-9b141f2357c1")
+		(uuid "bfdf0548-6e9d-4f6d-842e-b2859381f6a5")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -23019,7 +23016,7 @@
 		)
 	)
 	(footprint "D_SOD-923"
-		(uuid "b40e5658-7089-45a7-8e73-84a774263ba5")
+		(uuid "11cf1715-eccf-4b70-b6a4-1cb73a15d8a1")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -23376,7 +23373,7 @@
 		)
 	)
 	(footprint "D_SOD-923"
-		(uuid "f29b093e-fbec-4ace-885b-e5c3cc159439")
+		(uuid "ac068d90-a018-4e78-8a14-ff34f2061b8b")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -23733,7 +23730,7 @@
 		)
 	)
 	(footprint "D_SOD-923"
-		(uuid "99d2b788-4813-4601-834e-748509187918")
+		(uuid "fb50ed84-582d-4864-8b60-8752749e94d8")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -24090,7 +24087,7 @@
 		)
 	)
 	(footprint "D_SOD-923"
-		(uuid "fa884d52-44b4-489c-82ee-26d533e70a46")
+		(uuid "eb33ea94-6c9d-4c63-bc38-790233254110")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -24447,7 +24444,7 @@
 		)
 	)
 	(footprint "D_SOD-923"
-		(uuid "8da803d6-a7f8-4424-9e67-7c23a993b66e")
+		(uuid "1af85bbc-a5c2-4255-b3a2-b47a736015e8")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -24804,7 +24801,7 @@
 		)
 	)
 	(footprint "D_SOD-923"
-		(uuid "11c1fa50-1485-4c23-ab95-167bd49f0f19")
+		(uuid "4f688e37-4b62-455c-b3ee-2e144fb1935f")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -25161,7 +25158,7 @@
 		)
 	)
 	(footprint "D_SMA"
-		(uuid "61826089-8203-4055-bebc-9b29a64a27ec")
+		(uuid "92627bb7-5ab4-4491-b2b8-d40004f72fce")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -25438,7 +25435,7 @@
 		)
 	)
 	(footprint "C_0805_2012Metric"
-		(uuid "a67ebebb-28f9-45f6-a89d-548b4485176a")
+		(uuid "9c61a536-ea1a-48e4-9d54-d3bf28f1f173")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -25645,7 +25642,7 @@
 		)
 	)
 	(footprint "R_0603_1608Metric"
-		(uuid "006f3c41-11b9-404b-b424-a784df99530a")
+		(uuid "10a222a8-0c18-4780-ac26-0bc93672c8fd")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -25852,7 +25849,7 @@
 		)
 	)
 	(footprint "R_0603_1608Metric"
-		(uuid "b9d98825-da01-4ee7-98fd-d4faedbe207f")
+		(uuid "d496865c-e3d5-4593-866a-16cbf87c16ec")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -26059,7 +26056,7 @@
 		)
 	)
 	(footprint "C_0805_2012Metric"
-		(uuid "8207eafc-42a7-4f12-a58a-0d99a3d08985")
+		(uuid "ff6b4b5d-3148-4672-9750-254145414e5d")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -26266,7 +26263,7 @@
 		)
 	)
 	(footprint "C_0805_2012Metric"
-		(uuid "ddaf0f11-6c45-49f5-938c-9c81009bad38")
+		(uuid "f13a2925-5b5e-4ef1-85cf-edcfb170c3f4")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -26473,7 +26470,7 @@
 		)
 	)
 	(footprint "C_0805_2012Metric"
-		(uuid "c17e7046-6641-443e-b65f-fd7135ad67b1")
+		(uuid "fd7d11c1-4651-4517-99e6-c60ae9653059")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -26680,7 +26677,7 @@
 		)
 	)
 	(footprint "C_0805_2012Metric"
-		(uuid "50bfbc16-ef37-4fbb-ab87-d8fafd8488b9")
+		(uuid "2cbc3d25-bc6a-456f-b789-ddc4321355ac")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -26887,7 +26884,7 @@
 		)
 	)
 	(footprint "C_0805_2012Metric"
-		(uuid "c2e78a0c-98ff-4883-be37-4d4d065a913a")
+		(uuid "bfb3da8a-1c46-4d8f-8d00-b55f9f9ecc91")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -27094,7 +27091,7 @@
 		)
 	)
 	(footprint "C_0805_2012Metric"
-		(uuid "d0ca85d1-c7d3-4076-8685-a0122db53326")
+		(uuid "80f11b18-b0ed-46dc-948c-1a58676764ad")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -27301,7 +27298,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "582f3a91-d31c-4288-84b5-5e5c36e94e05")
+		(uuid "4bf95acc-75f3-4600-89f8-8f9bab1acef8")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -27508,7 +27505,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "5c2608c3-db8c-42fd-bb55-d00a58d0cb92")
+		(uuid "3876f397-aee4-4300-af2b-0367df6eb378")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -27715,7 +27712,7 @@
 		)
 	)
 	(footprint "C_0805_2012Metric"
-		(uuid "5b0daa7a-d9dd-4a6e-bbee-c11a70e2daa7")
+		(uuid "98a9ec68-13d3-426b-ac26-50f20dd8cb78")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -27922,7 +27919,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "a4de92c2-938a-4a8a-b3c3-185e848c58b5")
+		(uuid "01482859-a27d-42a0-a820-bfab3ebcd336")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -28129,7 +28126,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "37f65c9e-30fa-4a01-886a-16e08b6bb7cb")
+		(uuid "36c3bf5d-de63-4d4f-b868-fb078f090893")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -28336,7 +28333,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "06bc2382-1f7b-4521-9d57-dbf7e7b1668f")
+		(uuid "e93b8493-3ef6-480e-bc77-05948b6e2e98")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -28543,7 +28540,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "ff952fd2-64ec-492f-b366-cd4a86274273")
+		(uuid "13328f35-9f06-4f19-8c96-2169022d392d")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -28750,7 +28747,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "d76c4a0c-8215-41f2-881b-e4a350d2500d")
+		(uuid "0612883d-b8dd-4e9d-ae07-680fbb52a0c7")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -28957,7 +28954,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "45a00b00-3210-49b9-850b-ab509622e15a")
+		(uuid "a3a9727b-3fcf-4927-ae5f-fde6a7e9837f")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -29164,7 +29161,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "6b3b9c4f-952b-4d0c-bbd4-70c4c94aca7f")
+		(uuid "35d2fe6c-b8e7-4be6-af33-fc2597904981")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -29371,7 +29368,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "41d0859b-5686-4782-8cb5-292be307ae95")
+		(uuid "19b5bdcd-911e-436b-886e-90017cc33c8d")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -29578,7 +29575,7 @@
 		)
 	)
 	(footprint "R_0603_1608Metric"
-		(uuid "1154b52a-d482-4dfd-96c1-d52da795c1c8")
+		(uuid "31b093e5-896a-4422-8d90-94c6223a18ff")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -29785,7 +29782,7 @@
 		)
 	)
 	(footprint "R_0603_1608Metric"
-		(uuid "8ad016e2-a4ca-48f8-9c0a-f7d1e0e2d652")
+		(uuid "13d0787e-e4b9-4195-b2d9-973cb77d9d39")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -29992,7 +29989,7 @@
 		)
 	)
 	(footprint "R_0603_1608Metric"
-		(uuid "eeebc3cc-7f20-4072-9e58-a659933f2b8d")
+		(uuid "d6bfe874-c021-4d74-81c0-abf52c7baaba")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -30199,7 +30196,7 @@
 		)
 	)
 	(footprint "R_0603_1608Metric"
-		(uuid "24cc894e-1941-4ff4-a445-1d264e6b28c8")
+		(uuid "19b759a8-c94d-49ff-82c1-408f37f2ee2d")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -30406,7 +30403,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "6830d8e1-2e25-4329-b710-e5a5b682390a")
+		(uuid "7a830c67-8ff6-4383-9589-4af3540a07b4")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -30613,7 +30610,7 @@
 		)
 	)
 	(footprint "HTSSOP-32-1EP_6.1x11mm_P0.65mm_EP5.2x11mm_Mask4.11x4.36mm_ThermalVias"
-		(uuid "efa43beb-db89-4415-94b9-e01fcc4aafce")
+		(uuid "28839e95-fbd4-41f0-acf8-1b117176bc13")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -31522,7 +31519,7 @@
 		)
 	)
 	(footprint "R_0603_1608Metric"
-		(uuid "b755692f-0201-449d-8597-6eccc2e48a3d")
+		(uuid "897aace5-31f4-45c5-8361-57316c7ef3ef")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -31729,7 +31726,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "790d88dd-afd7-4fef-a8ed-76ac030be440")
+		(uuid "ebd4e77a-236d-4888-aa0a-cba82d0a1d26")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -31936,7 +31933,7 @@
 		)
 	)
 	(footprint "HTSSOP-32-1EP_6.1x11mm_P0.65mm_EP5.2x11mm_Mask4.11x4.36mm_ThermalVias"
-		(uuid "f9a30b84-40fc-4976-8c7e-e01b1d34d23a")
+		(uuid "dfd68479-f4df-4890-ab97-b5d098394f9a")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -32845,7 +32842,7 @@
 		)
 	)
 	(footprint "R_0603_1608Metric"
-		(uuid "fb5134f0-ef77-432d-a59b-e08d85cec8c4")
+		(uuid "3c571f46-bd29-4276-9c2a-ac215501007d")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -33052,7 +33049,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "54bc334e-b69a-420a-a3a7-a10c8593a8ea")
+		(uuid "4487f5a4-378f-495f-bad2-ec6ba2849119")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -33259,7 +33256,7 @@
 		)
 	)
 	(footprint "HTSSOP-32-1EP_6.1x11mm_P0.65mm_EP5.2x11mm_Mask4.11x4.36mm_ThermalVias"
-		(uuid "100e34d6-ff10-4d91-8b21-df401c170544")
+		(uuid "6e00bc4c-956d-487e-879a-c15ad6853ffb")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -34159,7 +34156,7 @@
 		)
 	)
 	(footprint "R_0603_1608Metric"
-		(uuid "56fe5e75-b4c9-4628-8ca6-546ce5710d4b")
+		(uuid "2e4e5234-8e15-46c5-a081-8357c232d142")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -34366,7 +34363,7 @@
 		)
 	)
 	(footprint "C_0603_1608Metric"
-		(uuid "a937ec57-db76-4648-b62e-f2bd61078ce0")
+		(uuid "108b430f-69a3-4007-b16e-56eb0a537c1b")
 		(version 20240108)
 		(generator "pcbnew")
 		(generator_version "8.0")
@@ -34573,7 +34570,7 @@
 		)
 	)
 	(footprint "qssc:Conn_02x10_BTB"
-		(uuid "e1667b92-5ca8-4afd-b985-1f4e83eb038e")
+		(uuid "3473cffb-c006-4b55-bba8-b223bb80ee79")
 		(layer "F.Cu")
 		(at 110 14 0)
 		(version 20240108)
@@ -34606,7 +34603,7 @@
 			)
 			(fill none)
 			(layer "F.Fab")
-			(uuid "c7b714a7-ff31-4e97-b094-a1c26fac5614")
+			(uuid "7b030d4e-7a1e-414e-b885-671fa39bc029")
 		)
 		(fp_rect
 			(start -4.1 -12.95)
@@ -34617,7 +34614,7 @@
 			)
 			(fill none)
 			(layer "F.CrtYd")
-			(uuid "87b15e4f-e72f-4ed8-84e7-87ba5ca0c7ef")
+			(uuid "7dd285b6-b534-4ab7-9225-4fb6eb02037f")
 		)
 		(pad "1" thru_hole rect
 			(at -2.54 11.43)
@@ -34768,7 +34765,7 @@
 			(type solid)
 		)
 		(layer "Edge.Cuts")
-		(uuid "46f5bcb6-70ce-4cb6-b93b-db562dfd7a93")
+		(uuid "f4e730af-c422-4da9-995a-ce8c673627bc")
 	)
 	(gr_line
 		(start 210 0)
@@ -34778,7 +34775,7 @@
 			(type solid)
 		)
 		(layer "Edge.Cuts")
-		(uuid "fce7ac8f-480b-402c-9c55-db15c3ad6edc")
+		(uuid "20b42dc8-88b8-43a9-a42f-9cfd0e9efd68")
 	)
 	(gr_line
 		(start 210 140)
@@ -34788,7 +34785,7 @@
 			(type solid)
 		)
 		(layer "Edge.Cuts")
-		(uuid "52a35754-2fa3-4589-a4bd-98a347c127a6")
+		(uuid "258f7059-0f3e-4d73-a001-c9331d6119fb")
 	)
 	(gr_line
 		(start 0 140)
@@ -34798,6 +34795,6 @@
 			(type solid)
 		)
 		(layer "Edge.Cuts")
-		(uuid "fb94900b-5153-4978-b93d-e474c4e4f9fa")
+		(uuid "780f0eb5-145f-484f-9375-0a3f3f073f14")
 	)
 )

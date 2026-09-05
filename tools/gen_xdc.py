@@ -82,12 +82,13 @@ def emit() -> str:
     L.append("")
 
     # ---- clock ----
-    L.append("# ---- 100 MHz system clock (TCXO) --------------------------------------------")
-    L.append(f"# clk_100mhz -> {ball('clk_100mhz')}, a multi-region clock-capable (MRCC) pin.")
+    L.append("# ---- 100 MHz system clock (XO, Abracon ASE) --------------------------------")
+    L.append(f"# clk_100mhz -> {ball('clk_100mhz')}, the P-side of an MRCC pair (IO_L..P.._MRCC_):")
+    L.append(f"# per UG472 the single-ended clock INPUT takes the dedicated, delay-")
+    L.append(f"# compensated route to the MMCM (no CLOCK_DEDICATED_ROUTE FALSE needed).")
     L.append(f"set_property PACKAGE_PIN {ball('clk_100mhz')}   [get_ports clk_100mhz]")
     L.append("set_property IOSTANDARD LVCMOS33 [get_ports clk_100mhz]")
     L.append("create_clock -name sys_clk -period 10.000 [get_ports clk_100mhz]")
-    L.append("set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets clk_100mhz_IBUF]")
     L.append("")
 
     # ---- reset ----

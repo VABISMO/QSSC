@@ -181,10 +181,19 @@ def main() -> None:
     taken: set[str] = set()
 
     # 3a. clocks on MRCC (clk_100mhz input, refclk_25m output).
+    # Per UG472, a single-ended clock INPUT must sit on the P-side of an MRCC
+    # pair for the dedicated, delay-compensated route to the MMCM/PLL; the N-side
+    # has no such route (would need CLOCK_DEDICATED_ROUTE FALSE + higher jitter).
+    # So put the INPUT clock on a P-side MRCC and the refclk OUTPUT (which needs
+    # no clock-capable input routing at all) on an N-side MRCC.
     assert len(mrcc) >= 2, f"need >=2 MRCC, have {len(mrcc)}"
-    signals["clk_100mhz"] = mrcc[0]
-    signals["refclk_out"] = mrcc[1]        # -> refclk_25m alias in net_map
-    taken |= {mrcc[0], mrcc[1]}
+    # P/N side of a diff pair is the letter after L<lane>: IO_L12P_.. / IO_L12N_..
+    mrcc_p = [b for b in mrcc if re.search(r'L\d+P', pins[b])]
+    mrcc_n = [b for b in mrcc if re.search(r'L\d+N', pins[b])]
+    assert mrcc_p and mrcc_n, f"need a P-side and an N-side MRCC; P={mrcc_p} N={mrcc_n}"
+    signals["clk_100mhz"] = mrcc_p[0]      # P-side: dedicated clock route
+    signals["refclk_out"] = mrcc_n[0]      # -> refclk_25m alias in net_map (output)
+    taken |= {mrcc_p[0], mrcc_n[0]}
 
     # 3b. 4 TLC5947 SPI signals -> bottom-edge balls toward the 3x TLC5947
     # constant-current LED driver that lives below the die. The old 64x EM_DRV

@@ -19,12 +19,13 @@ set_property CFGBVS VCCO [current_design]
 set_property CONFIG_VOLTAGE 3.3 [current_design]
 set_property BITSTREAM.CONFIG.SPI_BUSWIDTH 4 [current_design]
 
-# ---- 100 MHz system clock (TCXO) --------------------------------------------
-# clk_100mhz -> A8, a multi-region clock-capable (MRCC) pin.
-set_property PACKAGE_PIN A8   [get_ports clk_100mhz]
+# ---- 100 MHz system clock (XO, Abracon ASE) --------------------------------
+# clk_100mhz -> B8, the P-side of an MRCC pair (IO_L..P.._MRCC_):
+# per UG472 the single-ended clock INPUT takes the dedicated, delay-
+# compensated route to the MMCM (no CLOCK_DEDICATED_ROUTE FALSE needed).
+set_property PACKAGE_PIN B8   [get_ports clk_100mhz]
 set_property IOSTANDARD LVCMOS33 [get_ports clk_100mhz]
 create_clock -name sys_clk -period 10.000 [get_ports clk_100mhz]
-set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets clk_100mhz_IBUF]
 
 # ---- Reset (active-high push button) ----------------------------------------
 set_property PACKAGE_PIN A1   [get_ports reset]
@@ -108,7 +109,7 @@ set_property SLEW FAST [get_ports {spi_pins[1]}]
 set_property DRIVE 8   [get_ports {spi_pins[1]}]
 
 # ---- 25 MHz reference clock to ADF4351 REF_IN -------------------------------
-set_property PACKAGE_PIN B8   [get_ports refclk_out]
+set_property PACKAGE_PIN A8   [get_ports refclk_out]
 set_property IOSTANDARD LVCMOS33 [get_ports refclk_out]
 set_property SLEW FAST [get_ports refclk_out]
 set_property DRIVE 8   [get_ports refclk_out]
