@@ -28,10 +28,11 @@ PDFs already fetched locally are in `./pdfs/`.  The BOM is in `BOM.csv`.
 ## Main control board
 
 The main board is a 6-layer HDI 210×140 mm board that sits BELOW the die,
-contacting the die BOTTOM (emitter) face on its F.Cu via ACF pressure contact
-(no F.Paste — contact interface, not soldered).  It carries the FPGA, 3×
-TLC5947 emitter driver, RF chain, USB, power LDOs, the die EM face, and the
-BTB HOST connector J12.
+contacting the die BOTTOM (emitter) face on its F.Cu via an **Ironwood SBT
+spring-pin socket** (soldered down — F.Paste on the 65 pads — NOT ACF pressure
+contact; the detector TOP face on the head board is the ACF/pogo one).  It
+carries the FPGA, 3× TLC5947 emitter driver, RF chain, USB, power LDOs, the
+die EM face, and the BTB HOST connector J12.
 
 ### U1 — XC7A35T-1CSG324C  (AMD/Xilinx Artix-7 FPGA)
 - **Function:** digital core — UART command parser, AD7616 parallel-ADC SPI
@@ -296,7 +297,7 @@ edge spacer + electrical link.  No FPGA, no RF, no USB, no emitter driver.
   input.  Photovoltaic / zero-bias mode (the detectors output current).
 - **Package:** TSSOP-14, 4.4x5 mm, 0.65 mm pitch.
 - **Datasheet:** https://www.ti.com/lit/ds/symlink/tlv9004.pdf
-- **Local PDF:** `pdfs/TLV9004.pdf`
+- **Local PDF:** not fetched (TI serves a JS viewer; download in browser)
 - **Verified pinout:** 4=V+ (+3V3), 11=V- (GND); per-channel: 1=OUT_A, 2=-IN_A,
   3=+IN_A, 5=+IN_B, 6=-IN_B, 7=OUT_B, 8=OUT_C, 9=-IN_C, 10=+IN_C, 12=+IN_D,
   13=-IN_D, 14=OUT_D.

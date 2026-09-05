@@ -78,7 +78,7 @@ module adc_reader #(
     reg [15:0] sample_ram [0:63];
 
     // ---- background scan FSM: 8 CONVST pulses, each reads 4 chips x32 bits -
-    // SCLK = clk/4 = 25 MHz (< 40 MHz max). SCLK idles HIGH (AD7616 CPOL=1);
+    // SCLK = clk/8 = 12.5 MHz (< 40 MHz max). SCLK idles HIGH (AD7616 CPOL=1);
     // data is shifted out by the ADC on SCLK falling, sampled here on rising.
     localparam [3:0] SM_IDLE       = 4'd0;   // idle / between scans
     localparam [3:0] SM_RESET      = 4'd1;   // hold adc_resetn low at boot
@@ -237,7 +237,7 @@ module adc_reader #(
                 // shift 32 bits: SCLK falls (ADC drives next bit) then rises
                 // (sample MISO into shift reg, MSB first). 32 rising edges.
                 SM_BIT: begin
-                    if (sclk_div >= 3'd3) begin      // 4 clk cycles per half -> 25 MHz
+                    if (sclk_div >= 3'd3) begin      // 4 clk cycles per half -> 12.5 MHz
                         sclk_div <= 3'd0;
                         if (sclk_phase == 1'b0) begin
                             // falling edge: ADC shifts the next bit out

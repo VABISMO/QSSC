@@ -133,7 +133,7 @@ module adf4351_ctrl (
         //   (4/5 would silently misprogram any target in the 3.6-4.4 GHz band.)
         r1 = {3'b000, 1'b0, 1'b1, phase_r, MOD[11:0], 3'b001};
         // R2: noise=00(low), MUXOUT=001(digital lock detect), doubler=0,
-        //     rdiv2=0, R=1, dbl_buf=0, CP=7(~2.19mA), LDF=1(int-N),
+        //     rdiv2=0, R=1, dbl_buf=0, CP=7 (≈2.50 mA @5.1k; ≈2.71 mA with R73=4.7k), LDF=1(int-N),
         //     LDP=0, PD_POL=1, PD=0, CP3ST=0, CNT_RST=0, addr 010
         r2 = {1'b0, 2'b00, 3'b001, 1'b0, 1'b0, 10'd1, 1'b0, 4'd7,
               1'b1, 1'b0, 1'b1, 1'b0, 1'b0, 1'b0, 3'b010};

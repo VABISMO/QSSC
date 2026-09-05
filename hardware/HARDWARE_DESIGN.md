@@ -303,7 +303,7 @@ two-board sandwich.
 | 6  | both  | Board-to-board connector          | J12      | BTB_HOST (main) / BTB_DAUGHTER (head) | 1/1 | 2×10 (2.54 mm) carries the 9-wire `adc_*` SPI + GND/+3V3/+5V | 2×10 THT 2.54 mm | Würth 61302011121 (host) / 61002021121 (daughter); long pins set stacking height |
 | 7  | main  | Emitter LED driver (constant-current sink) | UE0–UE2 | TLC5947 (24-ch 12-bit PWM) | 3   | 64 CQD emitter cathodes `emitter_cat{i}` → OUTn; daisy-chained 72 ch (64 used) | HTSSOP-32-1EP 6.1×11 mm P0.65 | +3V3 VCC; OUT sinks up to 33 V/38 mA; 4-wire `em_sclk/sin/xlat/blank`; internal GS oscillator (no Gsclk) |
 | 8  | main  | Emitter current-set resistor      | Riref0–2 | 4.87 kΩ 1%                  | 3   | I_OUT = 41×1.20/R_IREF ≈ 10.1 mA per channel (one per TLC5947) | 0603                          | Sets the constant-current sink; inside CQD 2–20 mA/pixel spec |
-| 9  | head  | TIA feedback R/C (per channel)    | Rf, Cf   | 1 MΩ / 1 pF                   | 64/64 | Transimpedance gain + bandwidth: A=Rf=1 MΩ, BW≈1/(2π·Rf·Cf)    | 0603                          | 1 MΩ → 1 V/µA; 1 pF → ~106 kHz |
+| 9  | head  | TIA feedback R/C (per channel)    | Rf, Cf   | 1 MΩ / 1 pF                   | 64/64 | Transimpedance gain + bandwidth: A=Rf=1 MΩ, BW≈1/(2π·Rf·Cf)    | 0603                          | 1 MΩ → 1 V/µA; 1 pF → ≈159 kHz |
 | 10 | head  | +5V_A analog-rail ferrite + decoupling | FB_A / C_Abulk / C_ahf | 600 Ω / 10 µF / 100 nF | 1/1/1 | +5V from J12 → FB_A → +5V_A → AD7616 analog VCC; local decoupling | 0603 / 1206 / 0603 | Replaces old 64× comparator pull-up Rpu (no comparators now) |
 | 11 | main  | +12V_EMIT anode supply input      | J4 / F2  | Barrel 5.5×2.1 / 1 A PTC     | 1/1 | 12 V LED supply for the common emitter anode (`EM_ANODE` → +12V_EMIT) | PJ-102AH / 1206 | Separate from +5V logic (CQD EL turn-on 4–8 V > 5 V); TLC5947 OUT tolerates 33 V |
 | 12 | main  | +12V_EMIT rail decoupling + TLC5947 VCC dec | C85/C86 / Cem0–2 | 22 µF + 100 nF / 100 nF | 2/3 | Bulk + HF decouple the 12 V anode rail at the die; 100 nF on each TLC5947 VCC | 1206/0603 / 0603 | CQD is capacitive; 22 µF bulk handles in-rush |
@@ -321,7 +321,7 @@ two-board sandwich.
 | 24 | main  | PTC resettable fuse              | F1       | 2 A PTC                        | 1   | Input overcurrent protection                                   | 1206                          | — |
 | 25 | main  | Power LED                        | LED1     | Green 0603                     | 1   | Power-on indicator                                             | LED_0603                      | Series R70 330 Ω |
 | 26 | main  | RF output connector              | J3       | SMA female edge-mount          | 1   | ADF4351 RF out (post-amp) to antenna                           | SMA edge                      | 50 Ω |
-| 27 | main  | RF amplifier                     | U5       | GVA-84+ (Mini-Circuits)        | 1   | RF power amplification, DC-7 GHz, +18.4 dB @2 GHz, self-biased +5V | SOT-89-3                      | +5V_RF via L2 100nH choke |
+| 27 | main  | RF amplifier                     | U5       | GVA-84+ (Mini-Circuits)        | 1   | RF power amplification, DC-7 GHz, +18.4 dB @2 GHz (≈16 dB in-band @2.87/3.46 GHz), self-biased +5V | SOT-89-3                      | +5V_RF via L2 100nH choke |
 | 28 | main  | +5V→+5V_RF filter                | FB1      | Ferrite bead 600Ω@100MHz       | 1   | π-filter (FB1 + C45/C46 + C47/C48) from +5V to +5V_RF          | 0603                          | Replaces old REG4 AMS1117-5.0 (sat in dropout) |
 | 29 | main  | RF amp choke inductor            | L2       | 100 nH ±10%                    | 1   | DC bias choke on RF output                                     | 0603                          | Bias decoupling |
 | 30 | main  | Microwave antenna                | A1       | Loop / CPW resonator (custom)  | 1   | MW delivery to the host                                        | Custom SMD/wire               | 2–3 GHz, 50 Ω |
@@ -437,7 +437,7 @@ within source; the 12 V emitter budget is on its own J4 input.
   ADF4351 `REF_IN` (top_level.v: 2-bit counter). With R-counter = 1, doubler
   off, RDIV2 off, the ADF4351 PFD frequency is **25 MHz**.
 - The FPGA derives the **1 kHz lock-in modulation reference** (`mod_sync`) from
-  `sys_clk` in `adc_top.v` (toggle every 50 000 cycles at 100 MHz). The host /
+  `sys_clk` in `adc_reader.v` (toggle every 50 000 cycles at 100 MHz). The host /
   MW chain modulates the microwave drive at this 1 kHz and the host
   lock-in-demodulates the per-channel ADC sample stream to reject background
   light. There is no external pixel clock and no separate clock domain — the
@@ -496,8 +496,12 @@ surround them with ground.
 `ADF4351 RF_OUTA` (~0 dBm) → **C34** DC-block → **GVA-84+** RFIN (pin 1) →
 GVA-84+ RFOUT (pin 3) → **L2 (100 nH)** RF choke from +5V_RF for DC self-bias
 → **C35** AC-couple → **J3 SMA edge-mount** → 50 Ω coax →
-**A1 loop/CPW antenna** near the host substrate. Expected output ≈ +18 to +20
-dBm depending on GVA-84+ gain (+18.4 dB @2 GHz) and band. +5V_RF comes from the
+**A1 loop/CPW antenna** near the host substrate. Expected output ≈ +12 to +18 dBm
+(RF_PWR 0–2) using the in-band GVA-84+ gain (~16 dB @3 GHz — not the +18.4 dB
+@2 GHz data-sheet figure; the 2.87/3.46 GHz operating points sit above 2 GHz),
+rising to ~+21 dBm at RF_PWR=11 where the P1dB limit (~+20.5 dBm) bites — i.e.
+the ≤ +20 dBm board-level safety cap can be marginally exceeded at max drive.
++5V_RF comes from the
 FB1 π-filter (no VGG resistor — the GVA-84+ is self-biased; the old HMC441
 R69 was removed with the part swap).
 
@@ -596,13 +600,15 @@ a 9-wire SPI that crosses J12.
   PL, improving readout SNR.
 - **64× TIA (16× TLV9004, Rf 1 MΩ ‖ Cf 1 pF).** One op-amp channel per detector
   (4 per chip × 16 chips = 64), on the head board. Transimpedance gain A = Rf =
-  1 MΩ → 1 V/µA = 1 mV/nA; feedback bandwidth ≈ 1/(2π·1 MΩ·1 pF) ≈ 106 kHz.
+  1 MΩ → 1 V/µA = 1 mV/nA; feedback bandwidth ≈ 1/(2π·1 MΩ·1 pF) ≈ 159 kHz.
   The TIA output `DET_TIA{i}` is a voltage proportional to the channel
   photocurrent.
 - **4× AD7616 16-channel simultaneous-sampling 16-bit ADC (on the head).** 4
   ICs × 16 channels = 64. Each TIA output `DET_TIA{i}` feeds one AD7616 analog
-  input; the AD7616 samples all 16 of its channels simultaneously on a single
-  `adc_convst` edge, so all 64 channels are digitised in lockstep. This
+  input; the AD7616 is a dual-SAR — one CONVST samples one VA/VB pair (2
+  channels), and the wired sequencer (SEQEN) issues 8 CONVST per full 16-channel
+  scan, all 4 chips starting each pair-conversion together on the shared
+  `adc_convst` edge (pair-wise simultaneous, not all-16-at-once). This
   **replaces the old 16× LMV339 comparator + MCP4725 threshold DAC**: instead
   of thresholding the TIA voltage into a 1-bit photon pulse, the ADC captures
   the full per-channel waveform (16-bit), so the host can do thresholding,
@@ -615,8 +621,10 @@ a 9-wire SPI that crosses J12.
   board. The FPGA is the SPI master; `READ_DETECTORS` asserts convst, waits on
   busy, then clocks all 4 ADCs' 16×16-bit samples out over the shared miso.
 - **Why parallel ADC over the old photon-counter.** The AD7616 digitises the
-  waveform at up to 1 MSPS/channel with true simultaneous sampling (no skew
-  between channels), which the old single-bit comparator + FPGA counter could
+  waveform at ~125 kSPS/channel aggregate in sequencer mode (1 MSPS is per
+  VA/VB pair in direct mode; 8 CONVST per 16-ch scan), with pair-wise
+  simultaneous sampling (no skew within a VA/VB pair; the 4 chips sync on the
+  shared CONVST), which the old single-bit comparator + FPGA counter could
   not do — the host now sees the analog shape of every detector pulse, not just
   a count of threshold crossings, so lock-in demodulation, integration gating
   and background subtraction all improve. The 9-wire bus also collapses 64 FPGA
@@ -1240,7 +1248,7 @@ electrode DET_IN{i} (head B.Cu, die top face)
   → DET_TIA{i} → AD7616 analog input Vx{i}  (16 ch / ADC, 4 ADCs)
   → AD7616 SAR 16-bit simultaneous sample
   → 9-wire SPI (adc_convst/sclk/miso/busy/resetn/cs0..3) across J12
-  → FPGA SPI master (adc_top.v) → 64-wide 16-bit sample register
+  → FPGA SPI master (adc_reader.v) → 64-wide 16-bit sample register
 ```
 
 The whole detector chain lives on the **head board**; only the 9-wire digital
@@ -1278,7 +1286,7 @@ at a time. That is the **9-wire bus** that crosses J12:
 adc_convst | adc_sclk | adc_miso | adc_busy | adc_resetn | adc_cs0 | adc_cs1 | adc_cs2 | adc_cs3
 ```
 
-**FPGA SPI master.** `adc_top.v` (was `photon_counter_array.v` in the
+**FPGA SPI master.** `adc_reader.v` (was `photon_counter_array.v` in the
 comparator era) is an SPI master that asserts `adc_convst`, waits
 `adc_busy` deasserted, then clocks out the 16-bit word per channel under the
 selected `adc_cs{n}`. A 64-wide 16-bit sample register holds one full frame;
@@ -1506,7 +1514,7 @@ zero inferred latches + zero blackboxes + "fits XC7A35T").
 | I/O buffer      |     33 |                          250 |      13.2 % |
 | Global clock BUFG |    1 |                           32 |       3.1 % |
 
-The `adc_top` SPI master + the 64-wide × 16-bit sample register add ≈1024 FF
+The `adc_reader` SPI master + the 64-wide × 16-bit sample register add ≈1024 FF
 + the SPI shift/state logic — still ≪ the 41 600 FF / 20 800 LUT budget, so the
 parallel design fits the smallest Artix-7 35T with a large margin. (Re-run
 `run_synth.sh` for the exact post-pivot numbers; the gate remains "fits
