@@ -3,7 +3,7 @@
 [![CI](https://github.com/VABISMO/QSSC/actions/workflows/ci.yml/badge.svg)](https://github.com/VABISMO/QSSC/actions/workflows/ci.yml)
 [![License: Apache-2.0 NC](https://img.shields.io/badge/license-Apache--2.0%20NC-blue.svg)](LICENSE)
 [![Python 3.10–3.12](https://img.shields.io/badge/python-3.10–3.12-blue.svg)](https://www.python.org)
-[![Tests](https://img.shields.io/badge/tests-87%20passed-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-129%20passed%2C%204%20skipped-brightgreen.svg)](#testing)
 
 A room-temperature **solid-state spin-defect** quantum platform: a Qiskit
 backend, an FPGA control stack with PCB design, a validated chip-fabrication
@@ -29,13 +29,12 @@ NV-diamond *simulator* — into one coherent, renamed deliverable.
 | **Python core** | `qssc/` | `QSSCBackend` (Qiskit `BackendV2`), simulator, defect profiles, quantum circuits, fabrication-protocol model |
 | **REST backend** | `api/` | FastAPI app exposing the simulator, ODMR model, protocol and a circuit runner |
 | **Frontend** | `frontend/` | React 18 + Vite dashboard (ODMR chart, qubit grid, circuit runner, protocol viewer) |
-| **FPGA RTL** | `fpga/rtl` | 8 Verilog modules (Artix-7) — UART, SPI/ADF4351 PLL, 8×8 on-chip CQD emitter array, on-chip graphene/MoS₂ detector readout (analog MUX + XADC + 1 kHz lock-in), command parser, top-level |
+| **FPGA RTL** | `fpga/rtl` | 9 Verilog modules (Artix-7) — UART, SPI/ADF4351 PLL, 8×8 on-chip CQD emitter array, on-chip graphene/MoS₂ detector readout (analog MUX + XADC + 1 kHz lock-in), command parser, top-level |
 | **Hardware** | `hardware/` | KiCad PCB, XDC constraints, CNC G-code, `HARDWARE_DESIGN.md` |
-| **Protocol** | `docs/FABRICATION_PROTOCOL.md` | 5-section lab fabrication protocol, validated against published studies |
-| **Protocol (HTML)** | `docs/protocol.html` | Branded, print-ready HTML render of the protocol (regenerate with `python3 tools/build_protocol_html.py`) |
+| **Protocol** | `qssc/protocol.py` | Structured fabrication-protocol data (NV-diamond, hBN V_B⁻, SiC V_Si), served by the REST API (`/api/protocol`) and the frontend protocol viewer |
 | **Presentation** | `presentation/index.html` | Self-contained HTML deck with software mocks and diagrams |
-| **PDFs** | `presentation/QSSC_presentation.pdf`, `docs/QSSC_fabrication_protocol.pdf` | Headless-Chromium exports of the presentation and protocol |
-| **Tests** | `tests/` | 87 tests (defects, simulator, circuits, backend, API, protocol, crypto) |
+| **PDFs** | `presentation/QSSC_presentation.pdf` | Headless-Chromium export of the presentation |
+| **Tests** | `tests/` | 133 tests (defects, simulator, circuits, backend, API, protocol, crypto) |
 
 ## Quick start
 
@@ -45,7 +44,7 @@ python -m venv .venv && . .venv/bin/activate
 pip install -e ".[api,dev]"
 
 # run the test suite
-python -m pytest                       # 87 passed
+python -m pytest                       # 129 passed, 4 skipped (133 tests)
 
 # try the CLI
 qssc info                              # backend / defect summary (defaults to NV)
@@ -187,7 +186,7 @@ functionally simulated with iverilog, and synthesised with yosys
 `DRIVE_EMITTER 3 4 50` (asserts emitter rows/cols + `OK` reply) and
 `READ_DETECTORS` (asserts the full 64-electrode stream `1000 1040 … 3520\n`,
 320 bytes, 10/10 checks pass). The yosys synthesis maps the design to the
-Series-7 cell library and confirms it fits the XC7A35T-1CPG236C with ~90 % of
+Series-7 cell library and confirms it fits the XC7A35T-1CSG324C with ~90 % of
 the part free (≈2063 LUTs / 9.9 %, 1016 FFs / 2.4 %, 8 DSP48E1 / 8.9 %, 0
 inferred latches, 0 blackboxes). All three checks run in CI. (A first iverilog
 run caught two real handshake bugs pyverilog could not — an XADC busy race and
@@ -200,10 +199,10 @@ live in [`fpga/synth/`](fpga/synth) (see
 > XADC hard block, so the **same firmware runs on any Xilinx 7-series FPGA with
 > an XADC** — only the `.xdc` pin map changes. Three options are documented in
 > [`HARDWARE_DESIGN.md`](hardware/HARDWARE_DESIGN.md) §1A: the custom QSSC PCB
-> (XC7A35T-1CPG236C, programmed over JTAG with a Xilinx Platform Cable USB II
-> / Digilent JTAG-HS3), the **Digilent Arty A7-35T** (on-board USB-JTAG; remap
-> pins for the CSG324 package), and the **Digilent Cmod A7-35T** (same CPG236
-> package, limited I/O). Toolchain: free Xilinx **Vivado**. Host link is always a
+> (XC7A35T-1CSG324C, programmed over JTAG with a Xilinx Platform Cable USB II
+> / Digilent JTAG-HS3), the **Digilent Arty A7-35T** (on-board USB-JTAG; same
+> CSG324 package), and the **Digilent Cmod A7-35T** (CPG236 package; remap
+> pins, limited I/O). Toolchain: free Xilinx **Vivado**. Host link is always a
 > USB cable to the board's USB-UART bridge (FT232RL / FT2232H) at 115200-8-N-1.
 
 The host protocol is a small ASCII UART command set (115200 baud, 8-N-1,
@@ -233,14 +232,13 @@ board.
 
 ## Fabrication protocol
 
-`docs/FABRICATION_PROTOCOL.md` is a complete, parameterised lab build in five
-sections — CQD emitter array, hBN exfoliation + defect engineering + PMMA,
-on-chip 2D photodetectors, waveguides/stacking/thermal management, and safety —
-each step with target parameters and expected outcomes. It is grounded in
-landmark publications (Gottscholl *Nature Physics* 2020; Hernandez *Nature
-Nanotechnol.* 2008; Coleman *Science* 2011; Kianinia *ACS Photonics* 2020) and
-is explicit about what is established versus aspirational (e.g. the CQD source
-is described as amplified spontaneous emission, **not** a laser).
+The per-platform fabrication protocols (canonical NV-diamond compute chip,
+hBN V_B⁻ sensor variant, SiC V_Si variant) live as structured data in
+[`qssc/protocol.py`](qssc/protocol.py) and are served by the REST API
+(`/api/protocol`) and the frontend protocol viewer. The earlier standalone
+Markdown/HTML/PDF protocol documents were removed in commit `a3ab46b`
+(2026-08-28); note that `tools/build_protocol_html.py` still reads that
+deleted `docs/` input and is therefore not runnable as-is.
 
 ## Honesty note
 
@@ -312,10 +310,10 @@ failed test/parse/sim run blocks both deploys). It then:
   filter), microwave antenna/CPW, controlled-impedance routing, decoupling, the
   4-layer PCB stackup, critical-net trace geometry, CNC G-code files, the KiCad
   project, and a references list (ADF4351 / XC7A35T+XADC / HMC441 / NV readout).
-- [`fpga/rtl/`](fpga/rtl) — 8 Verilog modules: `top_level`, `command_parser`,
+- [`fpga/rtl/`](fpga/rtl) — 9 Verilog modules: `top_level`, `command_parser`,
   `uart_rx`/`uart_tx`, `spi_master` (ADF4351), `adf4351_ctrl`, `emitter_array`
-  (8×8 CQD crossbar), `photodetector_readout` (analog MUX + XADC + 1 kHz lock-in).
-- [`fpga/constraints.xdc`](fpga/constraints.xdc) — Artix-7 CPG236 pin
+  (8×8 CQD crossbar), `adc_reader` (XADC sampling), `tlc5947_ctrl`.
+- [`fpga/constraints.xdc`](fpga/constraints.xdc) — Artix-7 CSG324 pin
   assignments and timing constraints (100 MHz TCXO, emitter crossbar, detector
   MUX, ADF4351 SPI; no camera domain).
 - [`fpga/sim/tb_top_level.v`](fpga/sim/tb_top_level.v) — self-checking testbench.
@@ -333,23 +331,11 @@ failed test/parse/sim run blocks both deploys). It then:
 
 ### Fabrication protocol
 
-- [`docs/FABRICATION_PROTOCOL_Diamond.md`](docs/FABRICATION_PROTOCOL_Diamond.md)
-  — 5-section lab fabrication protocol for the **canonical NV-diamond** compute
-  chip (CQD emitter array, CVD diamond + NV⁻ engineering, on-chip graphene/MoS₂
-  photodetectors, waveguides/stacking/thermal management, safety), validated
-  against landmark publications.
-- [`docs/FABRICATION_PROTOCOL.md`](docs/FABRICATION_PROTOCOL.md) — hBN V_B⁻
-  sensor-variant protocol (CQD emitter array, hBN exfoliation + defect
-  engineering + PMMA, on-chip 2D photodetectors, …).
-- [`docs/FABRICATION_PROTOCOL_SiC.md`](docs/FABRICATION_PROTOCOL_SiC.md) —
-  SiC V_Si variant.
-- [`docs/protocol.html`](docs/protocol.html) /
-  [`protocol_diamond.html`](docs/protocol_diamond.html) /
-  [`protocol_sic.html`](docs/protocol_sic.html) — branded, print-ready HTML
-  renders (regenerate with `python3 tools/build_protocol_html.py`).
-- [`docs/QSSC_fabrication_protocol.pdf`](docs/QSSC_fabrication_protocol.pdf) /
-  [`…_diamond.pdf`](docs/QSSC_fabrication_protocol_diamond.pdf) /
-  [`…_sic.pdf`](docs/QSSC_fabrication_protocol_sic.pdf) — PDF exports.
+- [`qssc/protocol.py`](qssc/protocol.py) — structured protocol data for the
+  three platforms (NV-diamond, hBN V_B⁻, SiC V_Si), served via
+  [`/api/protocol`](api/main.py) and rendered by the frontend protocol
+  viewer. The former standalone Markdown/HTML/PDF documents under `docs/`
+  were removed in commit `a3ab46b` (2026-08-28).
 
 ### Presentation
 
