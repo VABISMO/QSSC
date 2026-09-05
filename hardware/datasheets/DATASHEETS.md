@@ -166,14 +166,16 @@ BTB HOST connector J12.
 | 16  | USBD- | bidir    | USB_DM_F    | -> R79 series-damping -> USB_DM -> USB-C |
 | 17  | 3V3OUT| output   | 3V3OUT      | internal regulator out — **decoupled by C57 100nF to GND** (regulator stability; NOT no-connect) |
 | 19  | RESET#| input    | +3V3        | internal pull-up; tied HIGH |
-| 20,24 | VCC | power   | +3V3        | core supply (two VCC pads per SSOP-28 datasheet) |
-| 7,18,21,23,25,26 | GND/AGND | power | GND | all bond-pad grounds (pin 23 = AGND) |
-| 2,3,6,9,10,11,12,13,14,22,27,28 | DTR/RTS/CBUS/OSC/TEST | — | NC | unused modem control / crystal / LED drive / test — `(no_connect)` per datasheet |
+| 20  | VCC  | power    | +3V3        | core supply — the ONLY VCC pad on the SSOP-28 (pin 24 is a no-bond NC, not a 2nd VCC) |
+| 7,18,21,25,26 | GND/AGND | power | GND | bond-pad grounds (pin 25 = AGND, the analog/regulator return) |
+| 2,3,6,9,10,11,12,13,14,22,23,24,27,28 | DTR/RTS/CBUS/PWREN/LED/OSC/TEST | — | NC | unused modem control / CBUS / PWREN# / LED drive / crystal / test — `(no_connect)` per datasheet |
 - **Connection note:** the FPGA ballmap ports are `tx`/`rx`; `fpga_net_map()`
   aliases them to `UART_TX`/`UART_RX` so the FT232 and FPGA share one net
-  (the prior name mismatch silently disconnected the UART). Pins 23 (AGND) and
-  24 (VCC) are required supply/ground pads per the SSOP-28 datasheet and are now
-  netted (previously unnetted — a real datasheet violation).
+  (the prior name mismatch silently disconnected the UART). Pins 23 (CBUS/PWREN#)
+  and 24 (no-bond NC) are intentionally `(no_connect)` — the SSOP-28 has ONE VCC
+  pad (pin 20) and pin 25 is AGND; an earlier draft of this table wrongly listed
+  pin 24 as a second VCC and pin 23 as AGND, which the generator (verified vs the
+  KiCad `Interface_USB:FT232RL` symbol that omits pads 8 & 24) does NOT do.
 
 ### J10 — USB-C receptacle (GCT USB4105-16P)
 - **Function:** USB + 5V power input.
