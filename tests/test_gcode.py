@@ -163,7 +163,7 @@ def test_through_cut_has_bridges(name):
 # Every P0 layer is drawn in the CARRIER coordinate system at its mounting
 # position, and emits the SAME 4 carrier-corner fiducials -> the files overlay.
 
-P0_LAYERS = ["p0_ito_isolate.gcode", "p0_cathode_stencil.gcode",
+P0_LAYERS = ["p0_cathode_stencil.gcode",
              "p0_waveguide_channel.gcode", "p0_detector_stencil.gcode",
              "p0_carrier_pcb.gcode"]
 P0_SHARED_FIDUCIALS = ["X1.000 Y1.000", "X134.000 Y1.000",
@@ -182,46 +182,22 @@ def test_p0_layers_share_carrier_fiducials():
 
 
 def test_p0_layers_align_to_carrier_pockets():
-    """VERTICAL STACK: all four layer gcodes (ITO, cathode, waveguide, detector)
+    """VERTICAL STACK: the three layer gcodes (cathode, waveguide, detector)
     are drawn at the SAME single die-pocket carrier coord (57.5,35), and the
     carrier mills that same pocket -- so every layer overlays on one 20x20
-    footprint (the three layers stack vertically, they do not sit side-by-side)."""
-    ito = _text("p0_ito_isolate.gcode")
+    footprint (the three layers stack vertically, they do not sit side-by-side).
+    The L1 ITO is a CONTINUOUS common anode now (no isolation gcode -- the
+    p0_ito_isolate job was removed)."""
     cath = _text("p0_cathode_stencil.gcode")
     wg = _text("p0_waveguide_channel.gcode")
     det = _text("p0_detector_stencil.gcode")
     carr = _text("p0_carrier_pcb.gcode")
     # every layer + the carrier die pocket start a rapid at the centred die (57.5,35)
-    for txt in (ito, cath, wg, det, carr):
+    for txt in (cath, wg, det, carr):
         assert "X57.500 Y35.000" in txt, "layer not at the centred die pocket (57.5,35)"
     # the OLD side-by-side pockets must be gone
     assert "X10.000 Y35.000" not in carr   # old emitter pocket
     assert "X30.000 Y40.000" not in carr   # old waveguide pocket
-
-
-def test_p0_ito_isolate_64_anode_pads():
-    """P0 L1 emitter BOTTOM face (carrier coords): 7 horizontal + 7 vertical
-    isolation channels = 14 scribes at Z-0.05, cutting the ITO into 64 individual
-    1.5 mm anode pads over the centred die pocket (57.5,35)->(77.5,55). No arcs,
-    no through-cut (glass is snapped)."""
-    txt = _text("p0_ito_isolate.gcode")
-    # 14 isolation scribe channels (7 horizontal + 7 vertical)
-    assert txt.count("Z-0.050") == 14
-    # horizontal channels at carrier Y = 35+2.5..35+17.5 = 37.5..52.5 (unchanged)
-    for yv in ["37.500", "40.000", "42.500", "45.000",
-               "47.500", "50.000", "52.500"]:
-        assert f"Y{yv}" in txt, f"missing horizontal scribe at Y={yv}"
-    # vertical channels at carrier X = 57.5+2.5..57.5+17.5 = 60.0..75.0
-    for xv in ["60.000", "62.500", "65.000", "67.500",
-               "70.000", "72.500", "75.000"]:
-        assert f"X{xv}" in txt, f"missing vertical scribe at X={xv}"
-    # horizontal channels run X 57.5->77.5; vertical channels run Y 35->55
-    assert "X77.500" in txt and "Y55.000" in txt
-    # die-footprint engrave at the centred die pocket
-    assert "X57.500 Y35.000" in txt
-    # no arcs and no through-cut
-    assert "G02" not in txt and "G03" not in txt
-    assert "Z-3.000" not in txt
 
 
 def test_p0_cathode_stencil_64_windows():
@@ -251,9 +227,11 @@ def test_p0_cathode_stencil_64_windows():
 
 def test_p0_carrier_vertical_stack_breakout():
     """P0 carrier 135x90 (VERTICAL stack): ONE 20x20 die pocket @ (57.5,35)
-    Z-1.1 (the two-faced stack die), 129 bond holes (64 detector top Y=85 + 64
-    emitter-cathode bottom Y=5 + 1 common EM_ANODE @ (3.5,8.0)), 135x90 outline
-    + bridges. NO separate waveguide pocket. Shared fiducials + labels."""
+    Z-1.1 (the two-faced stack die), 130 bond holes (64 detector top Y=85 + 64
+    emitter-cathode bottom Y=5 + 1 common EM_ANODE @ (3.5,8.0) + 1 common
+    DET_COMMON @ (3.5,82.0) = the L3 ITO detector masa), 135x90 outline
+    + bridges. NO separate waveguide pocket, NO ITO-isolation job (continuous
+    ITO common anode). Shared fiducials + labels."""
     txt = _text("p0_carrier_pcb.gcode")
     # ONE die pocket at the centred (57.5,35), floor Z-1.1
     assert "X57.500 Y35.000" in txt
@@ -266,17 +244,19 @@ def test_p0_carrier_vertical_stack_breakout():
     assert "Z-0.300" not in txt
     assert "Z-0.900" not in txt
     assert "Z-1.200" not in txt
-    # 129 peck-drilled bond holes bottom at Z-2.0 (>= 128; outline also passes
+    # 130 peck-drilled bond holes bottom at Z-2.0 (>= 129; outline also passes
     # through -2.0 on its way to -3.0, so the total is higher)
-    assert txt.count("Z-2.000") >= 128
+    assert txt.count("Z-2.000") >= 129
     # 64 emitter-cathode holes bottom edge Y=5 + 64 detector holes top edge Y=85
     bond_x = [3.5 + k * 2.0 for k in range(64)]
     for x in bond_x:
         xs = f"{x:.3f}"
         assert f"X{xs} Y5.000" in txt, f"missing emitter-cathode bond hole at X={xs}"
         assert f"X{xs} Y85.000" in txt, f"missing detector bond hole at X={xs}"
-    # 1 common EM_ANODE hole at (3.5, 8.0)
+    # 1 common EM_ANODE hole (L1 ITO anode) at (3.5, 8.0)
     assert "X3.500 Y8.000" in txt
+    # 1 common DET_COMMON hole (L3 ITO detector masa) at (3.5, 82.0)
+    assert "X3.500 Y82.000" in txt
     # 532 pump facet marker on the left edge of the die pocket (57.5, 45)
     assert "X57.500 Y45.000" in txt
     # 135x90 outline through-cut with bridges
@@ -291,6 +271,7 @@ def test_p0_carrier_vertical_stack_breakout():
     assert "[DETECTOR BONDS]" in txt
     assert "[EMITTER-CATHODE BONDS]" in txt
     assert "[COMMON EM_ANODE]" in txt
+    assert "[COMMON DET_COMMON]" in txt
     # old horizontal-chain labels fully removed
     assert "[EMITTER]" not in txt
     assert "[WAVEGUIDE]" not in txt
