@@ -21,7 +21,6 @@ Skips where ``pcbnew`` (system KiCad) is not importable (CI / .venv).
 """
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 import pytest
@@ -68,10 +67,6 @@ class _UF:
             self.p[rb] = ra
             return True
         return False
-
-
-def _copper_layers(board):
-    return list(range(board.GetCopperLayerCount()))
 
 
 def _pad_layer_set(pad):
@@ -160,7 +155,6 @@ def _split_nets(board_path: Path) -> dict[str, int]:
     pads are unreachable from others (a half-routed die net, a dangling stub).
     Only non-plane nets are checked (plane nets tie through the pour)."""
     b = pcbnew.LoadBoard(str(board_path))
-    cu_all = set(_copper_layers(b))
 
     # group items by netcode
     by_net: dict[int, list] = {}
