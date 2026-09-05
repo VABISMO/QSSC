@@ -1,11 +1,10 @@
 # qssc/protocol.py
 """Structured fabrication-protocol data served by the REST API.
 
-The frontend renders this as an interactive step list; each step carries the
-key parameters (timetables, temperatures, concentrations) so the protocol is
-actionable without leaving the dashboard.  The former standalone
-``docs/FABRICATION_PROTOCOL*.md`` documents were removed in commit
-``a3ab46b`` (2026-08-28).
+A machine-readable companion to ``docs/FABRICATION_PROTOCOL.md``.  The frontend
+renders this as an interactive step list; each step carries the key parameters
+(timetables, temperatures, concentrations) so the protocol is actionable
+without leaving the dashboard.
 """
 from __future__ import annotations
 

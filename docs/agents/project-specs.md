@@ -289,7 +289,7 @@ regenerable (see `.gitignore`: `__pycache__/`, `*.egg-info/`, `dist/`,
 | `hardware/pcb/qssc.kicad_*` | pin/net tables in `tools/` | `python tools/gen_qssc_kicad.py` |
 | `hardware/gcode/*` | geometry in `tools/gen_qssc_gcode.py` | `python tools/gen_qssc_gcode.py` |
 | `fpga/synth/synth.log`, `SYNTH_REPORT.md` | `fpga/rtl`, `constraints.xdc` | `bash fpga/synth/run_synth.sh` (needs oss-cad-suite) |
-| `tools/build_protocol_html.py` output | **broken**: reads `docs/FABRICATION_PROTOCOL*.md` as input — those files were deleted upstream (commit `a3ab46b`, 2026-08-28) | not runnable as-is |
+| `tools/build_protocol_html.py` output | reads `docs/FABRICATION_PROTOCOL*.md` as input — restored upstream in `d2159f6` after the `a3ab46b` deletion, so the tool should run again; UNVERIFIED on this branch (branch predates the restore) | re-verify on current `main` |
 
 <!-- verified 2026-09-05: pip editable install + pytest + ruff + xdc-check executed. Regeneration commands for PCB/G-code/synthesis UNVERIFIED — read from tool docstrings, scripts and ci.yml; not executed (in-place artefact overwrite / missing toolchain) -->
 
@@ -325,5 +325,5 @@ queue:
 | `cd frontend && npm ci && npm run build` | UNVERIFIED | ci.yml frontend job; no node_modules locally | 2026-09-05 |
 | `iverilog` / `yosys` runs | UNVERIFIED | ci.yml fpga job; binaries absent locally | 2026-09-05 |
 | `python tools/gen_qssc_kicad.py` / `gen_qssc_gcode.py` | UNVERIFIED | tool docstrings; not executed (in-place overwrite) | 2026-09-05 |
-| `python tools/build_protocol_html.py` | UNVERIFIED + currently broken | input `docs/FABRICATION_PROTOCOL*.md` deleted in `a3ab46b` | 2026-09-05 |
+| `python tools/build_protocol_html.py` | UNVERIFIED | input `docs/FABRICATION_PROTOCOL*.md` restored upstream in `d2159f6`; not re-run on this branch | 2026-09-05 |
 | `python -m venv .venv && pip install -e ".[api,dev]"` | UNVERIFIED as literal sequence | equivalent editable install already present; dep set read from pyproject.toml | 2026-09-05 |
