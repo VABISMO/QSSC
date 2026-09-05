@@ -2136,7 +2136,11 @@ def emit_pro():
     # 0.30 mm-pitch dog-bone vias (0.125 mm neighbour clearance) pass. The board
     # min_clearance is the floor; lowering it to 0.10 mm only unleashes the chip
     # dog-bones -- all other pairs keep 0.15 mm (their netclass > board min).
-    ds["rules"]["min_track_width"] = 0.15
+    # min_track_width 0.10 mm = the HDI 4-mil floor. FreeRouting auto-narrows the
+    # 0.30 mm-pitch emitter_cat dog-bone stubs to ~0.112 mm to fit the die field
+    # (a 0.15 mm track does not clear a 0.30 mm-pitch neighbour); 0.10 mm lets
+    # those through while every other netclass keeps its >= 0.15 mm width.
+    ds["rules"]["min_track_width"] = 0.10
     # HDI via floors -- these MUST agree with route_signals._relax_board_for_hdi
     # (m_ViasMinSize = BGA_VIA_DIAM_NM = 0.20 mm, m_ViasMinAnnularWidth = 0.05 mm).
     # The board uses 0.20 mm / 0.10 mm drill via-in-pad (filled+capped) microvias for
@@ -2198,11 +2202,13 @@ def emit_pro():
     # fan out as 0.30 mm-pitch dog-bone vias whose neighbour edge clearance is 0.125
     # mm. A 0.10 mm clearance (vs the 0.15 mm board default) relaxes ONLY chip<->chip
     # so the dog-bones pass DRC; chip<->other nets keep 0.15 mm (KiCad takes the max
-    # of the two netclass clearances). Track width 0.15 mm matches the dog-bone stub.
+    # of the two netclass clearances). Track width 0.10 mm = the HDI floor:
+    # FreeRouting auto-narrows the emitter_cat dog-bone stubs to ~0.112 mm to fit
+    # the 0.30 mm-pitch die field, so the Chip min must allow < 0.15 mm.
     nc.append({"bus_width": 12, "clearance": 0.10, "diff_pair_gap": 0.25, "diff_pair_via_gap": 0.25,
                "diff_pair_width": 0.2, "line_style": 0, "microvia_diameter": 0.2, "microvia_drill": 0.1,
                "name": "Chip", "pcb_color": "rgba(0, 255, 255, 0.000)", "schematic_color": "rgba(0, 0, 0, 0.000)",
-               "track_width": 0.15, "via_diameter": 0.2, "via_drill": 0.1, "wire_width": 6})
+               "track_width": 0.10, "via_diameter": 0.2, "via_drill": 0.1, "wire_width": 6})
     # netclass patterns: assign nets by prefix
     patterns = []
     for n in all_nets():
