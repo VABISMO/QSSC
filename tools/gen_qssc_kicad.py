@@ -365,7 +365,8 @@ def _chip_grid_xy(i):
 def chip_pin_list_em():
     """Schematic pins for the die BOTTOM (emitter) face: 64 EM cathodes on the
     bottom edge + 1 EM_ANODE common-anode pad.  This face contacts the MAIN
-    board's F.Cu.  1.0 mm SYMBOL pitch (independent of the 0.30 mm PCB pitch)."""
+    board's F.Cu.  1.0 mm SYMBOL pitch (independent of the 2.5 mm PCB grid
+    pitch -- the die is an 8x8 grid at 2.5 mm, 17.5 mm span on the 20 mm body)."""
     pins = []
     sp = 1.0
     x0 = -sp * 63 / 2
@@ -383,13 +384,23 @@ def chip_pin_list_em():
 
 def chip_pin_list_det():
     """Schematic pins for the die TOP (detector) face: 64 DET electrodes on the
-    top edge.  This face contacts the DETECTOR HEAD's B.Cu."""
+    top edge + 1 DET_COMMON common back-electrode (the continuous ITO film that
+    is the shared detector common masa, edge-contacted -- see
+    FABRICATION_PROTOCOL_P0.md: 130 contacts = 64 DET + 64 EM-cathode + 2 ITO
+    commons).  This face contacts the DETECTOR HEAD's B.Cu.  1.0 mm SYMBOL pitch
+    (independent of the 2.5 mm PCB grid pitch)."""
     pins = []
     sp = 1.0
     x0 = -sp * 63 / 2
     for i in range(64):
         pins.append(dict(number=f"DET{i}", name=f"DET{i}", etype="passive",
                          x=round(x0 + i * sp, 2), y=-12.7, rot=90, length=2.54))
+    # DET_COMMON: the ITO back-electrode shared by all 64 graphene pixels.  It
+    # ties to DET_REF (the 1.65 V TIA virtual ground) -> zero-bias short-circuit
+    # photocurrent readout (max responsivity for the photogating graphene/MoS2
+    # detector).  passive (DET_REF is a divider reference, not a power rail).
+    pins.append(dict(number="DET_COMMON", name="DET_COMMON", etype="passive",
+                     x=0, y=-15.24, rot=90, length=2.54))
     return pins
 
 
@@ -411,8 +422,15 @@ def chip_net_map_em():
 
 def chip_net_map_det():
     """{pad_name: net} for the die top (detector) face.
-    DET{i} -> DET_IN{i}  (analog input to the TIA -> AD7616 front-end)."""
-    return {f"DET{i}": f"DET_IN{i}" for i in range(64)}
+    DET{i}       -> DET_IN{i}  (analog input to the TIA -> AD7616 front-end).
+    DET_COMMON   -> DET_REF    (the ITO common back-electrode tied to the 1.65 V
+                               TIA virtual ground -> zero-bias photocurrent
+                               readout; closes the bias/return path for all 64
+                               graphene pixels -- without it the detector
+                               circuit is open on the common side)."""
+    m = {f"DET{i}": f"DET_IN{i}" for i in range(64)}
+    m["DET_COMMON"] = "DET_REF"
+    return m
 
 
 def chip_net_map():
@@ -470,18 +488,27 @@ def chip_footprint_em():
 
 def chip_footprint_det():
     """Footprint for the die TOP (detector) face on the DETECTOR HEAD B.Cu: 64
-    DET pads on an 8x8 grid across the 20x20 mm face (~2.5 mm pitch).  ACF
-    direct-contact pads (B.Cu + B.Mask, NO B.Paste -- the head is clamped
-    face-down onto the die, not soldered).  Pads on B.Cu so the head's bottom
-    face contacts the die's top face when the two boards are stacked."""
+    DET pads on an 8x8 grid across the 20x20 mm face (~2.5 mm pitch) + 1
+    DET_COMMON common-back-electrode pad on the LEFT edge (the continuous ITO
+    film shared by all 64 graphene pixels -- edge-contacted, mirrors EM_ANODE
+    on the emitter face).  ACF direct-contact pads (B.Cu + B.Mask, NO B.Paste
+    -- the head is clamped face-down onto the die, not soldered).  Pads on B.Cu
+    so the head's bottom face contacts the die's top face when the two boards
+    are stacked.  DET_COMMON is on the left edge (clear of the 8x8 grid, whose
+    leftmost column is at x=-8.75) so its fanout via does not collide with the
+    grid dog-bones."""
     def pad(name, x, y, w=1.2, h=1.2):
         return L(A("pad"), S(name), A("smd"), A("rect"),
                  L(A("at"), A(round(x, 3)), A(round(y, 3))),
                  L(A("size"), A(w), A(h)),
                  L(A("layers"), S("B.Cu"), S("B.Mask")))
     pads = [pad(f"DET{i}", *_chip_grid_xy(i)) for i in range(64)]
+    pads.append(L(A("pad"), S("DET_COMMON"), A("smd"), A("rect"),
+                  L(A("at"), A(-9.9), A(0)),
+                  L(A("size"), A(0.5), A(1.5)),
+                  L(A("layers"), S("B.Cu"), S("B.Mask"))))
     return _chip_fp_body("qssc:QSSC_Chip_DET", "QSSC_Chip_DET",
-                         "QSSC die TOP face: 64 graphene detector electrodes on an 8x8 grid; 20x20 mm ACF contact pads on B.Cu (~2.5 mm pitch)",
+                         "QSSC die TOP face: 64 graphene detector electrodes on an 8x8 grid + DET_COMMON ITO back-electrode; 20x20 mm ACF contact pads on B.Cu (~2.5 mm pitch)",
                          pads, "B.Cu")
 
 
@@ -2535,7 +2562,7 @@ def main():
     build_main_board()
     _emit_board(MAIN_CFG, assign_pcb_positions)
 
-    # ---- detector head board (4-layer: TIA + AD7616 + die detector face) -----
+    # ---- detector head board (6-layer: TIA + AD7616 + die detector face) -----
     COMPONENTS.clear()
     build_detector_head()
     _emit_board(HEAD_CFG, assign_pcb_positions_head)

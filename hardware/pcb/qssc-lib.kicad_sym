@@ -5448,6 +5448,24 @@
 					)
 				)
 			)
+			(pin passive line
+				(at 0 -15.24 90)
+				(length 2.54)
+				(name "DET_COMMON"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "DET_COMMON"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
 		)
 	)
 	(symbol "qssc:Ironwood_SBT"
