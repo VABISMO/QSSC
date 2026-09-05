@@ -330,7 +330,7 @@ def test_nets_one_component(name: str, path: Path):
     if not path.exists():
         pytest.skip(f"{path} not present")
     split = _split_nets(path)
-    sample = ", ".join(f"{k}({v})" for k, v in sorted(split)[:20])
+    sample = ", ".join(f"{k}({v})" for k, v in sorted(split.items())[:20])
     sample += " ..." if len(split) > 20 else ""
     assert split == {}, (
         f"{name}: {len(split)} non-plane net(s) are split across >1 copper "
