@@ -61,7 +61,7 @@ ADC_MAX = (1 << ADC_BITS) - 1            # 65535
 # Each detector electrode sits under one emitter channel and reads a *small
 # ensemble* of defects (not a single isolated spin), so the on-resonance PL dip
 # is the ensemble ODMR contrast, not the large single-NV spin-readout contrast.
-# Real NV-ensemble ODMR at 300 K is 3-8%; 5% is the honest mid-range and matches
+# Real NV-ensemble ODMR at 300 K is 3-8%; 5% is the representative mid-range and matches
 # the CW spectrum model (simulate_odmr, contrast_depth=0.03, same order).
 ODMR_CONTRAST = 0.05                      # ensemble ODMR dip fraction at resonance
 ODMR_LINEWIDTH_HZ = 5.0e6                 # ODMR linewidth (~5 MHz; matches simulate_odmr)
@@ -293,7 +293,7 @@ def simulate_cqd_pulse(intensity: float = 1.0, duration: float = 1e-6,
     Models an electrically-pumped CQD ASE/LED channel: even a green LED-level pump
     polarises the NV spin, and the ``ase_gain`` factor represents the
     amplified-spontaneous-emission edge coupling that concentrates the emission
-    spectrally/into the waveguide (the protocol is honest that this is ASE, not
+    spectrally/into the waveguide (the protocol is explicit that this is ASE, not
     a laser). ``adc`` is a 16-bit AD7616 code (0..65535).
     """
     rng = rng or np.random.default_rng()

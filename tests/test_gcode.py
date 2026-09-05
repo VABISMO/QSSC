@@ -143,16 +143,213 @@ def test_fluorescence_pixel_pad_gaps():
 @pytest.mark.parametrize("name", list(gen.FILES))
 def test_through_cut_has_bridges(name):
     """Every through-cut outline lifts to safe Z mid-edge (the bridge/tab) so
-    the freed part is retained by the stock, not launched."""
+    the freed part is retained by the stock, not launched.
+
+    Scribe/stencil-only toolpaths (no through-cut) are skipped -- the bridge
+    contract only applies to jobs that free a part from the stock.
+    """
     txt = _text(name)
+    if "Z-3.000" not in txt:
+        pytest.skip(f"{name}: no through-cut outline (scribe/stencil only)")
     # a bridge manifests as a retract (G0 Z10) immediately followed later by a
     # re-plunge at the same Z pass -- i.e. a through-cut has >=1 mid-edge lift.
-    # All three files include a Z-3 outline, so at least one Z-3 plunge exists.
-    assert "Z-3.000" in txt
     # count of safe retracts during the outline is at least the number of
     # bridge tabs (4 bridges per outline x number of outlines)
     n_retracts = txt.count("G0 Z10.000") + txt.count("G0 Z10.0")
     assert n_retracts >= 4
+
+
+# --- P0.2.0 prototype toolpaths (DIRECT matrix 64+64, shared carrier coords) ----
+# Every P0 layer is drawn in the CARRIER coordinate system at its mounting
+# position, and emits the SAME 4 carrier-corner fiducials -> the files overlay.
+
+P0_LAYERS = ["p0_ito_isolate.gcode", "p0_cathode_stencil.gcode",
+             "p0_waveguide_channel.gcode", "p0_detector_stencil.gcode",
+             "p0_carrier_pcb.gcode"]
+P0_SHARED_FIDUCIALS = ["X1.000 Y1.000", "X134.000 Y1.000",
+                       "X134.000 Y89.000", "X1.000 Y89.000"]
+
+
+def test_p0_layers_share_carrier_fiducials():
+    """Every P0 layer file emits the SAME 4 carrier-corner fiducials
+    (1,1)/(134,1)/(134,89)/(1,89) so all layers overlay in one coordinate
+    system -- the 'they don't superimpose / different scales' guard."""
+    for name in P0_LAYERS:
+        txt = _text(name)
+        for fc in P0_SHARED_FIDUCIALS:
+            assert fc in txt, f"{name}: missing shared carrier fiducial {fc}"
+        assert txt.count("Z-0.150") >= 4, f"{name}: needs 4 corner fiducials"
+
+
+def test_p0_layers_align_to_carrier_pockets():
+    """VERTICAL STACK: all four layer gcodes (ITO, cathode, waveguide, detector)
+    are drawn at the SAME single die-pocket carrier coord (57.5,35), and the
+    carrier mills that same pocket -- so every layer overlays on one 20x20
+    footprint (the three layers stack vertically, they do not sit side-by-side)."""
+    ito = _text("p0_ito_isolate.gcode")
+    cath = _text("p0_cathode_stencil.gcode")
+    wg = _text("p0_waveguide_channel.gcode")
+    det = _text("p0_detector_stencil.gcode")
+    carr = _text("p0_carrier_pcb.gcode")
+    # every layer + the carrier die pocket start a rapid at the centred die (57.5,35)
+    for txt in (ito, cath, wg, det, carr):
+        assert "X57.500 Y35.000" in txt, "layer not at the centred die pocket (57.5,35)"
+    # the OLD side-by-side pockets must be gone
+    assert "X10.000 Y35.000" not in carr   # old emitter pocket
+    assert "X30.000 Y40.000" not in carr   # old waveguide pocket
+
+
+def test_p0_ito_isolate_64_anode_pads():
+    """P0 L1 emitter BOTTOM face (carrier coords): 7 horizontal + 7 vertical
+    isolation channels = 14 scribes at Z-0.05, cutting the ITO into 64 individual
+    1.5 mm anode pads over the centred die pocket (57.5,35)->(77.5,55). No arcs,
+    no through-cut (glass is snapped)."""
+    txt = _text("p0_ito_isolate.gcode")
+    # 14 isolation scribe channels (7 horizontal + 7 vertical)
+    assert txt.count("Z-0.050") == 14
+    # horizontal channels at carrier Y = 35+2.5..35+17.5 = 37.5..52.5 (unchanged)
+    for yv in ["37.500", "40.000", "42.500", "45.000",
+               "47.500", "50.000", "52.500"]:
+        assert f"Y{yv}" in txt, f"missing horizontal scribe at Y={yv}"
+    # vertical channels at carrier X = 57.5+2.5..57.5+17.5 = 60.0..75.0
+    for xv in ["60.000", "62.500", "65.000", "67.500",
+               "70.000", "72.500", "75.000"]:
+        assert f"X{xv}" in txt, f"missing vertical scribe at X={xv}"
+    # horizontal channels run X 57.5->77.5; vertical channels run Y 35->55
+    assert "X77.500" in txt and "Y55.000" in txt
+    # die-footprint engrave at the centred die pocket
+    assert "X57.500 Y35.000" in txt
+    # no arcs and no through-cut
+    assert "G02" not in txt and "G03" not in txt
+    assert "Z-3.000" not in txt
+
+
+def test_p0_cathode_stencil_64_windows():
+    """P0 L1 emitter BOTTOM face (carrier coords): 64 square window openings
+    (8x8) in Kapton at Z-0.06, over the centred die pocket (same footprint as the
+    ITO anodes) -> 64 isolated Ag cathode pads. Window is 1.0 mm (NOT 1.5) so a
+    1 mm bit leaves a 0.5 mm Kapton web between windows at 2.5 mm pitch -- the
+    'windows merge -> cathodes short' guard."""
+    txt = _text("p0_cathode_stencil.gcode")
+    # one plunge per window (64 square outlines) -> 64 Z-0.060
+    assert txt.count("Z-0.060") == 64
+    # 64 pad comments name each cathode pad by its CARRIER centre
+    centres = [58.75, 61.25, 63.75, 66.25, 68.75, 71.25, 73.75, 76.25]  # 57.5+1.25..
+    rows = [36.25, 38.75, 41.25, 43.75, 46.25, 48.75, 51.25, 53.75]     # 35+1.25..
+    for cx in centres:
+        for cy in rows:
+            assert f"cathode pad carrier ({cx:.2f},{cy:.2f})" in txt, \
+                f"missing cathode pad comment at ({cx},{cy})"
+    # window corners land at centre +/- 0.5 mm (window 1.0 mm) in carrier coords.
+    # First column centre 58.75 -> edges 58.25/59.25; last col 76.25 -> 75.75/76.75.
+    assert "X58.250" in txt and "X59.250" in txt    # first-column window edges
+    assert "X75.750" in txt and "X76.750" in txt    # last-column window edges
+    # the 1.5 mm (zero-web) corners must NOT appear -- regression guard
+    assert "X58.000" not in txt and "X59.500" not in txt
+    assert "Z-3.000" not in txt  # no through-cut
+
+
+def test_p0_carrier_vertical_stack_breakout():
+    """P0 carrier 135x90 (VERTICAL stack): ONE 20x20 die pocket @ (57.5,35)
+    Z-1.1 (the two-faced stack die), 129 bond holes (64 detector top Y=85 + 64
+    emitter-cathode bottom Y=5 + 1 common EM_ANODE @ (3.5,8.0)), 135x90 outline
+    + bridges. NO separate waveguide pocket. Shared fiducials + labels."""
+    txt = _text("p0_carrier_pcb.gcode")
+    # ONE die pocket at the centred (57.5,35), floor Z-1.1
+    assert "X57.500 Y35.000" in txt
+    assert "Z-1.100" in txt
+    # the OLD side-by-side pockets are GONE
+    assert "X10.000 Y35.000" not in txt   # old emitter pocket
+    assert "X30.000 Y40.000" not in txt   # old waveguide strip pocket
+    # the old removed pocket raster used Z-0.300/-0.900/-1.200 (unique depths
+    # no pocket or peck-drill uses). graphene is sole detector.
+    assert "Z-0.300" not in txt
+    assert "Z-0.900" not in txt
+    assert "Z-1.200" not in txt
+    # 129 peck-drilled bond holes bottom at Z-2.0 (>= 128; outline also passes
+    # through -2.0 on its way to -3.0, so the total is higher)
+    assert txt.count("Z-2.000") >= 128
+    # 64 emitter-cathode holes bottom edge Y=5 + 64 detector holes top edge Y=85
+    bond_x = [3.5 + k * 2.0 for k in range(64)]
+    for x in bond_x:
+        xs = f"{x:.3f}"
+        assert f"X{xs} Y5.000" in txt, f"missing emitter-cathode bond hole at X={xs}"
+        assert f"X{xs} Y85.000" in txt, f"missing detector bond hole at X={xs}"
+    # 1 common EM_ANODE hole at (3.5, 8.0)
+    assert "X3.500 Y8.000" in txt
+    # 532 pump facet marker on the left edge of the die pocket (57.5, 45)
+    assert "X57.500 Y45.000" in txt
+    # 135x90 outline through-cut with bridges
+    assert "Z-3.000" in txt
+    for corner in ["X-0.500 Y-0.500", "X135.500 Y-0.500",
+                   "X135.500 Y90.500", "X-0.500 Y90.500"]:
+        assert corner in txt, f"missing outline corner {corner}"
+    n_retracts = txt.count("G0 Z10.000") + txt.count("G0 Z10.0")
+    assert n_retracts >= 4
+    # legibility: vertical-stack feature labels
+    assert "[DIE POCKET]" in txt
+    assert "[DETECTOR BONDS]" in txt
+    assert "[EMITTER-CATHODE BONDS]" in txt
+    assert "[COMMON EM_ANODE]" in txt
+    # old horizontal-chain labels fully removed
+    assert "[EMITTER]" not in txt
+    assert "[WAVEGUIDE]" not in txt
+    assert "[BOND]" not in txt
+
+
+def test_p0_waveguide_channel():
+    """P0 L2 MIDDLE layer (carrier coords): a SERPENTINE ENTANGLEMENT BUS
+    threading all 64 NV microdiamond sites (8x8, 2.5 mm pitch) as ONE continuous
+    core (8 horizontal runs + 7 vertical connectors), + 64 NV-site markers + a
+    perimeter MW-loop groove. 532 nm pump in at the LEFT facet (bus start). Foot-
+    print at the centred die pocket (57.5,35)->(77.5,55). No outline, no arcs."""
+    txt = _text("p0_waveguide_channel.gcode")
+    # serpentine bus: two z-passes (-0.25 then -0.5), one continuous plunge each
+    assert txt.count("Z-0.250") == 1
+    assert txt.count("Z-0.500") == 1
+    # bus spans the full die width: left facet X58.0, right facet X77.0
+    assert "X58.000" in txt and "X77.000" in txt
+    # all 8 pixel-row Y centres (carrier 36.25 .. 53.75)
+    for yv in ["36.250", "38.750", "41.250", "43.750",
+               "46.250", "48.750", "51.250", "53.750"]:
+        assert f"Y{yv}" in txt, f"missing serpentine row at Y={yv}"
+    # 64 NV site markers (one per pixel) named by carrier coord
+    centres = [58.75, 61.25, 63.75, 66.25, 68.75, 71.25, 73.75, 76.25]
+    rows = [36.25, 38.75, 41.25, 43.75, 46.25, 48.75, 51.25, 53.75]
+    for cx in centres:
+        for cy in rows:
+            assert f"NV site carrier ({cx:.2f},{cy:.2f})" in txt, \
+                f"missing NV site at ({cx},{cy})"
+    # 64 NV-site markers + 2 facet markers peck at Z-0.20 -> 66 total
+    assert txt.count("Z-0.200") == 66
+    # 532 pump in at the bus start (top-left facet)
+    assert "X58.000 Y36.250" in txt
+    # MW loop perimeter groove (rect_groove at -0.30 -> 4 segment plunges)
+    assert txt.count("Z-0.300") == 4
+    # wafer footprint at the centred die pocket
+    assert "X57.500 Y35.000" in txt
+    # no through-cut (glass wafer is snapped/clamped, not milled), no arcs
+    assert "Z-3.000" not in txt
+    assert "G02" not in txt and "G03" not in txt
+
+
+def test_p0_detector_stencil():
+    """P0 L3 detector TOP face (carrier coords): 64 Au/Cr detector contact-pad
+    openings (8x8) in Kapton at Z-0.06, over the centred die pocket (same
+    footprint as the emitter grids) -> 64 graphene/MoS2 detector readout pads
+    (sole detector). Shared fiducials."""
+    txt = _text("p0_detector_stencil.gcode")
+    # 64 square pad outlines -> 64 Z-0.060 (was 2 pads in the old horizontal chain)
+    assert txt.count("Z-0.060") == 64
+    # first + last detector pad comments (centred die coords)
+    assert "detector pad carrier (58.75,36.25)" in txt
+    assert "detector pad carrier (76.25,53.75)" in txt
+    # stencil footprint at the centred die pocket
+    assert "X57.500 Y35.000" in txt
+    # the OLD 2-pad facet detector positions must NOT appear -- regression guard
+    assert "X50.000" not in txt and "X52.000" not in txt
+    assert "X51.000 Y40.000" not in txt
+    assert "Z-3.000" not in txt
 
 
 # --- determinism -------------------------------------------------------------

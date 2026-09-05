@@ -1326,9 +1326,16 @@ def build_main_board():
     # reset=3V3 (strong drive overrides the 10k); released -> pulled low + RC-filtered.
     add("J7", "qssc:SW_Push", "RESET", "Button_Switch_THT:SW_PUSH_6mm_H5mm",
         60, 70, pins={"1": "+3V3", "2": "reset"})
+    # JTAG header J9 -- 2x5 2.54mm, the standard Xilinx 10-pin JTAG pinout
+    # (1=TCK 3=TDO 5=TMS 7=TDI, even=GND, 9=VREF 10=GND) per the Digilent
+    # JTAG-HS3 / Xilinx Platform Cable II cable pinout.  Pin 9 = VREF supplies
+    # the programmer's IO buffer and senses the target VCCO; the JTAG balls
+    # (TCK/TDI/TDO/TMS = E10/E11/E13/E12) sit in bank 0 whose VCCO_0 = +3V3,
+    # so VREF = +3V3.  (Was GND -- only FTDI-generic JTAG worked; HS3/Platform
+    # Cable II need VREF.)
     add("J9", "qssc:Conn_02x05", "JTAG", "Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical",
         260, 30, pins={"1": "TCK", "2": "GND", "3": "TDO", "4": "GND", "5": "TMS",
-                       "6": "GND", "7": "TDI", "8": "GND", "9": "GND", "10": "GND"})
+                       "6": "GND", "7": "TDI", "8": "GND", "9": "+3V3", "10": "GND"})
 
     # Decoupling caps C1-C20 (100nF) round-robin on rails
     _rails = ["+3V3", "+1V8", "+1V0", "+5V_RF", "+5V", "+3V3"]

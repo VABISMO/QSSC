@@ -597,7 +597,7 @@
 			(drill 1)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
-			(net 18 "GND")
+			(net 5 "+3V3")
 			(uuid "a2127896-e1cd-4a1d-b0fc-057dc5a6d287")
 		)
 		(pad "10" thru_hole oval

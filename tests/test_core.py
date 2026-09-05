@@ -559,7 +559,7 @@ def test_backend_runs_bell():
 
 
 def test_backend_shor_15():
-    # Honest physics: Shor's compiled modular-exponentiation decomposes to
+    # Physics: Shor's compiled modular-exponentiation decomposes to
     # hundreds of 2q gates whose ~hundreds-of-us duration far exceeds the
     # hBN V_B- room-temperature T2 (~2 us). At 300 K the circuit decoheres to a
     # near-uniform distribution and no factors are recovered; the assessment

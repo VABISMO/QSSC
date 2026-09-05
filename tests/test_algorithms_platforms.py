@@ -17,7 +17,7 @@ from api.runner import run_circuit
 
 PLATFORMS = ["hBN-VB", "NV", "SiC-VSi"]
 
-# cold = coherence window open (deep algorithms recover); room = honest 300 K
+# cold = coherence window open (deep algorithms recover); room = 300 K
 COLD = 1e-3
 ROOM = 300.0
 
@@ -151,7 +151,7 @@ def test_period_15_cold_on_platform(profile):
 
 
 # ---------------------------------------------------------------------------
-# decoherence honesty: deep algorithms must NOT recover at room temperature
+# decoherence: deep algorithms must NOT recover at room temperature
 # ---------------------------------------------------------------------------
 def test_shor_decoheres_at_room_temp_hbn():
     r = _run("shor", "hBN-VB", ROOM, n=15, a=7, shots=2048)
@@ -164,7 +164,7 @@ def test_qftnos_decoheres_at_room_temp_hbn():
     """Regression for the QFT-NOS DM-optimism bug: at 300 K hBN (T2 ~ 2 us)
     the controlled mod-mult block is an opaque ``UnitaryGate`` that the DM
     noise model does NOT attach thermal error to, so a density-matrix run
-    used to recover the factors [3,5] *despite* the assessment honestly
+    used to recover the factors [3,5] *despite* the assessment
     reporting the circuit exceeds the coherence budget. The runner result
     and the assessment must agree: at room temp QFT-NOS decoheres (no
     factors, outside coherence), matching full Shor's behaviour."""

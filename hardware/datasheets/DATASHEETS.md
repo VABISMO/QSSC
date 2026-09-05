@@ -41,10 +41,24 @@ BTB HOST connector J12.
   the PLL, 1 kHz `mod_sync` lock-in reference, `mw_gate` RF-switch envelope.
   **No analog MUX, no XADC, no photon-counter comparators** — the parallel
   ADC pivot digitises every channel at the AD7616 instead of thresholding.
-- **Package:** BGA-324, CSG324, 0.8 mm pitch (15x15, 324 balls).
+- **Package:** BGA-324, CSG324, 0.8 mm pitch (15x15, 324 balls). **No socket**
+  — the FPGA is soldered directly to the main board (correct for production;
+  the only socket in the design is the Ironwood SBT for the optical die).
 - **Datasheet:** https://docs.amd.com/r/en-US/ds181-Artix-7-Data-Sheet
   (package: UG475 — CSG324 ball map).
 - **Local PDF:** not fetched (AMD blocks headless download; 30 MB+).
+- **Land pattern (verified vs UG475 Appendix A, 2026-09-05):** footprint =
+  official KiCad `Package_BGA:Xilinx_CSG324`.  324 balls, 18x18 grid, 0.8 mm
+  pitch, 15x15 mm body (F.Fab 15.10), pad copper L = 0.40 mm = UG475 L.  NSMD:
+  footprint-level `solder_mask_margin 0.05` => mask opening M = 0.40 + 2x0.05 =
+  0.50 mm = UG475 M (NSMD, Xilinx-recommended).  Mask web between pads =
+  0.30 mm > 0.10 mm bridge rule.  Datasheet-correct, no change needed.
+- **JTAG header J9 (verified vs Xilinx 10-pin pinout, 2026-09-05):** 2x5 2.54 mm
+  `PinHeader_2x05_P2.54mm_Vertical`, standard Xilinx 10-pin JTAG — pin 1=TCK,
+  3=TDO, 5=TMS, 7=TDI, even pins=GND, **pin 9 = VREF = +3V3** (bank-0 VCCO),
+  pin 10=GND.  Pin 9 was GND (only FTDI-generic JTAG worked); now +3V3 so the
+  Digilent JTAG-HS3 / Xilinx Platform Cable II programmers power their buffers.
+  FPGA JTAG balls: TCK=E10, TDI=E11, TDO=E13, TMS=E12.
 - **Pin map:** 324 balls, built from `.tmpwork/fpga_csg324_map.json` (power
   GND/+3V3/+1V0/+1V8, config, JTAG, user IO = `adc_convst/sclk/miso/busy/
   resetn/cs0..3` + `em_sclk/sin/xlat/blank` + UART rx/tx + ADF4351 SPI/LE/

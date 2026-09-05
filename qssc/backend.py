@@ -4,7 +4,7 @@
 :class:`QSSCBackend` is a fully working ``BackendV2`` that runs any Qiskit
 circuit through ``qiskit-aer`` using a noise model derived from the chosen
 :class:`~qssc.defects.DefectProfile` (T1, T2 and optical readout error).  The
-backend is honest about what it does: the *quantum* result is produced by a
+backend is explicit about what it does: the *quantum* result is produced by a
 statevector/noise simulation, and the FPGA + on-chip readout stack is
 responsible for the *physical readout visualisation* on the 64-channel CQD
 emitter / graphene-detector array.
@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 # statevector / density matrix, which is O(2^n) in memory. AerSimulator's
 # default target tops out at 28 qubits (a 2^28 statevector ~4 GB); on the free
 # Render worker the practical safe width is lower (see API cap). Circuits
-# wider than this cannot be simulated honestly on any classical machine and
+# wider than this cannot be exactly simulated on any classical machine and
 # are rejected with a clear error instead of silently returning fake
 # all-zero counts. The grid still shows all 64 sites; only the *simulated*
 # subset that was measured lights up.
@@ -537,7 +537,7 @@ class QSSCBackend(BackendV2):
 
         Raises on failure rather than silently returning fake all-zero
         counts -- a circuit that Aer cannot simulate (too wide, unsupported
-        op...) must surface as an honest error, not a fabricated |0...0>
+        op...) must surface as a real error, not a fabricated |0...0>
         result that would mislead the dashboard into showing "everything
         measured zero". The width guard in :meth:`_execute` rejects
         over-wide circuits first; this catch-all only fires for unexpected
@@ -571,7 +571,7 @@ class QSSCBackend(BackendV2):
         use the phenomenological decoherence path regardless of qubit count.
         Either way the result reflects the actual chip physics, not a generic
         placeholder — and for circuits that exceed the room-temperature
-        coherence budget the honest outcome is decoherence to a near-uniform
+        coherence budget the physical outcome is decoherence to a near-uniform
         distribution.
         """
         n_active = len(self._active_qubits(circuit))
@@ -601,7 +601,7 @@ class QSSCBackend(BackendV2):
         (1q + 2q gate times, no readout). Compiled high-level blocks (Shor's
         controlled modular exponentiation, QFT, multipliers) have a tiny logical
         depth but decompose to many 2-qubit gates; we estimate that cost so the
-        coherence physics is honest.
+        coherence physics is faithful.
         """
         ops = circuit.count_ops()
         one_q = {"h", "x", "y", "z", "s", "t", "sx", "rx", "ry", "rz", "u",
@@ -645,7 +645,7 @@ class QSSCBackend(BackendV2):
         return n1q, n2q, n_compiled, quantum_time_s, est_2q
 
     def assess_circuit(self, circuit: QuantumCircuit) -> dict:
-        """Honest physical-feasibility assessment of a circuit on this chip.
+        """Physical-feasibility assessment of a circuit on this chip.
 
         Compares the circuit's estimated *decomposed* execution time against the
         coherence budget T2, and reports whether the algorithm fits within the
@@ -811,7 +811,7 @@ class QSSCBackend(BackendV2):
 
     # -- introspection -----------------------------------------------------
     def limitations(self) -> list:
-        """Honest, paper-grounded limitations of running on this chip at the
+        """Paper-grounded limitations of running on this chip at the
         current temperature. Surfaced in the dashboard so users see what the
         physics does and does not support."""
         t2_us = self._t2 * 1e6

@@ -276,7 +276,7 @@ def test_circuit_run_bb84_qkd(client):
     assert "error" not in res, res.get("error")
     assert res["qber"] >= 0.0
     assert res["sifted_bits"] >= 1
-    # an honest channel (no Eve, low readout noise) stays under the 11% threshold
+    # a clean channel (no Eve, low readout noise) stays under the 11% threshold
     assert res["qber"] < res["qber_threshold"]
     assert res["secure"] is True
 
@@ -347,7 +347,7 @@ def test_circuit_run_qft_20_qubits(client):
 def test_too_wide_circuit_errors_not_faked(client):
     """Regression: a circuit wider than the classical simulation ceiling
     (math mul bits=8 -> 32 qubits > SIM_MAX_QUBITS=28) used to silently fall
-    back to fake all-zero counts. It must now return an honest error."""
+    back to fake all-zero counts. It must now return an error."""
     r = client.post("/api/circuit/run", params={"sync": True},
                     json={"algorithm": "math", "profile": "NV", "op": "mul",
                           "a": 3, "b": 5, "bits": 8, "shots": 256, "seed": 3,
