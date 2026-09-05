@@ -133,8 +133,14 @@ Three noise modes (set via the backend `noise_mode` option):
   density-matrix simulation with thermal + depolarizing + readout noise built
   from the defect's real T₁/T₂ and gate times (O(4ⁿ)). Larger or compiled-block
   circuits fall back to the **analytic decoherence limit** computed from the
-  *same* real T₂ and gate-time parameters, so a 13-qubit Shor run honestly
-  decoheres toward a near-uniform distribution instead of recovering factors.
+  *same* real T₂, gate-time **and depolarization** parameters, so a 13-qubit
+  Shor run honestly decoheres toward a near-uniform distribution: at 300 K it
+  retains only ~5% of the ideal signal on NV (≈ 0% on hBN/SiC). The same
+  blend drives the assessment and the run, so their verdicts cannot disagree.
+  Gate-error caveat: depolarization is temperature-independent, so cooling
+  restores recoverability only where the gate spec permits — NV (~5%
+  retention at 1 mK) still extracts, hBN/SiC (< 0.3%) recover nothing even
+  at millikelvin.
 - **`phenomenological`** (fast analytic approximation) — ideal Aer statevector +
   post-hoc per-site readout bit-flip + T₂ coherence damping blended into the
   distribution. O(n) in qubits; runs in milliseconds regardless of size.
