@@ -121,8 +121,11 @@ _USB_NETS = {"USB_DP", "USB_DM"}
 _ANALOG_NETS = {"VREFP", "VREFN"}   # TIA/XADC analog nets removed in the
                                     # single-board parallel pivot.
 # Chip die-pad nets (DET_IN0..63, emitter_cat0..63) get the 0.10 mm-clearance
-# "Chip" netclass authored in gen_qssc_kicad so the 0.30 mm-pitch dog-bone vias
-# (0.125 mm neighbour clearance) pass DRC. Mirror gen_qssc_kicad._is_chip_net.
+# "Chip" netclass authored in gen_qssc_kicad. At the current 2.5 mm die pitch
+# the dog-bone vias clear the neighbour by 0.80 mm, so the 0.10 mm class is the
+# board's HDI floor, not a routing necessity (it was for the earlier 0.30 mm-pitch
+# die whose 0.125 mm neighbour clearance needed < 0.15 mm). Mirror
+# gen_qssc_kicad._is_chip_net.
 # NOTE: the nets are emitter_cat{i} (per-pixel CATHODES sunk by the TLC5947),
 # NOT emitter_anode -- the anode is the single shared EM_ANODE -> +12V_EMIT pad.
 _NETCLASS_WIDTH_NM = {"Default": 200_000, "RF": 300_000, "Power": 500_000,
@@ -1535,10 +1538,10 @@ def build(board) -> dict:
         for p in fp.Pads():
             nm = p.GetNetname()
             if nm and nm not in PLANE_NETS and nm not in EXCLUDE_NETS:
-                # skip the 128-pad chip die pads: _chip_fanout already tied each
-                # to a staggered dog-bone via (a via_pads pseudo-pad). Routing
-                # from the chip pad itself would duplicate the stub and hit the
-                # 0.30 mm-pitch keepout overlap; route from the via instead.
+                # skip the 128 signal chip die pads: _chip_fanout already tied each
+                # to a dog-bone via (a via_pads pseudo-pad; uniform 1.0 mm via-out
+                # at the 2.5 mm die pitch). Routing from the chip pad itself would
+                # duplicate the stub; route from the via instead.
                 if (int(p.GetPosition().x), int(p.GetPosition().y)) in chip_pad_centers:
                     continue
                 net_pads.setdefault(nm, []).append(p)

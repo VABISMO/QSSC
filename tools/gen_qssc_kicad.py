@@ -1338,16 +1338,19 @@ def build_main_board():
         420, 150, pins={"1": "J3_SIG", "2": "GND"})
 
     # ==========================================================================
-    # QSSC_Chip -- the merged-board quantum die (2026-09 single-board pivot).
-    # The old two-board design mated a swappable chip MODULE here via a 60-pin
-    # Samtec LSHM-130 (J11) carrying a 64:1 analog MUX, one TIA, and an 8x8
-    # emitter crossbar.  That is GONE: the FPGA and the die are now on ONE board
-    # and every channel is parallel.  The 128-pad bare die (64 DET top edge + 64 EM
-    # bottom edge, 0.30 mm wire-bond pitch) is placed board-centre; its 64 DET_IN{i}
-    # analog inputs fan UP to the TIA/comparator front-end (above the die) and its
-    # 64 emitter_cat{i} cathode pads fan DOWN to the 3x TLC5947 constant-current
-    # LED driver (below the die) -- the common +12V_EMIT anode rail is the EM_ANODE pad.
-    # The 128 nets escape outward on F.Cu (top edge up, bottom edge down).
+    # QSSC_Chip -- the two-faced quantum die, clamped between TWO PCBs (the
+    # 2026-09 two-board sandwich; supersedes the earlier single merged board).
+    # The old design mated a swappable chip MODULE here via a 60-pin Samtec
+    # LSHM-130 (J11) carrying a 64:1 analog MUX, one TIA, and an 8x8 emitter
+    # crossbar.  That is GONE: every channel is now parallel.  The 130-pad bare
+    # die (65 pads/face: 64 electrodes + 1 common; 8x8 grid at 2.5 mm pitch, 1.2 mm
+    # pads) is clamped between this main board (die BOTTOM / emitter face on F.Cu,
+    # via the soldered Ironwood SBT socket) and the head board (die TOP /
+    # detector face on B.Cu, ACF contact).  On THIS (main) board the 64
+    # emitter_cat{i} cathode pads fan out to the 3x TLC5947 constant-current LED
+    # driver, and the EM_ANODE pad is the common +12V_EMIT anode rail.  The 64
+    # EM signal nets escape outward on F.Cu; the dog-bone vias (0.20 mm via 1.0 mm
+    # out) drop to B.Cu for the router.
     # ==========================================================================
     # The die sits EMITTER-DOWN in an Ironwood SBT open-top spring-pin socket
     # (qssc:Ironwood_SBT) on F.Cu -- a real commercial socket (made-to-order,
@@ -1754,14 +1757,18 @@ POWER_NETS = {"+3V3", "+1V8", "+1V0", "+5V", "+5V_A", "+5V_RF", "+5V_IN", "+5V_T
 
 
 def _is_chip_net(net):
-    """The 128 QSSC_Chip die-pad nets: DET_IN0..63 (top edge -> TIA inputs) and
-    emitter_cat0..63 (bottom edge -> TLC5947 constant-current sink outputs).
-    These fan out as staggered 0.30 mm-pitch dog-bone vias (0.15 mm stub +
-    0.20 mm through-via) whose neighbour-to-neighbour edge clearance is 0.125 mm
-    < the 0.15 mm Default clearance. KiCad DRC takes the MAX of the two nets'
-    netclass clearances, so a Chip class at 0.10 mm relaxes ONLY chip<->chip
-    (the dog-bone case, 0.125 mm >= 0.10 mm) while chip<->everything-else stays
-    0.15 mm (max 0.10, 0.15)."""
+    """The 128 QSSC_Chip die-pad signal nets: DET_IN0..63 (top edge -> TIA inputs)
+    and emitter_cat0..63 (bottom edge -> TLC5947 constant-current sink outputs).
+    (The two common electrodes are separate nets: EM_ANODE -> +12V_EMIT power,
+    DET_COMMON -> DET_REF analog.) At the 2.5 mm die pitch / 1.2 mm pads the
+    dog-bone (0.15 mm stub + 0.20 mm through-via a uniform 1.0 mm out) lands
+    0.80 mm clear of the neighbour pad -- well above the 0.15 mm Default
+    clearance, so no shorting items occur. The Chip netclass (0.10 mm clearance)
+    was introduced for an earlier 0.30 mm-pitch die whose 0.125 mm neighbour
+    clearance needed the relaxation; at 2.5 mm it is retained as the board's
+    0.10 mm HDI capability floor. KiCad DRC takes the MAX of the two nets'
+    netclass clearances, so the Chip class at 0.10 mm relaxes ONLY chip<->chip
+    while chip<->everything-else stays 0.15 mm (max 0.10, 0.15)."""
     return net.startswith("DET_IN") or net.startswith("emitter_cat")
 
 
@@ -1979,8 +1986,9 @@ def emit_pcb(cfg):
 
     # Copper layer stack is cfg-driven: the main board is 6-layer HDI
     # (F.Cu sig / In1.Cu GND / In2.Cu PWR / In3.Cu sig / In4.Cu sig / B.Cu sig)
-    # and the detector head is 4-layer (F.Cu sig / In1.Cu GND / In2.Cu PWR /
-    # B.Cu sig). Each entry: (kicad_id, name, type, user_label_or_None).
+    # and the detector head is also 6-layer (same stack, commit b41009c: the
+    # 128-net die bus needs the In3.Cu/In4.Cu escape layers a 4-layer stack
+    # could not provide). Each entry: (kicad_id, name, type, user_label_or_None).
     copper = []
     for idx, name, typ, label in cfg["layer_stack"]:
         if label is not None:
@@ -2136,14 +2144,15 @@ def emit_pro():
     # 0.10 mm (4 mil) board min clearance -- standard HDI capability, same class
     # as the 0.10 mm laser drills already used. The netclass clearances stay at
     # 0.15 mm (see below), so every net-pair is governed by its 0.15 mm netclass
-    # EXCEPT chip<->chip: the "Chip" netclass is 0.10 mm so the 128 QSSC_Chip
-    # 0.30 mm-pitch dog-bone vias (0.125 mm neighbour clearance) pass. The board
-    # min_clearance is the floor; lowering it to 0.10 mm only unleashes the chip
-    # dog-bones -- all other pairs keep 0.15 mm (their netclass > board min).
-    # min_track_width 0.10 mm = the HDI 4-mil floor. FreeRouting auto-narrows the
-    # 0.30 mm-pitch emitter_cat dog-bone stubs to ~0.112 mm to fit the die field
-    # (a 0.15 mm track does not clear a 0.30 mm-pitch neighbour); 0.10 mm lets
-    # those through while every other netclass keeps its >= 0.15 mm width.
+    # EXCEPT chip<->chip: the "Chip" netclass is 0.10 mm. At the current 2.5 mm
+    # die pitch / 1.2 mm pads the dog-bone vias (0.20 mm via 1.0 mm out) clear
+    # the neighbour by 0.80 mm -- far above 0.15 mm -- so the Chip class is not a
+    # routing necessity there; it is retained as the board's 0.10 mm HDI floor
+    # (it was a necessity for the earlier 0.30 mm-pitch die whose 0.125 mm
+    # neighbour clearance needed < 0.15 mm). The board min_clearance is the
+    # floor; 0.10 mm only unleashes the chip dog-bones -- all other pairs keep
+    # 0.15 mm (their netclass > board min).
+    # min_track_width 0.10 mm = the HDI 4-mil floor.
     ds["rules"]["min_track_width"] = 0.10
     # HDI via floors -- these MUST agree with route_signals._relax_board_for_hdi
     # (m_ViasMinSize = BGA_VIA_DIAM_NM = 0.20 mm, m_ViasMinAnnularWidth = 0.05 mm).
@@ -2162,12 +2171,14 @@ def emit_pro():
     ds["rules"]["min_hole_clearance"] = 0.15
     ds["rules"]["min_hole_to_hole"] = 0.25
     # 0.15 mm (6 mil) board min hole_clearance -- the floor for drill-hole-to-copper
-    # of a DIFFERENT net. The 128 QSSC_Chip 0.30 mm-pitch dog-bone vias sit 0.175 mm
-    # from the neighbour pad's F.Cu stub (e.g. DET_IN30 drill vs DET_IN29 stub),
-    # which is under the old 0.18 mm floor but clears 0.15 mm with 0.025 mm margin.
-    # Non-chip vias (0.8 mm-pitch CSG324 BGA VIPs, GND/+3V3 stitching) are on much
-    # coarser pitches so 0.15 mm is safe board-wide. Same floor-unleashes-chip
-    # pattern as min_clearance above.
+    # of a DIFFERENT net. At the current 2.5 mm die pitch the QSSC_Chip dog-bone
+    # vias (0.20 mm via 1.0 mm out) clear the neighbour pad by 0.80 mm, so 0.15 mm
+    # is met with large margin. (The earlier 0.30 mm-pitch die had 0.175 mm
+    # drill-to-neighbour-stub, under the old 0.18 mm floor but clearing 0.15 mm
+    # by 0.025 mm -- the floor was lowered to 0.15 mm for it; at 2.5 mm the margin
+    # is wide.) Non-chip vias (0.8 mm-pitch CSG324 BGA VIPs, GND/+3V3 stitching)
+    # are on much coarser pitches so 0.15 mm is safe board-wide. Same
+    # floor-unleashes-chip pattern as min_clearance above.
     ds["rules"]["min_copper_edge_clearance"] = 0.3
     nc = proj["net_settings"]["classes"]
     nc.clear()
@@ -2202,13 +2213,16 @@ def emit_pro():
                "diff_pair_width": 0.2, "line_style": 0, "microvia_diameter": 0.2, "microvia_drill": 0.1,
                "name": "Analog", "pcb_color": "rgba(255, 255, 0, 0.000)", "schematic_color": "rgba(0, 0, 0, 0.000)",
                "track_width": 0.2, "via_diameter": 0.6, "via_drill": 0.3, "wire_width": 6})
-    # Chip netclass: the 128 QSSC_Chip die-pad nets (DET_IN0..63, emitter_cat0..63)
-    # fan out as 0.30 mm-pitch dog-bone vias whose neighbour edge clearance is 0.125
-    # mm. A 0.10 mm clearance (vs the 0.15 mm board default) relaxes ONLY chip<->chip
-    # so the dog-bones pass DRC; chip<->other nets keep 0.15 mm (KiCad takes the max
-    # of the two netclass clearances). Track width 0.10 mm = the HDI floor:
-    # FreeRouting auto-narrows the emitter_cat dog-bone stubs to ~0.112 mm to fit
-    # the 0.30 mm-pitch die field, so the Chip min must allow < 0.15 mm.
+    # Chip netclass: the 128 QSSC_Chip die-pad signal nets (DET_IN0..63,
+    # emitter_cat0..63). At the current 2.5 mm die pitch / 1.2 mm pads the
+    # dog-bone vias (0.20 mm via 1.0 mm out) clear the neighbour by 0.80 mm, so
+    # this 0.10 mm clearance (vs the 0.15 mm board default) is NOT a routing
+    # necessity -- it is retained as the board's HDI capability floor (it was a
+    # necessity for the earlier 0.30 mm-pitch die, whose 0.125 mm neighbour
+    # clearance needed < 0.15 mm and whose 0.15 mm stub did not clear a
+    # 0.30 mm-pitch neighbour). It relaxes ONLY chip<->chip; chip<->other nets
+    # keep 0.15 mm (KiCad takes the max of the two netclass clearances).
+    # Track width 0.10 mm = the HDI floor (no auto-narrowing needed at 2.5 mm).
     nc.append({"bus_width": 12, "clearance": 0.10, "diff_pair_gap": 0.25, "diff_pair_via_gap": 0.25,
                "diff_pair_width": 0.2, "line_style": 0, "microvia_diameter": 0.2, "microvia_drill": 0.1,
                "name": "Chip", "pcb_color": "rgba(0, 255, 255, 0.000)", "schematic_color": "rgba(0, 0, 0, 0.000)",
@@ -2239,7 +2253,9 @@ def emit_pro():
 # NOT reach In3.Cu/In4.Cu/B.Cu -- those inner signal layers stay clear for BGA
 # signal escapes. (A through-via on every power ball -- the original "HDI-lite"
 # plan -- blocked the inner layers solid at 0.5 mm pitch: 117 barrels overlap.)
-# The detector HEAD board uses a separate 4-layer stack (HEAD_LAYER_STACK).
+# The detector HEAD board uses a separate 6-layer stack (HEAD_LAYER_STACK) -- the
+# same 6-layer schedule as the main board (commit b41009c: the 128-net die bus
+# needs the In3.Cu/In4.Cu escape layers a 4-layer stack could not provide).
 LAYER_STACK = [
     (0,  "F.Cu",   "signal", None),
     (1,  "In1.Cu", "signal", "GND"),
