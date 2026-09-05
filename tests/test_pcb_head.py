@@ -3,13 +3,17 @@
 (``hardware/pcb/chip_module.kicad_pcb``), the top half of the two-PCB sandwich.
 
 The QSSC die is a two-faced (no-TSV) die clamped between TWO PCBs. This file
-verifies the **head** board -- the 4-layer board that carries the detector
-analog front-end and contacts the die TOP (detector) face on B.Cu via ACF:
+verifies the **head** board -- the 6-layer board that carries the detector
+analog front-end and contacts the die TOP (detector) face on B.Cu via ACF.
+Two extra inner signal layers (In3.Cu/In4.Cu) carry the 128-net die bus that a
+4-layer stackup could not escape (commit b41009c):
 
     F.Cu   signal + components (16x TLV9004 TIA + 4x AD7616 ADC + 64x Rf/Cf + J12)
     In1.Cu GND plane
     In2.Cu PWR plane (+3V3 / +5V_A)
-    B.Cu   64 DET die pads (die top face, ACF contact, no B.Paste) + analog routing
+    In3.Cu die-bus signal (escape routing for the 64 DET + 64 EM nets)
+    In4.Cu die-bus signal
+    B.Cu   65 DET die pads (64 electrodes + DET_COMMON) + analog routing
 
 The 9-wire AD7616 SPI + GND/+3V3/+5V cross J12 (BTB_DAUGHTER) to the main board.
 
@@ -102,12 +106,14 @@ def _has_kicad_cli() -> bool:
 # stackup
 # ---------------------------------------------------------------------------
 
-def test_head_four_layer_stackup():
-    """The head board is 4-layer (no FPGA, no dense BGA -> no In3/In4)."""
+def test_head_six_layer_stackup():
+    """The head board is 6-layer: F.Cu + In1.Cu(GND) + In2.Cu(PWR) + In3.Cu +
+    In4.Cu (two extra signal layers for the 128-net die bus, commit b41009c) +
+    B.Cu. A 4-layer stackup could not escape the 64 DET + 64 EM die nets."""
     layers = _copper_layers(PCB)
     names = [l[0] for l in layers]
-    assert names == ["F.Cu", "In1.Cu", "In2.Cu", "B.Cu"], (
-        f"expected 4-layer head stackup, got {names}"
+    assert names == ["F.Cu", "In1.Cu", "In2.Cu", "In3.Cu", "In4.Cu", "B.Cu"], (
+        f"expected 6-layer head stackup, got {names}"
     )
     labels = {l[0]: l[1] for l in layers}
     assert labels["In1.Cu"] == "GND", labels
@@ -174,7 +180,9 @@ def test_head_j12_is_2x10():
 # ---------------------------------------------------------------------------
 
 def test_head_det_pads_on_bcu():
-    """QSSC_Chip_DET's 64 detector pads must be on B.Cu (die top face)."""
+    """QSSC_Chip_DET's 65 detector pads must be on B.Cu (die top face):
+    64 DET electrodes + 1 DET_COMMON (the ITO common electrode, netted to
+    DET_REF since commit ea2fa2a to close the detector common electrode)."""
     t = PCB.read_text()
     fm = re.search(r'(?m)^\t\(footprint "[^"]*QSSC_Chip_DET"', t)
     assert fm, "QSSC_Chip_DET footprint not found"
@@ -187,9 +195,11 @@ def test_head_det_pads_on_bcu():
     pad_blocks = re.findall(r'\(pad "[^"]+" smd.*?\(layers "([^"]+)"', block, re.DOTALL)
     assert pad_blocks, "no smd pads parsed in QSSC_Chip_DET"
     bcu = [p for p in pad_blocks if p == "B.Cu"]
-    # 64 detector electrodes (the anode lives on the EM face / main board).
-    assert len(bcu) == 64, (
-        f"expected 64 DET pads on B.Cu, got {len(bcu)} (layers: {pad_blocks[:5]}...)"
+    # 64 detector electrodes + DET_COMMON (the anode lives on the EM face /
+    # main board; DET_COMMON is the shared ITO common electrode on the head).
+    assert len(bcu) == 65, (
+        f"expected 65 DET pads on B.Cu (64 electrodes + DET_COMMON), "
+        f"got {len(bcu)} (layers: {pad_blocks[:5]}...)"
     )
     # ACF contact interface, not a solder joint -> NO B.Paste on the DET pads.
     assert '"B.Paste"' not in block, "DET pads must have NO B.Paste (ACF contact)"
