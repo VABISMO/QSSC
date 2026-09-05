@@ -1352,8 +1352,12 @@ no floating-gate hazard.
 The QSSC_Chip die is **20 × 20 mm**, a **two-faced die, no TSVs**: **64
 detector electrodes on the TOP face** + **64 emitter cathodes on the BOTTOM
 face** + one **EM_ANODE** pad on the bottom face (the shared common anode,
-clear of the dog-bone field). Both faces use **0.30 mm pitch** (0.15 × 0.30 mm
-pads). The die is **clamped between the two PCBs** — it is NOT wire-bonded.
+clear of the dog-bone field). Both faces use **2.5 mm pitch** — an 8×8 grid of
+1.2 × 1.2 mm pads on a 17.5 mm span across the 20 mm body (EM_ANODE/DET_COMMON
+are 0.5 × 1.5 mm edge pads). The **0.30 mm** figure that appeared in earlier
+drafts of this doc is the P0-prototype PAD size, **not the pitch** — the
+production die is 2.5 mm pitch. The die is **clamped between the two PCBs** —
+it is NOT wire-bonded.
 
 The two faces are contacted by **two different mechanisms** (the die is
 removable):
@@ -1364,12 +1368,13 @@ removable):
   **F.Cu + F.Paste + F.Mask** (`qssc:Ironwood_SBT`, footprint `Uchip`). The die
   sits emitter-down in the socket (spring pins contact the die bottom pads),
   lid clamps it. Ironwood SBT is **made-to-order**, quoted against the die
-  drawing; it is the only commercial socket that covers **0.30 mm pitch over a
-  20 mm body** (+2.5 mm/side → 25 × 25 mm body, open-top, hardware/screw mount,
-  >100 k insertion cycles, −55…+150 °C, <100 mΩ/pin). No off-the-shelf socket
-  exists at this pitch/size — Yamaichi IC609 caps at 0.40 mm / ≤12 mm, Enplas
-  at 0.50 mm / 4 × 4 mm. The socket adds 4 NPTH M2 mount holes; the die centre
-  stays (80, 55) so the socket body centres on the same origin as the die.
+  drawing for the custom **2.5 mm 8×8 array over a 20 mm body** (+2.5 mm/side →
+  25 × 25 mm body, open-top, hardware/screw mount, >100 k insertion cycles,
+  −55…+150 °C, <100 mΩ/pin). Off-the-shelf QFP/BGA sockets do not match a 2.5 mm
+  8×8 grid, so a custom SBT array is quoted; 2.5 mm is routine spring-pin
+  territory (not sub-0.5 mm HDI spring pins), so this is a standard quote, not a
+  research part. The socket adds 4 NPTH M2 mount holes; the die centre stays
+  (80, 55) so the socket body centres on the same origin as the die.
   MPN = "Ironwood SBT custom (quote)" — tracked in the BOM as a mechanical
   (non-Digi-Key) line.
 - **Detector face (head board, TOP face) — ACF / pogo pressure contact.** The

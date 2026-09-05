@@ -519,19 +519,23 @@ def chip_footprint():
 
 
 # ---- Ironwood SBT open-top spring-pin SOCKET for the die emitter face --------
-# The user requires a REAL commercial socket that fits the 20x20 mm / 0.30 mm
-# pitch die (not an ACF pressure pad).  Ironwood Electronics SBT (Stamped Spring
-# Pin) sockets support 0.30 mm pitch and IC bodies 1-50 mm as a MADE-TO-ORDER
-# commercial product (footprint only +2.5 mm/side, open-top clamshell lid,
-# hardware/screw mount, >100k cycles, -55..+150 C, <100 mOhm/pin).  No off-the-
-# shelf socket exists at 0.30 mm / 20 mm (Yamaichi IC609 caps at 0.40 mm /
-# <=12 mm, Enplas at 0.50 mm / 4x4 mm) -> the socket is an Ironwood custom SBT,
-# quoted against the die drawing.  The SBT spring pins transfer 1:1 die-pad ->
-# PCB-pad at the SAME 0.30 mm perimeter positions, so the 65 contact pads reuse
-# the QSSC_Chip_EM pad geometry -- but they SOLDER to the board (F.Cu + F.Paste +
-# F.Mask; the ACF QSSC_Chip_EM pads carry no paste).  4 NPTH mount holes at the
-# socket corners (solder-less hardware mount).  The mount-hole drill/positions
-# below are SANE DEFAULTS -- FINALIZE them from the Ironwood quote drawing.
+# The user requires a REAL commercial socket that fits the 20x20 mm die whose 64
+# emitter cathodes sit on an 8x8 grid at 2.5 mm PITCH (17.5 mm span; the 0.30 mm
+# figure that appeared in an earlier draft was the P0-prototype PAD size, NOT
+# the pitch -- the production die is 2.5 mm pitch, 1.2 mm pads).  Ironwood
+# Electronics SBT (Stamped Spring Pin) sockets are a MADE-TO-ORDER commercial
+# product for arbitrary pin arrays / IC bodies 1-50 mm (footprint +2.5 mm/side,
+# open-top clamshell lid, hardware/screw mount, >100k cycles, -55..+150 C,
+# <100 mOhm/pin); 2.5 mm is routine spring-pin territory (not the exotic
+# sub-0.5 mm HDI spring pins), so a custom 8x8 SBT array is a standard quote,
+# not a research part.  Off-the-shelf QFP/BGA sockets do not match a 2.5 mm 8x8
+# grid, so the socket is an Ironwood custom SBT quoted against the die drawing.
+# The SBT spring pins transfer 1:1 die-pad -> PCB-pad at the SAME 2.5 mm grid
+# positions, so the 65 contact pads reuse the QSSC_Chip_EM pad geometry -- but
+# they SOLDER to the board (F.Cu + F.Paste + F.Mask; the ACF QSSC_Chip_EM pads
+# carry no paste).  4 NPTH mount holes at the socket corners (solder-less
+# hardware mount).  The mount-hole drill/positions below are SANE DEFAULTS --
+# FINALIZE them from the Ironwood quote drawing.
 SOCKET_BODY_HALF = 12.5     # 25x25 mm body (+2.5 mm/side over the 20 mm die)
 SOCKET_CRTYD_HALF = 13.5    # courtyard half-extent (contains body + 4 NPTH pads)
 SOCKET_MNT = 11.5           # mount-hole centre offset (just inside body corners)
