@@ -228,13 +228,71 @@ def test_qft_nos_fewer_qubits_than_shor():
 
 
 def test_qft_nos_factors_15_cold():
-    # Like Shor: decoheres at 300 K, recovers 3x5 when cooled.
-    b_cold = QSSCBackend("hBN-VB", sites=_quick_sites(20), seed=1,
+    # QFT-NOS measures only 5 classical bits (32 outcomes), so its uniform
+    # floor is high and a run needs real signal retention to clear the
+    # register-aware cutoff (audit issue #8). On the NV (diamond) profile
+    # cooled to 1 mK, coprime a=11 has period 2 -- the cheapest decomposition
+    # (~525 vs ~925 decomposed 2q gates for a=7) -> ~28% signal retention,
+    # well above the cutoff, so it recovers the factors of 15. hBN and SiC
+    # retain too little signal to recover (audit issue #7). Real NV site
+    # coherence (auto_align) is required: the _quick_sites helper pins every
+    # site to hBN-300K T2 (~2 us), which decoheres this longer circuit before
+    # the peaks form.
+    sites = auto_align(profile="NV", grid=8, temperature_k=1e-3,
+                       rng=np.random.default_rng(1))
+    b_cold = QSSCBackend("NV", sites=sites, seed=1,
                          temperature_k=1e-3, noise_mode="real")
-    qc, a = create_qft_nos_circuit(15, a=7)
+    qc, a = create_qft_nos_circuit(15, a=11)
     res = b_cold.run(qc, shots=4096).result()
-    _, factors = postprocess_period_swapless(res.get_counts(), qc.num_clbits, a, 15)
-    assert factors == (3, 5)
+    r, factors = postprocess_period_swapless(res.get_counts(), qc.num_clbits,
+                                             a, 15)
+    assert factors[0] is not None
+    assert factors[0] * factors[1] == 15  # (5, 3); order-agnostic
+
+
+def test_qft_nos_noise_dominated_no_spurious_factors():
+    # Audit issue #8: a noise-dominated QFT-NOS run (hBN at 1 mK retains ~0
+    # signal) must NOT report a spurious factor pair. The register-aware
+    # cutoff rejects every candidate that does not clear the uniform floor by
+    # the k factor, so the result is (period, factors=None) -- not a phantom
+    # (3, 5) lifted out of noise by the old fixed 1% cutoff.
+    b = QSSCBackend("hBN-VB", sites=_quick_sites(20), seed=1,
+                    temperature_k=1e-3, noise_mode="real")
+    qc, a = create_qft_nos_circuit(15, a=7)
+    res = b.run(qc, shots=4096).result()
+    r, factors = postprocess_period_swapless(res.get_counts(), qc.num_clbits,
+                                            a, 15)
+    assert factors[0] is None  # no spurious factor pair from a starved register
+
+
+def test_assess_circuit_exposes_signal_retention():
+    # Audit issue #7: assess_circuit must surface the shared survival metric
+    # (coherence * depolarization) so a run's "success" can be judged against
+    # its signal budget. A short Bell circuit keeps most of its signal; a long
+    # Shor-15 circuit on hBN at 300 K retains ~none (coherence-limited there).
+    from qiskit import QuantumCircuit
+    b = QSSCBackend("hBN-VB", sites=_quick_sites(20), seed=1,
+                    temperature_k=300.0, noise_mode="real")
+    bell = QuantumCircuit(2, 2)
+    bell.h(0); bell.cx(0, 1); bell.measure([0, 1], [0, 1])
+    a_short = b.assess_circuit(bell)
+    for key in ("signal_retention", "coherence_survival",
+                "depolarization_survival"):
+        assert key in a_short
+        assert 0.0 <= a_short[key] <= 1.0
+    # signal_retention is the product of the two survival channels (stored
+    # rounded to 4 decimals, so check at low precision).
+    assert a_short["signal_retention"] == pytest.approx(
+        a_short["coherence_survival"] * a_short["depolarization_survival"],
+        rel=1e-3)
+    # A Bell circuit is short: coherence survival is high (>> 1/2) and
+    # depolarization barely dents it.
+    assert a_short["coherence_survival"] > 0.5
+    assert a_short["depolarization_survival"] > 0.95
+
+    qc, _ = create_shor_circuit(15, a=7)
+    a_long = b.assess_circuit(qc)
+    assert a_long["signal_retention"] < 0.01  # hBN 300 K destroys the signal
 
 
 # -- crypto (quantum RNG -> Ed25519 + X.509) ---------------------------------
@@ -559,11 +617,11 @@ def test_backend_runs_bell():
 
 
 def test_backend_shor_15():
-    # Physics: Shor's compiled modular-exponentiation decomposes to
-    # hundreds of 2q gates whose ~hundreds-of-us duration far exceeds the
-    # hBN V_B- room-temperature T2 (~2 us). At 300 K the circuit decoheres to a
-    # near-uniform distribution and no factors are recovered; the assessment
-    # must report it as NOT within the coherence window.
+    # Physics: Shor's compiled modular-exponentiation decomposes to ~10^3
+    # two-qubit gates. At 300 K the hBN V_B- T2 (~2 us) is far shorter than the
+    # circuit duration, so the distribution decoheres to near-uniform and no
+    # factors are recovered; the assessment must report it NOT within the
+    # coherence window.
     b = QSSCBackend("hBN-VB", sites=_quick_sites(20), seed=1,
                     temperature_k=300.0, noise_mode="real")
     qc, a = create_shor_circuit(15, a=7)
@@ -572,15 +630,27 @@ def test_backend_shor_15():
     assert res.assessment["within_coherence"] is False
     assert factors[0] is None  # decohered at room temperature -> no factors
 
-    # Cooled to millikelvin the coherence window opens up and Shor recovers
-    # 3 x 5 (a=7 -> period 4). This is the whole point of the cooling knob.
+    # Cooled to millikelvin the coherence window opens (within_coherence True),
+    # but hBN's per-gate depolarization (depol_2q=0.006 compounded over ~10^3
+    # decomposed 2q gates) still destroys the signal -> no factors. hBN is a
+    # sensor variant, not compute-capable even cold (audit issue #7).
     b_cold = QSSCBackend("hBN-VB", sites=_quick_sites(20), seed=1,
                          temperature_k=1e-3, noise_mode="real")
     res_cold = b_cold.run(qc, shots=2048).result()
     _, factors_cold = postprocess_period(res_cold.get_counts(), qc.num_clbits,
                                          a, 15)
     assert res_cold.assessment["within_coherence"] is True
-    assert factors_cold == (3, 5)
+    assert factors_cold[0] is None  # depolarization-limited, not coherence-limited
+
+    # NV (diamond) cooled to 1 mK: its lower depol_2q (0.002) keeps enough
+    # signal to recover 3 x 5 (a=7 -> period 4). NV is the compute-capable
+    # profile -- the whole point of the cooling knob (audit issue #7).
+    b_nv = QSSCBackend("NV", sites=_quick_sites(20), seed=1,
+                       temperature_k=1e-3, noise_mode="real")
+    res_nv = b_nv.run(qc, shots=2048).result()
+    _, factors_nv = postprocess_period(res_nv.get_counts(), qc.num_clbits, a, 15)
+    assert res_nv.assessment["within_coherence"] is True
+    assert factors_nv == (3, 5)
 
 
 # -- protocol ----------------------------------------------------------------

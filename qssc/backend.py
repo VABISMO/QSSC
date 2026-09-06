@@ -467,14 +467,20 @@ class QSSCBackend(BackendV2):
                     if j == q:
                         continue
                     s2 = self.sites[j]
+                    # Both qubits sit idle for the full 2q gate duration, so the
+                    # 2q thermal channel must be built from g2q (not the 1q
+                    # therm1) for the control qubit too -- previously the control
+                    # was relaxed over g1q, under-relaxing it by gate_2q/gate_1q
+                    # (~8x on NV/hBN, ~7.5x on SiC).
+                    therm_q = thermal_relaxation_error(t1, t2, g2q)
                     ej = thermal_relaxation_error(s2.t1 or self._t1,
                                                   s2.t2 or self._t2, g2q)
-                    two_q_therm = therm1.tensor(ej)
+                    two_q_therm = therm_q.tensor(ej)
                     dep2err = depolarizing_error(dep2, 2)
                     nm.add_quantum_error(two_q_therm.compose(dep2err),
                                          ["cx", "cz", "cp", "swap"], [q, j])
             except Exception as exc:  # pragma: no cover
-                logger.debug("real noise build skipped pair %s,%s: %s", q, q, exc)
+                logger.debug("real noise build skipped pair %s,%s: %s", q, j, exc)
             nm.add_readout_error(ReadoutError([[1 - ro, ro], [ro, 1 - ro]]), [q])
         return nm
 
@@ -575,7 +581,7 @@ class QSSCBackend(BackendV2):
         distribution.
         """
         n_active = len(self._active_qubits(circuit))
-        _, _, n_compiled, _, _ = self._decomposed_cost(circuit)
+        _, _, n_compiled, _, _, _ = self._decomposed_cost(circuit)
         use_dm = (n_active <= self._dm_qubit_limit) and (n_compiled == 0)
         if use_dm:
             try:
@@ -642,7 +648,35 @@ class QSSCBackend(BackendV2):
         est_2q = n2q + decomp_2q
         est_1q = n1q + est_2q * 2
         quantum_time_s = est_1q * self._g1q + est_2q * self._g2q
-        return n1q, n2q, n_compiled, quantum_time_s, est_2q
+        return n1q, n2q, n_compiled, quantum_time_s, est_2q, est_1q
+
+    def _signal_survival(self, circuit: QuantumCircuit) -> tuple:
+        """Shared signal-retention estimate used by :meth:`assess_circuit` and
+        the phenomenological blend so the two paths cannot disagree.
+
+        ``signal_retention = coherence_survival * depolarization_survival``
+        where ``coherence_survival = exp(-t_circuit / T2)`` (T2 dephasing over
+        the decomposed quantum-evolution time) and
+        ``depolarization_survival = (1-depol_1q)**est_1q * (1-depol_2q)**est_2q``
+        (cumulative per-gate depolarization, temperature-independent). ``est_1q``
+        and ``est_2q`` are the *decomposed* gate counts from
+        :meth:`_decomposed_cost` (compiled blocks expanded to their 2q-gate
+        cost), so a Shor run whose modular-exponentiation block hides ~10^3
+        entangling gates is damped by all of them, not just its logical depth.
+
+        Returns ``(coherence_survival, depolarization_survival,
+        signal_retention, t_circuit_s, est_1q, est_2q)``.
+        """
+        _, _, _, t_circuit, est_2q, est_1q = self._decomposed_cost(circuit)
+        t2 = max(self._t2, 1e-15)
+        coherence_survival = math.exp(-t_circuit / t2)
+        d1 = self.profile.depol_1q
+        d2 = self.profile.depol_2q
+        depol_survival = ((1.0 - d1) ** max(est_1q, 0)
+                         * (1.0 - d2) ** max(est_2q, 0))
+        signal_retention = coherence_survival * depol_survival
+        return (coherence_survival, depol_survival, signal_retention,
+                t_circuit, est_1q, est_2q)
 
     def assess_circuit(self, circuit: QuantumCircuit) -> dict:
         """Physical-feasibility assessment of a circuit on this chip.
@@ -652,40 +686,57 @@ class QSSCBackend(BackendV2):
         coherence window — the key limitation of a 300 K spin-defect chip.
         """
         depth = max(circuit.depth(), 1)
-        n1q, n2q, n_compiled, quantum_time_s, est_2q = self._decomposed_cost(circuit)
+        n1q, n2q, n_compiled, quantum_time_s, est_2q, est_1q = self._decomposed_cost(
+            circuit)
         duration_s = quantum_time_s + self._readout_t
         crit_path_s = depth * self._g1q + max(n2q, 0) * (self._g2q - self._g1q)
         t2 = self._t2
         budget_gates = int(t2 / self._g1q) if self._g1q > 0 else 0
         damping = 1.0 - math.exp(-duration_s / max(t2, 1e-15))
         within = duration_s <= t2
+        # Shared retention estimate (coherence + cumulative per-gate
+        # depolarization) -- the phenomenological blend uses the same helper, so
+        # assessment and run cannot disagree by construction.
+        coherence_survival, depol_survival, signal_retention, _, _, _ = (
+            self._signal_survival(circuit))
         if n_compiled > 0 and not within:
             verdict = ("contains compiled blocks (modular exponentiation / QFT / "
                        "arithmetic) whose decomposed depth (~%g 2q gates, ~%g us) "
                        "far exceeds the room/coherence budget — NOT physically "
-                       "executable at this temperature without cooling or QEC"
-                       % (est_2q, round(quantum_time_s * 1e6, 1)))
+                       "executable at this temperature without cooling or QEC "
+                       "(signal retention %.2f%%: coherence %.2f%% x depolarization "
+                       "%.2f%% over ~%g decomposed 2q gates)"
+                       % (est_2q, round(quantum_time_s * 1e6, 1),
+                          signal_retention * 100, coherence_survival * 100,
+                          depol_survival * 100, est_2q))
         elif within:
             verdict = ("fits within the T2 coherence window — physically "
-                       "executable at this temperature")
+                       "executable at this temperature (signal retention %.2f%%)"
+                       % (signal_retention * 100))
         elif damping < 0.5:
             verdict = ("partially decohered at this temperature — result is "
-                       "T2-limited; cool the chip for higher fidelity")
+                       "T2-limited; cool the chip for higher fidelity "
+                       "(signal retention %.2f%%)" % (signal_retention * 100))
         else:
             verdict = ("exceeds the room/coherence budget — not physically "
                        "executable at this temperature without cooling or "
-                       "quantum error correction")
+                       "quantum error correction (signal retention %.2f%%)"
+                       % (signal_retention * 100))
         return {
             "depth": depth,
             "n_1q": n1q, "n_2q": n2q,
             "n_compiled_blocks": n_compiled,
             "estimated_2q_decomposed": est_2q,
+            "estimated_1q_decomposed": est_1q,
             "logical_duration_us": round(crit_path_s * 1e6, 4),
             "duration_ns": round(duration_s * 1e9, 1),
             "duration_us": round(duration_s * 1e6, 4),
             "t2_us": round(t2 * 1e6, 4),
             "coherence_budget_gates": budget_gates,
             "decoherence_fraction": round(damping, 4),
+            "coherence_survival": round(coherence_survival, 4),
+            "depolarization_survival": round(depol_survival, 4),
+            "signal_retention": round(signal_retention, 4),
             "within_coherence": within,
             "verdict": verdict,
         }
@@ -699,10 +750,13 @@ class QSSCBackend(BackendV2):
 
         * **Readout error** -- each measured bit of each shot is flipped with
           probability ``site.readout_err`` (optical fluorescence readout).
-        * **Coherence damping** -- the circuit duration is estimated from its
-          depth and gate times; the distribution is blended with the maximally
-          mixed distribution by ``(1 - exp(-t_circuit / T2))``, modelling T2
-          dephasing over the sequence.
+        * **Signal-retention damping** -- the distribution is blended with the
+          maximally mixed distribution by ``(1 - signal_retention)`` where
+          ``signal_retention = exp(-t_circuit/T2) * (1-depol_1q)**est_1q *
+          (1-depol_2q)**est_2q`` (T2 dephasing over the decomposed evolution time
+          AND cumulative per-gate depolarization over the decomposed gate
+          counts). The shared :meth:`_signal_survival` helper keeps this
+          identical to :meth:`assess_circuit`'s reported retention.
 
         This runs in milliseconds regardless of qubit count, in contrast to a
         full density-matrix noise simulation.
@@ -733,14 +787,17 @@ class QSSCBackend(BackendV2):
         noisy_int = np.copy(drawn)
         for i in range(nbits):
             noisy_int = np.where(flip[:, i], np.bitwise_xor(noisy_int, 1 << i), noisy_int)
-        # --- coherence damping: blend with uniform --------------------------
-        # Use the SAME decomposed quantum-evolution time as assess_circuit, so
-        # the analytic limit agrees with the physical-feasibility verdict (a
-        # Shor run that "is NOT physically executable at 300 K" must decohere to
-        # a near-uniform distribution here, not recover its factors).
-        _, _, _, t_circuit, _ = self._decomposed_cost(circuit)
-        t2 = self._t2
-        damping = 1.0 - math.exp(-t_circuit / max(t2, 1e-12))
+        # --- signal-retention damping: blend with uniform --------------------
+        # Use the SAME _signal_survival estimate as assess_circuit (coherence *
+        # cumulative per-gate depolarization over the decomposed gate counts), so
+        # the analytic limit agrees with the physical-feasibility verdict: a
+        # Shor run whose assessment reports a near-destroyed signal must decohere
+        # to a near-uniform distribution here, not recover its factors. Before
+        # this used only the T2 term and omitted the (temperature-independent)
+        # cumulative depolarization, understating decoherence for compiled-block
+        # circuits that hide ~10^3 entangling gates.
+        _, _, signal_retention, _, _, _ = self._signal_survival(circuit)
+        damping = 1.0 - signal_retention
         uniform = rng.integers(0, 2 ** nbits, size=shots)
         final_int = np.where(rng.random(shots) < damping, uniform, noisy_int)
         # --- back to counts --------------------------------------------------

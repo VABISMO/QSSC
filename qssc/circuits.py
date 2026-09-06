@@ -23,6 +23,19 @@ from qiskit.circuit.library import (
 from qiskit.circuit.library.standard_gates import RYGate
 from qiskit.circuit.library import UnitaryGate
 
+# A run whose assessed ``signal_retention`` (coherence x depolarization
+# survival, exposed by QSSCBackend.assess_circuit) falls below this is
+# noise-dominated: its measured distribution is indistinguishable from the
+# uniform floor, so any "period" lifted out of it is a noise artifact (audit
+# issue #8). The count-based k-floor cutoff below handles registers with a
+# large uniform floor (QFT-NOS's 5 clbits), but a wide register like full
+# Shor (9 clbits) has such a small floor that a noise peak can still clear
+# k x floor; the retention gate rejects those runs outright. 1% sits below
+# every legitimate cold recovery (SiC Shor ~1.7%, NV ~5%, NV QFT-NOS ~28%)
+# and above the noise-dominated hBN runs (~0.1%). Callers without a
+# retention estimate (synthetic / ideal inputs) pass None and skip the gate.
+NOISE_RETENTION_FLOOR = 0.01
+
 
 def is_prime(n: int, k: int = 8) -> bool:
     """Miller-Rabin primality test."""
@@ -95,15 +108,41 @@ def create_period_finding_circuit(n: int, a: int) -> QuantumCircuit:
     return qc
 
 
-def postprocess_period(counts: dict, num_control: int, a: int, n: int) -> tuple:
+def postprocess_period(counts: dict, num_control: int, a: int, n: int,
+                       k: int = 2, signal_retention: Optional[float] = None) -> tuple:
     """Recover the period and, for Shor, the factors of ``n``.
 
     Returns (period, (factor1, factor2)).  A trivial result yields
     ``(None, (None, None))``.
+
+    A candidate peak is accepted only if it rises ``k``-fold above the uniform
+    floor ``total / 2**num_control``. The previous fixed 1% cutoff was vacuous
+    for QFT-NOS's reduced register (5 clbits -> 32 outcomes -> ~3.1% uniform
+    floor, already above 1%): on a noise-dominated run it filtered nothing and a
+    spurious period was reported. ``k = 2`` rejects uniform-noise outcomes
+    (which for a 5-clbit register sit at ~1x the floor, maxing ~1.2x for a few
+    thousand shots) while keeping genuine cold-run signal peaks (>= ~2x floor,
+    e.g. SiC QFT-NOS via the shallow a=11/r=2 circuit, NV Shor-15) and clean
+    ideal distributions (4x floor). It must stay below ~2.1 so the documented
+    marginal QFT-NOS recoveries (peaks just above 2x) are not lost, and at/above
+    2 so uniform noise is suppressed.
+
+    A wide register (full Shor's 9 clbits -> 512 outcomes -> a tiny uniform
+    floor) defeats the count cutoff alone: a noise peak can still clear
+    ``k x floor``. When the caller supplies the run's ``signal_retention``
+    (coherence x depolarization survival, from ``QSSCBackend.assess_circuit``),
+    a noise-dominated run -- retention below :data:`NOISE_RETENTION_FLOOR` --
+    is rejected outright so it cannot report a noise-artifact period (audit
+    issue #8). Callers without a retention estimate (synthetic / ideal inputs)
+    pass ``None`` and skip this gate.
     """
+    if (signal_retention is not None
+            and signal_retention < NOISE_RETENTION_FLOOR):
+        return None, (None, None)
     total = sum(counts.values())
+    floor = total / (2 ** num_control) if num_control > 0 else total
     for state, count in sorted(counts.items(), key=lambda x: x[1], reverse=True)[:12]:
-        if count < 0.01 * total:
+        if count <= k * floor:
             continue
         dec = int(state.replace(" ", ""), 2)
         phase = dec / (2 ** num_control)
@@ -179,17 +218,27 @@ def create_qft_nos_circuit(n: int, a: Optional[int] = None, rng=None):
 
 
 def postprocess_period_swapless(counts: dict, num_control: int,
-                                a: int, n: int) -> tuple:
+                                a: int, n: int, k: int = 2,
+                                signal_retention: Optional[float] = None) -> tuple:
     """Period + factors for the swapless QFT-NOS readout.
 
     Identical maths to :func:`postprocess_period` but reverses the bit order
     of each measured string first, because the swapless inverse QFT leaves the
     counting register in reversed bit order.  Returns ``(period, (p, q))``.
+
+    Uses the same register-aware ``k``-fold-above-uniform-floor acceptance and
+    the same ``signal_retention`` noise gate as :func:`postprocess_period`
+    (see its docstring): the old fixed 1% cutoff was vacuous for the 5-clbit
+    QFT-NOS register and admitted noise artifacts.
     """
+    if (signal_retention is not None
+            and signal_retention < NOISE_RETENTION_FLOOR):
+        return None, (None, None)
     total = sum(counts.values())
+    floor = total / (2 ** num_control) if num_control > 0 else total
     for state, count in sorted(counts.items(), key=lambda x: x[1],
                                reverse=True)[:12]:
-        if count < 0.01 * total:
+        if count <= k * floor:
             continue
         raw = state.replace(" ", "")
         # swapless QFT: measured MSB..LSB is reversed -> reverse to recover phase

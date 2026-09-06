@@ -53,12 +53,26 @@ class DefectProfile:
     # pulse to flip the spin, and the width of the photocurrent dip in the ODMR
     # sweep. NV ~5 MHz; hBN-VB ensemble ~tens of MHz; SiC V_Si ensemble ~1-2 MHz.
     odmr_linewidth_hz: float = 5.0e6
-    # --- Real control/readout timings (nanoseconds) from the literature ---
+    # --- Control/readout timings + gate-error probabilities ----------------
+    # NOTE: ASPIRATIONAL TARGET SPEC, not a measured device. The T1/T2/readout
+    # numbers above are literature-anchored (each profile's `references` tuple
+    # cites the source), but the gate durations and depolarizing probabilities
+    # below are NOT cited -- no supplier datasheet or paper quotes them for this
+    # architecture. They encode a best-case engineering target for a
+    # room-temperature defect-spin chip, not a characterized device. Published
+    # multi-qubit entangling-gate fidelities for NV-diamond / defect-spin
+    # architectures are well below depol_2q = 0.002 (99.8%).
+    # Sensitivity: cold recovery of Shor-15 on NV requires depol_2q <=~ 0.002 at
+    # ~10**3 decomposed 2q gates. Signal retention is
+    #   exp(-t/T2) * (1-depol_1q)**est_1q * (1-depol_2q)**est_2q
+    # (see QSSCBackend._signal_survival); re-derive from this formula before
+    # trusting any factor-recovery claim, and sweep these constants to test it.
     gate_1q_ns: float = 50.0           # single-qubit (microwave pi-pulse) duration
     gate_2q_ns: float = 400.0          # two-qubit (entangling) gate duration
     readout_ns: float = 800.0          # optical spin-readout integration time
     init_ns: float = 200.0             # optical initialisation time
     # Depolarizing error probabilities per gate (drive crosstalk / non-ideal MW)
+    # -- aspirational, uncited (see the NOTE above).
     depol_1q: float = 0.0008
     depol_2q: float = 0.006
     # --- Hyperfine geometry: number of equivalent coupled nuclei (for the ODMR

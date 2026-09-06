@@ -95,11 +95,15 @@ def test_bb84_eve_detected_on_platform(profile):
 
 
 # ---------------------------------------------------------------------------
-# deeper algorithms — validated cold (coherence window open) on every platform.
-# At 300 K hBN (T2 ~ 2 us) any multi-2q-gate circuit (Grover, QFT, arithmetic,
-# Shor) decoheres, so the correct-result validation runs cold where coherence
-# is not the limiting factor. The 300 K decoherence behaviour is checked
-# separately below.
+# deeper algorithms — cold recovery is profile-dependent (audit issue #7).
+# NV (diamond) is the compute profile: low depol_2q (0.002) keeps enough signal
+# to recover Shor-15, QFT-NOS and period-4 at 1 mK. SiC (marginal) recovers
+# Shor-15 cold via the retry's shallow a=11/r=2 coprime on full Shor's wide
+# 9-clbit register (tiny uniform floor -> count cutoff lenient), but NOT QFT-NOS
+# (5-clbit register, high floor -> the register-aware cutoff rejects its
+# borderline ~7 % signal, audit issue #8). hBN is a sensor: retention ~0.1 %
+# sits below the noise gate, so it recovers nothing cold. Shallow algorithms
+# (Grover, QFT, arithmetic) are short enough to recover cold on every profile.
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("profile", PLATFORMS)
 def test_grover_on_platform(profile):
@@ -128,26 +132,47 @@ def test_qft_uniform_on_platform(profile):
 def test_shor_15_cold_on_platform(profile):
     r = _run("shor", profile, COLD, n=15, a=7, shots=4096)
     assert "error" not in r
-    assert r["factors"] == [3, 5]
-    assert r["success"] is True
+    if profile == "hBN-VB":
+        # sensor: retention ~0.1 % -> noise gate rejects -> no factors
+        assert r["factors"] is None
+        assert r["success"] is False
+    else:
+        # NV (compute) and SiC (marginal) recover cold. The retry's chosen
+        # coprime fixes the factor order: a=7/r=4 -> (3,5), a=11/r=2 -> (5,3).
+        assert r["factors"] is not None
+        assert r["factors"][0] * r["factors"][1] == 15
+        assert r["success"] is True
 
 
 @pytest.mark.parametrize("profile", PLATFORMS)
 def test_qftnos_15_cold_on_platform(profile):
     r = _run("qftnos", profile, COLD, n=15, a=7, shots=4096)
     assert "error" not in r
-    assert r["factors"] == [3, 5]
-    assert r["success"] is True
     # QFT-NOS must use fewer qubits than full Shor
     assert r["shor_comparison"] is not None
     assert r["num_qubits"] < r["shor_comparison"]["num_qubits"]
+    if profile == "NV":
+        # compute: retry finds the shallow a=11/r=2 circuit -> recovers (5,3)
+        assert r["factors"] is not None
+        assert r["factors"][0] * r["factors"][1] == 15
+        assert r["success"] is True
+    else:
+        # hBN/SiC: the 5-clbit register's high uniform floor + noise gate
+        # reject the weak signal -> no spurious factors (audit issue #8).
+        assert r["factors"] is None
+        assert r["success"] is False
 
 
 @pytest.mark.parametrize("profile", PLATFORMS)
 def test_period_15_cold_on_platform(profile):
     r = _run("period", profile, COLD, n=15, a=7, shots=4096)
     assert "error" not in r
-    assert r["period"] == 4  # 7 mod 15 has period 4
+    if profile == "NV":
+        assert r["period"] == 4  # 7 mod 15 has period 4; NV retains the signal
+    else:
+        # hBN/SiC: a=7/r=4 needs the deep (925-gate) decomposition -> retention
+        # below the noise gate -> no period reported (audit issues #7/#8).
+        assert r["period"] != 4
 
 
 # ---------------------------------------------------------------------------

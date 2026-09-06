@@ -89,15 +89,20 @@ def run_circuit(req: dict) -> dict:
             qc = create_shor_circuit(n, a=a, rng=rng)[0]
             res = b.run(qc, shots=shots).result()
             counts = res.get_counts()
-            r, factors = postprocess_period(counts, qc.num_clbits, a, n)
+            _ret = float(res.assessment.get("signal_retention", 0.0) or 0.0)
+            r, factors = postprocess_period(counts, qc.num_clbits, a, n,
+                                            signal_retention=_ret)
             if factors[0] and factors[0] * factors[1] == n:
                 break
             chosen_a = None
         ok = bool(factors[0]) and factors[0] * factors[1] == n
+        _retention = float(getattr(res, "assessment", {}).get(
+            "signal_retention", 0.0) or 0.0)
         result.update({"n": n, "a": a, "counts": counts,
                        "period": r,
                        "factors": list(factors) if factors[0] else None,
-                       "success": ok, "attempts": attempt + 1})
+                       "success": ok, "attempts": attempt + 1,
+                       "signal_retention": round(_retention, 4)})
         result.update(_circuit_meta(qc))
 
     elif algo == "period":
@@ -112,8 +117,12 @@ def run_circuit(req: dict) -> dict:
         # recover the period by iterating the top phase peaks (not just the
         # single top state): the k=0 peak (phase 0 -> denominator 1) ties with
         # the k/r peaks, so a naive max-counts lookup would wrongly report
-        # period 1. postprocess_period skips trivial / odd candidates.
-        r, _ = postprocess_period(counts, qc.num_clbits, a, n)
+        # period 1. postprocess_period skips trivial / odd candidates, and the
+        # signal_retention gate rejects noise-dominated runs so a starved run
+        # cannot report a noise-artifact period (audit issue #8).
+        _ret = float(res.assessment.get("signal_retention", 0.0) or 0.0)
+        r, _ = postprocess_period(counts, qc.num_clbits, a, n,
+                                  signal_retention=_ret)
         bs = max(counts, key=counts.get)
         phase = int(bs.replace(" ", ""), 2) / 2 ** qc.num_clbits
         frac = Fraction(phase).limit_denominator(n - 1)
@@ -279,7 +288,9 @@ def run_circuit(req: dict) -> dict:
             qc, a = create_qft_nos_circuit(n, a=a, rng=rng)
             res = b.run(qc, shots=shots).result()
             counts = res.get_counts()
-            r, factors = postprocess_period_swapless(counts, qc.num_clbits, a, n)
+            _ret = float(res.assessment.get("signal_retention", 0.0) or 0.0)
+            r, factors = postprocess_period_swapless(counts, qc.num_clbits, a, n,
+                                                    signal_retention=_ret)
             if factors[0] and factors[0] * factors[1] == n:
                 break
             chosen_a = None
@@ -293,11 +304,14 @@ def run_circuit(req: dict) -> dict:
             }
         except Exception:  # noqa: BLE001
             comparison = None
+        _retention = float(getattr(res, "assessment", {}).get(
+            "signal_retention", 0.0) or 0.0)
         result.update({"n": n, "a": a, "counts": counts, "period": r,
                        "factors": list(factors) if factors[0] else None,
                        "success": ok, "attempts": attempt + 1,
                        "counting_qubits": qc.num_clbits,
-                       "shor_comparison": comparison})
+                       "shor_comparison": comparison,
+                       "signal_retention": round(_retention, 4)})
         result.update(_circuit_meta(qc))
 
     elif algo == "bb84":
