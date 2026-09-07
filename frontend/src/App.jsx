@@ -7,6 +7,30 @@ import {
   CompassRose, GyroPanel, MagnetoImage, SensorField,
 } from './components.jsx'
 
+// Fallback firmware command list (all 17 verbs). Used in the "Reply & readout"
+// empty state when the API isn't running or is a stale build serving fewer
+// commands, so every command we added is always visible. The live API list
+// (fpga.protocol) takes precedence when it serves the full set.
+const FALLBACK_PROTOCOL = [
+  { cmd: 'DRIVE_EMITTER', args: 'index duration_ms', desc: 'pump one CQD emitter at full grayscale (gs=4095)' },
+  { cmd: 'SET_EMITTER', args: 'index level(0..4095)', desc: "arm one channel's 12-bit grayscale level" },
+  { cmd: 'DRIVE_PATTERN', args: 'duration_ms', desc: 'fire ALL armed channels in parallel' },
+  { cmd: 'CLEAR_EMITTERS', args: '—', desc: 'disarm all channels (gs=0)' },
+  { cmd: 'APPLY_PULSE', args: 'qubit freq_khz amp duration_ns phase_mrad', desc: 'program the ADF4351 microwave pulse' },
+  { cmd: 'READ_DETECTOR', args: 'site', desc: 'one AD7616 16-bit photocurrent sample' },
+  { cmd: 'READ_DETECTORS', args: '—', desc: 'all 64 detector channels in one parallel frame' },
+  { cmd: 'CLEAR_DETECTORS', args: '—', desc: 'no-op on the ADC (no counters to clear)' },
+  { cmd: 'CALIBRATE', args: '—', desc: 'emitter→site→detector sweep, builds the readout LUT' },
+  { cmd: 'READ_RNG', args: 'n_bytes', desc: 'harvest n_bytes of von-Neumann-debiased AD7616 LSB-noise entropy (qrng_entropy.v)' },
+  { cmd: 'ODMR_SWEEP', args: 'qubit f_start_khz f_stop_khz n_points', desc: 'sweep the ADF4351 across the NV resonance, one AD7616 sample per point' },
+  { cmd: 'READ_COMPASS', args: '[n_avg]', desc: '4-axis ODMR doublet fit → ambient B-vector + heading (compass_measure)' },
+  { cmd: 'READ_GYRO', args: 'T_ns', desc: 'Ramsey π/2–T–π/2 → rotation rate (gyro_measure)' },
+  { cmd: 'READ_LOCKIN', args: 'ref_khz n_cycles', desc: 'lock-in accumulator: on-minus-off differential over n cycles (lockin_integrated_readout)' },
+  { cmd: 'RUN_SEQUENCE', args: 'kind n_windows', desc: 'pulse-sequence engine stub: ramsey / hahn / cpmg → n readout codes (#58 RTL pending)' },
+  { cmd: 'STATUS', args: '—', desc: 'board self-status: PLL lock, ADC busy, rail voltages, die temperature' },
+  { cmd: 'RESET', args: '—', desc: 'soft reset of the TLC5947 / ADF4351 / ADC peripheral state' },
+]
+
 const PROFILES = [
   { id: 'NV', label: 'Diamond · NV centre (default / compute)' },
   { id: 'hBN-VB', label: 'hBN · V_B⁻ (boron-vacancy · sensor)' },
@@ -531,7 +555,7 @@ export default function App() {
       {/* ============================= MAIN TABS ============================= */}
       <div className="maintabs">
         <div className={`maintab ${mainTab === 'hardware' ? 'active' : ''}`} onClick={() => setMainTab('hardware')}>
-          <span className="mt-ic">⬡</span> Hardware
+          <span className="mt-ic">⬡</span> Circuits
         </div>
         <div className={`maintab ${mainTab === 'fpga' ? 'active' : ''}`} onClick={() => { setMainTab('fpga'); refreshFpga() }}>
           <span className="mt-ic">⊞</span> FPGA
@@ -701,12 +725,14 @@ export default function App() {
               {!fpgaReply && (
                 <div className="fpga-emptyhelp">
                   <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Available firmware commands — click one to run it, or type it in the Raw command box.</div>
-                  {fpga?.protocol?.map(p => (
-                    <button key={p.cmd} type="button" className="fpga-helpcmd" onClick={() => sendFpga(p.args === '—' ? p.cmd : `${p.cmd} ${p.cmd === 'READ_RNG' ? '32' : p.cmd === 'READ_DETECTOR' ? '0' : p.cmd === 'DRIVE_EMITTER' ? '0 50' : p.cmd === 'SET_EMITTER' ? '0 4095' : p.cmd === 'DRIVE_PATTERN' ? '50' : p.cmd === 'APPLY_PULSE' ? '0 2870000 63 200 0' : ''}`.trim())}>
+                  <div className="fpga-helpscroll">
+                  {(fpga?.protocol?.length >= FALLBACK_PROTOCOL.length ? fpga.protocol : FALLBACK_PROTOCOL).map(p => (
+                    <button key={p.cmd} type="button" className="fpga-helpcmd" onClick={() => sendFpga(p.args === '—' ? p.cmd : `${p.cmd} ${p.cmd === 'READ_RNG' ? '32' : p.cmd === 'READ_DETECTOR' ? '0' : p.cmd === 'DRIVE_EMITTER' ? '0 50' : p.cmd === 'SET_EMITTER' ? '0 4095' : p.cmd === 'DRIVE_PATTERN' ? '50' : p.cmd === 'APPLY_PULSE' ? '0 2870000 63 200 0' : p.cmd === 'ODMR_SWEEP' ? '0 2860000 2880000 64' : p.cmd === 'READ_COMPASS' ? '5000' : p.cmd === 'READ_GYRO' ? '1000000' : p.cmd === 'READ_LOCKIN' ? '1000 500' : p.cmd === 'RUN_SEQUENCE' ? 'ramsey 8' : ''}`.trim())}>
                       <span className="mono fpga-helpcmd-name">{p.cmd}{p.args !== '—' ? <span className="muted"> {p.args}</span> : null}</span>
                       <span className="fpga-helpcmd-desc">{p.desc}</span>
                     </button>
                   ))}
+                  </div>
                 </div>
               )}
               {fpgaReply && (
@@ -938,7 +964,7 @@ export default function App() {
               <SensorField data={thermal} error={thermalErr} loading={thermalLoading} promptText="Press Measure to image the temperature field." />
             </div>
 
-            <div className="card" style={{ gridColumn: '1 / -1' }}>
+            <div className="card">
               <h2><span className="dot" />Current imaging (Ampère, through enclosures)</h2>
               <div className="hint">Every current makes a B field (µ₀I / 2πr); the array images it contactlessly — short-circuit localization, battery-cell current signatures, chip power-rail mapping, all through the enclosure.</div>
               <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>

@@ -568,6 +568,23 @@ _FPGA_PROTOCOL = [
      "desc": "emitter→site→detector sweep, builds the readout LUT"},
     {"cmd": "READ_RNG", "args": "n_bytes", "reply": "<hex> <raw> <kept> <rate> / ERR",
      "desc": "harvest n_bytes of von-Neumann-debiased AD7616 LSB-noise entropy (qrng_entropy.v)"},
+    {"cmd": "ODMR_SWEEP", "args": "qubit f_start_khz f_stop_khz n_points",
+     "reply": "<n> f0 c0 f1 c1 … / ERR",
+     "desc": "sweep the ADF4351 across the NV resonance, one AD7616 sample per point"},
+    {"cmd": "READ_COMPASS", "args": "[n_avg]", "reply": "<B_nT> <heading°> <elev°> <sens_µT> <axes> / ERR",
+     "desc": "4-axis ODMR doublet fit → ambient B-vector + heading (compass_measure)"},
+    {"cmd": "READ_GYRO", "args": "T_ns", "reply": "<rate_dps> <noise_dps> <t2_µs> <grade> / ERR",
+     "desc": "Ramsey π/2–T–π/2 → rotation rate (gyro_measure)"},
+    {"cmd": "READ_LOCKIN", "args": "ref_khz n_cycles",
+     "reply": "<diff> <sigma> <snr1> <snrN> / ERR",
+     "desc": "lock-in accumulator: on-minus-off differential over n cycles (lockin_integrated_readout)"},
+    {"cmd": "RUN_SEQUENCE", "args": "kind n_windows",
+     "reply": "<n> c0 c1 … / ERR",
+     "desc": "pulse-sequence engine stub: ramsey / hahn / cpmg → n readout codes (#58 RTL pending)"},
+    {"cmd": "STATUS", "args": "—", "reply": "PLL_LOCKED … VCC3V3_mv … TEMP_C …",
+     "desc": "board self-status: PLL lock, ADC busy, rail voltages, die temperature"},
+    {"cmd": "RESET", "args": "—", "reply": "OK",
+     "desc": "soft reset of the TLC5947 / ADF4351 / ADC peripheral state"},
 ]
 _FPGA_VERBS = {p["cmd"] for p in _FPGA_PROTOCOL}
 
@@ -733,6 +750,32 @@ def fpga_qrng(n_bytes: int = 32, common_name: str = "QSSC-hw-qrng",
         "extraction": stats,
         **kp,
     }
+
+
+@app.get("/api/fpga/status")
+def fpga_status(request: Request = None):
+    """Board self-status via the ``STATUS`` firmware verb: PLL lock, ADC busy,
+    rail voltages (+3V3 / +5V / +12V_EMIT) and die temperature. Localhost-only.
+    """
+    if not _is_local(request):
+        raise HTTPException(403, "FPGA status endpoint is localhost-only.")
+    try:
+        reply = _fpga().send_command("STATUS")
+    except Exception as exc:  # pyserial link down, etc.
+        raise HTTPException(503, f"FPGA status failed: {exc}")
+    if reply == "ERR":
+        raise HTTPException(502, "FPGA STATUS returned ERR")
+    # reply: "PLL_LOCKED 1 ADC_BUSY 0 VCC3V3_mv 3300 VCC5V_mv 4980 VCC12V_mv 12050 TEMP_C 42"
+    out: dict = {}
+    toks = reply.split()
+    for k, v in zip(toks[0::2], toks[1::2]):
+        try:
+            out[k] = int(v)
+        except ValueError:
+            out[k] = v
+    return out
+
+
 # image (per-pixel 8x8 array). These model what the ADF4351 -> J3 -> A1 MW
 # chain and the 64-channel TIA + 4x AD7616 readout measure as quantum sensors.
 # ---------------------------------------------------------------------------

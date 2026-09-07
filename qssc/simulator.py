@@ -145,6 +145,17 @@ class SimulatedFPGA:
         self.lut: Dict[int, int] = {}
         t1, t2 = coherence_at_temperature(self.profile, temperature_k)
         self.t1, self.t2 = t1, t2
+        # Ambient field + rotation the sensor is subjected to (the physical
+        # quantity the on-chip compass/gyro read back). Defaults: a 500 uT
+        # field (a nearby magnet -- the NV 5 MHz linewidth cannot resolve
+        # Earth's ~50 uT field, whose ~1.6 MHz doublet split sits below the
+        # line; compass_measure's note says so) and a 100 deg/s fast spin
+        # (the as-built microdiamond sensor is rate-grade, not inertial-grade,
+        # so it responds to fast rotation, not Earth-rate). READ_COMPASS /
+        # READ_GYRO measure these; the host can change them to simulate a
+        # different environment.
+        self.b_vector_t: List[float] = [500e-6, 0.0, -200e-6]
+        self.rotation_rate_dps: float = 100.0
 
     # -- command interface -------------------------------------------------
     def send_command(self, command: str) -> str:
@@ -231,6 +242,58 @@ class SimulatedFPGA:
                 if n_bytes <= 0 or n_bytes > 4096:
                     return "ERR"
                 return self._harvest_entropy(n_bytes)
+            if head == "ODMR_SWEEP":
+                # ODMR_SWEEP <qubit> <f_start_khz> <f_stop_khz> <n_points>:
+                # the foundational sensing primitive -- sweep the ADF4351 across
+                # the NV resonance and sample one AD7616 channel per point.
+                # Returns n_points "freq_khz code" pairs (flat, count-prefixed).
+                qubit = int(parts[1])
+                f_start = int(parts[2]); f_stop = int(parts[3])
+                n_points = int(parts[4])
+                if not (0 <= qubit < self.N_SITES) or n_points <= 0 or n_points > 4096:
+                    return "ERR"
+                return self._odmr_sweep(qubit, f_start, f_stop, n_points)
+            if head == "READ_COMPASS":
+                # READ_COMPASS [n_avg]: 4-axis ODMR doublet fit -> ambient
+                # B-vector + heading. Mirrors qssc.sensors.compass_measure.
+                n_avg = int(parts[1]) if len(parts) > 1 else 1000
+                if n_avg <= 0:
+                    return "ERR"
+                return self._read_compass(n_avg)
+            if head == "READ_GYRO":
+                # READ_GYRO <T_ns>: Ramsey pi/2-T-pi/2 -> rotation rate (dps).
+                # T_ns is the free-precession window. Mirrors gyro_measure.
+                t_ns = int(parts[1])
+                if t_ns <= 0:
+                    return "ERR"
+                return self._read_gyro(t_ns)
+            if head == "READ_LOCKIN":
+                # READ_LOCKIN <ref_khz> <n_cycles>: lock-in accumulator result
+                # (on-minus-off differential over n_cycles modulation cycles).
+                # Mirrors lockin_integrated_readout + the pending RTL lock-in
+                # accumulator (#58). Reply: "diff sigma snr_single snr_int".
+                ref_khz = int(parts[1]); n_cycles = int(parts[2])
+                if n_cycles <= 0 or n_cycles > 100000:
+                    return "ERR"
+                return self._read_lockin(ref_khz, n_cycles)
+            if head == "RUN_SEQUENCE":
+                # RUN_SEQUENCE <kind> <n_windows>: pulse-sequence engine stub
+                # (#58 RTL pending). kind in {ramsey, hahn, cpmg}; returns
+                # n_windows readout codes (one per optical read window).
+                kind = parts[1] if len(parts) > 1 else "ramsey"
+                n_windows = int(parts[2]) if len(parts) > 2 else 8
+                if kind not in ("ramsey", "hahn", "cpmg") or n_windows <= 0 or n_windows > 1024:
+                    return "ERR"
+                return self._run_sequence(kind, n_windows)
+            if head == "STATUS":
+                # Self-status: PLL lock, ADC busy, rail voltages, board temp.
+                return self._status()
+            if head == "RESET":
+                # Soft reset of the TLC5947/ADF4351/ADC peripheral state.
+                self.emitter_gs = {}
+                self.sim_states = {}
+                self.lut = {}
+                return "OK"
             return "ERR"
         except Exception as exc:  # pragma: no cover - defensive
             logger.error("sim command failed: %s (%s)", command, exc)
@@ -319,6 +382,110 @@ class SimulatedFPGA:
         out = bits_to_bytes(bits[:need_bits])
         rate = (kept_total / raw_total) if raw_total else 0.0
         return f"{out.hex()} {raw_total} {kept_total} {round(rate, 4)}"
+
+    def _odmr_sweep(self, qubit: int, f_start_khz: int, f_stop_khz: int,
+                    n_points: int) -> str:
+        """Sweep the ADF4351 across the NV resonance, one AD7616 sample per point.
+
+        Models the ODMR lineshape the compass/thermometry fit on top of: a
+        Lorentzian PL dip at D (``self.sim_freq``) with the profile linewidth,
+        plus photocurrent noise. Returns ``"<n> f0 c0 f1 c1 ..."``
+        (freq_khz, 16-bit code) -- the same flat space-separated form as
+        READ_DETECTORS, count-prefixed so the host parser knows the arity.
+        """
+        f0 = self.sim_freq                     # D, Hz
+        lw = self.profile.odmr_linewidth_hz    # FWHM, Hz
+        fs = np.linspace(f_start_khz * 1e3, f_stop_khz * 1e3, n_points)
+        # Lorentzian dip: PL = bright * (1 - contrast * L(f)); L(0) = 1.
+        lor = (lw / 2.0) ** 2 / ((fs - f0) ** 2 + (lw / 2.0) ** 2)
+        codes = BRIGHT_CODE * (1.0 - ODMR_CONTRAST * lor)
+        codes += self.rng.normal(0, READOUT_NOISE, size=n_points)
+        codes = np.clip(codes, 0, ADC_MAX).astype(int)
+        # make the addressed channel reflect its pumped/bright state off-resonance
+        if self.emitter_gs.get(qubit, 0) <= 0:
+            codes = BG_CODE + self.rng.normal(0, READOUT_NOISE, size=n_points).astype(int)
+            codes = np.clip(codes, 0, ADC_MAX)
+        flat = [str(n_points)]
+        for fk, ck in zip(fs, codes):
+            flat.append(f"{int(fk / 1e3)}")      # back to kHz
+            flat.append(str(int(ck)))
+        return " ".join(flat)
+
+    def _read_compass(self, n_avg: int) -> str:
+        """4-axis ODMR doublet fit -> ambient B-vector + heading.
+
+        Thin wrapper over :func:`qssc.sensors.compass_measure` so the simulator
+        and the ``/api/compass`` endpoint share one physics model. Reply:
+        ``"<B_nT> <heading_deg> <elevation_deg> <sensitivity_ut> <resolved>"``.
+        """
+        from .sensors import compass_measure
+        res = compass_measure(self.profile, tuple(self.b_vector_t), n_avg, rng=self.rng)
+        b_nt = res.b_reconstructed_t * 1e9
+        return (f"{b_nt:.1f} {res.heading_deg:.2f} {res.elevation_deg:.2f} "
+                f"{res.sensitivity_ut:.4f} {res.resolved_axes}")
+
+    def _read_gyro(self, t_ns: int) -> str:
+        """Ramsey pi/2-T-pi/2 -> rotation rate (dps).
+
+        Wraps :func:`qssc.sensors.gyro_measure`; T_ns is the free-precession
+        window. Reply: ``"<rate_dps> <noise_dps> <t2_us> <rate_grade>"``.
+        """
+        from .sensors import gyro_measure
+        res = gyro_measure(self.profile, self.temperature_k,
+                           rotation_rate_dps=self.rotation_rate_dps,
+                           free_precession_us=t_ns / 1000.0, rng=self.rng)
+        grade = 1 if res.rate_grade else 0
+        return (f"{res.measured_rate_dps:.5f} {res.rate_noise_dps:.5f} "
+                f"{res.t2_us:.4f} {grade}")
+
+    def _read_lockin(self, ref_khz: int, n_cycles: int) -> str:
+        """Lock-in accumulator: on-minus-off differential over n_cycles.
+
+        Wraps :func:`qssc.sensors.lockin_integrated_readout`; ``ref_khz`` is the
+        modulation reference (1 kHz typical). Reply:
+        ``"<diff> <sigma> <snr_single> <snr_int>"``.
+        """
+        from .sensors import lockin_integrated_readout
+        res = lockin_integrated_readout(BRIGHT_CODE, ODMR_CONTRAST,
+                                        n_cycles, READOUT_NOISE, rng=self.rng)
+        return (f"{res['differential_code']:.1f} {res['sigma_code']:.1f} "
+                f"{res['single_frame_snr']:.2f} {res['integrated_snr']:.2f}")
+
+    def _run_sequence(self, kind: str, n_windows: int) -> str:
+        """Pulse-sequence engine stub (#58 RTL pending).
+
+        Models the optical readout of ``n_windows`` windows for a Ramsey / Hahn
+        echo / CPMG sequence as a decaying fringe of photocurrent codes, so the
+        host can exercise the sequence engine before the RTL lands. Reply:
+        ``"<n> c0 c1 ... cN-1"``.
+        """
+        t2_us = self.t2 * 1e6
+        # window times spread over ~2*T2 so the decay is visible
+        ts = np.linspace(0, 2 * t2_us, n_windows)
+        if kind == "ramsey":
+            fringe = 0.5 + 0.5 * np.cos(ts * 0.3)
+        elif kind == "hahn":
+            fringe = 0.5 + 0.5 * np.cos(ts * 0.2) * np.exp(-ts / t2_us)
+        else:  # cpmg
+            fringe = 0.5 + 0.5 * np.cos(ts * 0.15) * np.exp(-(ts / t2_us) ** 2)
+        codes = BRIGHT_CODE * fringe + self.rng.normal(0, READOUT_NOISE, size=n_windows)
+        codes = np.clip(codes, 0, ADC_MAX).astype(int)
+        return " ".join([str(n_windows)] + [str(int(c)) for c in codes])
+
+    def _status(self) -> str:
+        """Board self-status: PLL lock, ADC busy, rails, board temperature.
+
+        The rails (+3V3/+5V/+12V_EMIT) and die temperature are modelled with
+        small jitter around their nominal values; PLL locks once CALIBRATE or
+        an ODMR sweep has run (``last_mw_freq_khz`` set), else reports unlocked.
+        """
+        locked = 1 if self.last_mw_freq_khz is not None else 0
+        v33 = 3300 + int(self.rng.normal(0, 8))
+        v5 = 4980 + int(self.rng.normal(0, 12))
+        v12 = 12050 + int(self.rng.normal(0, 25))
+        temp = 42 + int(self.rng.normal(0, 1))
+        return (f"PLL_LOCKED {locked} ADC_BUSY 0 VCC3V3_mv {v33} "
+                f"VCC5V_mv {v5} VCC12V_mv {v12} TEMP_C {temp}")
 
 
 # ---------------------------------------------------------------------------

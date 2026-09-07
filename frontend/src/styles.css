@@ -307,13 +307,21 @@ textarea.code-editor:focus { outline: 1px solid var(--brand); border-color: var(
 .fpga-qrng-out { margin-top: 6px; }
 /* ---- FPGA empty-state command help ---- */
 .fpga-emptyhelp { display: flex; flex-direction: column; gap: 6px; }
+.fpga-helpscroll { display: flex; flex-direction: column; gap: 6px;
+  max-height: 680px; overflow-y: auto; padding-right: 6px;
+  scrollbar-width: thin; scrollbar-color: var(--brand, #22d3ee) var(--bg-soft, #121931); }
+.fpga-helpscroll::-webkit-scrollbar { width: 8px; }
+.fpga-helpscroll::-webkit-scrollbar-track { background: var(--bg-soft, #121931); border-radius: 4px; }
+.fpga-helpscroll::-webkit-scrollbar-thumb { background: var(--brand, #22d3ee); border-radius: 4px; }
+.fpga-helpscroll::-webkit-scrollbar-thumb:hover { background: var(--brand-2, #6366f1); }
 .fpga-helpcmd { display: flex; flex-direction: column; gap: 2px; text-align: left;
   background: rgba(34,211,238,.04); border: 1px solid var(--border); border-radius: 6px;
-  padding: 8px 10px; cursor: pointer; transition: border-color .15s, background .15s; }
-.fpga-helpcmd:hover { border-color: var(--accent, #22d3ee); background: rgba(34,211,238,.09); }
-.fpga-helpcmd-name { font-size: 12.5px; }
-.fpga-helpcmd-name .muted { font-weight: 400; }
-.fpga-helpcmd-desc { font-size: 11.5px; color: var(--dim); line-height: 1.35; }
+  padding: 8px 10px; cursor: pointer; color: var(--text);
+  transition: border-color .15s, background .15s; }
+.fpga-helpcmd:hover { border-color: var(--brand, #22d3ee); background: rgba(34,211,238,.10); }
+.fpga-helpcmd-name { font-size: 12.5px; color: var(--brand, #22d3ee); font-weight: 600; }
+.fpga-helpcmd-name .muted { font-weight: 400; color: var(--muted); }
+.fpga-helpcmd-desc { font-size: 11.5px; color: var(--muted); line-height: 1.35; }
 .qrng-hex { background: rgba(34,211,238,.06); border: 1px solid var(--border); border-radius: 6px;
   padding: 8px 10px; margin: 0; font-size: 11px; line-height: 1.5; word-break: break-all;
   white-space: pre-wrap; max-height: 120px; overflow-y: auto; }
