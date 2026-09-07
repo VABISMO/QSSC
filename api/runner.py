@@ -328,9 +328,9 @@ def run_circuit(req: dict) -> dict:
         result.update(info)
         result.update({"num_qubits": 1, "num_clbits": 1, "depth": 1})
         # bb84 never assigns `res` (it runs many 1-qubit combos inside
-        # simulate_bb84); build an honest assessment of the 1-qubit channel
-        # circuit so the dashboard verdict is not empty/NaN. A single H+measure
-        # is the deepest BB84 op and always fits the T2 window.
+        # simulate_bb84); build a representative assessment of the 1-qubit
+        # channel circuit so the dashboard verdict is not empty/NaN. A single
+        # H+measure is the deepest BB84 op and always fits the T2 window.
         _chan = _QC(1, 1); _chan.h(0); _chan.measure(0, 0)
         res = SimpleNamespace(assessment=b.assess_circuit(_chan),
                               approximate=False)

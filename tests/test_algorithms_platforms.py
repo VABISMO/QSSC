@@ -102,8 +102,10 @@ def test_bb84_eve_detected_on_platform(profile):
 # 9-clbit register (tiny uniform floor -> count cutoff lenient), but NOT QFT-NOS
 # (5-clbit register, high floor -> the register-aware cutoff rejects its
 # borderline ~7 % signal, audit issue #8). hBN is a sensor: retention ~0.1 %
-# sits below the noise gate, so it recovers nothing cold. Shallow algorithms
-# (Grover, QFT, arithmetic) are short enough to recover cold on every profile.
+# sits below the noise gate, so it recovers nothing cold. Genuinely shallow
+# algorithms (Grover, a 3-qubit QFT) are short enough to recover cold on every
+# profile; the RG QFT *multiplier* is NOT -- it is a compiled block that
+# decomposes to ~10^3 2q gates (as deep as Shor), so hBN decoheres it too.
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("profile", PLATFORMS)
 def test_grover_on_platform(profile):
@@ -117,7 +119,19 @@ def test_grover_on_platform(profile):
 def test_math_mul_on_platform(profile):
     r = _run("math", profile, COLD, op="mul", a=3, b=4, bits=4, shots=4096)
     assert "error" not in r
-    assert r["result"] == 12  # 3 * 4
+    if profile == "hBN-VB":
+        # The RGQFTMultiplier is a *compiled* block that decomposes to ~10^3
+        # two-qubit gates -- as deep as Shor, NOT a shallow circuit. hBN is a
+        # sensor: its ~1.1 ms cold T2 + depol_2q=0.006 give ~0.03 % retention,
+        # so the distribution is noise-dominated and the top bitstring is NOT
+        # the product (audit issue #7). Tie the assertion to the physics
+        # (retention below the noise floor), not to a specific noise draw.
+        assert r["assessment"]["signal_retention"] < 0.01
+        assert r["result"] != 12
+    else:
+        # NV (compute, ~8.5 % retention) and SiC (marginal, ~0.6 %) retain
+        # enough signal that the product 3 x 4 = 12 is the top bitstring.
+        assert r["result"] == 12
 
 
 @pytest.mark.parametrize("profile", PLATFORMS)
