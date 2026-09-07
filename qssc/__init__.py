@@ -31,6 +31,10 @@ from .circuits import (
     postprocess_period_swapless, create_math_circuit, grover_search,
     build_user_circuit, UserCircuitError,
 )
+from .sensors import (
+    lockin_integrated_readout, compass_measure, gyro_measure,
+    CompassResult, GyroResult,
+)
 
 __version__ = "2.0.0"
 __all__ = [
@@ -45,5 +49,7 @@ __all__ = [
     "is_prime", "select_coprime", "mod_mult_gate", "create_period_finding_circuit",
     "postprocess_period", "create_shor_circuit", "create_qft_nos_circuit",
     "postprocess_period_swapless", "create_math_circuit",
-    "grover_search", "build_user_circuit", "UserCircuitError", "__version__",
+    "grover_search", "build_user_circuit", "UserCircuitError",
+    "lockin_integrated_readout", "compass_measure", "gyro_measure",
+    "CompassResult", "GyroResult", "__version__",
 ]

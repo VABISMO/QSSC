@@ -50,4 +50,15 @@ export const api = {
   // FPGA tab — synthesis metrics + live command protocol (localhost-only)
   fpgaInfo: () => get('/api/fpga/info'),
   fpgaCommand: (command) => post('/api/fpga/command', { command }),
+  // hardware QRNG — ADC-noise entropy -> Ed25519 keypair + cert (wraps READ_RNG)
+  fpgaQrng: (o) => get(`/api/fpga/qrng?${q(o)}`),
+  // on-chip quantum sensors (compass / gyro / magneto-optic image)
+  compass: (o) => get(`/api/compass?${q(o)}`),
+  gyro: (o) => get(`/api/gyro?${q(o)}`),
+  magneto: (o) => get(`/api/magneto?${q(o)}`),
+  // contactless field-imaging sensors (ferromagnetic / geomagnetic nav / temp / current)
+  ferro: (o) => get(`/api/ferro?${q(o)}`),
+  nav: (o) => get(`/api/nav?${q(o)}`),
+  thermal: (o) => get(`/api/thermal?${q(o)}`),
+  current: (o) => get(`/api/current?${q(o)}`),
 }
