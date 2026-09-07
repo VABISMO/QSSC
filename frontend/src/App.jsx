@@ -531,7 +531,7 @@ export default function App() {
       {/* ============================= MAIN TABS ============================= */}
       <div className="maintabs">
         <div className={`maintab ${mainTab === 'hardware' ? 'active' : ''}`} onClick={() => setMainTab('hardware')}>
-          <span className="mt-ic">⬡</span> Hardware
+          <span className="mt-ic">⬡</span> Circuits
         </div>
         <div className={`maintab ${mainTab === 'fpga' ? 'active' : ''}`} onClick={() => { setMainTab('fpga'); refreshFpga() }}>
           <span className="mt-ic">⊞</span> FPGA
@@ -701,12 +701,14 @@ export default function App() {
               {!fpgaReply && (
                 <div className="fpga-emptyhelp">
                   <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Available firmware commands — click one to run it, or type it in the Raw command box.</div>
+                  <div className="fpga-helpscroll">
                   {fpga?.protocol?.map(p => (
-                    <button key={p.cmd} type="button" className="fpga-helpcmd" onClick={() => sendFpga(p.args === '—' ? p.cmd : `${p.cmd} ${p.cmd === 'READ_RNG' ? '32' : p.cmd === 'READ_DETECTOR' ? '0' : p.cmd === 'DRIVE_EMITTER' ? '0 50' : p.cmd === 'SET_EMITTER' ? '0 4095' : p.cmd === 'DRIVE_PATTERN' ? '50' : p.cmd === 'APPLY_PULSE' ? '0 2870000 63 200 0' : ''}`.trim())}>
+                    <button key={p.cmd} type="button" className="fpga-helpcmd" onClick={() => sendFpga(p.args === '—' ? p.cmd : `${p.cmd} ${p.cmd === 'READ_RNG' ? '32' : p.cmd === 'READ_DETECTOR' ? '0' : p.cmd === 'DRIVE_EMITTER' ? '0 50' : p.cmd === 'SET_EMITTER' ? '0 4095' : p.cmd === 'DRIVE_PATTERN' ? '50' : p.cmd === 'APPLY_PULSE' ? '0 2870000 63 200 0' : p.cmd === 'ODMR_SWEEP' ? '0 2860000 2880000 64' : p.cmd === 'READ_COMPASS' ? '5000' : p.cmd === 'READ_GYRO' ? '1000000' : p.cmd === 'READ_LOCKIN' ? '1000 500' : p.cmd === 'RUN_SEQUENCE' ? 'ramsey 8' : ''}`.trim())}>
                       <span className="mono fpga-helpcmd-name">{p.cmd}{p.args !== '—' ? <span className="muted"> {p.args}</span> : null}</span>
                       <span className="fpga-helpcmd-desc">{p.desc}</span>
                     </button>
                   ))}
+                  </div>
                 </div>
               )}
               {fpgaReply && (
@@ -938,7 +940,7 @@ export default function App() {
               <SensorField data={thermal} error={thermalErr} loading={thermalLoading} promptText="Press Measure to image the temperature field." />
             </div>
 
-            <div className="card" style={{ gridColumn: '1 / -1' }}>
+            <div className="card">
               <h2><span className="dot" />Current imaging (Ampère, through enclosures)</h2>
               <div className="hint">Every current makes a B field (µ₀I / 2πr); the array images it contactlessly — short-circuit localization, battery-cell current signatures, chip power-rail mapping, all through the enclosure.</div>
               <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>

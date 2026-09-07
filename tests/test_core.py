@@ -138,6 +138,50 @@ def test_simulated_fpga_protocol():
     assert fpga.send_command("CAPTURE_FRAME") == "ERR"
 
 
+def test_simulated_fpga_sensing_commands():
+    # Sensing + status verbs added on top of the raw readout protocol:
+    # ODMR_SWEEP / READ_COMPASS / READ_GYRO / READ_LOCKIN / RUN_SEQUENCE /
+    # STATUS / RESET. Each wraps the qssc.sensors physics (or models the #58
+    # RTL stub) and must reply with a parseable, in-range payload or ERR.
+    fpga = SimulatedFPGA("NV", seed=2)
+    # ODMR_SWEEP: count-prefixed freq/code pairs, dip near D=2.87 MHz-kHz.
+    sweep = fpga.send_command("ODMR_SWEEP 0 2860000 2880000 16").split()
+    assert int(sweep[0]) == 16
+    assert len(sweep) == 1 + 16 * 2
+    assert all(t.lstrip("-").isdigit() for t in sweep[1:])
+    # READ_COMPASS: B_nT heading elev sens axes -- 500 uT default resolves (>0 axes).
+    comp = fpga.send_command("READ_COMPASS 5000").split()
+    assert len(comp) == 5
+    assert float(comp[0]) > 0.0          # reconstructed |B| in nT
+    assert int(comp[4]) >= 1             # at least one <111> axis resolved
+    # READ_GYRO: rate noise t2 grade -- rate-grade sensor (grade=1).
+    gyro = fpga.send_command("READ_GYRO 1000000").split()
+    assert len(gyro) == 4
+    assert float(gyro[2]) > 0.0          # T2 in us
+    assert int(gyro[3]) in (0, 1)
+    # READ_LOCKIN: diff sigma snr1 snrN -- integrated SNR > single-frame SNR.
+    li = fpga.send_command("READ_LOCKIN 1000 500").split()
+    assert len(li) == 4
+    assert float(li[3]) > float(li[2])
+    # RUN_SEQUENCE: count-prefixed readout codes, kind-validated.
+    seq = fpga.send_command("RUN_SEQUENCE hahn 8").split()
+    assert int(seq[0]) == 8
+    assert len(seq) == 9
+    assert all(0 <= int(c) <= 65535 for c in seq[1:])
+    assert fpga.send_command("RUN_SEQUENCE badseq 8") == "ERR"
+    # STATUS: keyed self-status report.
+    st = fpga.send_command("STATUS")
+    assert "PLL_LOCKED" in st and "TEMP_C" in st and "VCC3V3_mv" in st
+    # RESET clears armed state -> a previously-armed channel reads background.
+    fpga.send_command("SET_EMITTER 5 4095")
+    assert fpga.send_command("RESET") == "OK"
+    assert int(fpga.send_command("READ_DETECTOR 5")) < 10000
+    # arg validation -> ERR
+    assert fpga.send_command("READ_GYRO -1") == "ERR"
+    assert fpga.send_command("ODMR_SWEEP 0 1 2 0") == "ERR"
+    assert fpga.send_command("READ_LOCKIN 1 0") == "ERR"
+
+
 def test_readout_odmr_dip():
     # CQD pump -> graphene detector photocurrent -> ODMR dip at resonance.
     # A pumped site with no resonant MW reads bright (ms=0, high code); a
