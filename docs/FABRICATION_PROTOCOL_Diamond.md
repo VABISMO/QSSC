@@ -12,6 +12,26 @@
 
 > **On-chip emitter (no big diodes).** This variant keeps the **on-chip CQD emitter** as the pump — no external laser diode is required. (The SiC variant is the one that needs a different on-chip emitter; diamond reuses the green CQD unchanged.)
 
+> **Two diamond routes, one canonical die (audit issue #15).** The QSSC chip is
+> built around a single canonical **20 × 20 mm two-faced die** (130 pads, 2.5 mm
+> pitch, 64 electrodes + 1 common per face — see
+> `hardware/HARDWARE_DESIGN.md`). The diamond host can be realized two ways,
+> both centred on that die:
+> 1. **Bulk ¹²C-enriched CVD diamond** — the **compute** route described in this
+>    protocol (T₂ ≈ 1.8 ms at 300 K, enough to run small Shor-15). This is the
+>    route the `NV` simulator profile's 300 K compute claim is scoped to.
+> 2. **Spin-coated NV⁻ microdiamond in TEOS sol-gel** — the **sensor-array**
+>    route (the microdiamond-layer option above / `FABRICATION_PROTOCOL_P0.md`):
+>    ~100 nm pre-activated microdiamonds give µs–tens-of-µs ensemble T₂
+>    (surface-proximity-limited), suitable for sensing, **not** for running
+>    quantum algorithms. Do **not** read the 1.8 ms / 300 K-compute figure as
+>    applying to the as-built microdiamond sensor array — it is a bulk-CVD
+>    compute-material figure.
+>
+> This protocol documents the bulk-CVD compute route; a full microdiamond
+> sensor-array protocol rewrite is flagged as a follow-up (the P0 prototype
+> covers the home-lab version today).
+
 ---
 
 ## 1. Abstract
@@ -180,8 +200,46 @@ Only the **host** and one optional anneal change. Everything else (CQD chemicals
 ### 5.1 Electroluminescence (CQD array) — unchanged
 Drive each pixel 0–15 V, confirm turn-on 4–8 V and broadband green EL; ASE check (FWHM narrowing < 25 nm). As in the hBN protocol.
 
+> **At-the-sample optical power (mandatory, audit issue #14).** The CQD
+> radiance target (≥ 10 cd/m², Sec. 1) and the ODMR pump budget (~1 mW at the
+> sample, Sec. 5.2) sit ~4 decades apart (see the §5.2 link budget). Before any
+> ODMR run, place a **calibrated lab optical power meter** (µW-class thermal /
+> Si photodiode sensor head + meter, e.g. a Thorlabs PM100 series power sensor)
+> at the sample plane — **directly where the diamond will sit** — and record the
+> green pump power with the driven pixel on. This is a **characterization
+> instrument**, not a design part of the chip (it lives on the bench, never on
+> the PCB): it reconciles the radiance spec with the watt-level pump budget and
+> tells you whether the on-chip CQD emitter actually delivers the ~1 mW the
+> ODMR step assumes, or whether an external 532 nm assist is needed for the
+> first measurement. Record the reading in the run log. No discrete photodiode
+> is added to the chip itself.
+
 ### 5.2 ODMR of NV⁻ in diamond
 4. **Optical:** on-chip green CQD emitter (~532 nm, ~1 mW at the sample) — no external laser. Collect NV⁻ PL at **637–800 nm** through the **650 nm red photographic long-pass filter** (passes the red/NIR NV PL, blocks the 532 nm green pump) into the **on-chip graphene/MoS₂ detector array**. No Si APD / discrete photodiode.
+
+> **Radiance → watt link budget (audit issue #14).** The two headline optical
+> numbers are measured at different points in the chain and are **not
+> contradictory**:
+>
+> - **Radiance ≥ 10 cd/m²** (Sec. 1) is the CQD emitter's *surface brightness*
+>   into 2π — the spec the EL/ASE check verifies. Converting: 10 cd/m² ≈
+>   14.6 mW·sr⁻¹·m⁻² for a Lambertian green source (1 cd ≈ 1.46 mW·sr⁻¹ at
+>   532 nm via the photopic-luminous-efficiency peak). A single 1 mm² pixel
+>   radiating into 2π sr therefore emits ~14.6 mW·sr⁻¹·m⁻² × 1 mm² × … ≈
+>   **45–50 nW** isotropic-equivalent at the source surface.
+> - **~1 mW at the sample** (above) is the *pump irradiance* the NV⁻ ensemble
+>   needs for measurable ODMR — the on-chip CQD emitter is driven harder
+>   (overdrive into the ASE regime, Sec. 1.7) and the diamond is held within
+>   ~tens of µm of the emitter, so the collected solid angle is large and the
+>   drive is concentrated onto the ~3×3 mm plate, not spread over 2π.
+>
+> The ~4-decade gap is therefore the **collection geometry + overdrive** factor
+> (Lambertian-spread → near-field concentration), not a missing watt. The build
+> drives the **on-chip CQD emitter** to ~1 mW at the sample; verify it with the
+> §5.1 power meter before relying on it for ODMR. If the on-chip emitter falls
+> short, an external 532 nm laser diode through the same optical path is the
+> fallback for the first characterization only — the chip's defining demo is
+> the on-chip-pumped ODMR.
 5. **Microwave:** sweep **2.80–2.94 GHz** from the function generator / ADF4351 through the CPW. Modulate MW at 1 kHz for lock-in detection of the ODMR dip.
 6. **Expected resonance:** a single dip at **D ≈ 2.87 GHz** (the ¹⁴N 3-line hyperfine, A ≈ 2.16 MHz, is sub-linewidth and usually merges into one dip at B=0; it splits into a doublet under a static B₀). ODMR contrast **2–30 %** (ensemble/single), linewidth **1–10 MHz**. NV⁻ ODMR contrast is **higher** than V_B⁻ (0.5–3 %), so readout is easier.
 7. **Magnetic field sweep:** apply B₀ along the NV axis; observe D shift D(B) = D₀ ± γ_e·B₀, γ_e/2π ≈ 28 GHz/T; the resonance splits into a doublet — confirms the S=1 triplet.
