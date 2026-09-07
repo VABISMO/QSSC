@@ -51,9 +51,14 @@ Run:  python3 tools/route_qssc_pcb.py     (needs system python3 with pcbnew)
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pcbnew
+from _kicad_compat import patch_swig_iterators, track_width_nm, exit_cleanly
+
+patch_swig_iterators()
 
 PCB_PATH = Path(
     os.environ.get(
@@ -62,16 +67,20 @@ PCB_PATH = Path(
     )
 )
 
-# layer ids (KiCad 8 fixed copper indices). The GND and +3V3 *plane* layers are
-# detected dynamically from the board's layer labels (In1.Cu is labelled "GND",
-# the +3V3 plane is labelled "PWR" -- In2.Cu on BOTH the main board and the chip
-# module, post-HDI-pivot), so this script works for either 6-layer stackup.
-F_CU = 0
-IN1_CU = 1      # GND plane (label "GND")
-IN2_CU = 2      # +3V3 plane (label "PWR") on both boards (HDI: adjacent to F.Cu)
-IN3_CU = 3      # signal
-IN4_CU = 4      # signal
-B_CU = 31
+# layer ids. Copper indices are NOT fixed across KiCad releases: KiCad 8/9
+# number F.Cu=0, In1.Cu=1 ... B.Cu=31, while KiCad 10 interleaves tech layers
+# with copper (F.Cu=0, B.Cu=2, In1.Cu=4, In2.Cu=6, ...). Always derive them
+# from the binding so the tools run on both. The GND and +3V3 *plane* layers
+# are in addition detected dynamically from the board's layer labels (In1.Cu
+# is labelled "GND", the +3V3 plane is labelled "PWR" -- In2.Cu on BOTH the
+# main board and the chip module, post-HDI-pivot), so this script works for
+# either 6-layer stackup.
+F_CU = pcbnew.F_Cu
+IN1_CU = pcbnew.In1_Cu      # GND plane (label "GND")
+IN2_CU = pcbnew.In2_Cu      # +3V3 plane (label "PWR") on both boards (HDI: adjacent to F.Cu)
+IN3_CU = pcbnew.In3_Cu      # signal
+IN4_CU = pcbnew.In4_Cu      # signal
+B_CU = pcbnew.B_Cu
 
 GRID_STEP_NM = 10_000_000          # 10 mm stitching grid
 VIA_DIAM_NM = 600_000              # 0.6 mm stitching / rail-pad via
@@ -127,10 +136,14 @@ def _find_plane_layer(board, label):
     """Return the layer ID of the copper layer whose user label == `label`
     ("GND" or "PWR"), or None. The main board labels In1.Cu="GND" and
     In4.Cu="PWR"; the chip module labels In1.Cu="GND" and In2.Cu="PWR". Avoids
-    CuStack() (a bare SwigPyObject in this build after board mutation)."""
-    n = board.GetCopperLayerCount()
-    cands = list(range(n - 1)) + [pcbnew.B_Cu]
-    for lid in cands:
+    CuStack() (a bare SwigPyObject in this build after board mutation).
+
+    Iterate the full layer-ID range filtered to copper layers: KiCad >= 10
+    interleaves tech layers with copper, so raw copper IDs are no longer
+    contiguous (F.Cu=0, B.Cu=2, In1.Cu=4, In2.Cu=6, ...)."""
+    for lid in range(board.GetCopperLayerStackMaxId() + 1):
+        if not pcbnew.IsCopperLayer(lid):
+            continue
         try:
             if board.GetLayerName(lid) == label:
                 return lid
@@ -163,7 +176,7 @@ def _clear_routed(board):
             # strip only this script's own WIDE vias (0.6 mm stitching / rail-pad);
             # KEEP the <= VIP_MAX_NM via-in-pad VIPs owned by route_signals
             # (GND 0.2 mm microvias, +3V3 0.3 mm THRU vias on the BGA).
-            if t.GetWidth() > VIP_MAX_NM:
+            if track_width_nm(t) > VIP_MAX_NM:
                 board.Remove(t)
         else:
             # PCB_TRACK: every GND/+3V3 tie trace is THIS script's (route_signals
@@ -256,11 +269,11 @@ def _signal_obstacles(board):
             continue
         if isinstance(t, pcbnew.PCB_VIA):
             c = t.GetPosition()
-            circles.append((c.x, c.y, t.GetWidth() / 2))
+            circles.append((c.x, c.y, track_width_nm(t) / 2))
         else:
             s = t.GetStart()
             e = t.GetEnd()
-            hw = t.GetWidth() / 2
+            hw = track_width_nm(t) / 2
             seg = (s.x, s.y, e.x, e.y, hw)
             segs.append(seg)
             if t.GetLayer() == pcbnew.F_Cu:
@@ -282,7 +295,7 @@ def _surviving_via_centers(board):
         if not isinstance(t, pcbnew.PCB_VIA):
             continue
         nm = t.GetNetname()
-        if nm in ("GND", "+3V3") and t.GetWidth() > VIP_MAX_NM:
+        if nm in ("GND", "+3V3") and track_width_nm(t) > VIP_MAX_NM:
             continue  # this script's own wide via -- removed by _clear_routed
         c = t.GetPosition()
         centres.append((c.x, c.y, t.GetNetCode()))
@@ -782,11 +795,11 @@ def _straggler_obstacles(board):
         nc = t.GetNetCode()
         if isinstance(t, pcbnew.PCB_VIA):
             c = t.GetPosition()
-            circles.append((c.x, c.y, t.GetWidth() / 2, nc))
+            circles.append((c.x, c.y, track_width_nm(t) / 2, nc))
         else:
             s = t.GetStart()
             e = t.GetEnd()
-            segs.append((s.x, s.y, e.x, e.y, t.GetWidth() / 2, nc, t.GetLayer()))
+            segs.append((s.x, s.y, e.x, e.y, track_width_nm(t) / 2, nc, t.GetLayer()))
     return segs, circles
 
 
@@ -914,12 +927,18 @@ def _tie_stragglers_to_rail(board, netcode, via_positions, obs_segs, obs_circles
     return nt
 
 
-def build(board, gnd, p33, bbox, pads) -> dict:
+def build(board, gnd, p33, bbox, pads, fill_zones=True) -> dict:
     """Add the copper-plane foundation to an ALREADY-LOADED board and return a
     stats dict. Does NOT load or save -- callers (main / tests) own the board
     lifetime. Split out so tests can run it repeatedly on one board without
     re-loading (KiCad's python binding can hand back bare SwigPyObjects for a
-    board re-loaded after a SaveBoard/mutation, which breaks repeated runs)."""
+    board re-loaded after a SaveBoard/mutation, which breaks repeated runs).
+
+    ``fill_zones=False`` skips the inline zone fill: on KiCad 10.x,
+    ``ZONE_FILLER.Fill`` segfaults in a process that just added hundreds of
+    tracks/vias via the swig layer, so ``main`` fills in a fresh ``--fill``
+    subprocess after saving. Direct ``build`` callers that never mutate the
+    board afterwards can keep ``fill_zones=True`` (works on every version)."""
     # Capture signal tracks/vias AND footprint pads BEFORE _clear_routed mutates
     # the board: the swig proxy layer breaks (board.Tracks()/GetFootprints()
     # return bare SwigPyObjects) once board.Remove() runs in _clear_routed, so
@@ -1013,11 +1032,12 @@ def build(board, gnd, p33, bbox, pads) -> dict:
     vias += straggler_vias
 
     # fill all zones now that vias exist (ZONE_FILLER.Fill takes a vector)
-    vec = pcbnew.ZONES()
-    for z in zones:
-        vec.append(z)
-    filler = pcbnew.ZONE_FILLER(board)
-    filler.Fill(vec)
+    if fill_zones:
+        filler = pcbnew.ZONE_FILLER(board)
+        vec = pcbnew.ZONES()
+        for z in zones:
+            vec.append(z)
+        filler.Fill(vec, False, None)
 
     # stats, built from the in-memory objects we hold (the zone/via proxies we
     # created stay valid; re-loading the board after mutation is unreliable in
@@ -1054,10 +1074,24 @@ def main() -> dict:
     bbox = board.GetBoardEdgesBoundingBox()
     pads = _pad_obstacle(board)       # collect pad obstacles before mutation
 
-    stats = build(board, gnd, p33, bbox, pads)
+    stats = build(board, gnd, p33, bbox, pads, fill_zones=False)
 
     board.SetModified()
     pcbnew.SaveBoard(str(PCB_PATH), board)
+
+    # Zone fill happens in a FRESH process: in this process the swig layer
+    # handed back unusable proxies after the ~700 board.Add() mutations above,
+    # and ZONE_FILLER.Fill on such a mutated board segfaults (KiCad 10.0.6;
+    # see _kicad_compat.fill_all_zones). Re-loading and filling there works on
+    # every binding. Called as a function (from tests), the fill step is the
+    # caller's: import _kicad_compat and run fill_all_zones on a fresh load.
+    if __name__ == "__main__":
+        fill_rc = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), "--fill",
+             str(PCB_PATH)],
+        )
+        if fill_rc.returncode != 0:
+            raise SystemExit(f"zone fill subprocess failed: {fill_rc.returncode}")
 
     if __name__ != "__main__":      # called as a function (e.g. from tests)
         return stats
@@ -1066,11 +1100,42 @@ def main() -> dict:
     print(f"  zones: {len(stats['zones'])} (GND plane + {pwr} plane)")
     print(f"  rail + stitching vias: {stats['via_count']}")
     for z in stats["zones"]:
-        print(f"    zone {z['net']:>6} on {z['layer']:>6}: "
-              f"{z['filled_mm2']:.1f} mm^2 filled")
+        if z["filled_mm2"]:
+            print(f"    zone {z['net']:>6} on {z['layer']:>6}: "
+                  f"{z['filled_mm2']:.1f} mm^2 filled")
+        else:
+            # fill_zones was False (fill ran in the --fill subprocess, whose
+            # output above shows the real areas); GetFilledArea() is 0 here.
+            print(f"    zone {z['net']:>6} on {z['layer']:>6}: placed "
+                  f"(filled by the --fill subprocess)")
     print(f"  saved {PCB_PATH}")
     return stats
 
 
+def _fill_only(pcb_path) -> int:
+    """``--fill`` entry point: load a saved board and fill all its zones.
+
+    Runs in its own process so the filler sees freshly-minted swig proxies
+    (zone proxies from a heavily-mutated process are bare SwigPyObjects and
+    the C++ filler segfaults on that state, KiCad 10.0.6). Works identically
+    on older bindings, where an inline fill would also have been fine.
+    """
+    from _kicad_compat import fill_all_zones
+    board = pcbnew.LoadBoard(str(pcb_path))
+    zones = fill_all_zones(board)
+    board.SetModified()
+    pcbnew.SaveBoard(str(pcb_path), board)
+    for z in zones:
+        print(f"  filled {z.GetNetname():>6} on "
+              f"{board.GetLayerName(z.GetFirstLayer()):>6}: "
+              f"{z.GetFilledArea() / 1e12:.1f} mm^2")
+    print(f"  saved {pcb_path}")
+    return 0
+
+
 if __name__ == "__main__":
+    if len(sys.argv) >= 2 and sys.argv[1] == "--fill":
+        _rc = _fill_only(sys.argv[2] if len(sys.argv) > 2 else PCB_PATH)
+        exit_cleanly(_rc)               # teardown GC is unsafe (see compat)
     main()
+    exit_cleanly(0)                     # teardown GC is unsafe (see compat)
