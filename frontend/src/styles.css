@@ -308,7 +308,7 @@ textarea.code-editor:focus { outline: 1px solid var(--brand); border-color: var(
 /* ---- FPGA empty-state command help ---- */
 .fpga-emptyhelp { display: flex; flex-direction: column; gap: 6px; }
 .fpga-helpscroll { display: flex; flex-direction: column; gap: 6px;
-  max-height: 340px; overflow-y: auto; padding-right: 6px;
+  max-height: 680px; overflow-y: auto; padding-right: 6px;
   scrollbar-width: thin; scrollbar-color: var(--brand, #22d3ee) var(--bg-soft, #121931); }
 .fpga-helpscroll::-webkit-scrollbar { width: 8px; }
 .fpga-helpscroll::-webkit-scrollbar-track { background: var(--bg-soft, #121931); border-radius: 4px; }
