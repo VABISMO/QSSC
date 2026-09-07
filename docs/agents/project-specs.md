@@ -128,9 +128,16 @@ Merge style on the upstream repo: merge commits of the form
    needs iverilog + yosys (see CI — toolchain absent from a typical dev box).
 6. **Regenerate the PCB** — `python tools/gen_qssc_kicad.py` rewrites
    `hardware/pcb/qssc.kicad_*` from the pin/net tables in the repo, then the
-   `test_pcb_*` files validate the result.
+   `test_pcb_*` files validate the result. Routing pipeline:
+   `tools/route_signals.py` (signals + BGA fanout) **then**
+   `tools/route_qssc_pcb.py` (inner planes + stitching; the zone fill runs
+   in a `--fill` subprocess automatically). Both run on KiCad 8–10
+   bindings via `tools/_kicad_compat.py` (PR #24) and are idempotent —
+   point them at a COPY with `QSSC_PCB_PATH=<copy>`: pcbnew's `SaveBoard`
+   rewrites `.kicad_pro`/`.kicad_prl` with the running KiCad's schema.
 
-   <!-- UNVERIFIED — source: tools/gen_qssc_kicad.py docstring + README.md:326; regeneration not executed in this session (in-place artefact overwrite) -->
+   <!-- verified 2026-09-07: pipeline run on KiCad 10.0.6 on a /tmp copy = 2 zones (In1.Cu GND 26030 mm^2, In2.Cu +3V3 27468 mm^2) + 396 vias, exit 0, idempotent re-run; .kicad_pro/.prl schema churn observed on in-repo runs (git restore needed) -->
+   <!-- UNVERIFIED — gen_qssc_kicad regeneration itself not executed this session (in-place artefact overwrite) -->
 7. **Serve the API locally** — `uvicorn api.main:app --port 8000`;
    endpoints include `/api/protocol` (`api/main.py:261`).
 
@@ -181,11 +188,26 @@ Key files:
   `test_api` 33, `test_core` 36, `test_gcode` 18, `test_pcb_drc` 1,
   `test_pcb_head` 5, `test_pcb_stackup` 1 → **129 collected**; plus 4
   module-skipped pcbnew-gated files → **133 items total**.
-- **Expected result**: `129 passed, 4 skipped` (~36 s locally). The 4 skips
-  are module-level `pytest.importorskip("pcbnew")` gates at
-  `tests/test_pcb_pin_audit.py:28`, `test_pcb_route.py:32`,
-  `test_pcb_route_full.py:31`, `test_pcb_route_signals.py:28` — KiCad's
-  `pcbnew` python module is not pip-installable; these skip in CI too.
+- **Expected result**: `129 passed, 4 skipped` (~36 s locally) on a box
+  **without** KiCad. The 4 skips are module-level
+  `pytest.importorskip("pcbnew")` gates at `tests/test_pcb_pin_audit.py:28`,
+  `test_pcb_route.py:32`, `test_pcb_route_full.py:31`,
+  `test_pcb_route_signals.py:28` — KiCad's `pcbnew` python module is not
+  pip-installable; these skip in CI too.
+- **With KiCad installed** (local dev box, KiCad 10.0.6 + venv python 3.14,
+  `PYTHONPATH=/usr/lib/python3.14/site-packages`): the pcbnew-gated files
+  RUN — the 4 skips become 3 gcode scribe/stencil skips
+  (`test_gcode.py:153`, no through-cut outline) + 1 `QSSC_SLOW` gate
+  (`test_pcb_route_full.py:89`). Suite on a KiCad-10 box with the
+  `tools/_kicad_compat.py` layer (PR #24): **4 failed, 164 passed,
+  4 skipped** — the 4 failures are pre-existing board connectivity defects
+  (`mod_sync` dangling net, 11 split nets on `qssc.kicad_pcb`, 80 split
+  `DET_IN*` on `chip_module.kicad_pcb`), documented in the PR #23 review.
+
+  <!-- verified 2026-09-07: suite on fix/kicad-version-compat (739d732) with
+  KiCad 10.0.6 pcbnew = "4 failed, 164 passed, 4 skipped in 53.41s"; skip
+  reasons from `pytest -rs`; without pcbnew the same tree = "129 passed,
+  4 skipped" (docs/agents-bundle tree) -->
 - **Test data**: no fixtures/golden dirs — tests parse the repo artefacts
   directly (`hardware/pcb/*.kicad_pcb` sexpressions, `hardware/gcode/*`).
 - **Config**: `pyproject.toml [tool.pytest.ini_options]` —
@@ -252,7 +274,13 @@ lacks (absent here) — `tools/check_xdc_ports.py` alone runs fine.
 - **System**: none beyond the above for the Python/API path; FPGA
   sim/synthesis needs the iverilog/oss-cad-suite binaries; PCB regeneration
   needs KiCad (`kicad-cli`/`pcbnew` — the `pcbnew` python module is not
-  pip-installable).
+  pip-installable). When driving `pcbnew` from a venv python, add KiCad's
+  python dir to `PYTHONPATH` (Arch: `PYTHONPATH=/usr/lib/python3.14/site-packages`).
+  The routing tools run on KiCad 8–10 bindings via `tools/_kicad_compat.py`
+  (swig iterator shim, layer-aware via widths, fill-in-subprocess, symbolic
+  copper layer IDs) — PR #24.
+
+  <!-- verified 2026-09-07: KiCad 10.0.6, pcbnew via PYTHONPATH=/usr/lib/python3.14/site-packages with a venv python 3.14; route_qssc_pcb.py + route_signals.py run exit 0 and build 2 planes + 396 vias (PR #24 head 739d732); without the compat layer the same tools segfault (exit 139) or build only 1 zone -->
 
 ## Source Layout
 

@@ -73,8 +73,8 @@ Ockham (BIC) · Systemic Impact · verdict block (**EVIDENCE GRADE**,
 |---|---|---|---|
 | QSSC-001 | physics-simulation review (`qssc/`) | B | session audit — no in-repo artefact |
 | QSSC-002 | full-repo physics audit | F | upstream issues #7, #8, #9 |
-| QSSC-003 | post-audit implementation fixes | B | branch `fix/2q-depolarization-physics` (PR #10) |
-| QSSC-004 | PCB physics audit (HARDWARE_DESIGN + datasheets + RTL) | B | [`docs/audits/QSSC-004_pcb_physics_audit.md`](../audits/QSSC-004_pcb_physics_audit.md) (branch `docs/audit-qssc-004`) |
+| QSSC-003 | post-audit implementation fixes | B | branch `fix/2q-depolarization-physics` (PR #10; superseded by PR #23's platform matrix, under review) |
+| QSSC-004 | PCB physics audit (HARDWARE_DESIGN + datasheets + RTL) | B | [`docs/audits/QSSC-004_pcb_physics_audit.md`](../audits/QSSC-004_pcb_physics_audit.md) (branch `docs/audit-qssc-004`, PR #26) |
 
 <!-- UNVERIFIED — source: the QSSC-001/002/003 grades were produced in
 working sessions against this repo and are only externally evidenced by the
@@ -85,4 +85,4 @@ linked upstream issues/PR; no in-repo report exists for them. -->
 Each finding is filed in the *defect → measured evidence → `file:line`
 cites → suggested fix* form (the observed issue norm, see
 [`project-specs.md`](project-specs.md) → "Writing pull requests / issues").
-Precedents: #7–#9 (QSSC-002), #14–#20 (QSSC-004).
+Precedents: #7–#9 (QSSC-002), #14–#20 and #25 (QSSC-004).
