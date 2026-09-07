@@ -683,7 +683,8 @@ a 9-wire SPI that crosses J12.
   beneath. No stubs, no vias on the RF path if avoidable. AC-coupling caps are
   0402/0603 with minimal pad discontinuity. For 1.6 mm FR4 (εr ≈ 4.3) a 50 Ω
   microstrip needs ~0.30 mm signal width on top over GND (verify with an
-  impedance solver).
+  impedance solver — registered as gate §15D F11; the IPC-2141 closed form
+  computes ≈ 43 Ω at this width, not 50 Ω).
 - **USB D+/D−** (FT232): 90 Ω differential, length-matched within 5 mil, no
   stubs, ground guard via fence, single pair, series 22 Ω optional.
 - **SPI to ADF4351** (LE/CLK/DATA): short (≤50 mm), 50 Ω-ish single-ended,
@@ -801,7 +802,8 @@ B.Cu  0.035
 The 0.15 mm F.Cu→In1.Cu dielectric gives ~50 Ω microstrip on F.Cu at a track
 width near 0.30 mm (RF netclass) over the GND plane — DRC does not enforce
 impedance, the width encodes the intent; final verification is a GUI solver
-step (§15).
+step (§15D F11 — the IPC-2141 closed form computes ≈ 43 Ω at 0.30 mm, so
+expect the solver to land ≈ 0.21–0.24 mm for a true 50 Ω).
 
 ### 12.1 Detector head — 6-layer (chip_module.kicad_pcb)
 
@@ -1472,6 +1474,76 @@ table is the auditable summary.
 | TLV9004 ×16 | UT0-15 | TSSOP-14 | 4 ch each: in- (2/6/9/13) ← DET_IN{i}; in+ (3/5/10/12) → DET_REF 1.65 V; out (1/7/8/14) → DET_TIA{i}; V+ (4) → +3V3; V- (11) → GND; Rf 1 MΩ ‖ Cf 1 pF across in-/out. |
 | Ironwood SBT | Uchip | custom (25×25 mm) | 65 solder pads (64 EM cathodes + EM_ANODE) on F.Cu + F.Paste + F.Mask at 2.5 mm die pitch (1.2 mm pads); 4 NPTH M2 mount holes. EM pads → emitter_cat{i}; EM_ANODE → +12V_EMIT. Die removable, emitter-down. |
 | QSSC_Chip_DET | Uchip (head) | custom | 65 DET pads (64 electrodes + DET_COMMON) on B.Cu + B.Mask (no B.Paste, ACF contact) → DET_IN{i}/DET_REF; dog-bone escapes on F.Cu. |
+
+---
+
+## 15D. Pre-fab gate register (QSSC-004 F10–F12)
+
+Three findings from the QSSC-004 PCB physics audit (issue #25; full report on
+PR #26) are **gates to clear before the part order / fab release** — none of
+them requires a board respin, but ordering before they close risks
+re-ordering. They are registered here so they cannot be lost between the
+audit and the fab date. None of the three closes from this document alone:
+F10 needs the Ironwood quote drawing, F11 the solver run, F12 the θJA
+estimate — each is documented with its arithmetic so the close-out is a
+verification step, not a re-derivation.
+
+### F10 · Mechanical registration of the head board — OPEN
+
+The head board aligns to the main board **only through J12** (2×10, 2.54 mm)
+— no locating standoffs/pins are documented, and the ACF bond-force budget is
+open. The stack height itself is already deferred to the Ironwood quote
+drawing (§C3 z-height note: J12 pin length must span socket height + die
+thickness + head contact gap).
+
+- **Close-out:** add ≥ 2 locating standoffs/pins on **diagonal corners** of
+  the 150 × 140 mm head board (M2, matching the existing §C3 M2 mount-hole
+  pattern so one drill table serves both), spec the stack height from the
+  Ironwood quote drawing, and budget the ACF bonding force (recommended bond
+  pressure × the 20 × 20 mm contact area, from the ACF datasheet — the
+  spring-pin socket clamps the emitter face, so the *detector-face* ACF
+  joint is the only face whose contact force is not set by hardware).
+- **Gate:** all three documented in §1B (montaje) / §C3 before the standoff
+  + ACF order.
+
+### F11 — 50 Ω geometry — OPEN
+
+§10 and §12.0 spec ≈ 0.30 mm signal width over the 0.15 mm F.Cu→In1.Cu
+dielectric on εr ≈ 4.3 (0.035 mm Cu) and call it ≈ 50 Ω; §9 states the same
+width as a CPW (signal 0.30 / gap 0.50 mm) at ≈ 50 Ω. The IPC-2141 closed
+form gives
+
+> Z₀ = 87/√(εr + 1.41) · ln(5.98·H / (0.8·W + T)) ≈ **43 Ω**
+
+at W = 0.30 mm, H = 0.15 mm, T = 0.035 mm, εr = 4.3 — **~7 Ω low**. Solving
+the same closed form for 50 Ω gives W ≈ **0.24 mm**; thickness-corrected
+calculators typically land ≈ 0.21–0.23 mm for this stackup. DRC does not
+check impedance, so the solver run is the only verification step.
+
+- **Close-out:** run the KiCad/GUI impedance solver on the **as-ordered**
+  prepreg (εr is laminate-specific; real prepreg often sits below 4.3, which
+  moves the answer *up* toward 50 Ω), then re-spec W in §10/§12.0 and the
+  §9 CPW geometry from the solver's number.
+- **Gate:** before impedance-controlled fab release.
+
+### F12 — Thermal budget of the sandwich — OPEN
+
+At the full-array operating point the die emitters dissipate
+64 × (4–8 V) × 10.1 mA ≈ **2.6–5.2 W** *at the die* (§7), and the 3×
+TLC5947 sinks drop the remainder of the +12 V rail:
+(12 V − V_f) × 10.1 mA ≈ 40–81 mW per channel × 64 ≈ **2.6–5.2 W** on the
+main board, split per the BOM 24/24/16 channels → **0.97–1.94 W (chips 0/1)
+and 0.65–1.29 W (chip 2)**. Emitter-path worst case ≈ **5.2–10.3 W** before
+any logic. Against that, the fab protocol §4.4 sizes the chip-stabilisation
+TEC at "**< 5 W**" — a budget chosen for substrate temperature *stability*,
+not for lifting the emitter dissipation through the same path — and the heat
+path (die → Ironwood spring pins → F.Cu copper pour; head → ACF, a poor
+thermal conductor *by design* → J12) is nowhere modelled.
+
+- **Close-out:** a worst-case power budget **per layer** (die / main / head)
+  and a rough θJA path estimate. If the sum busts the "< 5 W" TEC sizing,
+  re-spec the TEC or document the steady-state ΔT at the operating point.
+- **Gate:** before TEC / cold-plate ordering (§1B).
 
 ---
 
