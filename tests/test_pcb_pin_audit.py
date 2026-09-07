@@ -12,7 +12,9 @@ part (PLL loop, SPI, reference decoupling). It also locks the Ironwood SBT
 socket footprint facts (4 NPTH mount holes, F.Paste on the 65 solder pads) so a
 future regen cannot silently revert the socket.
 
-Skips where ``pcbnew`` (system KiCad) is not importable (CI / .venv).
+No skips: ``tests/_pcb_env.ensure_pcbnew()`` resolves KiCad's binding and
+applies the repo's swig compat patch; CI installs KiCad and runs this
+unconditionally. A missing board file is a FAILURE, not a skip.
 
 The expected nets come from the datasheets in ``hardware/datasheets/`` cross-
 checked against the generator's pin dicts; where the two disagreed (FT232 pins
@@ -25,7 +27,9 @@ from pathlib import Path
 
 import pytest
 
-pcbnew = pytest.importorskip("pcbnew")
+from _pcb_env import ensure_pcbnew
+
+pcbnew = ensure_pcbnew()
 
 REPO = Path(__file__).resolve().parent.parent
 MAIN = REPO / "hardware" / "pcb" / "qssc.kicad_pcb"
@@ -80,8 +84,7 @@ W25Q128 = {"8": "+3V3", "4": "GND", "1": "SPI_CS", "6": "SPI_CCLK",
     ("J1", FT232), ("U3", ADF4351), ("U8", W25Q128),
 ])
 def test_main_pin_nets(ref, expected):
-    if not MAIN.exists():
-        pytest.skip(f"{MAIN} not present")
+    assert MAIN.exists(), f"main board missing: {MAIN}"
     nets = _pad_nets(MAIN, ref)
     assert nets, f"{ref} not found on main board"
     bad = {n: nets.get(n, "<missing>") for n, want in expected.items()
@@ -93,8 +96,7 @@ def test_ft232_nc_pads_have_no_rail():
     """FT232 pin 23 (CBUS/PWREN#) and 24 (no-bond NC) must NOT be tied to a
     power/ground rail -- a prior doc draft wrongly called 24 a 2nd VCC. The
     generator leaves them no-net (or NC); assert they are not +3V3/GND."""
-    if not MAIN.exists():
-        pytest.skip(f"{MAIN} not present")
+    assert MAIN.exists(), f"main board missing: {MAIN}"
     nets = _pad_nets(MAIN, "J1")
     rails = {"+3V3", "GND", "+5V", "+1V8"}
     for n in FT232_NC:
@@ -103,8 +105,7 @@ def test_ft232_nc_pads_have_no_rail():
 
 
 def test_adf4351_nc_pads_have_no_rail():
-    if not MAIN.exists():
-        pytest.skip(f"{MAIN} not present")
+    assert MAIN.exists(), f"main board missing: {MAIN}"
     nets = _pad_nets(MAIN, "U3")
     rails = {"+3V3", "GND"}
     for n in ADF4351_NC:
@@ -116,8 +117,7 @@ def test_main_chip_is_ironwood_sbt_socket():
     """Uchip must be the Ironwood SBT socket (not the ACF QSSC_Chip_EM), with
     4 NPTH mount holes and F.Paste on the solder pads (the socket solders down,
     unlike the ACF pressure-contact die footprint)."""
-    if not MAIN.exists():
-        pytest.skip(f"{MAIN} not present")
+    assert MAIN.exists(), f"main board missing: {MAIN}"
     fp = _footprint(MAIN, "Uchip")
     assert fp is not None, "Uchip not found on main board"
     assert fp.GetFPID().GetLibItemName() == "Ironwood_SBT", (
@@ -137,8 +137,7 @@ AD7616_NC = {"41", "42", "43", "44", "47", "48", "53", "54", "55", "56"}
 
 
 def test_head_ad7616_supply_ground():
-    if not HEAD.exists():
-        pytest.skip(f"{HEAD} not present")
+    assert HEAD.exists(), f"head board missing: {HEAD}"
     for j in range(4):
         nets = _pad_nets(HEAD, f"UAD{j}")
         assert nets, f"UAD{j} not found on head board"
@@ -169,8 +168,7 @@ def test_head_ad7616_supply_ground():
 
 
 def test_head_tlv9004_supply_ground():
-    if not HEAD.exists():
-        pytest.skip(f"{HEAD} not present")
+    assert HEAD.exists(), f"head board missing: {HEAD}"
     for j in range(16):
         nets = _pad_nets(HEAD, f"UT{j}")
         assert nets, f"UT{j} not found on head board"
