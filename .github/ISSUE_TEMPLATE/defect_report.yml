@@ -1,0 +1,52 @@
+name: "Defect report"
+description: "Report a defect with measured evidence — audit finding or reproduction on the current tree"
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. QSSC issues are **evidence-first**:
+        every claim should be checkable against the tree (`file:line`,
+        commit hash, measured output). See [CONTRIBUTING.md](../../blob/main/CONTRIBUTING.md)
+        for the full norms. One defect (or one tightly coupled defect
+        cluster) per issue.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: "Summary"
+      description: "One paragraph: what is wrong, and where (file:line / commit)."
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: "Evidence"
+      description: "file:line references, commit hashes, measured output or logs — and the tree/commit they were taken on. Mark hypotheses as hypotheses."
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: "Impact"
+      description: "What breaks, drifts or gets misreported if this is not fixed."
+
+  - type: textarea
+    id: suggested-fix
+    attributes:
+      label: "Suggested fix"
+      description: "Concrete, minimal steps. Numbered list if there is more than one."
+
+  - type: dropdown
+    id: provenance
+    attributes:
+      label: "Provenance"
+      description: "How this finding was produced."
+      options:
+        - "Reproduction on the current tree"
+        - "Systematic audit finding"
+        - "Question / discussion"
+    validations:
+      required: true

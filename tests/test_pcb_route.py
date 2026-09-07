@@ -47,18 +47,41 @@ def _parse(path: Path) -> dict:
     zone_blocks = re.split(r"(?m)^\t\(zone\b", t)[1:]
     zones = []
     for b in zone_blocks:
+        # Zone nets: <= 9 write `(net_name "GND")`, >= 10 `(net "GND")`.
         nm = re.search(r'\(net_name "([^"]+)"\)', b)
+        if nm is None:
+            nm = re.search(r'\(net "([^"]+)"\)', b)
         layer = re.search(r'\(layer "([^"]+)"\)', b)
         zones.append((layer.group(1) if layer else None,
                      nm.group(1) if nm else None))
+    # netcode -> net name, from the `(net N "name")` declarations
+    nets = {m.group(1): m.group(2)
+            for m in re.finditer(r'\(net (\d+) "([^"]+)"\)', t)}
     vias = re.split(r"(?m)^\t\(via\b", t)[1:]
-    via_nets = {re.search(r"\(net (\d+)\)", b).group(1) for b in vias}
-    # Resolve the GND netcode from the `(net N "GND")` declaration rather than
-    # hardcoding it: regenerating the board (adding/removing nets, e.g. the
-    # +7V_EMIT elimination) shifts every netcode, so a literal "13" is brittle.
-    gnd = re.search(r'\(net (\d+) "GND"\)', t)
+    # Via entries reference their net differently across KiCad versions:
+    # <= 9 write the numeric netcode `(net 15)`, >= 10 the name `(net "GND")`.
+    # Normalize both to the net NAME so the assertions are version-agnostic.
+    via_nets = set()
+    for b in vias:
+        m = re.search(r"\(net (\d+)\)", b)
+        if m is not None:
+            via_nets.add(nets.get(m.group(1), m.group(1)))
+            continue
+        m = re.search(r'\(net "([^"]+)"\)', b)
+        if m is not None:
+            via_nets.add(m.group(1))
+    # Resolve the GND net rather than hardcoding a netcode: regenerating the
+    # board (adding/removing nets, e.g. the +7V_EMIT elimination) shifts every
+    # netcode. <= 9 declare it as `(net 15 "GND")`; >= 10 dropped the net
+    # table entirely and reference nets by name, `(net "GND")`.
+    gnd = re.search(r'\(net (\d+) "GND"\)', t) or re.search(r'\(net "GND"\)', t)
+    gnd_name = None
+    if gnd:
+        # name-only reference (>= 10) carries no netcode to resolve
+        gnd_name = nets.get(gnd.group(1), "GND") if gnd.re.groups else "GND"
     return {"zones": sorted(zones), "via_count": len(vias),
-            "via_nets": sorted(via_nets), "gnd_net": gnd.group(1) if gnd else None}
+            "via_nets": sorted(via_nets),
+            "gnd_net": gnd_name}
 
 
 def test_copper_plane_foundation(tmp_path):

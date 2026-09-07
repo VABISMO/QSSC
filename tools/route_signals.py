@@ -51,6 +51,12 @@ import pcbnew
 from route_qssc_pcb import (
     F_CU, IN1_CU, IN2_CU, IN3_CU, IN4_CU, B_CU, VIP_MAX_NM,
 )
+from route_qssc_pcb import patch_swig_iterators, track_width_nm
+from _kicad_compat import VIATYPE_BLIND_BURIED
+
+# KiCad-version compat: fix the swig track iterator before any board.Tracks()
+# loop, and probe via widths via layer-aware GetWidth (see _kicad_compat).
+patch_swig_iterators()
 
 # 6-layer HDI stackup (F.Cu sig / In1.Cu GND / In2.Cu +3V3 / In3.Cu sig /
 # In4.Cu sig / B.Cu sig). In1.Cu/In2.Cu are the GND/+3V3 PLANES (adjacent to
@@ -1109,7 +1115,7 @@ def _clear_tracks(board):
     keeps the small VIPs and signal copper)."""
     for t in [t for t in board.Tracks()]:
         nm = t.GetNetname()
-        if nm in ("GND", "+3V3") and t.GetWidth() > VIP_MAX_NM:
+        if nm in ("GND", "+3V3") and track_width_nm(t) > VIP_MAX_NM:
             continue                      # wide plane via/track -- not ours
         board.Remove(t)
 
@@ -1209,7 +1215,7 @@ def _bga_fanout(board, x0, y0, routed, fps=None):
         v = pcbnew.PCB_VIA(board)
         v.SetPosition(pcbnew.VECTOR2I(int(px), int(py)))
         v.SetNetCode(p.GetNetCode())
-        v.SetViaType(pcbnew.VIATYPE_BLIND_BURIED)
+        v.SetViaType(VIATYPE_BLIND_BURIED)   # compat: >=10 split BLIND/BURIED
         v.SetDrill(150_000)             # 0.15 mm blind drill
         v.SetWidth(300_000)             # 0.30 mm blind via
         ls = pcbnew.LSET()
@@ -1764,3 +1770,5 @@ def main() -> dict:
 
 if __name__ == "__main__":
     main()
+    from _kicad_compat import exit_cleanly
+    exit_cleanly(0)             # teardown GC is unsafe (see _kicad_compat)
