@@ -112,6 +112,7 @@ td code{font-size:12px}
 <h2 id="section-5-characterization-testing">Section 5 — Characterization &amp; Testing</h2>
 <h3 id="51-electroluminescence-cqd-array">5.1 Electroluminescence (CQD array)</h3>
 <h3 id="52-odmr-of-vb-in-hbn">5.2 ODMR of VB− in hBN</h3>
+<h3 id="521-optical-link-budget-explicit">5.2.1 Optical link budget (explicit)</h3>
 <h3 id="53-spin-coherence-t2">5.3 Spin coherence (T₂)</h3>
 <h3 id="54-coupling-efficiency-waveguide-detector">5.4 Coupling efficiency (waveguide → detector)</h3>
 <h3 id="55-end-to-end-functional-test">5.5 End-to-end functional test</h3>
@@ -598,30 +599,40 @@ Pattern 8 × 8 matching pads on the ZnO ETL.</li>
 <li>Drive each pixel 0–15 V, log I–V and L–V. Confirm <strong>turn-on 4–8 V</strong> and broadband visible EL.</li>
 <li>Spectra: couple edge emission to fiber + USB spectrometer. Expect broad Gaussian-like EL centered at the CQD PL peak (450–620 nm depending on synthesis).</li>
 <li><strong>ASE check:</strong> drive a single pixel with short pulses (1 ms, 10 % duty) while stepping current; watch for FWHM narrowing from ~80 nm to &lt; 25 nm and a super-linear L–I knee. <strong>Do not</strong> interpret this as lasing — it is ASE.</li>
+<li><strong>At-the-sample optical power — mandatory gate.</strong> With the array driven at its nominal operating point (step 1), measure the emitted optical power <strong>at the sample plane</strong> with a calibrated photodiode power meter (µW-class head resolved to tens of nW at the pump band, e.g. Thorlabs S120C, 400–1100 nm, 50 nW floor — the same calibrated-head measurement §5.4 assumes). At the §1 radiance target (≥ 10 cd/m²) the EL is <strong>≈ 50 nW per 1 mm² pixel</strong> at 532 nm — <strong>≈ 3 µW with all 64 pixels driven</strong>, resolvable on a µW-class meter (a single pixel at ~50 nW sits at that meter's floor, so take the array aggregate as the budget input and the step-1 per-pixel L–V sweep for uniformity). <strong>Record P_EL and substitute it into the §5.2 link budget before any ODMR attempt</strong> — the readout feasibility turns on this number, which is why the measurement is part of the EL test and not an optional extra.</li>
 </ol>
 <h3 id="52-odmr-of-vb-in-hbn">5.2 ODMR of VB− in hBN</h3>
-<ol start="4">
-<li><strong>Optical:</strong> 532 nm CW laser (or the on-chip green CQD emitter), ~1 mW at the sample. Collect the VB− PL at <strong>~850 nm</strong> through a <strong>650 nm red photographic long-pass filter</strong> (passes the 850 nm NIR defect PL, blocks the 532 nm green pump) into the <strong>on-chip graphene/MoS₂ detector array</strong>. No Si APD / discrete photodiode — the readout is entirely on-chip.</li>
+<ol start="5">
+<li><strong>Optical:</strong> 532 nm CW laser (or the on-chip green CQD emitter) at the power measured in §5.1 — order ~50 nW/pixel at the §1 radiance target, <em>not</em> the ~1 mW quoted in earlier revisions (that figure contradicted the §1 radiance target by ~4 orders of magnitude; see the §5.2.1 link budget). Collect the VB− PL at <strong>~850 nm</strong> through a <strong>650 nm red photographic long-pass filter</strong> (passes the 850 nm NIR defect PL, blocks the 532 nm green pump) into the <strong>on-chip graphene/MoS₂ detector array</strong>. No Si APD / discrete photodiode — the readout is entirely on-chip.</li>
 <li><strong>Microwave:</strong> sweep 3.30–3.60 GHz from the function generator through the CPW. Modulate MW at 1 kHz for lock-in detection of the ODMR dip.</li>
 <li><strong>Expected resonance:</strong> the characteristic <strong>7-line ¹⁴N hyperfine pattern</strong> centred at <strong>D ≈ 3.46 GHz</strong> (coupling to 3 equivalent ¹⁴N, A/h ≈ 47 MHz, intensity ratios ≈ 1:3:6:7:6:3:1) [5]. ODMR contrast <strong>0.5–3 %</strong> (ensemble), linewidth <strong>5–20 MHz</strong> (broadened by strain and the ¹⁰B/¹¹B nuclear bath). At low resolution the seven lines merge into a single dip near 3.46 GHz.</li>
 <li><strong>Magnetic field sweep:</strong> apply a static B₀ along the c-axis (a small permanent magnet on a linear stage); observe D shift following D(B) = D₀ ± γ_e·B₀ with γ_e/2π ≈ 28 GHz/T. The doublet splits symmetrically — confirms the spin-1 (S=1) triplet of VB−.</li>
 </ol>
+<h3 id="521-optical-link-budget-explicit">5.2.1 Optical link budget (explicit)</h3>
+<p>The §1 emitter spec is a <strong>radiance</strong>, so the pump power at the sample follows from photometry, not from a free-floating watt figure. Shared emitter-side arithmetic (all variants, 1 mm² Lambertian pixel):</p>
+<ul>
+<li>10 cd/m² at 532 nm ≈ <strong>15 mW·sr⁻¹·m⁻²</strong> → EL per pixel <strong>≈ 45–50 nW</strong> (≈ 3 µW array-wide).</li>
+<li>The defect PL reaching the detector is that number through the chain <strong>defect absorption × PL quantum yield (~10 %) × escape cone ~1/(4n²) ≈ 4–6 % for n ≈ 2.1–2.4</strong> — i.e. <strong>pW-scale before detector responsivity</strong> (or below, for the thin-flake variants), with the exact value set by the variant's absorption (worked example: <code>FABRICATION_PROTOCOL_Diamond.md</code> §5.2.1).</li>
+<li>Detector: graphene 0.01–0.1 A/W answers at tens of pA — around the 51 pA RMS TIA noise floor (HARDWARE_DESIGN.md §C1); the MoS₂ photogating channel (10–10² A/W) is the only one that can close.</li>
+</ul>
+<p>If the §5.1 photodiode instead measures near "~1 mW at the sample", the emitters beat the §1 radiance target by ~4 orders of magnitude and the budget closes comfortably. Until measured, <strong>this budget — not the 1 mW prose figure — is the planning basis</strong> for §5.5 end-to-end claims.</p>
+<hr />
 <h3 id="53-spin-coherence-t2">5.3 Spin coherence (T₂)</h3>
-<ol start="8">
+<ol start="9">
 <li><strong>Pulsed ODMR</strong> (requires pulse-capable source or fast PIN switch): run Hahn echo (π/2 – τ – π – τ – echo) at the resonance. Vary τ from 0.1–20 µs. Fit echo amplitude vs τ to exp[−(2τ/T₂)^n] with n ≈ 1–2.</li>
 <li><strong>Expected T₂:</strong> <strong>0.5–5 µs at room temperature</strong> for ensembles in exfoliated hBN, limited by ¹⁰B/¹¹B nuclear spins and paramagnetic impurities. T₁ typically 10–100 µs.</li>
 </ol>
 <h3 id="54-coupling-efficiency-waveguide-detector">5.4 Coupling efficiency (waveguide → detector)</h3>
-<ol start="10">
+<ol start="11">
 <li>Inject calibrated light (e.g., 532 nm, 1 µW) into the sol-gel SiO₂ input facet with a tapered fiber; measure power at the output facet with a power meter and the on-chip graphene detector photocurrent.</li>
 <li><strong>Coupling efficiency target: 20–60 %</strong> (input) and propagation loss &lt; 1 dB/cm; on-chip detector responsivity measured from the known input power.</li>
 </ol>
 <h3 id="55-end-to-end-functional-test">5.5 End-to-end functional test</h3>
-<ol start="12">
+<ol start="13">
 <li>Drive CQD pixel electrically → green EL pumps the hBN VB− ensemble → collect the ~850 nm defect PL (through the 650 nm long-pass filter) at the on-chip graphene/MoS₂ detector → its photocurrent is modulated by MW at D ≈ 3.46 GHz → the FPGA / lock-in reads the ODMR dip. A successful end-to-end ODMR with the on-chip CQD pump (no external laser) is the chip's defining demonstration.</li>
 </ol>
 <h3 id="56-emitterqubitdetector-calibration-software-pulse-capture">5.6 Emitter↔qubit↔detector calibration (software pulse-capture)</h3>
-<ol start="13">
+<ol start="14">
 <li><strong>No manual pixel-perfect alignment is required.</strong> With the stack coarse-assembled (layer-to-layer registration ~100 µm is enough), run an automated calibration sweep from the FPGA: for each emitter pixel (i,j) fire a short green pump pulse, then sample every graphene/MoS₂ detector electrode and record which one(s) show a modulated ~850 nm response under MW at D ≈ 3.46 GHz. The sweep builds a lookup table mapping <strong>emitter pixel → qubit site → detector electrode</strong>. Subsequent operation addresses qubits through this table, so the chip tolerates coarse mechanical stacking and needs <strong>no camera and no micron alignment jig for readout</strong>. (A camera on the separate FPGA controller board, if present, is used only for initial visual inspection of the assembled chip — never for qubit readout.)</li>
 </ol>
 <hr />
@@ -876,7 +887,7 @@ Pattern 8 × 8 matching pads on the ZnO ETL.</li>
 <p>[32] Y. Xia and G. M. Whitesides, "Soft lithography," Annual Review of Materials Research 28, 153-184 (1998). doi:10.1146/annurev.matsci.28.1.153</p>
 <p>[33] D. Qin, Y. Xia, and G. M. Whitesides, "Soft lithography for micro- and nanoscale patterning," Nature Protocols 5, 491-502 (2010). doi:10.1038/nprot.2009.234</p>
 <p>[34] A. R. Bülau et al., "A highly efficient, low-cost microwave resonator for exciting a diamond sample from a miniaturized quantum magnetometer," Metrology 5, 69 (2025). doi:10.3390/metrology5040069</p>
-  <div class="foot">QSSC — Quantum Solid State Chip (room temperature) · fabrication protocol · branded document · 51005 source bytes</div>
+  <div class="foot">QSSC — Quantum Solid State Chip (room temperature) · fabrication protocol · branded document · 53300 source bytes</div>
 </div>
 </body>
 </html>

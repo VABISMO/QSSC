@@ -180,24 +180,44 @@ Only the **host** and one optional anneal change. Everything else (CQD chemicals
 ### 5.1 Electroluminescence (CQD array) — unchanged
 Drive each pixel 0–15 V, confirm turn-on 4–8 V and broadband green EL; ASE check (FWHM narrowing < 25 nm). As in the hBN protocol.
 
+**One addition over the hBN base:** the hBN §5.1 at-the-sample optical-power measurement (calibrated µW-class photodiode, step 4 there) is **mandatory here too** — its reading is the pump-power input of the §5.2.1 link budget and the gate for any ODMR attempt.
+
 ### 5.2 ODMR of NV⁻ in diamond
-4. **Optical:** on-chip green CQD emitter (~532 nm, ~1 mW at the sample) — no external laser. Collect NV⁻ PL at **637–800 nm** through the **650 nm red photographic long-pass filter** (passes the red/NIR NV PL, blocks the 532 nm green pump) into the **on-chip graphene/MoS₂ detector array**. No Si APD / discrete photodiode.
-5. **Microwave:** sweep **2.80–2.94 GHz** from the function generator / ADF4351 through the CPW. Modulate MW at 1 kHz for lock-in detection of the ODMR dip.
-6. **Expected resonance:** a single dip at **D ≈ 2.87 GHz** (the ¹⁴N 3-line hyperfine, A ≈ 2.16 MHz, is sub-linewidth and usually merges into one dip at B=0; it splits into a doublet under a static B₀). ODMR contrast **2–30 %** (ensemble/single), linewidth **1–10 MHz**. NV⁻ ODMR contrast is **higher** than V_B⁻ (0.5–3 %), so readout is easier.
-7. **Magnetic field sweep:** apply B₀ along the NV axis; observe D shift D(B) = D₀ ± γ_e·B₀, γ_e/2π ≈ 28 GHz/T; the resonance splits into a doublet — confirms the S=1 triplet.
+5. **Optical:** on-chip green CQD emitter (~532 nm) at the pump power measured in §5.1 — at the §1 radiance target (≥ 10 cd/m²) that is **≈ 45–50 nW per 1 mm² pixel** (≈ 3 µW array-wide), *not* the ~1 mW quoted in earlier revisions: that figure contradicted the §1 radiance target by ~4 orders of magnitude, and the §5.2.1 budget below supersedes it — no external laser. Collect NV⁻ PL at **637–800 nm** through the **650 nm red photographic long-pass filter** (passes the red/NIR NV PL, blocks the 532 nm green pump) into the **on-chip graphene/MoS₂ detector array**. No Si APD / discrete photodiode.
+6. **Microwave:** sweep **2.80–2.94 GHz** from the function generator / ADF4351 through the CPW. Modulate MW at 1 kHz for lock-in detection of the ODMR dip.
+7. **Expected resonance:** a single dip at **D ≈ 2.87 GHz** (the ¹⁴N 3-line hyperfine, A ≈ 2.16 MHz, is sub-linewidth and usually merges into one dip at B=0; it splits into a doublet under a static B₀). ODMR contrast **2–30 %** (ensemble/single), linewidth **1–10 MHz**. NV⁻ ODMR contrast is **higher** than V_B⁻ (0.5–3 %), so readout is easier.
+8. **Magnetic field sweep:** apply B₀ along the NV axis; observe D shift D(B) = D₀ ± γ_e·B₀, γ_e/2π ≈ 28 GHz/T; the resonance splits into a doublet — confirms the S=1 triplet.
+
+### 5.2.1 Optical link budget (explicit)
+
+At the §1 target (radiance ≥ 10 cd/m², 532 nm, 1 mm² Lambertian pixel):
+
+| Stage | Value |
+|---|---|
+| Radiance → radiant exitance | 10 cd/m² ≈ **15 mW·sr⁻¹·m⁻²** at 532 nm |
+| EL per pixel (π·L·A) | ≈ **45–50 nW** |
+| NV⁻ absorption over the 0.5 mm plate (10¹⁰–10¹² cm⁻³) | 1.5–78 % → **0.8–39 nW** absorbed |
+| PL quantum yield | ~10 % → **80 pW–4 nW** NV⁻ PL emitted |
+| Escape cone ~1/(4n²), n_diamond ≈ 2.4 | ≈ 4.3 % → **≈ 3–160 pW at the detector** |
+| Graphene responsivity 0.01–0.1 A/W | 0.03–16 pA — **below the 51 pA RMS TIA floor** (HARDWARE_DESIGN.md §C1) |
+| MoS₂ photogating 10–10² A/W | **30 pA–16 nA** — marginal; the only channel that can close |
+
+At the radiance target the graphene-only readout sits below the TIA noise floor and the MoS₂ channel is marginal — the chain closes only if the emitters deliver near the other figure of this pair. Deciding that is exactly what the §5.1 photodiode measurement is for: "~1 mW at the sample" would require ≈ 2×10⁵ cd/m² (~4 orders above the §1 target), so the measured value — not either prose figure — is the planning basis for the §5.5 end-to-end ODMR claim. If the measured P_EL lands at the radiance target, re-derive §5.5 expectations against this table (MoS₂ photogating, longer integration, 1 kHz lock-in) before declaring the readout failed.
+
+---
 
 ### 5.3 Spin coherence (T₂)
-8. **Pulsed ODMR** (Hahn echo, π/2–τ–π–τ–echo). Vary τ from 1 µs to **2 ms**. Fit echo vs τ to exp[−(2τ/T₂)^n].
-9. **Expected T₂:** **0.5–1.8 ms at room temperature** (≈0.5–0.7 ms natural-abundance, ≈1.8 ms in ¹²C-enriched CVD). T₁ typically **3–7 ms**. This is **~900× longer than V_B⁻** and is why this variant can run small quantum algorithms at 300 K. With dynamical decoupling (XY8/CPMG) T₂ extends further.
+9. **Pulsed ODMR** (Hahn echo, π/2–τ–π–τ–echo). Vary τ from 1 µs to **2 ms**. Fit echo vs τ to exp[−(2τ/T₂)^n].
+10. **Expected T₂:** **0.5–1.8 ms at room temperature** (≈0.5–0.7 ms natural-abundance, ≈1.8 ms in ¹²C-enriched CVD). T₁ typically **3–7 ms**. This is **~900× longer than V_B⁻** and is why this variant can run small quantum algorithms at 300 K. With dynamical decoupling (XY8/CPMG) T₂ extends further.
 
 ### 5.4 Coupling efficiency (waveguide → detector) — unchanged
 Inject calibrated 532 nm light into the sol-gel SiO₂ facet; measure output + on-chip detector photocurrent. Target 20–60 % coupling, < 0.5 dB/cm loss.
 
 ### 5.5 End-to-end functional test
-12. Drive the CQD pixel electrically → green EL pumps the NV⁻ ensemble → collect 637–800 nm NV PL (through the 650 nm long-pass filter) at the on-chip graphene/MoS₂ detector → photocurrent modulated by MW at **2.87 GHz** → FPGA/lock-in reads the ODMR dip. Successful end-to-end ODMR with the **on-chip CQD pump** (no external laser) is the chip's defining demonstration — identical concept to the hBN chip, at a different MW frequency and with ~900× more coherence headroom.
+13. Drive the CQD pixel electrically → green EL pumps the NV⁻ ensemble → collect 637–800 nm NV PL (through the 650 nm long-pass filter) at the on-chip graphene/MoS₂ detector → photocurrent modulated by MW at **2.87 GHz** → FPGA/lock-in reads the ODMR dip. Successful end-to-end ODMR with the **on-chip CQD pump** (no external laser) is the chip's defining demonstration — identical concept to the hBN chip, at a different MW frequency and with ~900× more coherence headroom.
 
 ### 5.6 Emitter↔qubit↔detector calibration (software pulse-capture) — unchanged
-13. Same automated FPGA sweep as the hBN chip: for each emitter pixel fire a green pump pulse, sample every detector electrode, record which sees a modulated NV-PL response under MW at **2.87 GHz** → build the emitter-pixel→qubit-site→detector-electrode lookup table. No camera, no alignment jig. (The only change is the MW frequency in the sweep.)
+14. Same automated FPGA sweep as the hBN chip: for each emitter pixel fire a green pump pulse, sample every detector electrode, record which sees a modulated NV-PL response under MW at **2.87 GHz** → build the emitter-pixel→qubit-site→detector-electrode lookup table. No camera, no alignment jig. (The only change is the MW frequency in the sweep.)
 
 ---
 

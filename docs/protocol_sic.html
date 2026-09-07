@@ -417,26 +417,27 @@ td code{font-size:12px}
 <ol>
 <li>Drive each pixel 0–12 V, confirm turn-on 3–8 V and red/NIR EL (~730–760 nm; check with a night-vision viewer, phone camera, or InGaAs/Si spectrometer). ASE check: FWHM narrowing &lt; 30 nm above threshold. As in the hBN protocol.</li>
 </ol>
+<p><strong>One addition over the hBN base:</strong> the hBN §5.1 at-the-sample photodiode power measurement is <strong>mandatory here too</strong> (same logic, at the 730–760 nm pump band); it pins the pump power of §5.2.</p>
 <h3 id="52-odmr-of-v_si-in-4h-sic">5.2 ODMR of V_Si in 4H-SiC</h3>
-<ol start="4">
-<li><strong>Optical:</strong> on-chip CIS-QD emitter (~730–760 nm, ~1 mW at the sample) — no external laser. Collect V_Si PL at <strong>~916 nm</strong> through the <strong>850 nm long-pass filter</strong> (passes 916, blocks the 730–760 pump) into the <strong>on-chip graphene/few-layer-MoS₂ detector array</strong>. No Si APD / discrete photodiode. (A Si spectrometer has reduced sensitivity at 916 nm near its cutoff; an InGaAs detector/spectrometer is preferred for characterization, but the on-chip graphene detector reads 916 nm fine.)</li>
+<ol start="5">
+<li><strong>Optical:</strong> on-chip CIS-QD emitter (~730–760 nm, ~1 mW at the sample) — no external laser. (<strong>Verify the ~1 mW with the §5.1 photodiode measurement — mandatory.</strong> At ~745 nm the cd→W conversion differs strongly from the green-pixel arithmetic in <code>FABRICATION_PROTOCOL.md</code> §5.2.1, so no internal contradiction is claimed here — the measured value pins it.) Collect V_Si PL at <strong>~916 nm</strong> through the <strong>850 nm long-pass filter</strong> (passes 916, blocks the 730–760 pump) into the <strong>on-chip graphene/few-layer-MoS₂ detector array</strong>. No Si APD / discrete photodiode. (A Si spectrometer has reduced sensitivity at 916 nm near its cutoff; an InGaAs detector/spectrometer is preferred for characterization, but the on-chip graphene detector reads 916 nm fine.)</li>
 <li><strong>Microwave:</strong> sweep <strong>~50–90 MHz</strong> from the function generator / ADF4351 through the CPW. Modulate MW at 1 kHz for lock-in.</li>
 <li><strong>Expected resonance:</strong> a resonance at <strong>2|D| ≈ 70 MHz</strong> (V_Si V2, S=3/2; the ²⁹Si hyperfine, A ~ 1.5 MHz, is weak/sub-linewidth and usually merges into one line). ODMR contrast <strong>1–10 %</strong> (ensemble), linewidth <strong>5–30 MHz</strong>. The S=3/2 quartet structure splits under a static B₀.</li>
 <li><strong>Magnetic field sweep:</strong> apply B₀; observe the S=3/2 sublevel splitting, D shift D(B) = D₀ ± γ_e·B₀, γ_e/2π ≈ 28 GHz/T — confirms the spin-3/2 assignment.</li>
 </ol>
 <h3 id="53-spin-coherence-t2">5.3 Spin coherence (T₂)</h3>
-<ol start="8">
+<ol start="9">
 <li><strong>Pulsed ODMR</strong> (Hahn echo at 70 MHz). Vary τ from 0.1 µs to <strong>100 µs</strong>. Fit echo vs τ to exp[−(2τ/T₂)^n].</li>
 <li><strong>Expected T₂:</strong> <strong>20–60 µs at room temperature</strong> (natural abundance, ensemble), up to <strong>~100 µs isotopically purified</strong> (⁴H-²⁸SiC), extended with dynamical decoupling. T₁ typically <strong>~340 µs</strong>. This is <strong>~20× longer than V_B⁻</strong> — enough for shallow algorithms (Bell pairs, small QFT, Ramsey sensing) at 300 K, but <strong>deep algorithms (Shor N=15) do not fit T₂ at 300 K without DD + isotopic purification</strong>; cool to raise T₂ further.</li>
 </ol>
 <h3 id="54-coupling-efficiency-waveguide-detector-unchanged">5.4 Coupling efficiency (waveguide → detector) — unchanged</h3>
 <p>Inject calibrated 730 nm light into the SU-8 facet; measure output + on-chip detector photocurrent through the 850 nm LP. Target 20–60 % coupling, &lt; 1 dB/cm loss.</p>
 <h3 id="55-end-to-end-functional-test">5.5 End-to-end functional test</h3>
-<ol start="12">
+<ol start="13">
 <li>Drive the CIS pixel electrically → red/NIR EL pumps the V_Si ensemble → collect 916 nm PL (through the 850 nm long-pass filter) at the on-chip graphene/few-layer-MoS₂ detector → photocurrent modulated by MW at <strong>70 MHz</strong> → FPGA/lock-in reads the ODMR dip. Successful end-to-end ODMR with the <strong>on-chip CIS-QD pump</strong> (no external laser, no big diode) is the chip's defining demonstration.</li>
 </ol>
 <h3 id="56-emitterqubitdetector-calibration-software-pulse-capture-unchanged">5.6 Emitter↔qubit↔detector calibration (software pulse-capture) — unchanged</h3>
-<ol start="13">
+<ol start="14">
 <li>Same automated FPGA sweep: for each emitter pixel fire a red/NIR pump pulse, sample every detector electrode, record which sees a modulated 916 nm response under MW at <strong>70 MHz</strong> → build the emitter-pixel→qubit-site→detector-electrode lookup table. No camera, no alignment jig. (The MW frequency in the sweep is 70 MHz, the filter is 850 nm LP, the pump is red/NIR — the only calibration deltas from the hBN chip.)</li>
 </ol>
 <hr />
@@ -635,7 +636,7 @@ td code{font-size:12px}
 <li>Lekavicius et al., PRX Quantum 3, 010343 (2022). doi:10.1103/PRXQuantum.3.010343</li>
 <li>H. Zhong et al., and the CuInS₂/ZnS colloidal-QD / NIR-QLED literature (size-tunable 550–800 nm, Cd/Pb-free).</li>
 </ul>
-  <div class="foot">QSSC — Quantum Solid State Chip (room temperature) · fabrication protocol · branded document · 32661 source bytes</div>
+  <div class="foot">QSSC — Quantum Solid State Chip (room temperature) · fabrication protocol · branded document · 33121 source bytes</div>
 </div>
 </body>
 </html>
