@@ -333,6 +333,211 @@ def test_p0_detector_stencil():
     assert "Z-3.000" not in txt
 
 
+# --- P1.0 pin-scaffold support (commercial pin-header electrode array) --------
+
+def test_p1_pin_array_64_holes_2p54_pitch():
+    """P1 pin-scaffold support: 8x8 = 64 through-holes at the STANDARD 2.54 mm
+    pin-header pitch on a 20x20x3 support, 1.5 mm circle-bored through with
+    LINEAR-SEGMENT polygon circles (NOT G02 arcs -- some gcode viewers misdraw the
+    G02 I/J arc-centre offset as a diagonal chord, which made the grid LOOK
+    diagonal even though the hole centres are a perfect square grid aligned to
+    X/Y). The pin header's molded strip fixes the pitch at 2.54 mm (NOT the P0
+    2.5 mm) so a standard cut header drops straight in -- the grid must be 2.54.
+    Each hole is a polygon circle (not a Z-only peck drill) so it shows as a
+    VISIBLE circle in a gcode top view (a 1.0 mm peck at 1.0 mm = bit dia would
+    be an invisible point -- the earlier "showed only the border" bug). Each pin
+    = one pixel electrode AND its own plug-in fan-out (no wire-bonding, no pogo
+    clamshell). User-confirmed 8x8 (supersedes the 48-pin draft). Holes are drilled
+    in boustrophedon (snake) row-major order so the travels are horizontal/vertical
+    (no diagonal rapids)."""
+    txt = _text("p1_pin_array_support.gcode")
+    # 64 pin-hole comments, one per pixel
+    assert txt.count("pin (") == 64
+    # 8x8 grid centred on 20x20: first pin 1.11, last 18.89, pitch 2.54 (-> 3.65)
+    assert "support (1.11,1.11)" in txt   # pin (1,1)
+    assert "support (3.65,1.11)" in txt   # pin (2,1) -- pitch 2.54
+    assert "support (18.89,18.89)" in txt  # pin (8,8)
+    # the P0 2.5 mm pitch must NOT appear here (the header fixes 2.54 mm)
+    assert "2.5 mm pitch" not in txt
+    assert "2.54 mm pitch" in txt         # standard pin-header pitch stated
+    # 1.5 mm holes bored as LINEAR-SEGMENT polygon circles (NO G02 arcs) -- the
+    # fix for the "holes look diagonal" complaint: some gcode viewers misdraw
+    # the G02 I/J arc-centre offset as a diagonal chord toward the origin, which
+    # made the square grid look diagonal. A 16-segment G1-XY polygon circle
+    # renders as a clean circle in EVERY viewer, so the grid reads as straight
+    # aligned rows matching the pin matrix.
+    assert "1.5 mm" in txt
+    # NO arc COMMANDS (a comment may mention "G02" as text, but no gcode line
+    # starts with G02/G03) -- linear-segment circles only, so no viewer can
+    # misrender an I/J offset as a diagonal chord.
+    assert not re.search(r"(?m)^G02\b", txt), "G02 arc command present"
+    assert not re.search(r"(?m)^G03\b", txt), "G03 arc command present"
+    # each hole has a polygon-circle start at (cx + 0.25, cy) -- 64 of them
+    # (path_r = 1.5/2 - 1.0/2 = 0.25 mm). hole (1,1): cx=1.11 -> X1.360 Y1.110.
+    assert "X1.360 Y1.110" in txt    # hole (1,1) polygon start
+    assert "X18.640 Y18.890" in txt  # hole (8,8) polygon start (18.89-0.25)
+    # through-bored Z-3.0
+    assert "Z-3.000" in txt
+    # 20x20 outline through-cut with 4 bridges
+    for corner in ["X-0.500 Y-0.500", "X20.500 Y-0.500",
+                   "X20.500 Y20.500", "X-0.500 Y20.500"]:
+        assert corner in txt, f"missing outline corner {corner}"
+    n_retracts = txt.count("G0 Z10.000") + txt.count("G0 Z10.0")
+    assert n_retracts >= 4
+    # the two use-cases are documented in the header
+    assert "DETECTOR" in txt and "EMITTER" in txt
+
+
+def test_p1_holes_and_mold_two_pieces():
+    """P1 layer templates: a 3-row x 4-col grid, NO through-cut.
+
+    Row 1 (Y 0..17.78): 4 HOLES pieces -- 64-hole pattern, circle-bored, BLIND
+    2.0 mm, ONLY holes ("sin rebordes"), flush at the copy origin. Row 2
+    (Y 20.78..38.56): 4 MOLD pieces -- 17.78 x 17.78, 1.0 mm-deep pocket
+    (perimeter "cuadrado de fuera" + interior zigzag "vaciado de por dentro").
+    Row 3 (Y 41.56..59.34): 4 WAVEGUIDE templates -- 17.78 x 17.78, 1.0 mm-deep
+    SERPENTINE channel connecting all 64 grid points in boustrophedon order (the
+    L2 entanglement-bus layer, later filled with TEOS + microdiamonds; 532 nm
+    pump in at the bottom-left facet). 4 of each type (12 pieces), 3 mm gap,
+    ~80 x 59 mm (fits a 3018). No through-cut on any piece. The original
+    p1_pin_array_support (through-holes + outline) is a SEPARATE file, unchanged.
+    """
+    txt = _text("p1_holes_and_mold.gcode")
+    # 4 holes pieces x 64 holes = 256 pin-hole comments
+    assert txt.count("pin (") == 256
+    # 4 of each type -- the per-copy origin markers
+    assert txt.count("holes piece (") == 4
+    assert txt.count("mold piece (") == 4
+    assert txt.count("waveguide piece (") == 4
+    assert "2.54 mm pitch" in txt
+    # holes BLIND 2.0 mm deep (NOT through): Z-2.000 present, Z-3.000 absent
+    assert "Z-2.000" in txt
+    assert "Z-3.000" not in txt
+    # NO through-cut outline on any piece: the support outline corners absent
+    for corner in ["X-0.500 Y-0.500", "X20.500 Y-0.500",
+                   "X20.500 Y20.500", "X-0.500 Y20.500"]:
+        assert corner not in txt, f"no outline expected, found {corner}"
+    # NO arc COMMANDS (linear-segment polygon circles + serpentine, no G02/G03)
+    assert not re.search(r"(?m)^G02\b", txt), "G02 arc command present"
+    assert not re.search(r"(?m)^G03\b", txt), "G03 arc command present"
+    # --- Row 1 (holes): flush at the copy origin (first pin at the corner) ---
+    # copy 0 first hole (1,1) at (0,0) -> polygon start at (0+0.25, 0) = X0.250 Y0.000
+    assert "X0.250 Y0.000" in txt
+    # copy 0 last hole (8,8) at (17.78,17.78) -> polygon start X18.030 Y17.780
+    assert "X18.030 Y17.780" in txt
+    # copy 3 (origin X62.34) last hole at (62.34+17.78, 17.78) = (80.12, 17.78)
+    assert "hole (80.12,17.78)" in txt
+    # 4 holes origins: (0,0),(20.78,0),(41.56,0),(62.34,0)
+    for ox in [0.00, 20.78, 41.56, 62.34]:
+        assert f"at origin ({ox:.2f},0.00)" in txt, f"missing holes origin x={ox}"
+    # --- Row 2 (molds): 17.78 x 17.78, 1.0 mm-deep pocket, Y 20.78..38.56 ---
+    assert "MOLD" in txt
+    assert "Z-1.000" in txt
+    # copy 0 mold at origin (0,20.78) -> bit-offset perimeter corner (0.5,21.28)
+    assert "X0.500 Y21.280" in txt
+    # copy 3 mold at origin (62.34,20.78) -> top-right corner (62.34+17.28, 20.78+17.28)
+    #   = (79.62, 38.06)
+    assert "X79.620 Y38.060" in txt
+    for ox in [0.00, 20.78, 41.56, 62.34]:
+        assert f"at origin ({ox:.2f},20.78)" in txt, f"missing mold origin x={ox}"
+    # --- Row 3 (waveguides): 1 mm-deep SERPENTINE through all 64 points ---
+    assert "WAVEGUIDE" in txt or "waveguide" in txt
+    assert "SERPENTINE" in txt
+    # copy 0 waveguide at origin (0,41.56): bus start at the bottom-left facet
+    # (pump in), first feed to the next grid point (2.54, 41.56)
+    assert "X0.000 Y41.560" in txt
+    assert "X2.540 Y41.560" in txt
+    # the serpentine reaches every row Y of the 8x8 grid (relative to origin 41.56):
+    #   Y = 41.56 + j*2.54 for j=0..7  -> 41.56, 44.10, 46.64, 49.18, 51.72, 54.26, 56.80, 59.34
+    for j in range(8):
+        yv = 41.56 + j * 2.54
+        assert f"Y{yv:.3f}" in txt, f"waveguide copy 0 missing row Y={yv}"
+    # serpentine ends at the bottom-left of the last row: (0, 41.56+17.78) = (0, 59.34)
+    assert "X0.000 Y59.340" in txt
+    # copy 3 waveguide at origin (62.34,41.56): last row ends at (62.34, 59.34)
+    assert "X62.340 Y59.340" in txt
+    for ox in [0.00, 20.78, 41.56, 62.34]:
+        assert f"at origin ({ox:.2f},41.56)" in txt, f"missing waveguide origin x={ox}"
+    # the serpentine passes through all 64 grid points of copy 0 (on the 2.54 grid)
+    for j in range(8):
+        for i in range(8):
+            xv = i * 2.54
+            yv = 41.56 + j * 2.54
+            assert f"X{xv:.3f} Y{yv:.3f}" in txt, \
+                f"waveguide copy 0 missing grid point ({xv},{yv})"
+    # 3 mm gap between copies: pitch = array span (17.78) + gap (3) = 20.78
+    assert "20.78" in txt
+    # the three rows are documented
+    assert "Row 1" in txt and "Row 2" in txt and "Row 3" in txt
+    assert "no through-cut" in txt.lower() or "NO through-cut" in txt
+
+
+# --- P1.0 single-piece files (one piece per file) -----------------------------
+
+def test_p1_holes_single():
+    """Standalone single-piece: ONE 64-hole pattern, 17.78x17.78, 2.0 mm BLIND,
+    sin rebordes. Same geometry as one grid copy, flush at the origin."""
+    txt = _text("p1_holes.gcode")
+    assert txt.count("pin (") == 64
+    assert "hole (0.00,0.00)" in txt      # first pin flush at the origin
+    assert "hole (17.78,17.78)" in txt    # last pin
+    assert "2.54 mm pitch" in txt
+    assert "Z-2.000" in txt               # 2 mm blind
+    assert "Z-3.000" not in txt           # no through-cut
+    assert not re.search(r"(?m)^G02\b", txt)
+    assert not re.search(r"(?m)^G03\b", txt)
+    # polygon start of hole (1,1) at (0+0.25, 0)
+    assert "X0.250 Y0.000" in txt
+    # no outline corners
+    for corner in ["X-0.500 Y-0.500", "X20.500 Y-0.500",
+                   "X20.500 Y20.500", "X-0.500 Y20.500"]:
+        assert corner not in txt
+
+
+def test_p1_vaciado_single():
+    """Standalone single-piece: ONE 17.78x17.78 'vaciado completo' (full pocket),
+    1.0 mm deep (perimeter cuadrado + interior vaciado zigzag). Same geometry as
+    one mold cell of the grid."""
+    txt = _text("p1_vaciado.gcode")
+    assert "VACIADO" in txt or "vaciado" in txt
+    assert "Z-1.000" in txt               # 1 mm blind pocket floor
+    assert "Z-3.000" not in txt           # no through-cut
+    assert not re.search(r"(?m)^G02\b", txt)
+    assert not re.search(r"(?m)^G03\b", txt)
+    # perimeter (bit offset 0.5): corners (0.5,0.5) and (17.28,17.28)
+    assert "X0.500 Y0.500" in txt
+    assert "X17.280 Y17.280" in txt
+    # no outline through-cut corners
+    for corner in ["X-0.500 Y-0.500", "X20.500 Y-0.500"]:
+        assert corner not in txt
+
+
+def test_p1_waveguide_single():
+    """Standalone single-piece: ONE 17.78x17.78 serpentine waveguide channel,
+    1.0 mm deep, connecting all 64 grid points in boustrophedon order (the L2
+    entanglement-bus template, TEOS + microdiamond fill). Same geometry as one
+    grid copy. Pump in at the bottom-left facet (0,0)."""
+    txt = _text("p1_waveguide.gcode")
+    assert "WAVEGUIDE" in txt or "waveguide" in txt
+    assert "SERPENTINE" in txt
+    assert "Z-1.000" in txt               # 1 mm blind channel
+    assert "Z-3.000" not in txt           # no through-cut
+    assert not re.search(r"(?m)^G02\b", txt)
+    assert not re.search(r"(?m)^G03\b", txt)
+    # bus start at the bottom-left facet (0,0)
+    assert "X0.000 Y0.000" in txt
+    # the serpentine reaches every row Y of the 8x8 grid (j*2.54, j=0..7)
+    for j in range(8):
+        assert f"Y{j * 2.54:.3f}" in txt, f"missing row Y={j * 2.54}"
+    # ends at the bottom-left of the last row: (0, 17.78)
+    assert "X0.000 Y17.780" in txt
+    # passes through ALL 64 grid points (on the 2.54 grid, flush at origin)
+    for j in range(8):
+        for i in range(8):
+            assert f"X{i * 2.54:.3f} Y{j * 2.54:.3f}" in txt, \
+                f"waveguide single missing grid point ({i},{j})"
+
+
 # --- determinism -------------------------------------------------------------
 
 @pytest.mark.parametrize("name", list(gen.FILES))

@@ -743,6 +743,438 @@ def gen_p0_carrier() -> str:
     return g.text()
 
 
+# --- P1.0 pin-scaffold (commercial pin-header electrode array) ----------------
+# P1 replaces the P0 hand-bonded magnet-wire fan-out with a COMMERCIAL pin-header
+# scaffold: standard 2.54 mm pitch male pin headers (0.64 mm square, tin-plated,
+# cut to length) seat in a CNC'd support so each pin is one pixel's electrode AND
+# its own plug-in fan-out (solders straight into a 2.54 mm female socket -> no
+# wire-bonding, no pogo clamshell, no magnet-wire fan-out). The 1 mm bit drills
+# 1.0 mm holes -> ~0.18 mm radial clearance for the paste annulus (detector) or a
+# free sliding fit (emitter cathode contacts). 8x8 = 64 pins (user-confirmed 8x8,
+# supersedes the 48-pin draft) matches the 64-pixel grid. Support 20x20 overlays
+# the P0 die / ITO glass footprint. Pitch is 2.54 mm (not the P0 2.5 mm) because
+# the pin header's molded strip fixes the pitch -- a standard cut header only
+# drops in at 2.54.
+P1_SUPPORT = 20.0
+P1_PIN_PITCH = 2.54          # standard PCB pin-header pitch (molded strip, fixed)
+P1_PIN_N = 8                 # 8x8 = 64 pins (matches the 64-pixel grid)
+P1_PIN_BIT = 1.0             # 1 mm flat end-mill
+P1_HOLE_R = 0.75            # 1.5 mm hole dia -- > 1 mm bit so circle_bore mills a
+                            #  VISIBLE polygon circle (a Z-only peck drill at 1.0 mm =
+                            #  bit dia shows as a point in a top view, not a hole).
+                            #  0.64 mm pin in 1.5 mm hole -> 0.43 mm radial clearance.
+P1_STOCK_Z = 3.0             # 3 mm support: pin length + clearance, through-bored
+# 8x8 grid centred on the 20x20 support: span (8-1)*2.54 = 17.78, start 1.11 mm.
+P1_PIN_START = (P1_SUPPORT - (P1_PIN_N - 1) * P1_PIN_PITCH) / 2.0   # 1.11 mm
+P1_PIN_CENTRES = [P1_PIN_START + k * P1_PIN_PITCH for k in range(P1_PIN_N)]
+
+# --- P1 holes + mold: a 2x4 grid of the pin-array footprint, NO through-cut ---
+# The user asked for 2 rows of 4 pieces of EACH type (holes + mold), no through-
+# cut ("los rebordes no los quiero"): a single 2-row x 4-col grid -- row 1 =
+# 4 HOLES pieces (64 holes each, blind 2 mm), row 2 = 4 MOLD pieces (17.78x17.78
+# 1 mm pocket). 3 mm gap between copies; each holes array is FLUSH at the copy
+# origin (first pin at the corner) so it aligns with the mold cell below/above.
+P1_HOLES_Z = 2.0            # hole depth -- BLIND (NOT through): 2 mm of 3 mm stock
+P1_MOLD_Z = 1.0             # mold pocket depth -- 1 mm
+P1_MOLD_STEP = 0.5          # mold pocket stepover (~50% of the 1 mm bit)
+P1_ARRAY_SPAN = (P1_PIN_N - 1) * P1_PIN_PITCH    # 17.78 mm -- the pin-array footprint
+P1_COPY_GAP = 3.0           # gap between copies in the grid (mm)
+P1_COPY_PITCH = P1_ARRAY_SPAN + P1_COPY_GAP      # 20.78 mm -- copy-to-copy pitch
+P1_GRID_COLS = 4           # 4 pieces per row
+P1_GRID_ROWS = 3          # 3 rows: row 0 = holes, row 1 = molds, row 2 = waveguides
+P1_WG_Z = 1.0             # waveguide channel depth (BLIND, 1 mm) -- L2 bus, TEOS+microdiamond fill
+
+
+def circle_bore(g: G, cx: float, cy: float, hole_r: float, bit_r: float,
+                z_target: float, z_step: float = 0.5, n_seg: int = 16,
+                feed: int = PLUNGE_FEED) -> None:
+    """Bore a hole of radius ``hole_r`` with a ``bit_r`` end-mill by LINEAR-SEGMENT
+    polygon circles (G1 XY moves), NOT G02 arcs.
+
+    Why linear segments, not G02: some gcode viewers misrender the G02 I/J
+    arc-centre offset as a diagonal chord toward the origin, which made the 8x8
+    grid look "diagonal" even though the hole centres are a perfect axis-aligned
+    grid. A polygon circle (16 short G1 XY segments) renders as a clean closed
+    circle in EVERY viewer, so the grid reads as straight aligned rows. A single
+    on-grid centre pierce marks the hole for the SVG parser (which filters
+    plunges to the 2.54 mm pin grid); then the polygon steps down in Z. Emits
+    explicit plunge cycles (no canned G83) for a plain GRBL 3018.
+    """
+    path_r = hole_r - bit_r               # 0.25 mm (1.5 mm hole - 1 mm bit)
+    # 1. centre pierce -- the plunge here is at (cx, cy), ON the pin grid, so the
+    #    SVG parser (_hole_centers) locates the hole. Steps down to full depth.
+    g.rapid(cx, cy, z=SAFE_Z)
+    z = 0.0
+    while z > z_target + 1e-6:
+        z = max(z - z_step, z_target)
+        g.plunge(z, feed=feed)
+    g.retract()
+    # 2. linear-segment polygon circle stepping down Z -- visible in any viewer,
+    #    no G02 I/J to misrender as a diagonal. Start at (cx + path_r, cy).
+    g.rapid(cx + path_r, cy, z=SAFE_Z)
+    z = 0.0
+    while z > z_target + 1e-6:
+        z = max(z - z_step, z_target)
+        g.plunge(z, feed=feed)
+        for k in range(n_seg + 1):
+            a = 2.0 * math.pi * k / n_seg
+            g.feed(cx + path_r * math.cos(a), cy + path_r * math.sin(a), feed=CUT_FEED)
+        g.retract()
+
+
+def rect_pocket(g: G, x0: float, y0: float, w: float, h: float, bit: float,
+                z_target: float, stepover: float, z_step: float = 0.5,
+                feed: int = CUT_FEED) -> None:
+    """Pocket a ``w`` x ``h`` square (corner ``x0,y0``) down to ``z_target`` (BLIND).
+
+    Two passes, both stepped down in Z:
+
+      1. PERIMETER outline ("cuadrado de fuera") -- trace the square at each
+         Z level so the mold has a crisp square wall. The bit center stays
+         ``bit/2`` inside the boundary so the cut edge reaches the square.
+      2. INTERIOR zigzag raster ("vaciado de por dentro") -- clear the inside at
+         each Z level with a boustrophedon (snake) zigzag, step-over ``stepover``.
+
+    No through-cut: the bit stops at ``z_target`` (leaves a floor). Used for the
+    P1 mold (a 1 mm-deep 17.78 x 17.78 pocket the pin array drops into).
+    """
+    r = bit / 2.0
+    xa, xb = x0 + r, x0 + w - r
+    ya, yb = y0 + r, y0 + h - r
+    # 1. perimeter outline -- step down in Z, trace the square each level
+    g.rapid(xa, ya, z=SAFE_Z)
+    z = 0.0
+    while z > z_target + 1e-6:
+        z = max(z - z_step, z_target)
+        g.plunge(z, feed=PLUNGE_FEED)
+        g.feed(xb, ya, feed=feed)
+        g.feed(xb, yb, feed=feed)
+        g.feed(xa, yb, feed=feed)
+        g.feed(xa, ya, feed=feed)
+        g.retract()
+    # 2. interior zigzag pocket -- clear the inside at each Z level
+    n = max(1, int(round((yb - ya) / stepover)))
+    ys = [ya + i * (yb - ya) / n for i in range(n + 1)]
+    g.rapid(xa, ya, z=SAFE_Z)
+    z = 0.0
+    while z > z_target + 1e-6:
+        z = max(z - z_step, z_target)
+        g.plunge(z, feed=PLUNGE_FEED)
+        for i, yy in enumerate(ys):
+            x_from = xa if (i % 2 == 0) else xb
+            x_to = xb if (i % 2 == 0) else xa
+            if i > 0:
+                g.feed(x_from, yy, feed=feed)    # Y step-over (no lift between rows)
+            g.feed(x_to, yy, feed=feed)          # cut across the pocket
+        g.retract()
+        g.rapid(xa, ya, z=SAFE_Z)
+
+
+def serpentine_channel(g: G, ox: float, oy: float, n: int, pitch: float,
+                       bit: float, z_target: float, z_step: float = 0.5,
+                       feed: int = CUT_FEED) -> None:
+    """Mill a bit-width serpentine channel through the ``n`` x ``n`` grid of
+    points (``pitch`` mm, flush at origin ``ox,oy``), stepped down to ``z_target``
+    (BLIND). The L2 entanglement-bus / waveguide template.
+
+    The path is a boustrophedon (snake): row 0 left->right through all n points,
+    drop to row 1 at the right end, row 1 right->left, drop to row 2 at the left
+    end, ... so ONE continuous channel passes through all n*n grid points (the
+    532 nm pump goes in at the bottom-left facet, the bus start). Vertical
+    connectors at ALTERNATING ends link the rows, so the polyline never crosses
+    itself. The channel is ``bit``-diameter wide (1 mm) and ``z_target`` deep
+    (1 mm) -- later filled with TEOS + microdiamonds as the L2 entanglement bus.
+    No through-cut (the bit stops at ``z_target``).
+    """
+    # build the waypoint polyline (the serpentine through all n*n grid points)
+    pts: list[tuple[float, float]] = []
+    for row in range(n):
+        y = oy + row * pitch
+        xs = [ox + i * pitch for i in range(n)]
+        if row % 2 == 1:
+            xs.reverse()
+        if row == 0:
+            pts.append((xs[0], y))           # bus start (bottom-left facet, pump in)
+        for x in xs[1:]:
+            pts.append((x, y))               # along the row
+        if row < n - 1:
+            pts.append((xs[-1], y + pitch))  # vertical connector to next row
+    # step down in Z; at each level plunge at the start and trace the full polyline
+    g.rapid(pts[0][0], pts[0][1], z=SAFE_Z)
+    z = 0.0
+    while z > z_target + 1e-6:
+        z = max(z - z_step, z_target)
+        g.plunge(z, feed=PLUNGE_FEED)
+        for x, y in pts[1:]:
+            g.feed(x, y, feed=feed)
+        g.retract()
+        g.rapid(pts[0][0], pts[0][1], z=SAFE_Z)
+
+
+def gen_p1_pin_array_support() -> str:
+    """P1 pin-scaffold support -- 8x8 circle-bored through-hole grid for PCB pins.
+
+    The P1 fabrication uses COMMERCIAL pin-header pins as the per-pixel electrode
+    AND the plug-in fan-out (no wire-bonding, no pogo clamshell, no magnet-wire
+    fan-out). This toolpath circle-bores the 64 support holes one standard 2.54 mm
+    male pin-header pin fits in, on a 20x20x3 mm FR4 (or clear acrylic) support
+    that overlays the 20x20 die / ITO glass footprint.
+
+      * 8x8 = 64 holes at 2.54 mm pitch (standard pin-header pitch; the molded
+        strip fixes the pitch, so the grid MUST be 2.54, not the P0 2.5 mm).
+        Centred on the 20x20 support (first pin at 1.11 mm).
+      * 1.0 mm flat end-mill CIRCLE-BORES 1.5 mm through-holes (3 mm stock) by
+        LINEAR-SEGMENT polygon circles (G1 XY moves, NOT G02 arcs -- some viewers
+        misdraw the G02 I/J arc-centre offset as a diagonal chord, which made the
+        grid look diagonal even though the hole centres are a square grid). The
+        hole is bigger than the bit (1.5 > 1.0) so each hole is a VISIBLE circle
+        in a gcode top view (a Z-only peck drill at 1.0 mm = bit diameter would
+        show as a point, not a hole). A standard 0.64 mm square pin-header pin
+        leaves ~0.43 mm radial clearance -- the paste annulus for both devices.
+      * 4 corner fiducials + 20x20 outline with 4 bridges.
+
+    DETECTOR use (pin-molded paste): fill each hole with graphene paste, insert
+    the pin, let dry -> graphene skin on the pin; repeat with MoS2+PEDOT:PSS
+    paste -> a coaxial pin/graphene/MoS2 pixel; the ITO glass under the support
+    is the common back-electrode (DET_COMMON), the paste column between pin tip
+    and ITO is the active photogating layer.
+    EMITTER use (pin-molded CQD paste, symmetric to the detector): mold the CQD-LED
+    stack around each pin in the hole, layer by layer -- ZnO paste (inner, ETL),
+    dry, CQD paste (EML), dry, PEDOT:PSS paste (outer, HIL), dry -- pin = cathode,
+    ITO glass under the support = EM_ANODE anode. Same pin-molding process as the
+    detector; the paste interfaces interdiffuse (not as sharp as a spin-coated
+    stack) so it is a weaker/rougher LED, but it emits and is symmetric. Each pin
+    addressable from the back via a 2.54 mm female socket. No silver stencil, no
+    magnet-wire fan-out, no spin-coater.
+    """
+    g = G()
+    g.comment("QSSC P1 -- PIN-SCAFFOLD SUPPORT: 8x8 circle-bored hole grid for PCB pin headers")
+    g.comment("GENERATED by tools/gen_qssc_gcode.py -- deterministic, auditable")
+    g.comment(f"Stock: {P1_SUPPORT:.0f}x{P1_SUPPORT:.0f}x{P1_STOCK_Z:.0f} mm FR4 (or clear acrylic) | tool: 1.0 mm flat end-mill")
+    g.comment(f"spindle {SPINDLE_RPM} rpm | bore feed 100 mm/min | through Z-{P1_STOCK_Z:.1f}")
+    g.comment("PINS: standard 2.54 mm pitch male pin header, 0.64 mm square, tin-plated")
+    g.comment("  (Mill-Max 1129 / Harwin M50 machined round gold pins = the upgrade for uniform coating).")
+    g.comment(f"8x8 = 64 holes @ 2.54 mm pitch, centred (first pin {P1_PIN_START:.2f} mm), {P1_HOLE_R*2:.1f} mm dia.")
+    g.comment(f"1 mm bit CIRCLE-BORES {P1_HOLE_R*2:.1f} mm holes (linear-segment polygon circles, visible in a top view) -> 0.43 mm radial clearance (0.64 mm pin).")
+    g.comment("NOT a Z-only peck drill (invisible as a point) and NOT G02 arcs (some viewers misdraw I/J as a diagonal) -- a real polygon circle per hole.")
+    g.comment("DETECTOR: paste-mold graphene then MoS2+PEDOT:PSS around each pin in the hole;")
+    g.comment("  ITO glass under the support = common back-electrode (DET_COMMON).")
+    g.comment("EMITTER: paste-mold ZnO then CQD then PEDOT:PSS around each pin -- symmetric")
+    g.comment("  to the detector; pin = cathode, ITO glass under the support = EM_ANODE anode.")
+    g.comment("COORDS: support-local. WORK ZERO = support bottom-left (0,0). 20x20 overlays the P0 die.")
+    g.blank()
+    g.lines.append(SAFE_START)
+    g.blank()
+    g.comment("-- support bounding box (engrave, visual frame) --")
+    engrave_rect(g, 0.0, 0.0, P1_SUPPORT, P1_SUPPORT)
+    g.comment("-- corner fiducials (registration) --")
+    corner_fiducials(g, 0.0, 0.0, P1_SUPPORT, P1_SUPPORT)
+    g.blank()
+    g.comment(f"-- 8x8 = 64 pin holes, 2.54 mm pitch, {P1_HOLE_R*2:.1f} mm circle-bored through --")
+    # boustrophedon (snake) row-major: row left->right, next row right->left, so every
+    # between-hole travel is a short horizontal step (and a short vertical step between
+    # rows) -- no long diagonal rapids crossing the matrix (the earlier column-up-then
+    # -jump-down order drew 8 diagonal rapids that looked misaligned in a gcode viewer).
+    for iy, cy in enumerate(P1_PIN_CENTRES):
+        cols = list(enumerate(P1_PIN_CENTRES))
+        if iy % 2:
+            cols.reverse()
+        for ix, cx in cols:
+            g.comment(f"   pin ({ix + 1},{iy + 1}) support ({cx:.2f},{cy:.2f})")
+            circle_bore(g, cx, cy, P1_HOLE_R, P1_PIN_BIT / 2.0,
+                        z_target=-P1_STOCK_Z, z_step=0.5)
+    g.blank()
+    g.comment(f"-- [OUTLINE] through-cut {P1_SUPPORT:.0f}x{P1_SUPPORT:.0f} (4 bridges) --")
+    outline_rect_with_bridges(g, 0.0, 0.0, P1_SUPPORT, P1_SUPPORT, bit=P1_PIN_BIT,
+                              z_passes=[-1.0, -2.0, -P1_STOCK_Z], bridges=4)
+    g.blank()
+    g.lines.append(PROGRAM_END)
+    return g.text()
+
+
+def _p1_emit_holes(g: G, ox: float, oy: float) -> None:
+    """Emit one 8x8 = 64-hole pattern at copy origin (ox,oy), flush (first pin
+    at the corner), 2.0 mm BLIND, boustrophedon order, ONLY holes."""
+    for iy in range(P1_PIN_N):
+        cy = oy + iy * P1_PIN_PITCH
+        cols = list(range(P1_PIN_N))
+        if iy % 2:
+            cols.reverse()
+        for ix in cols:
+            cx = ox + ix * P1_PIN_PITCH
+            g.comment(f"   pin ({ix + 1},{iy + 1}) hole ({cx:.2f},{cy:.2f})")
+            circle_bore(g, cx, cy, P1_HOLE_R, P1_PIN_BIT / 2.0,
+                        z_target=-P1_HOLES_Z, z_step=0.5)
+
+
+def _p1_emit_mold(g: G, ox: float, oy: float) -> None:
+    """Emit one 17.78 x 17.78 'vaciado completo' (full pocket) at (ox,oy):
+    1.0 mm-deep perimeter 'cuadrado de fuera' + interior zigzag 'vaciado de
+    por dentro'."""
+    rect_pocket(g, ox, oy, P1_ARRAY_SPAN, P1_ARRAY_SPAN,
+                bit=P1_PIN_BIT, z_target=-P1_MOLD_Z, stepover=P1_MOLD_STEP,
+                z_step=0.5)
+
+
+def _p1_emit_waveguide(g: G, ox: float, oy: float) -> None:
+    """Emit one 17.78 x 17.78 waveguide template at (ox,oy): a 1.0 mm-deep
+    serpentine channel through all 64 grid points in boustrophedon order (the
+    L2 entanglement bus, later filled with TEOS + microdiamonds)."""
+    serpentine_channel(g, ox, oy, P1_PIN_N, P1_PIN_PITCH, bit=P1_PIN_BIT,
+                       z_target=-P1_WG_Z, z_step=0.5)
+
+
+def gen_p1_holes_and_mold() -> str:
+    """P1 layer templates -- a 3-row x 4-col grid of the pin-array footprint, no through-cut.
+
+    Three piece TYPES (one per row), 4 copies each, with NO through-cutting
+    outline ("los rebordes ... no los quiero"):
+
+      * Row 1 (Y 0..17.78): 4 HOLES pieces -- each the 8x8 = 64-hole PATTERN,
+        circle-bored (linear-segment polygon circles, same method as
+        p1_pin_array_support), BLIND 2.0 mm deep (NOT through). ONLY holes --
+        no outline, no engrave, no fiducials ("sin rebordes"). Each array is
+        FLUSH at the copy origin (first pin at the corner) so it aligns with a
+        mold / waveguide cell -- hole (i,j) at (ox + i*pitch, oy + j*pitch).
+      * Row 2 (Y 20.78..38.56): 4 MOLD pieces -- each a 17.78 x 17.78, 1.0 mm-deep
+        square pocket (perimeter "cuadrado de fuera" + interior zigzag "vaciado
+        de por dentro"), the pin-array footprint.
+      * Row 3 (Y 41.56..59.34): 4 WAVEGUIDE templates -- each a 17.78 x 17.78, 1.0
+        mm-deep SERPENTINE channel ("linea vaciada") connecting ALL 64 grid
+        points in boustrophedon order (the L2 entanglement-bus layer, later
+        filled with TEOS + microdiamonds; 532 nm pump in at the bottom-left
+        facet, the bus start).
+
+    4 of each type (12 pieces), 3 mm gap between copies, ~80 x 59 mm (fits a
+    3018). No through-cut on any piece. Stock >= 3 mm: 2 mm blind holes leave a
+    1 mm floor; the 1 mm mold / waveguide leave a 2 mm floor. The original
+    p1_pin_array_support.gcode (through-holes + outline) is a SEPARATE file,
+    kept unchanged.
+    """
+    grid_w = (P1_GRID_COLS - 1) * P1_COPY_PITCH + P1_ARRAY_SPAN   # ~80.12 mm
+    grid_h = (P1_GRID_ROWS - 1) * P1_COPY_PITCH + P1_ARRAY_SPAN   # ~59.34 mm
+    g = G()
+    g.comment("QSSC P1 -- LAYER TEMPLATES: 3x4 grid (4 holes + 4 molds + 4 waveguides), NO through-cut")
+    g.comment("GENERATED by tools/gen_qssc_gcode.py -- deterministic, auditable")
+    g.comment(f"Stock >= 3 mm FR4/acrylic | tool: {P1_PIN_BIT:.1f} mm flat end-mill")
+    g.comment(f"spindle {SPINDLE_RPM} rpm | feeds {PLUNGE_FEED} (plunge) / {CUT_FEED} (cut) mm/min")
+    g.comment(f"Row 1 (Y 0..{P1_ARRAY_SPAN:.2f}): 4 HOLES pieces, 64 holes each, "
+              f"2.54 mm pitch, 1.5 mm circle-bored, 2.0 mm DEEP (blind), sin rebordes.")
+    g.comment(f"Row 2 (Y {P1_COPY_PITCH:.2f}..{P1_COPY_PITCH + P1_ARRAY_SPAN:.2f}): 4 MOLD pieces, "
+              f"{P1_ARRAY_SPAN:.2f}x{P1_ARRAY_SPAN:.2f} mm, 1.0 mm-deep pocket (cuadrado + vaciado).")
+    g.comment(f"Row 3 (Y {2*P1_COPY_PITCH:.2f}..{2*P1_COPY_PITCH + P1_ARRAY_SPAN:.2f}): 4 WAVEGUIDE templates, "
+              f"{P1_ARRAY_SPAN:.2f}x{P1_ARRAY_SPAN:.2f} mm, 1.0 mm-deep SERPENTINE channel "
+              f"(all 64 points, boustrophedon) -- L2 bus, TEOS + microdiamond fill.")
+    g.comment(f"4 of each type (12 pieces), {P1_COPY_GAP:.0f} mm gap between copies, "
+              f"~{grid_w:.1f}x{grid_h:.1f} mm. No through-cut.")
+    g.comment("COORDS: stock-local. WORK ZERO = stock bottom-left (0,0).")
+    g.blank()
+    g.lines.append(SAFE_START)
+    g.blank()
+
+    # --- Row 1: 4 holes pieces (64 holes each, 2 mm blind, only holes) ---
+    g.comment(f"-- Row 1: 4 holes pieces (X 0..{grid_w:.2f}), 2.0 mm deep, sin rebordes --")
+    for c in range(P1_GRID_COLS):
+        ox = c * P1_COPY_PITCH
+        oy = 0.0
+        g.comment(f"   -- holes piece ({c + 1}/{P1_GRID_COLS}) at origin ({ox:.2f},{oy:.2f}) --")
+        _p1_emit_holes(g, ox, oy)
+    g.blank()
+
+    # --- Row 2: 4 mold pieces (17.78x17.78, 1 mm-deep pocket) ---
+    g.comment(f"-- Row 2: 4 mold pieces (X 0..{grid_w:.2f}), 1.0 mm deep --")
+    for c in range(P1_GRID_COLS):
+        ox = c * P1_COPY_PITCH
+        oy = P1_COPY_PITCH
+        g.comment(f"   -- mold piece ({c + 1}/{P1_GRID_COLS}) at origin ({ox:.2f},{oy:.2f}) --")
+        _p1_emit_mold(g, ox, oy)
+    g.blank()
+
+    # --- Row 3: 4 waveguide templates (17.78x17.78, 1 mm-deep serpentine) ---
+    g.comment(f"-- Row 3: 4 waveguide templates (X 0..{grid_w:.2f}), 1.0 mm-deep serpentine --")
+    for c in range(P1_GRID_COLS):
+        ox = c * P1_COPY_PITCH
+        oy = 2.0 * P1_COPY_PITCH
+        g.comment(f"   -- waveguide piece ({c + 1}/{P1_GRID_COLS}) at origin ({ox:.2f},{oy:.2f}) --")
+        _p1_emit_waveguide(g, ox, oy)
+    g.blank()
+    g.lines.append(PROGRAM_END)
+    return g.text()
+
+
+def _p1_single_header(g: G, title: str, body: str) -> None:
+    """Common header for the single-piece P1 gcode files."""
+    g.comment(title)
+    g.comment("GENERATED by tools/gen_qssc_gcode.py -- deterministic, auditable")
+    g.comment(f"Stock >= 3 mm FR4/acrylic | tool: {P1_PIN_BIT:.1f} mm flat end-mill")
+    g.comment(f"spindle {SPINDLE_RPM} rpm | feeds {PLUNGE_FEED} (plunge) / {CUT_FEED} (cut) mm/min")
+    g.comment(body)
+    g.comment(f"Footprint {P1_ARRAY_SPAN:.2f}x{P1_ARRAY_SPAN:.2f} mm, flush at origin. No through-cut.")
+    g.comment("COORDS: stock-local. WORK ZERO = stock bottom-left (0,0).")
+    g.blank()
+    g.lines.append(SAFE_START)
+    g.blank()
+
+
+def gen_p1_holes_single() -> str:
+    """P1 holes -- ONE 64-hole pattern (17.78x17.78), 2.0 mm BLIND, sin rebordes.
+
+    Standalone single-piece file: the 8x8 = 64-hole pattern, circle-bored
+    (linear-segment polygon circles, no G02), BLIND 2.0 mm deep, ONLY holes (no
+    outline / engrave / fiducials). Flush at the origin (first pin at the corner)
+    so it aligns with a mold / waveguide cell. Same geometry as one grid copy.
+    """
+    g = G()
+    _p1_single_header(
+        g, "QSSC P1 -- HOLES (single): 64-hole pattern, 2.0 mm blind, sin rebordes",
+        f"8x8 = 64 holes @ 2.54 mm pitch, {P1_HOLE_R*2:.1f} mm circle-bored, "
+        f"2.0 mm DEEP (blind). ONLY holes -- no outline / engrave / fiducials.")
+    g.comment("-- 64 pin holes, 2.54 mm pitch, 2.0 mm deep (blind) --")
+    _p1_emit_holes(g, 0.0, 0.0)
+    g.blank()
+    g.lines.append(PROGRAM_END)
+    return g.text()
+
+
+def gen_p1_vaciado_single() -> str:
+    """P1 vaciado -- ONE 17.78x17.78 'vaciado completo' (full pocket), 1.0 mm deep.
+
+    Standalone single-piece file: the full square pocket -- perimeter 'cuadrado
+    de fuera' (crisp wall) + interior boustrophedon zigzag 'vaciado de por
+    dentro' (cleared floor). Same geometry as one mold cell of the grid.
+    """
+    g = G()
+    _p1_single_header(
+        g, "QSSC P1 -- VACIADO (single): 17.78x17.78 full pocket, 1.0 mm deep",
+        f"{P1_ARRAY_SPAN:.2f}x{P1_ARRAY_SPAN:.2f} mm, 1.0 mm-deep pocket "
+        f"(perimeter cuadrado + interior vaciado zigzag). Blind -- not through.")
+    g.comment("-- full pocket (vaciado completo), 1.0 mm deep --")
+    _p1_emit_mold(g, 0.0, 0.0)
+    g.blank()
+    g.lines.append(PROGRAM_END)
+    return g.text()
+
+
+def gen_p1_waveguide_single() -> str:
+    """P1 waveguide -- ONE 17.78x17.78 serpentine channel, 1.0 mm deep.
+
+    Standalone single-piece file: the L2 entanglement-bus template -- a 1.0 mm-
+    deep, 1 mm-wide serpentine channel connecting ALL 64 grid points in
+    boustrophedon order (532 nm pump in at the bottom-left facet, the bus start).
+    Later filled with TEOS + microdiamonds. Same geometry as one grid copy.
+    """
+    g = G()
+    _p1_single_header(
+        g, "QSSC P1 -- WAVEGUIDE (single): 17.78x17.78 serpentine channel, 1.0 mm deep",
+        f"SERPENTINE channel through all 64 grid points @ 2.54 mm pitch, 1.0 mm "
+        f"deep, 1 mm wide. L2 entanglement bus (TEOS + microdiamond fill). Pump in at (0,0).")
+    g.comment("-- serpentine waveguide channel, 1.0 mm deep (L2 bus) --")
+    _p1_emit_waveguide(g, 0.0, 0.0)
+    g.blank()
+    g.lines.append(PROGRAM_END)
+    return g.text()
+
+
 # --- driver -----------------------------------------------------------------
 
 FILES = {
@@ -753,6 +1185,11 @@ FILES = {
     "p0_waveguide_channel.gcode": gen_p0_waveguide_channel,
     "p0_detector_stencil.gcode": gen_p0_detector_stencil,
     "p0_carrier_pcb.gcode": gen_p0_carrier,
+    "p1_pin_array_support.gcode": gen_p1_pin_array_support,
+    "p1_holes_and_mold.gcode": gen_p1_holes_and_mold,
+    "p1_holes.gcode": gen_p1_holes_single,
+    "p1_vaciado.gcode": gen_p1_vaciado_single,
+    "p1_waveguide.gcode": gen_p1_waveguide_single,
 }
 
 
