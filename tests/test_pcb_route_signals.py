@@ -65,6 +65,13 @@ with open({out!r}, "w") as fh:
         "bga_vias": len(pad_vip),
         "via_nets": sorted(nets),
     }}, fh)
+# Skip interpreter finalization: KiCad >= 10 swig teardown GCs the stale
+# proxies of a mutated board and segfaults AFTER the work above is already
+# on disk (~40% of runs, 10.0.6). os._exit is the documented workaround
+# (tools/_kicad_compat.exit_cleanly) and is a no-op difference on older
+# bindings.
+import os
+os._exit(0)
 """
 
 
