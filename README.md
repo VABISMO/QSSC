@@ -3,7 +3,7 @@
 [![CI](https://github.com/VABISMO/QSSC/actions/workflows/ci.yml/badge.svg)](https://github.com/VABISMO/QSSC/actions/workflows/ci.yml)
 [![License: Apache-2.0 NC](https://img.shields.io/badge/license-Apache--2.0%20NC-blue.svg)](LICENSE)
 [![Python 3.10–3.12](https://img.shields.io/badge/python-3.10–3.12-blue.svg)](https://www.python.org)
-[![Tests](https://img.shields.io/badge/tests-87%20passed-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-149%20passed-brightgreen.svg)](#testing)
 
 A room-temperature **solid-state spin-defect** quantum platform: a Qiskit
 backend, an FPGA control stack with PCB design, a validated chip-fabrication
@@ -35,7 +35,7 @@ NV-diamond *simulator* — into one coherent, renamed deliverable.
 | **Protocol (HTML)** | `docs/protocol.html` | Branded, print-ready HTML render of the protocol (regenerate with `python3 tools/build_protocol_html.py`) |
 | **Presentation** | `presentation/index.html` | Self-contained HTML deck with software mocks and diagrams |
 | **PDFs** | `presentation/QSSC_presentation.pdf`, `docs/QSSC_fabrication_protocol.pdf` | Headless-Chromium exports of the presentation and protocol |
-| **Tests** | `tests/` | 87 tests (defects, simulator, circuits, backend, API, protocol, crypto) |
+| **Tests** | `tests/` | 149 software/physics tests (defects, simulator, circuits, backend, API, crypto, cross-platform) + a PCB DRC/connectivity track |
 
 ## Quick start
 
@@ -45,7 +45,7 @@ python -m venv .venv && . .venv/bin/activate
 pip install -e ".[api,dev]"
 
 # run the test suite
-python -m pytest                       # 87 passed
+python -m pytest                       # 149 passed (software/physics suite)
 
 # try the CLI
 qssc info                              # backend / defect summary (defaults to NV)
@@ -266,7 +266,7 @@ Nanotechnol.* 2008; Coleman *Science* 2011; Kianinia *ACS Photonics* 2020) and
 is explicit about what is established versus aspirational (e.g. the CQD source
 is described as amplified spontaneous emission, **not** a laser).
 
-## Honesty note
+## Scope note
 
 This is an **engineering design + simulator**, not a claim of a working
 fault-tolerant processor. The software stack runs and is tested; the
@@ -354,7 +354,7 @@ failed test/parse/sim run blocks both deploys). It then:
   0 unconnected; 130×85 mm FR4, full netlist on pads). Copper routing
   (BGA fanout, 50 Ω RF microstrip, USB diff pair, analog guard rings,
   plane pours) still needs one GUI `pcbnew` session — `kicad-cli` cannot
-  export DSN / import SES headless (described honestly in
+  export DSN / import SES headless (documented frankly in
   `HARDWARE_DESIGN.md` §15).
 
 ### Fabrication protocol
