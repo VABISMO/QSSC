@@ -469,7 +469,11 @@ class QSSCBackend(BackendV2):
                     s2 = self.sites[j]
                     ej = thermal_relaxation_error(s2.t1 or self._t1,
                                                   s2.t2 or self._t2, g2q)
-                    two_q_therm = therm1.tensor(ej)
+                    # BOTH qubits relax over the *two-qubit* gate duration;
+                    # therm1 above is over g1q and would under-relax the
+                    # control by ~g2q/g1q (~8x for these profiles). (#7)
+                    therm_q_2q = thermal_relaxation_error(t1, t2, g2q)
+                    two_q_therm = therm_q_2q.tensor(ej)
                     dep2err = depolarizing_error(dep2, 2)
                     nm.add_quantum_error(two_q_therm.compose(dep2err),
                                          ["cx", "cz", "cp", "swap"], [q, j])
@@ -694,7 +698,7 @@ class QSSCBackend(BackendV2):
                                       ideal_counts: dict, shots: int) -> dict:
         """Fast, tunable noise applied to the ideal measurement distribution.
 
-        Two effects, both derived from the defect profile and the per-site
+        Three effects, all derived from the defect profile and the per-site
         properties:
 
         * **Readout error** -- each measured bit of each shot is flipped with
@@ -703,6 +707,12 @@ class QSSCBackend(BackendV2):
           depth and gate times; the distribution is blended with the maximally
           mixed distribution by ``(1 - exp(-t_circuit / T2))``, modelling T2
           dephasing over the sequence.
+        * **Cumulative gate depolarization** -- every basis gate carries the
+          profile's ``depol_1q`` / ``depol_2q`` channel in the "real"
+          density-matrix path; the analytic path composes the same
+          probabilities over the decomposed gate counts and folds them into
+          the same uniform blend, so deep circuits do not come out
+          under-noised relative to the "real" mode (#7).
 
         This runs in milliseconds regardless of qubit count, in contrast to a
         full density-matrix noise simulation.
@@ -738,11 +748,30 @@ class QSSCBackend(BackendV2):
         # the analytic limit agrees with the physical-feasibility verdict (a
         # Shor run that "is NOT physically executable at 300 K" must decohere to
         # a near-uniform distribution here, not recover its factors).
-        _, _, _, t_circuit, _ = self._decomposed_cost(circuit)
+        n1q_raw, _, _, t_circuit, est_2q = self._decomposed_cost(circuit)
         t2 = self._t2
         damping = 1.0 - math.exp(-t_circuit / max(t2, 1e-12))
+        # Cumulative per-gate depolarization (#7): the DM path composes a
+        # depolarizing channel onto EVERY basis gate, but this analytic path
+        # carried only T2 damping -- deep circuits came out under-noised
+        # relative to the "real" mode. Compose the per-gate probabilities the
+        # same way the channels compose (independent identity survivals):
+        #   identity = (1-lam1)^est_1q * (1-lam2)^est_2q
+        # and fold the result into the same uniform blend (a fully depolarized
+        # register and a fully dephased one both end uniform over the readout).
+        # qiskit's depolarizing_error(p, n) mixes to I/2^n with probability
+        # lam = p * 4^n / (4^n - 1), so convert the profile params the same
+        # way the DM path's channels do.
+        est_1q = n1q_raw + est_2q * 2          # mirrors _decomposed_cost
+        dep1, dep2 = self.profile.depol_1q, self.profile.depol_2q
+        lam1 = dep1 * 4.0 / 3.0                # 1q: p * 4 / 3
+        lam2 = dep2 * 16.0 / 15.0              # 2q: p * 16 / 15
+        identity = (1.0 - lam1) ** max(int(est_1q), 0) * (1.0 - lam2) ** max(int(est_2q), 0)
+        depol_mix = 1.0 - identity
+        # combine the two uniform-mixing channels: 1-(1-a)(1-b)
+        p_uniform = 1.0 - (1.0 - damping) * (1.0 - depol_mix)
         uniform = rng.integers(0, 2 ** nbits, size=shots)
-        final_int = np.where(rng.random(shots) < damping, uniform, noisy_int)
+        final_int = np.where(rng.random(shots) < p_uniform, uniform, noisy_int)
         # --- back to counts --------------------------------------------------
         unique, cnts = np.unique(final_int, return_counts=True)
         counts = {format(int(v), f"0{nbits}b"): int(c) for v, c in zip(unique, cnts)}

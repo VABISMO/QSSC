@@ -58,7 +58,22 @@ class DefectProfile:
     gate_2q_ns: float = 400.0          # two-qubit (entangling) gate duration
     readout_ns: float = 800.0          # optical spin-readout integration time
     init_ns: float = 200.0             # optical initialisation time
-    # Depolarizing error probabilities per gate (drive crosstalk / non-ideal MW)
+    # Depolarizing error probabilities per gate (drive crosstalk / non-ideal
+    # MW control).
+    #
+    # UNVERIFIED — provenance (#9): these are ENGINEERING ESTIMATES, not
+    # datasheet numbers. No published per-gate depolarization probability
+    # exists for room-temperature V_B- / NV- / V_Si ensembles coupled through
+    # the microwave stripline modelled here; published gate fidelities for
+    # these defects are single-site or cryogenic, not this 2q-bus geometry.
+    # The values are chosen to the same order of magnitude as the best
+    # room-temperature defect-spin two-qubit demonstrations
+    # (~99% CX fidelity → per-gate error ~1e-2) scaled down for the short
+    # (<= 400 ns) gated bus modelled here, with the 1q value ~8x smaller
+    # (shorter pulse, no entangling bus). Every "honest recovery" claim that
+    # survives beyond ~1e3 two-qubit gates hinges on these constants — run
+    # the sensitivity sweep (depol_2q 0.002..0.02) before quoting a
+    # recovery rate at scale. Do not cite them as measured.
     depol_1q: float = 0.0008
     depol_2q: float = 0.006
     # --- Hyperfine geometry: number of equivalent coupled nuclei (for the ODMR
@@ -109,7 +124,7 @@ HBN_VB = DefectProfile(
     readout_error=0.12,              # ensemble optical readout, partial contrast
     defect_density_per_um2=0.30,
     gate_1q_ns=50.0, gate_2q_ns=400.0, readout_ns=800.0, init_ns=200.0,
-    depol_1q=0.0008, depol_2q=0.006,
+    depol_1q=0.0008, depol_2q=0.006,   # engineering estimate, see class note (#9)
     n_equivalent_nuclei=3,           # 3 equivalent 14N -> 7-line hyperfine (2nI+1)
     t1_exponent=2.5,                 # T1 ~ T^(-5/2) (Gottscholl 2021)
     t2_exponent=0.5,
@@ -144,7 +159,7 @@ NV_DIAMOND = DefectProfile(
     readout_error=0.08,              # single-shot spin readout ~90% fidelity
     defect_density_per_um2=5.0,
     gate_1q_ns=25.0, gate_2q_ns=200.0, readout_ns=3000.0, init_ns=1000.0,
-    depol_1q=0.0002, depol_2q=0.002,
+    depol_1q=0.0002, depol_2q=0.002,   # engineering estimate, see class note (#9)
     n_equivalent_nuclei=1,           # single 14N -> 3-line hyperfine
     t1_exponent=1.0,
     t2_exponent=0.5,
@@ -175,7 +190,7 @@ SIC_VS = DefectProfile(
     readout_error=0.10,
     defect_density_per_um2=0.5,
     gate_1q_ns=40.0, gate_2q_ns=300.0, readout_ns=2000.0, init_ns=500.0,
-    depol_1q=0.0005, depol_2q=0.004,
+    depol_1q=0.0005, depol_2q=0.004,   # engineering estimate, see class note (#9)
     n_equivalent_nuclei=1,            # no equivalent-nucleus fingerprint like V_B-
     t1_exponent=1.0,
     t2_exponent=0.5,

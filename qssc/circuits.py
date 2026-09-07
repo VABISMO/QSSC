@@ -95,15 +95,52 @@ def create_period_finding_circuit(n: int, a: int) -> QuantumCircuit:
     return qc
 
 
+def _signal_floor(counts: dict, total: float) -> float:
+    """Minimum count for a bitstring to be considered a *signal* peak.
+
+    Two gates, and the larger one wins:
+
+    * ``0.01 * total`` -- the original 1% floor.  It governs the full-Shor
+      readout (``t = 2l + 1`` counting bits: uniform noise spreads over
+      ``2^t`` states, so per-state noise share is far below 1%).
+    * ``mu + 4 sigma`` -- for the reduced QFT-NOS register (``t = l + 1``,
+      e.g. 5 clbits for n = 15) the uniform-noise share per state is
+      ``mu = total / 2^w`` (3.1% for 5 bits), which sits *above* 1%: a
+      noise-dominated run then reports spurious "periods" continued-
+      fractioned out of mere noise states (issue #8).  A candidate must
+      clear the uniform-noise band by 4 binomial sigmas,
+      ``sigma = sqrt(mu (1 - 1/2^w)))``: the expected maximum of a uniform
+      readout over ~32 states is only ~mu + 2.6 sigma, so noise states
+      stay below, while a *damped but real* phase peak still passes --
+      a cold run carries ~0.35 uniform blend from T2 damping, putting the
+      true r-peak at ~mu + 11 sigma there.
+
+    The bit width ``w`` is read off the measured keys (spaces allowed).
+    """
+    try:
+        w = len(next(iter(counts)).replace(" ", ""))
+    except StopIteration:
+        return 0.0
+    mu = total / (2 ** w)
+    sigma = math.sqrt(mu * (1.0 - 1.0 / (2 ** w)))
+    return max(0.01 * total, mu + 4.0 * sigma)
+
+
 def postprocess_period(counts: dict, num_control: int, a: int, n: int) -> tuple:
     """Recover the period and, for Shor, the factors of ``n``.
+
+    Candidate bitstrings must clear the :func:`_signal_floor` threshold
+    (1% of shots, or mu + 4 sigma of the uniform noise band -- whichever
+    is larger) so a noise-dominated distribution degenerates to "no
+    period" instead of a continued-fraction coincidence.
 
     Returns (period, (factor1, factor2)).  A trivial result yields
     ``(None, (None, None))``.
     """
     total = sum(counts.values())
+    floor = _signal_floor(counts, total)
     for state, count in sorted(counts.items(), key=lambda x: x[1], reverse=True)[:12]:
-        if count < 0.01 * total:
+        if count < floor:
             continue
         dec = int(state.replace(" ", ""), 2)
         phase = dec / (2 ** num_control)
@@ -187,9 +224,10 @@ def postprocess_period_swapless(counts: dict, num_control: int,
     counting register in reversed bit order.  Returns ``(period, (p, q))``.
     """
     total = sum(counts.values())
+    floor = _signal_floor(counts, total)
     for state, count in sorted(counts.items(), key=lambda x: x[1],
                                reverse=True)[:12]:
-        if count < 0.01 * total:
+        if count < floor:
             continue
         raw = state.replace(" ", "")
         # swapless QFT: measured MSB..LSB is reversed -> reverse to recover phase

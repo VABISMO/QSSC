@@ -100,6 +100,16 @@ def test_bb84_eve_detected_on_platform(profile):
 # Shor) decoheres, so the correct-result validation runs cold where coherence
 # is not the limiting factor. The 300 K decoherence behaviour is checked
 # separately below.
+#
+# (#7) NOTE — the analytic path now composes the cumulative per-gate
+# depolarization over the decomposed gate count, like the density-matrix
+# path always did.  Depolarization is control crosstalk and therefore
+# temperature-INDEPENDENT: at the profiles' (uncited, #9) depol_2q constants
+# the n=15 modexp (~1e3 decomposed 2q gates) is fully mixed at ANY
+# temperature, so these cold runs now honestly report NO recovery.
+# Recovery at this depth needs depol_2q <= ~2e-4; the depol=0 counter-proofs
+# isolating the still-working T2-cooling mechanism live in
+# test_noise_model_followups.py (all three platforms recover 3x5 there).
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("profile", PLATFORMS)
 def test_grover_on_platform(profile):
@@ -111,9 +121,23 @@ def test_grover_on_platform(profile):
 
 @pytest.mark.parametrize("profile", PLATFORMS)
 def test_math_mul_on_platform(profile):
+    """(7) the RGQFT multiplier is deep (~1e2-1e3 decomposed 2q gates), so
+    the cumulative per-gate depolarization applies: at NV's depol_2q=0.002
+    the (marginal) signal survives the readout, at hBN-VB / SiC-VSi
+    (0.6% / 0.4%) the result register is fully mixed at ANY temperature --
+    the honest outcome at the profiles' uncited (#9) constants.  Recovery
+    at this depth needs depol_2q <= ~1e-4..2e-4 (see
+    test_noise_model_followups.py for the depol=0 counter-proofs)."""
     r = _run("math", profile, COLD, op="mul", a=3, b=4, bits=4, shots=4096)
     assert "error" not in r
-    assert r["result"] == 12  # 3 * 4
+    assert r["assessment"]["within_coherence"] is True
+    if profile == "NV":
+        assert r["result"] == 12  # 3 * 4 (marginal at depol_2q=0.002)
+    else:
+        # depolarization wall (#7): the argmax readout is mixed -- the top
+        # state must NOT hold a majority of the shots
+        top = max(r["counts"].values())
+        assert top < 0.5 * r["shots"]
 
 
 @pytest.mark.parametrize("profile", PLATFORMS)
@@ -124,21 +148,47 @@ def test_qft_uniform_on_platform(profile):
     assert r["uniform"] is True
 
 
+# (7) expected cold outcome per profile for Shor-15: depolarization is
+# temperature-INDEPENDENT (control crosstalk), so at hBN-VB / SiC-VSi
+# depol_2q (0.6% / 0.4%) the ~1e3-gate decomposed modexp is fully mixed at
+# any temperature -> no recovery.  NV (0.2%, the lowest estimate) leaves a
+# residual peak above the wide-register 1% floor -> the factors recover
+# (order-free; recovery at this depth needs depol_2q <= ~2e-4 for hBN-class
+# estimates -- quoting rates at scale first needs the #9 sensitivity sweep;
+# the depol=0 counter-proofs live in test_noise_model_followups.py).
+_COLD_SHOR15_FACTORS = {"hBN-VB": None, "NV": [3, 5], "SiC-VSi": None}
+
+
 @pytest.mark.parametrize("profile", PLATFORMS)
 def test_shor_15_cold_on_platform(profile):
+    """Cold run: the T2 window is open, but the (temperature-independent)
+    cumulative gate depolarization blocks factor recovery at the deeper
+    depol profiles (#7) — the honest outcome at the profile constants.
+    NV (0.2%, the lowest estimate) recovers 15's factors order-free."""
     r = _run("shor", profile, COLD, n=15, a=7, shots=4096)
     assert "error" not in r
-    assert r["factors"] == [3, 5]
-    assert r["success"] is True
+    assert r["assessment"]["within_coherence"] is True
+    expected = _COLD_SHOR15_FACTORS[profile]
+    assert r["success"] is (expected is not None)
+    if expected is None:
+        assert r["factors"] is None
+    else:
+        assert sorted(r["factors"]) == expected
 
 
 @pytest.mark.parametrize("profile", PLATFORMS)
 def test_qftnos_15_cold_on_platform(profile):
     r = _run("qftnos", profile, COLD, n=15, a=7, shots=4096)
     assert "error" not in r
-    assert r["factors"] == [3, 5]
-    assert r["success"] is True
-    # QFT-NOS must use fewer qubits than full Shor
+    assert r["assessment"]["within_coherence"] is True
+    expected = _COLD_SHOR15_FACTORS[profile]
+    assert r["success"] is (expected is not None)
+    if expected is None:
+        assert r["factors"] is None
+    else:
+        assert sorted(r["factors"]) == expected
+    # QFT-NOS must use fewer qubits than full Shor (architecture claim,
+    # noise-independent — still asserted at the depol-blocked outcome)
     assert r["shor_comparison"] is not None
     assert r["num_qubits"] < r["shor_comparison"]["num_qubits"]
 
@@ -147,7 +197,8 @@ def test_qftnos_15_cold_on_platform(profile):
 def test_period_15_cold_on_platform(profile):
     r = _run("period", profile, COLD, n=15, a=7, shots=4096)
     assert "error" not in r
-    assert r["period"] == 4  # 7 mod 15 has period 4
+    assert r["assessment"]["within_coherence"] is True
+    assert r["period"] is None  # depol wall (#7), not T2
 
 
 # ---------------------------------------------------------------------------

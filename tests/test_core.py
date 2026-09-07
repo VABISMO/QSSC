@@ -1,5 +1,7 @@
 # tests/test_core.py
 """Unit tests for the QSSC core: defects, simulator, circuits and backend."""
+import dataclasses
+
 import numpy as np
 import pytest
 
@@ -228,13 +230,32 @@ def test_qft_nos_fewer_qubits_than_shor():
 
 
 def test_qft_nos_factors_15_cold():
-    # Like Shor: decoheres at 300 K, recovers 3x5 when cooled.
+    # Like Shor (test_backend_shor_15): the T2 window opens when cooled, but
+    # (#7) the analytic path now also composes the cumulative per-gate
+    # depolarization over the decomposed gate count (~1e3 two-qubit gates
+    # for the n=15 modular exponentiation).  Depolarization is control
+    # crosstalk -- temperature-INDEPENDENT -- so at the profile's (uncited,
+    # see #9) depol_2q the register is fully mixed at ANY temperature;
+    # recovery at this depth needs depol_2q <= ~2e-4.  With depol zeroed the
+    # cooled run recovers 3x5, isolating depolarization as the blocker.
     b_cold = QSSCBackend("hBN-VB", sites=_quick_sites(20), seed=1,
                          temperature_k=1e-3, noise_mode="real")
     qc, a = create_qft_nos_circuit(15, a=7)
     res = b_cold.run(qc, shots=4096).result()
-    _, factors = postprocess_period_swapless(res.get_counts(), qc.num_clbits, a, 15)
-    assert factors == (3, 5)
+    r, factors = postprocess_period_swapless(res.get_counts(), qc.num_clbits, a, 15)
+    assert res.assessment["within_coherence"] is True
+    assert r is None
+    assert factors == (None, None)  # depol wall, not T2
+
+    b_quiet = QSSCBackend(
+        dataclasses.replace(b_cold.profile, depol_1q=0.0, depol_2q=0.0),
+        sites=_quick_sites(20), seed=1, temperature_k=1e-3,
+        noise_mode="real")
+    res_q = b_quiet.run(qc, shots=4096).result()
+    r_q, factors_q = postprocess_period_swapless(res_q.get_counts(),
+                                                  qc.num_clbits, a, 15)
+    assert r_q == 4
+    assert factors_q == (3, 5)
 
 
 # -- crypto (quantum RNG -> Ed25519 + X.509) ---------------------------------
@@ -572,15 +593,32 @@ def test_backend_shor_15():
     assert res.assessment["within_coherence"] is False
     assert factors[0] is None  # decohered at room temperature -> no factors
 
-    # Cooled to millikelvin the coherence window opens up and Shor recovers
-    # 3 x 5 (a=7 -> period 4). This is the whole point of the cooling knob.
+    # Cooled to millikelvin the T2 window opens (within_coherence True), but
+    # (#7) the cumulative per-gate depolarization over the ~1e3 decomposed
+    # two-qubit gates of the compiled modexp is temperature-INDEPENDENT: at
+    # the profile's (uncited, #9) depol_2q=0.006 the register is fully mixed
+    # at ANY temperature -- recovery at this depth needs depol_2q <= ~2e-4,
+    # ~30x below the current engineering estimate.  The recovery demo below
+    # therefore runs with depol zeroed, isolating the cooling mechanism (T2
+    # window) from the depolarization wall; quoting a recovery rate at scale
+    # first needs the #9 sensitivity sweep.
     b_cold = QSSCBackend("hBN-VB", sites=_quick_sites(20), seed=1,
                          temperature_k=1e-3, noise_mode="real")
     res_cold = b_cold.run(qc, shots=2048).result()
-    _, factors_cold = postprocess_period(res_cold.get_counts(), qc.num_clbits,
-                                         a, 15)
+    r_cold, factors_cold = postprocess_period(res_cold.get_counts(),
+                                              qc.num_clbits, a, 15)
     assert res_cold.assessment["within_coherence"] is True
-    assert factors_cold == (3, 5)
+    assert r_cold is None
+    assert factors_cold == (None, None)  # depol, not T2
+
+    b_depol0 = QSSCBackend(
+        dataclasses.replace(b_cold.profile, depol_1q=0.0, depol_2q=0.0),
+        sites=_quick_sites(20), seed=1, temperature_k=1e-3,
+        noise_mode="real")
+    res0 = b_depol0.run(qc, shots=2048).result()
+    r0, factors0 = postprocess_period(res0.get_counts(), qc.num_clbits, a, 15)
+    assert r0 == 4
+    assert factors0 == (3, 5)  # T2 window alone: recovery returns
 
 
 # -- protocol ----------------------------------------------------------------
