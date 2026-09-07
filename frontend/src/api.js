@@ -47,4 +47,7 @@ export const api = {
   scripts: () => get('/api/scripts'),
   saveScript: (body) => post('/api/scripts', body),
   deleteScript: (id) => del(`/api/scripts/${id}`),
+  // FPGA tab — synthesis metrics + live command protocol (localhost-only)
+  fpgaInfo: () => get('/api/fpga/info'),
+  fpgaCommand: (command) => post('/api/fpga/command', { command }),
 }

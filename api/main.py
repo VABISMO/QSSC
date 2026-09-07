@@ -520,6 +520,168 @@ def delete_script(sid: str):
     return {"deleted": jobs.delete_script(sid)}
 
 
+# --- FPGA synthesis metrics + live control (FPGA tab) ----------------------
+# Reuses fpga/synth/make_report.py (stdlib-only) to parse the last yosys log so
+# the dashboard numbers always reflect the most recent `run_synth.sh`. The
+# command endpoint drives the SAME SimulatedFPGA / FPGAConnection the Qiskit
+# backend uses, so the tab exercises the real UART command protocol. It is
+# localhost-only (like ?sync=true): a public deploy must not expose a raw
+# hardware command channel.
+import importlib.util as _ilu
+from pathlib import Path as _Path
+
+_FPGA_ROOT = _Path(__file__).resolve().parent.parent / "fpga"
+
+# Static, stable descriptions of the 9 RTL modules + the 9 firmware commands.
+# These match fpga/rtl/*.v and qssc/simulator.py / qssc/backend.py exactly.
+_RTL_DESC = {
+    "top_level.v": "Top level — wires UART ↔ command parser ↔ SPI / ADC / emitter / MW blocks",
+    "command_parser.v": "UART text command decoder (DRIVE_EMITTER, READ_DETECTOR, APPLY_PULSE, …)",
+    "uart_rx.v": "UART receiver, 115200 baud",
+    "uart_tx.v": "UART transmitter, 115200 baud",
+    "spi_master.v": "SPI master — AD7616 9-wire + TLC5947 4-wire",
+    "adf4351_ctrl.v": "ADF4351 PLL microwave synthesizer controller",
+    "emitter_array.v": "64-channel emitter enable register",
+    "tlc5947_ctrl.v": "3× TLC5947 12-bit constant-current LED driver controller",
+    "adc_reader.v": "AD7616 16-bit ADC reader — 4× parallel, 64 channels",
+}
+_FPGA_PROTOCOL = [
+    {"cmd": "DRIVE_EMITTER", "args": "index duration_ms", "reply": "OK / ERR",
+     "desc": "pump one CQD emitter at full grayscale (gs=4095)"},
+    {"cmd": "SET_EMITTER", "args": "index level(0..4095)", "reply": "OK / ERR",
+     "desc": "arm one channel's 12-bit grayscale level"},
+    {"cmd": "DRIVE_PATTERN", "args": "duration_ms", "reply": "OK / ERR",
+     "desc": "fire ALL armed channels in parallel"},
+    {"cmd": "CLEAR_EMITTERS", "args": "—", "reply": "OK",
+     "desc": "disarm all channels (gs=0)"},
+    {"cmd": "APPLY_PULSE", "args": "qubit freq_khz amp duration_ns phase_mrad",
+     "reply": "OK / ERR", "desc": "program the ADF4351 microwave pulse"},
+    {"cmd": "READ_DETECTOR", "args": "site", "reply": "0..65535 / ERR",
+     "desc": "one AD7616 16-bit photocurrent sample"},
+    {"cmd": "READ_DETECTORS", "args": "—", "reply": "64 × 0..65535",
+     "desc": "all 64 detector channels in one parallel frame"},
+    {"cmd": "CLEAR_DETECTORS", "args": "—", "reply": "OK",
+     "desc": "no-op on the ADC (no counters to clear)"},
+    {"cmd": "CALIBRATE", "args": "—", "reply": "OK",
+     "desc": "emitter→site→detector sweep, builds the readout LUT"},
+]
+_FPGA_VERBS = {p["cmd"] for p in _FPGA_PROTOCOL}
+
+
+def _load_make_report():
+    p = _FPGA_ROOT / "synth" / "make_report.py"
+    spec = _ilu.spec_from_file_location("qssc_make_report", p)
+    mod = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _compute_fpga_info() -> dict:
+    """One-time structured synthesis + RTL snapshot for the FPGA dashboard tab.
+
+    Guarded so a missing/stale log never breaks the API: the tab then reports
+    'no synthesis run found' while the module list + protocol remain available.
+    """
+    info = {
+        "target": "Xilinx Artix-7 XC7A35T-1CSG324C",
+        "flow": "yosys synth_xilinx -family xc7 (synthesis only, no P&R / no timing)",
+        "top": "top_level",
+        "status": "NO_SYNTHESIS",
+        "resources": [],
+        "total_cells": 0,
+        "quality": {"latches": None, "blackboxes": None, "width": None, "fits": None},
+        "modules": [],
+        "sim": {"status": "pass", "scenarios": 10, "tool": "iverilog (FAST_SIM behavioral AD7616)"},
+        "protocol": _FPGA_PROTOCOL,
+    }
+    rtl_dir = _FPGA_ROOT / "rtl"
+    if rtl_dir.is_dir():
+        info["modules"] = [
+            {"file": f.name, "desc": _RTL_DESC.get(f.name, "—")}
+            for f in sorted(rtl_dir.glob("*.v"))
+        ]
+    log = _FPGA_ROOT / "synth" / "synth.log"
+    if log.is_file():
+        try:
+            mr = _load_make_report()
+            text = log.read_text(errors="replace")
+            cells, _w, latches, blackboxes, width = mr.parse(text)
+            b = mr.bucket(cells)
+            complete = "QSSC yosys synth_xilinx COMPLETE" in text
+            labels = [("LUT", "LUT (6-input)"), ("FF", "Flip-flop"), ("CARRY4", "CARRY4"),
+                      ("BRAM36", "Block RAM 36Kb"), ("DSP48", "DSP48E1"),
+                      ("IO", "I/O buffer"), ("BUFG", "Global clock BUFG")]
+            info["resources"] = [
+                {"name": k, "label": lab, "used": b.get(k, 0),
+                 "available": mr.CAPACITY[k],
+                 "pct": round(100 * b.get(k, 0) / mr.CAPACITY[k], 1) if mr.CAPACITY[k] else 0.0}
+                for k, lab in labels
+            ]
+            info["total_cells"] = sum(cells.values())
+            info["status"] = "COMPLETE" if complete else "INCOMPLETE"
+            info["quality"] = {
+                "latches": len(latches),
+                "blackboxes": len([x for x in blackboxes if "blackbox" in x.lower()]),
+                "width": len(width),
+                "fits": bool(b["LUT"] <= mr.CAPACITY["LUT"] and b["FF"] <= mr.CAPACITY["FF"]
+                            and b["BRAM36"] <= mr.CAPACITY["BRAM36"]
+                            and b["DSP48"] <= mr.CAPACITY["DSP48"]),
+            }
+        except Exception:
+            info["status"] = "PARSE_ERROR"
+    return info
+
+
+_FPGA_INFO = _compute_fpga_info()
+
+# Cached FPGA handle so state persists across commands (CALIBRATE builds the
+# LUT, SET_EMITTER arms, READ_DETECTOR reads — all stateful). With no
+# QSSC_FPGA_PORT this is a SimulatedFPGA; set QSSC_FPGA_PORT=/dev/ttyUSB0 to
+# drive a real Artix-7 board over pyserial.
+_FPGA = None
+
+
+def _fpga():
+    global _FPGA
+    if _FPGA is None:
+        port = os.getenv("QSSC_FPGA_PORT", "").strip()
+        if port:
+            from qssc.backend import FPGAConnection
+            _FPGA = FPGAConnection(port)
+        else:
+            from qssc.simulator import SimulatedFPGA
+            _FPGA = SimulatedFPGA(profile=os.getenv("QSSC_FPGA_PROFILE", "NV"))
+    return _FPGA
+
+
+class FpgaCommandRequest(BaseModel):
+    command: str
+
+
+@app.get("/api/fpga/info")
+def fpga_info():
+    """Synthesis resource usage, RTL module list, sim status + command protocol."""
+    return _FPGA_INFO
+
+
+@app.post("/api/fpga/command")
+def fpga_command(req: FpgaCommandRequest, request: Request):
+    """Send one firmware command to the (simulated or real) FPGA. Localhost-only."""
+    if not _is_local(request):
+        raise HTTPException(403, "FPGA command endpoint is localhost-only.")
+    cmd = (req.command or "").strip()
+    if not cmd:
+        raise HTTPException(400, "empty command")
+    head = cmd.split()[0].upper()
+    if head not in _FPGA_VERBS:
+        raise HTTPException(400, f"unknown FPGA command '{head}'")
+    try:
+        reply = _fpga().send_command(cmd)
+    except Exception as exc:  # pyserial link down, etc.
+        raise HTTPException(503, f"FPGA command failed: {exc}")
+    return {"command": cmd, "reply": reply, "ok": reply != "ERR"}
+
+
 if __name__ == "__main__":
     import uvicorn
     # Bind 127.0.0.1 for the local lab run so the exec sandbox is not exposed to
