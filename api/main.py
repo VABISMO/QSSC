@@ -22,6 +22,7 @@ from qssc import (
     get_profile, coherence_at_temperature,
     auto_align, simulate_odmr, QSSCBackend,
     make_detector_response, PROFILES,
+    compass_measure, gyro_measure,
 )
 from qssc.simulator import DETECT_THRESHOLD
 from qssc.protocol import (
@@ -532,7 +533,7 @@ from pathlib import Path as _Path
 
 _FPGA_ROOT = _Path(__file__).resolve().parent.parent / "fpga"
 
-# Static, stable descriptions of the 9 RTL modules + the 9 firmware commands.
+# Static, stable descriptions of the 10 RTL modules + the 10 firmware commands.
 # These match fpga/rtl/*.v and qssc/simulator.py / qssc/backend.py exactly.
 _RTL_DESC = {
     "top_level.v": "Top level — wires UART ↔ command parser ↔ SPI / ADC / emitter / MW blocks",
@@ -544,6 +545,7 @@ _RTL_DESC = {
     "emitter_array.v": "64-channel emitter enable register",
     "tlc5947_ctrl.v": "3× TLC5947 12-bit constant-current LED driver controller",
     "adc_reader.v": "AD7616 16-bit ADC reader — 4× parallel, 64 channels",
+    "qrng_entropy.v": "Hardware RNG — AD7616 LSB noise → von-Neumann extractor → 32-bit words",
 }
 _FPGA_PROTOCOL = [
     {"cmd": "DRIVE_EMITTER", "args": "index duration_ms", "reply": "OK / ERR",
@@ -564,6 +566,8 @@ _FPGA_PROTOCOL = [
      "desc": "no-op on the ADC (no counters to clear)"},
     {"cmd": "CALIBRATE", "args": "—", "reply": "OK",
      "desc": "emitter→site→detector sweep, builds the readout LUT"},
+    {"cmd": "READ_RNG", "args": "n_bytes", "reply": "<hex> <raw> <kept> <rate> / ERR",
+     "desc": "harvest n_bytes of von-Neumann-debiased AD7616 LSB-noise entropy (qrng_entropy.v)"},
 ]
 _FPGA_VERBS = {p["cmd"] for p in _FPGA_PROTOCOL}
 
@@ -680,6 +684,469 @@ def fpga_command(req: FpgaCommandRequest, request: Request):
     except Exception as exc:  # pyserial link down, etc.
         raise HTTPException(503, f"FPGA command failed: {exc}")
     return {"command": cmd, "reply": reply, "ok": reply != "ERR"}
+
+
+@app.get("/api/fpga/qrng")
+def fpga_qrng(n_bytes: int = 32, common_name: str = "QSSC-hw-qrng",
+              request: Request = None):
+    """Harvest ``n_bytes`` of ADC-noise entropy from the FPGA QRNG and derive
+    an Ed25519 keypair + self-signed X.509 cert. Localhost-only — wraps the
+    ``READ_RNG`` firmware verb (``qrng_entropy.v``).
+
+    This is *hardware* entropy: the AD7616 LSB noise floor of a dark detector
+    channel, von-Neumann-debiased on-FPGA. It is distinct from the Qiskit
+    ``qrand`` algorithm in the Hardware tab, which is a simulated Hadamard
+    coin flip (``qc.h ; qc.measure``). Ed25519 needs a 32-byte seed, so
+    ``n_bytes`` is clamped to >= 32.
+    """
+    if not _is_local(request):
+        raise HTTPException(403, "FPGA QRNG endpoint is localhost-only.")
+    n_bytes = max(32, min(int(n_bytes), 256))
+    try:
+        reply = _fpga().send_command(f"READ_RNG {n_bytes}")
+    except Exception as exc:  # pyserial link down, etc.
+        raise HTTPException(503, f"FPGA QRNG failed: {exc}")
+    if reply == "ERR":
+        raise HTTPException(502, "FPGA QRNG returned ERR")
+    parts = reply.split()
+    hexstr = parts[0]
+    stats = {"raw_bits": 0, "kept": 0, "extract_rate": 0.0}
+    if len(parts) >= 4:
+        try:
+            stats = {"raw_bits": int(parts[1]), "kept": int(parts[2]),
+                     "extract_rate": float(parts[3])}
+        except ValueError:
+            pass
+    try:
+        entropy = bytes.fromhex(hexstr)
+    except ValueError:
+        raise HTTPException(502, "FPGA QRNG returned malformed hex")
+    from qssc.crypto import derive_keypair
+    try:
+        kp = derive_keypair(entropy, common_name=common_name)
+    except ValueError as exc:
+        raise HTTPException(500, str(exc))
+    return {
+        "source": "hardware-adc-noise",
+        "n_bytes": n_bytes,
+        "entropy_hex": entropy.hex(),
+        "extraction": stats,
+        **kp,
+    }
+# image (per-pixel 8x8 array). These model what the ADF4351 -> J3 -> A1 MW
+# chain and the 64-channel TIA + 4x AD7616 readout measure as quantum sensors.
+# ---------------------------------------------------------------------------
+def _sensor_as_dict(obj) -> dict:
+    from dataclasses import asdict, is_dataclass
+    return asdict(obj) if is_dataclass(obj) else dict(obj)
+
+
+def _sensor_mode_n_avg(n_avg: int, mode: str) -> int:
+    """Average count scaled by the FPGA environment selector.
+
+    ``mode='sim'`` — the simulator is not shot-noise-limited, so it averages
+    freely and returns a cleaner readout (n_avg x8); ``mode='real'`` — real
+    hardware is shot-noise-limited, so the requested average count stands and
+    the linewidth + shot noise are realistic. Both environments resolve the
+    same physics, only the noise floor differs.
+    """
+    n = int(n_avg)
+    return n * 8 if mode == "sim" else n
+
+
+# 64 pixels span the 20 mm die -> 2.5 mm pixel pitch (per the canonical die).
+_SENSOR_PIX_PITCH_MM = 2.5
+
+
+def _sensor_pixel_xy_mm(ix: int, iy: int, grid: int = 8):
+    """Centre coordinates (mm) of pixel (ix, iy) on a grid x grid array."""
+    return ((ix - (grid - 1) / 2.0) * _SENSOR_PIX_PITCH_MM,
+            (iy - (grid - 1) / 2.0) * _SENSOR_PIX_PITCH_MM)
+
+
+def _sensor_field_noise_ut(profile: str, mode: str, n_avg: int = 500):
+    """Field noise floor (uT) for the given environment + averages, plus the
+    effective average count and the ODMR linewidth in MHz. This is the
+    linewidth-limited sensitivity shared by every field-imaging sensor."""
+    prof = get_profile(profile)
+    lw = prof.odmr_linewidth_hz / 1e6
+    gamma = prof.gyromagnetic_ratio
+    n_eff = _sensor_mode_n_avg(n_avg, mode)
+    noise = (lw * 1e6) / (2.0 * gamma) * 1e6 / np.sqrt(max(1, n_eff))
+    return float(noise), n_eff, float(lw)
+
+
+# NV D-resonance temperature coefficient used by the thermometry model. This is
+# a well-established material constant of the NV centre, NOT a supplier-quoted
+# device spec on this chip's datasheet.
+_NV_D_TEMP_COEFF_HZ_PER_K = -74.0e3
+
+
+@app.get("/api/compass")
+def api_compass(
+    profile: str = "NV",
+    bx: float = 150.0, by: float = 50.0, bz: float = -100.0,  # uT (lab field)
+    n_avg: int = 1000,
+    mode: str = "real",
+    seed: Optional[int] = None,
+):
+    """ODMR compass: 4-axis <111> doublet split -> B-vector + heading.
+
+    bx/by/bz are the ambient field in microtesla. Default ~188 uT lab field
+    resolves >=3 NV <111> doublets at the ~5 MHz linewidth; dial to Earth's
+    field (~25-65 uT) to see the linewidth limit (doublets unresolved).
+    mode='sim' averages freely (cleaner); 'real' is shot-noise-limited.
+    """
+    rng = np.random.default_rng(seed)
+    B = (float(bx) * 1e-6, float(by) * 1e-6, float(bz) * 1e-6)
+    out = _sensor_as_dict(compass_measure(profile, b_vector_t=B,
+                                          n_avg=_sensor_mode_n_avg(n_avg, mode),
+                                          rng=rng))
+    out["mode"] = mode
+    return out
+
+
+@app.get("/api/gyro")
+def api_gyro(
+    profile: str = "NV",
+    rate_dps: float = 1.0,
+    temperature_k: float = 300.0,
+    free_precession_us: Optional[float] = None,
+    n_avg: int = 100,
+    mode: str = "real",
+    seed: Optional[int] = None,
+):
+    """Ramsey pi/2-T-pi/2 gyroscope: rotation rate -> accumulated phase.
+
+    mode='sim' averages freely (cleaner phase readout); 'real' is
+    shot-noise-limited at the requested averages.
+    """
+    rng = np.random.default_rng(seed)
+    out = _sensor_as_dict(gyro_measure(
+        profile, temperature_k=float(temperature_k),
+        rotation_rate_dps=float(rate_dps),
+        free_precession_us=free_precession_us,
+        n_averages=_sensor_mode_n_avg(n_avg, mode), rng=rng))
+    out["mode"] = mode
+    return out
+
+
+@app.get("/api/magneto")
+def api_magneto(
+    profile: str = "NV",
+    n_avg: int = 500,
+    gradient_ut_mm: float = 8.0,
+    base_bx_ut: float = 25.0,
+    base_bz_ut: float = -40.0,
+    mode: str = "real",
+    seed: Optional[int] = None,
+):
+    """Magneto-optic image: per-pixel |B.n| across the 8x8 array.
+
+    Models a spatially-varying field (linear gradient + dipole offset) sampled
+    by each of the 64 detector pixels through its ODMR doublet -- the physics
+    model of the parallel 64-channel AD7616 frame readout -> 8x8 field image.
+    mode='sim' averages freely (cleaner per-pixel readout); 'real' is
+    shot-noise-limited at the requested averages.
+    """
+    prof = get_profile(profile)
+    rng = np.random.default_rng(seed)
+    gamma = prof.gyromagnetic_ratio
+    lw_mhz = prof.odmr_linewidth_hz / 1e6
+    n_eff = _sensor_mode_n_avg(n_avg, mode)
+    split_sigma_mhz = lw_mhz / np.sqrt(max(1, n_eff))
+    sens_ut = (lw_mhz * 1e6) / (2.0 * gamma) * 1e6 / np.sqrt(max(1, n_eff))
+    n_axis = np.array([1, 1, 1]) / np.sqrt(3.0)
+    grid = 8
+    pixels = []
+    src = np.array([2.0, 5.0])
+    for iy in range(grid):
+        for ix in range(grid):
+            p = np.array([float(ix), float(iy)])
+            dipole = 12.0 / (np.linalg.norm(p - src) + 1.2)
+            bx = base_bx_ut + gradient_ut_mm * ix + dipole * 0.4
+            by = gradient_ut_mm * 0.3 * iy
+            bz = base_bz_ut + dipole
+            B = np.array([bx, by, bz]) * 1e-6
+            bpar = float(B @ n_axis)
+            split_true = 2.0 * gamma * abs(bpar) / 1e6
+            split_meas = max(0.0, split_true + rng.normal(0.0, split_sigma_mhz))
+            contrast = 0.05 * np.exp(-(split_true / (3.0 * lw_mhz)) ** 2)
+            pixels.append({"pixel": iy * grid + ix, "x": ix, "y": iy,
+                           "b_proj_ut": round(abs(bpar) * 1e6, 3),
+                           "split_mhz": round(split_meas, 4),
+                           "contrast": round(float(contrast), 5)})
+    centre_B = np.array([base_bx_ut + gradient_ut_mm * 3.5,
+                         gradient_ut_mm * 0.3 * 3.5,
+                         base_bz_ut + 12.0 / (np.linalg.norm(
+                             np.array([3.5, 3.5]) - src) + 1.2)]) * 1e-6
+    f, c = simulate_odmr(prof, freqs_ghz=None,
+                         b_field_t=abs(float(centre_B @ n_axis)),
+                         linewidth_mhz=lw_mhz, contrast_depth=0.05)
+    return {
+        "profile": prof.short, "grid": grid, "n_pixels": grid * grid,
+        "n_avg": n_eff, "mode": mode, "linewidth_mhz": float(lw_mhz),
+        "sensitivity_ut": round(float(sens_ut), 4), "pixels": pixels,
+        "dip_curve": {"frequencies_ghz": [round(float(x), 5) for x in f],
+                      "contrast": [round(float(x), 5) for x in c]},
+        "note": (f"Per-pixel |B.n| over the 8x8 graphene/MoS2 array "
+                 f"(n_axis=[1,1,1]/sqrt3); field = {gradient_ut_mm:g} uT/mm "
+                 f"gradient + dipole offset; linewidth {lw_mhz:g} MHz, {n_eff} "
+                 f"averages ({mode} environment) -> sensitivity {sens_ut:.2f} uT. "
+                 f"The FPGA returns all 64 AD7616 samples in one parallel frame."),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Contactless field-imaging sensors — every one reads the same 64-pixel NV
+# array through a different physical source: a ferromagnetic dipole, the
+# Earth's crustal anomaly field, a temperature field (NV D-shift), or a
+# current (Ampere). Magnetic fields penetrate fog/walls/tissue/packaging, so
+# these all "see" through non-magnetic media. Each returns a generic shape
+# (grid + cells + vmin/vmax + unit + stats + optional markers) consumed by the
+# SensorField heatmap component in the frontend.
+# ---------------------------------------------------------------------------
+def _field_cells(grid, value_fn):
+    cells = []
+    for iy in range(grid):
+        for ix in range(grid):
+            cells.append({"x": ix, "y": iy, "value": round(float(value_fn(ix, iy)), 4)})
+    return cells
+
+
+@app.get("/api/ferro")
+def api_ferro(
+    profile: str = "NV",
+    moment_am2: float = 0.02,
+    distance_mm: float = 15.0,
+    offset_x_mm: float = 4.0,
+    offset_y_mm: float = 3.0,
+    n_avg: int = 500,
+    mode: str = "real",
+    seed: Optional[int] = None,
+):
+    """Ferromagnetic-object detection: a magnetic dipole (the object) at a
+    distance is imaged by the 8x8 array through non-magnetic media. The peak
+    field + bearing reconstruct the object's location; detection fires when the
+    peak clears the mode-dependent noise floor. Vertical-dipole model.
+    """
+    rng = np.random.default_rng(seed)
+    noise_ut, n_eff, _lw = _sensor_field_noise_ut(profile, mode, n_avg)
+    M = float(moment_am2)
+    d = float(distance_mm) * 1e-3
+    ox = float(offset_x_mm) * 1e-3
+    oy = float(offset_y_mm) * 1e-3
+    grid = 8
+
+    def b(ix, iy):
+        px, py = _sensor_pixel_xy_mm(ix, iy)
+        rx, ry = px * 1e-3 - ox, py * 1e-3 - oy
+        r2 = rx * rx + ry * ry + d * d
+        bz = 1e-7 * M * (2 * d * d - rx * rx - ry * ry) / (r2 ** 2.5)  # T
+        return bz * 1e6 + rng.normal(0.0, noise_ut)  # uT
+
+    cells = _field_cells(grid, b)
+    vals = [c["value"] for c in cells]
+    peak = max(vals, key=abs)
+    bearing = (float(np.degrees(np.arctan2(oy, ox))) + 360.0) % 360.0
+    detected = abs(peak) > noise_ut
+    return {
+        "profile": get_profile(profile).short, "mode": mode, "grid": grid,
+        "unit": "µT", "vmin": round(min(vals), 3), "vmax": round(max(vals), 3),
+        "cells": cells, "noise_ut": round(noise_ut, 4), "n_avg": n_eff,
+        "detected": bool(detected), "peak_ut": round(float(peak), 3),
+        "bearing_deg": round(bearing, 1), "distance_mm": float(distance_mm),
+        "moment_am2": M,
+        "stats": [
+            {"k": "Peak |B|", "v": f"{abs(peak):.2f}", "unit": "µT"},
+            {"k": "Noise floor", "v": f"{noise_ut:.3f}", "unit": "µT"},
+            {"k": "Detected", "v": "yes" if detected else "no"},
+            {"k": "Bearing", "v": f"{bearing:.1f}", "unit": "°"},
+            {"k": "Distance", "v": f"{distance_mm:.1f}", "unit": "mm"},
+            {"k": "Moment", "v": f"{M:.3f}", "unit": "A·m²"},
+            {"k": "Averages", "v": str(n_eff)},
+        ],
+        "note": (f"Vertical-dipole model of a ferromagnetic object {distance_mm:g} mm "
+                 f"from the array; the field penetrates packaging/walls/tissue. "
+                 f"Detection fires when the peak clears the {noise_ut:.3f} µT "
+                 f"{mode} noise floor."),
+    }
+
+
+@app.get("/api/nav")
+def api_nav(
+    profile: str = "NV",
+    pos_x: float = 12.0,
+    pos_y: float = 10.0,
+    map_size: int = 24,
+    anomaly_ut: float = 2.0,
+    n_avg: int = 500,
+    mode: str = "real",
+    seed: Optional[int] = None,
+):
+    """Geomagnetic anomaly navigation: match the local crustal-field anomaly
+    against a stored anomaly map to estimate position -- works where GPS and
+    optical both fail (underwater / underground / indoors). The as-built micro-
+    diamond (µT floor) cannot resolve sub-µT crustal anomalies; bulk-CVD (nT)
+    shrinks the match error.
+    """
+    rng = np.random.default_rng(seed)
+    noise_ut, n_eff, _lw = _sensor_field_noise_ut(profile, mode, n_avg)
+    grid = int(map_size)
+    # deterministic anomaly map: a handful of 2-D Gaussians (seeded separately
+    # so the map is stable across re-measures at different positions)
+    prng = np.random.default_rng((seed or 0) + 1)
+    peaks = [(prng.uniform(0, grid), prng.uniform(0, grid),
+              prng.uniform(0.5, 1.5), prng.uniform(1.5, 3.5)) for _ in range(6)]
+
+    def anomaly(x, y):
+        v = 0.0
+        for cx, cy, amp, sigma in peaks:
+            v += amp * np.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2 * sigma ** 2))
+        return float(v * anomaly_ut)
+
+    amap = np.array([[anomaly(x, y) for x in range(grid)] for y in range(grid)])
+    px, py = float(pos_x), float(pos_y)
+    x0 = min(max(int(px), 0), grid - 2)
+    y0 = min(max(int(py), 0), grid - 2)
+    fx, fy = px - x0, py - y0
+    true_val = (amap[y0, x0] * (1 - fx) * (1 - fy) + amap[y0, x0 + 1] * fx * (1 - fy) +
+                amap[y0 + 1, x0] * (1 - fx) * fy + amap[y0 + 1, x0 + 1] * fx * fy)
+    meas = float(true_val) + rng.normal(0.0, noise_ut)
+    matched = np.unravel_index(int(np.argmin(np.abs(amap - meas))), amap.shape)
+    my, mx = int(matched[0]), int(matched[1])
+    err_km = float(np.hypot(px - mx, py - my))  # 1 cell = 1 km for the demo
+    cells = [{"x": x, "y": y, "value": round(float(amap[y, x]), 4)}
+             for y in range(grid) for x in range(grid)]
+    return {
+        "profile": get_profile(profile).short, "mode": mode, "grid": grid,
+        "unit": "µT", "vmin": round(float(amap.min()), 3),
+        "vmax": round(float(amap.max()), 3), "cells": cells,
+        "measured_ut": round(meas, 4), "noise_ut": round(noise_ut, 4),
+        "n_avg": n_eff, "true_pos": [px, py], "matched_pos": [float(mx), float(my)],
+        "error_km": round(err_km, 2),
+        "markers": [{"x": px, "y": py, "kind": "true"},
+                    {"x": float(mx), "y": float(my), "kind": "matched"}],
+        "stats": [
+            {"k": "Measured", "v": f"{meas:.3f}", "unit": "µT"},
+            {"k": "Noise floor", "v": f"{noise_ut:.3f}", "unit": "µT"},
+            {"k": "Match error", "v": f"{err_km:.2f}", "unit": "km"},
+            {"k": "True pos", "v": f"({px:.1f},{py:.1f})"},
+            {"k": "Matched", "v": f"({mx},{my})"},
+            {"k": "Averages", "v": str(n_eff)},
+        ],
+        "note": (f"Crustal-anomaly map matching ({anomaly_ut:g} µT relief); the {mode} "
+                 f"noise floor is {noise_ut:.3f} µT. As-built µT floor cannot resolve "
+                 f"sub-µT crustal anomalies; bulk-CVD (nT) shrinks the match error."),
+    }
+
+
+@app.get("/api/thermal")
+def api_thermal(
+    profile: str = "NV",
+    base_temp_k: float = 300.0,
+    hotspot_k: float = 330.0,
+    hotspot_x: float = 5.0,
+    hotspot_y: float = 4.0,
+    n_avg: int = 500,
+    mode: str = "real",
+    seed: Optional[int] = None,
+):
+    """NV thermometry: the D zero-field splitting shifts with temperature, so
+    the 8x8 array is a contactless temperature image (a chip hotspot, a
+    surface's thermal map read through the diamond). Uses the modeled NV D
+    temperature coefficient (a material constant, not a supplier-quoted spec).
+    """
+    rng = np.random.default_rng(seed)
+    prof = get_profile(profile)
+    lw = prof.odmr_linewidth_hz / 1e6
+    n_eff = _sensor_mode_n_avg(n_avg, mode)
+    freq_noise_hz = lw * 1e6 / np.sqrt(max(1, n_eff))
+    temp_noise = abs(freq_noise_hz / _NV_D_TEMP_COEFF_HZ_PER_K)
+    hx, hy = float(hotspot_x), float(hotspot_y)
+    sigma = 1.6
+    grid = 8
+
+    def t(ix, iy):
+        t_true = base_temp_k + (hotspot_k - base_temp_k) * np.exp(
+            -((ix - hx) ** 2 + (iy - hy) ** 2) / (2 * sigma ** 2))
+        df = _NV_D_TEMP_COEFF_HZ_PER_K * (t_true - base_temp_k)
+        t_meas = base_temp_k + (df + rng.normal(0.0, freq_noise_hz)) / _NV_D_TEMP_COEFF_HZ_PER_K
+        return t_meas - 273.15  # Celsius
+
+    cells = _field_cells(grid, t)
+    vals = [c["value"] for c in cells]
+    peak = max(vals)
+    detected = (hotspot_k - base_temp_k) > temp_noise
+    return {
+        "profile": prof.short, "mode": mode, "grid": grid,
+        "unit": "°C", "vmin": round(min(vals), 2), "vmax": round(max(vals), 2),
+        "cells": cells, "temp_noise_k": round(temp_noise, 3), "n_avg": n_eff,
+        "detected": bool(detected),
+        "stats": [
+            {"k": "Base", "v": f"{base_temp_k - 273.15:.1f}", "unit": "°C"},
+            {"k": "Hotspot", "v": f"{hotspot_k - 273.15:.1f}", "unit": "°C"},
+            {"k": "Peak", "v": f"{peak:.2f}", "unit": "°C"},
+            {"k": "Temp noise", "v": f"{temp_noise:.2f}", "unit": "K"},
+            {"k": "Detected", "v": "yes" if detected else "no"},
+            {"k": "Averages", "v": str(n_eff)},
+        ],
+        "note": (f"NV D-shift thermometry (modeled coefficient "
+                 f"{int(_NV_D_TEMP_COEFF_HZ_PER_K / 1e3)} kHz/K, not a supplier-quoted "
+                 f"spec); {n_eff} averages -> {temp_noise:.2f} K resolution. "
+                 f"Contactless temperature image through the diamond."),
+    }
+
+
+@app.get("/api/current")
+def api_current(
+    profile: str = "NV",
+    current_a: float = 0.5,
+    wire_offset_mm: float = 0.0,
+    depth_mm: float = 3.0,
+    n_avg: int = 500,
+    mode: str = "real",
+    seed: Optional[int] = None,
+):
+    """Current imaging (Ampere): a current in a wire/trace produces a B field
+    the array images contactlessly -- short-circuit localization, battery-cell
+    current signatures, chip power-rail mapping, all through the enclosure.
+    Straight-wire model: |B| = µ0 I / (2π r).
+    """
+    rng = np.random.default_rng(seed)
+    noise_ut, n_eff, _lw = _sensor_field_noise_ut(profile, mode, n_avg)
+    I = float(current_a)
+    ox = float(wire_offset_mm) * 1e-3
+    depth = float(depth_mm) * 1e-3
+    grid = 8
+
+    def b(ix, iy):
+        px, _py = _sensor_pixel_xy_mm(ix, iy)
+        r = max(float(np.hypot(px * 1e-3 - ox, depth)), 1e-6)
+        return (2e-7 * I / r) * 1e6 + rng.normal(0.0, noise_ut)  # uT
+
+    cells = _field_cells(grid, b)
+    vals = [c["value"] for c in cells]
+    peak = max(vals, key=abs)
+    detected = abs(peak) > noise_ut
+    return {
+        "profile": get_profile(profile).short, "mode": mode, "grid": grid,
+        "unit": "µT", "vmin": round(min(vals), 3), "vmax": round(max(vals), 3),
+        "cells": cells, "noise_ut": round(noise_ut, 4), "n_avg": n_eff,
+        "detected": bool(detected), "peak_ut": round(float(peak), 3),
+        "current_a": I,
+        "stats": [
+            {"k": "Current", "v": f"{I:.2f}", "unit": "A"},
+            {"k": "Peak |B|", "v": f"{abs(peak):.2f}", "unit": "µT"},
+            {"k": "Noise floor", "v": f"{noise_ut:.3f}", "unit": "µT"},
+            {"k": "Depth", "v": f"{depth_mm:.1f}", "unit": "mm"},
+            {"k": "Detected", "v": "yes" if detected else "no"},
+            {"k": "Averages", "v": str(n_eff)},
+        ],
+        "note": (f"Ampere field of a straight wire {depth_mm:g} mm below the array "
+                 f"carrying {I:g} A; imaged contactlessly through encapsulation. "
+                 f"Detection fires above the {noise_ut:.3f} µT {mode} floor."),
+    }
 
 
 if __name__ == "__main__":

@@ -219,6 +219,18 @@ class SimulatedFPGA:
             if head == "CALIBRATE":
                 self._calibrate()
                 return "OK"
+            if head == "READ_RNG":
+                # READ_RNG <n_bytes>: harvest n_bytes of von-Neumann-debiased
+                # entropy from the AD7616 LSB noise floor (a dark detector
+                # channel). Mirrors fpga/rtl/qrng_entropy.v: successive ADC
+                # LSBs are paired, 01->0 / 10->1 kept, 00/11 discarded, packed
+                # MSB-first. The raw LSB stream is mildly biased (p1 ~ 0.52,
+                # thermal + shot noise) so the extractor's work shows up in the
+                # returned stats. Reply: "<hex> <raw_bits> <kept> <extract_rate>".
+                n_bytes = int(parts[1]) if len(parts) > 1 else 32
+                if n_bytes <= 0 or n_bytes > 4096:
+                    return "ERR"
+                return self._harvest_entropy(n_bytes)
             return "ERR"
         except Exception as exc:  # pragma: no cover - defensive
             logger.error("sim command failed: %s (%s)", command, exc)
@@ -280,6 +292,33 @@ class SimulatedFPGA:
 
     def close(self):  # pragma: no cover
         pass
+
+    def _harvest_entropy(self, n_bytes: int) -> str:
+        """Von-Neumann-debiased ADC LSB noise -> n_bytes hex + extraction stats.
+
+        Models ``fpga/rtl/qrng_entropy.v`` in software: the LSB of a dark
+        AD7616 channel is a biased but independent bit stream (thermal + shot
+        noise, p1 ~ 0.52); pairing successive bits and keeping only 01 / 10
+        removes the bias. Returns ``"<hex> <raw_bits> <kept> <extract_rate>"``.
+        """
+        from .crypto import von_neumann_extract, bits_to_bytes
+        need_bits = n_bytes * 8
+        p1 = 0.52
+        # von-Neumann keeps ~2*p1*(1-p1) of pairs (~50% for p1=0.52), i.e.
+        # ~25% of raw LSBs, so ~6x raw is comfortably enough for one batch.
+        bits: list[int] = []
+        raw_total = 0
+        kept_total = 0
+        while len(bits) < need_bits:
+            raw = [1 if self.rng.random() < p1 else 0 for _ in range(need_bits * 6)]
+            # huge `need` so the extractor processes every pair (no early stop)
+            more, _st = von_neumann_extract(raw, 1 << 30)
+            raw_total += len(raw)
+            kept_total += len(more)
+            bits.extend(more)
+        out = bits_to_bytes(bits[:need_bits])
+        rate = (kept_total / raw_total) if raw_total else 0.0
+        return f"{out.hex()} {raw_total} {kept_total} {round(rate, 4)}"
 
 
 # ---------------------------------------------------------------------------

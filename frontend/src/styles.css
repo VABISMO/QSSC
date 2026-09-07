@@ -302,3 +302,112 @@ textarea.code-editor:focus { outline: 1px solid var(--brand); border-color: var(
   .fpga-proto-hd { display: none; }
   .fpga-proto-cmd { border-top: 1px solid var(--border); padding-top: 10px; }
 }
+
+/* ---- hardware QRNG output ---- */
+.fpga-qrng-out { margin-top: 6px; }
+/* ---- FPGA empty-state command help ---- */
+.fpga-emptyhelp { display: flex; flex-direction: column; gap: 6px; }
+.fpga-helpcmd { display: flex; flex-direction: column; gap: 2px; text-align: left;
+  background: rgba(34,211,238,.04); border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 10px; cursor: pointer; transition: border-color .15s, background .15s; }
+.fpga-helpcmd:hover { border-color: var(--accent, #22d3ee); background: rgba(34,211,238,.09); }
+.fpga-helpcmd-name { font-size: 12.5px; }
+.fpga-helpcmd-name .muted { font-weight: 400; }
+.fpga-helpcmd-desc { font-size: 11.5px; color: var(--dim); line-height: 1.35; }
+.qrng-hex { background: rgba(34,211,238,.06); border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 10px; margin: 0; font-size: 11px; line-height: 1.5; word-break: break-all;
+  white-space: pre-wrap; max-height: 120px; overflow-y: auto; }
+.qrng-pem { background: rgba(99,102,241,.05); border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 10px; margin-top: 6px; font-size: 10.5px; line-height: 1.45; white-space: pre-wrap;
+  word-break: break-all; max-height: 220px; overflow-y: auto; }
+/* ---- FPGA feature feasibility list ---- */
+.fpga-feat { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.fpga-feat-row { display: flex; gap: 10px; align-items: flex-start; padding: 9px 10px;
+  border-radius: 6px; border: 1px solid var(--border); }
+.fpga-feat-row.ok { background: rgba(52,211,153,.05); }
+.fpga-feat-row.no { background: rgba(248,113,113,.05); }
+.fpga-feat-ic { flex: 0 0 auto; width: 20px; height: 20px; border-radius: 50%; display: grid;
+  place-items: center; font-size: 12px; font-weight: 700; margin-top: 1px; }
+.fpga-feat-row.ok .fpga-feat-ic { background: rgba(52,211,153,.18); color: var(--ok); }
+.fpga-feat-row.no .fpga-feat-ic { background: rgba(248,113,113,.18); color: var(--err); }
+.fpga-feat-row b { font-size: 13px; }
+.fpga-feat-row .muted { font-size: 12px; line-height: 1.4; margin-top: 2px; }
+
+/* ============================= ON-CHIP QUANTUM SENSORS ============================= */
+.sensor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 720px) { .sensor-grid { grid-template-columns: 1fr; } }
+.compass-rose { display: block; margin: 0 auto; }
+.magneto-grid {
+  display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px;
+  width: 188px; height: 188px; padding: 6px; border-radius: 10px;
+  background: #070d22; border: 1px solid #1a2342;
+}
+.magneto-cell {
+  border-radius: 3px; min-height: 0;
+  box-shadow: inset 0 0 0 1px rgba(7,13,34,.5);
+  transition: transform .12s;
+}
+.magneto-cell:hover { transform: scale(1.18); z-index: 2; }
+.magneto-bar {
+  display: flex; align-items: center; gap: 6px; margin-top: 8px;
+  font-size: 10.5px; color: var(--muted); font-family: var(--font-mono);
+}
+.magneto-bar-fill {
+  flex: 1; height: 8px; border-radius: 4px;
+  background: linear-gradient(90deg, rgb(99,102,241), rgb(34,211,238), rgb(244,114,182));
+}
+
+/* ---- generic N×N field heatmap (ferro / nav / thermal / current) ---- */
+.field-grid {
+  display: grid; gap: 3px; padding: 6px; border-radius: 10px;
+  background: #070d22; border: 1px solid #1a2342;
+}
+.field-cell {
+  border-radius: 3px; min-height: 0;
+  box-shadow: inset 0 0 0 1px rgba(7,13,34,.5);
+  transition: transform .12s;
+}
+.field-cell:hover { transform: scale(1.18); z-index: 2; }
+.field-marker {
+  position: absolute; width: 11px; height: 11px; border-radius: 50%;
+  transform: translate(-50%, -50%); border: 2px solid #04121f;
+  box-shadow: 0 0 0 2px rgba(255,255,255,.85), 0 0 8px rgba(0,0,0,.7);
+}
+.field-marker.true { background: #fbbf24; }
+.field-marker.matched { background: #34d399; }
+.field-marker-legend {
+  display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  margin-right: 5px; vertical-align: -1px; border: 1.5px solid #04121f;
+}
+.field-marker-legend.true { background: #fbbf24; }
+.field-marker-legend.matched { background: #34d399; }
+
+/* ---- environment selector (sim / real) — top of FPGA + Sensors tabs ---- */
+.seg-toggle {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  padding: 10px 14px; margin-bottom: 18px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+}
+.seg-toggle .seg-label {
+  font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--dim); margin-right: 4px;
+}
+.seg-toggle .seg {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 16px; border-radius: 9px; cursor: pointer;
+  font-size: 13.5px; font-weight: 600; color: var(--muted);
+  background: #0a1128; border: 1px solid var(--border);
+  transition: all .14s ease;
+}
+.seg-toggle .seg:hover { color: var(--text); border-color: #2a3a66; }
+.seg-toggle .seg .seg-ic { font-size: 15px; opacity: .85; }
+.seg-toggle .seg.on {
+  color: #04121f; font-weight: 700;
+  background: linear-gradient(135deg, #22d3ee, #6366f1);
+  border-color: transparent;
+  box-shadow: 0 4px 16px rgba(34,211,238,.28);
+}
+.seg-toggle .seg.on .seg-ic { opacity: 1; }
+.seg-toggle .seg-note {
+  font-size: 11.5px; color: var(--dim); margin-left: 6px; line-height: 1.4;
+}

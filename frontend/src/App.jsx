@@ -4,6 +4,7 @@ import {
   QubitGrid, OdmrChart, BarCounts,
   SignalChart, CalibrationPanel, Verdict,
   OpticalChainDiagram, RunPhysics,
+  CompassRose, GyroPanel, MagnetoImage, SensorField,
 } from './components.jsx'
 
 const PROFILES = [
@@ -204,6 +205,18 @@ export default function App() {
   const [mwDur, setMwDur] = useState(200)              // ns
   const [mwPhase, setMwPhase] = useState(0)            // mrad
   const [rawCmd, setRawCmd] = useState('')
+  // hardware QRNG (ADC-noise entropy -> Ed25519 keypair + cert)
+  const [qrng, setQrng] = useState(null)
+  const [qrngErr, setQrngErr] = useState(null)
+  const [qrngLoading, setQrngLoading] = useState(false)
+  const [qrngBytes, setQrngBytes] = useState(32)         // entropy bytes (>=32 for Ed25519 seed)
+  const [qrngCN, setQrngCN] = useState('QSSC-hw-qrng')
+  // FPGA environment selector shown at the top of the FPGA tab:
+  // 'sim' = simulator (averages freely -> cleaner readout), 'real' = hardware
+  // chain (realistic shot noise at the requested averages). Both drive the
+  // same ADF4351 -> J3 -> A1 + 64-channel AD7616 physics; only the noise floor
+  // differs. Toggling it re-runs the sensor captures.
+  const [fpgaMode, setFpgaMode] = useState('sim')
 
   const refreshFpga = useCallback(() => {
     setFpgaLoading(true); setFpgaErr(null)
@@ -220,13 +233,118 @@ export default function App() {
       .finally(() => setFpgaBusy(false))
   }, [fpgaBusy])
 
-  // ---- global control state ----
+  // Hardware QRNG: harvest ADC-noise entropy via the READ_RNG firmware verb,
+  // derive an Ed25519 keypair + self-signed cert on the server.
+  const runQrng = useCallback(() => {
+    setQrngLoading(true); setQrngErr(null)
+    api.fpgaQrng({ n_bytes: qrngBytes, common_name: qrngCN })
+      .then(setQrng).catch(e => setQrngErr(e.message)).finally(() => setQrngLoading(false))
+  }, [qrngBytes, qrngCN])
+
+  // ---- global control state (declared early so sensor handlers below can
+  //      reference profile / temperature / seed in their useCallback deps) ----
   const [profile, setProfile] = useState('NV')
   // Peltier liquid-cooling setpoint: 2-stage TEC + NTC + PID holds the chip at
   // 295 K +/- 0.1 K (see docs/FABRICATION_PROTOCOL_Diamond.md, protocol.py).
   const [temperature, setTemperature] = useState(295)
   const [seed, setSeed] = useState(42)
   const [noiseMode, setNoiseMode] = useState('real')
+
+  // ---- FPGA tab: on-chip quantum sensors (compass / gyro / magneto-optic) ----
+  // On-demand measurements (button click), not auto-fetched — active MW sweeps.
+  const [compass, setCompass] = useState(null)
+  const [compassLoading, setCompassLoading] = useState(false)
+  const [compassErr, setCompassErr] = useState(null)
+  const [compassBx, setCompassBx] = useState(150)
+  const [compassBy, setCompassBy] = useState(50)
+  const [compassBz, setCompassBz] = useState(-100)
+  const [compassAvg, setCompassAvg] = useState(1000)
+  const [gyro, setGyro] = useState(null)
+  const [gyroLoading, setGyroLoading] = useState(false)
+  const [gyroErr, setGyroErr] = useState(null)
+  const [gyroRate, setGyroRate] = useState(10)
+  const [gyroAvg, setGyroAvg] = useState(100)
+  const [mag, setMag] = useState(null)
+  const [magLoading, setMagLoading] = useState(false)
+  const [magErr, setMagErr] = useState(null)
+  const [magAvg, setMagAvg] = useState(500)
+  const [magGrad, setMagGrad] = useState(8)
+
+  // ---- contactless field-imaging sensors (ferro / nav / thermal / current) ----
+  const [ferro, setFerro] = useState(null); const [ferroLoading, setFerroLoading] = useState(false); const [ferroErr, setFerroErr] = useState(null)
+  const [ferroMoment, setFerroMoment] = useState(0.02)
+  const [ferroDist, setFerroDist] = useState(15)
+  const [ferroOffX, setFerroOffX] = useState(4)
+  const [ferroOffY, setFerroOffY] = useState(3)
+  const [nav, setNav] = useState(null); const [navLoading, setNavLoading] = useState(false); const [navErr, setNavErr] = useState(null)
+  const [navPosX, setNavPosX] = useState(12); const [navPosY, setNavPosY] = useState(10); const [navAnom, setNavAnom] = useState(2)
+  const [thermal, setThermal] = useState(null); const [thermalLoading, setThermalLoading] = useState(false); const [thermalErr, setThermalErr] = useState(null)
+  const [thermalBase, setThermalBase] = useState(300); const [thermalHot, setThermalHot] = useState(330)
+  const [thermalHX, setThermalHX] = useState(5); const [thermalHY, setThermalHY] = useState(4)
+  const [current, setCurrent] = useState(null); const [currentLoading, setCurrentLoading] = useState(false); const [currentErr, setCurrentErr] = useState(null)
+  const [currentI, setCurrentI] = useState(0.5); const [currentDepth, setCurrentDepth] = useState(3); const [currentOff, setCurrentOff] = useState(0)
+  // shared averages for the four field-imaging sensors
+  const [fieldAvg, setFieldAvg] = useState(500)
+
+  const runCompass = useCallback(() => {
+    setCompassLoading(true); setCompassErr(null)
+    api.compass({ profile, mode: fpgaMode, bx: compassBx, by: compassBy, bz: compassBz, n_avg: compassAvg, seed })
+      .then(setCompass).catch(e => setCompassErr(e.message))
+      .finally(() => setCompassLoading(false))
+  }, [profile, fpgaMode, compassBx, compassBy, compassBz, compassAvg, seed])
+  const runGyro = useCallback(() => {
+    setGyroLoading(true); setGyroErr(null)
+    api.gyro({ profile, mode: fpgaMode, rate_dps: gyroRate, temperature_k: temperature, n_avg: gyroAvg, seed })
+      .then(setGyro).catch(e => setGyroErr(e.message))
+      .finally(() => setGyroLoading(false))
+  }, [profile, fpgaMode, gyroRate, temperature, gyroAvg, seed])
+  const runMag = useCallback(() => {
+    setMagLoading(true); setMagErr(null)
+    api.magneto({ profile, mode: fpgaMode, n_avg: magAvg, gradient_ut_mm: magGrad, seed })
+      .then(setMag).catch(e => setMagErr(e.message))
+      .finally(() => setMagLoading(false))
+  }, [profile, fpgaMode, magAvg, magGrad, seed])
+
+  const runFerro = useCallback(() => {
+    setFerroLoading(true); setFerroErr(null)
+    api.ferro({ profile, mode: fpgaMode, moment_am2: ferroMoment, distance_mm: ferroDist,
+      offset_x_mm: ferroOffX, offset_y_mm: ferroOffY, n_avg: fieldAvg, seed })
+      .then(setFerro).catch(e => setFerroErr(e.message)).finally(() => setFerroLoading(false))
+  }, [profile, fpgaMode, ferroMoment, ferroDist, ferroOffX, ferroOffY, fieldAvg, seed])
+  const runNav = useCallback(() => {
+    setNavLoading(true); setNavErr(null)
+    api.nav({ profile, mode: fpgaMode, pos_x: navPosX, pos_y: navPosY, anomaly_ut: navAnom, n_avg: fieldAvg, seed })
+      .then(setNav).catch(e => setNavErr(e.message)).finally(() => setNavLoading(false))
+  }, [profile, fpgaMode, navPosX, navPosY, navAnom, fieldAvg, seed])
+  const runThermal = useCallback(() => {
+    setThermalLoading(true); setThermalErr(null)
+    api.thermal({ profile, mode: fpgaMode, base_temp_k: thermalBase, hotspot_k: thermalHot,
+      hotspot_x: thermalHX, hotspot_y: thermalHY, n_avg: fieldAvg, seed })
+      .then(setThermal).catch(e => setThermalErr(e.message)).finally(() => setThermalLoading(false))
+  }, [profile, fpgaMode, thermalBase, thermalHot, thermalHX, thermalHY, fieldAvg, seed])
+  const runCurrent = useCallback(() => {
+    setCurrentLoading(true); setCurrentErr(null)
+    api.current({ profile, mode: fpgaMode, current_a: currentI, wire_offset_mm: currentOff,
+      depth_mm: currentDepth, n_avg: fieldAvg, seed })
+      .then(setCurrent).catch(e => setCurrentErr(e.message)).finally(() => setCurrentLoading(false))
+  }, [profile, fpgaMode, currentI, currentOff, currentDepth, fieldAvg, seed])
+
+  // Auto-capture an initial reading whenever the Sensors tab is opened and
+  // whenever the sim/real environment is toggled, so every sensor shows data
+  // immediately (not just on the Measure buttons). The loading guards stop
+  // overlapping in-flight calls.
+  useEffect(() => {
+    if (mainTab !== 'sensors') return
+    if (!compassLoading) runCompass()
+    if (!gyroLoading) runGyro()
+    if (!magLoading) runMag()
+    if (!ferroLoading) runFerro()
+    if (!navLoading) runNav()
+    if (!thermalLoading) runThermal()
+    if (!currentLoading) runCurrent()
+    // re-run only on tab enter or environment toggle
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mainTab, fpgaMode])
 
   // ---- circuit runner state ----
   const [algo, setAlgo] = useState('custom')
@@ -418,6 +536,9 @@ export default function App() {
         <div className={`maintab ${mainTab === 'fpga' ? 'active' : ''}`} onClick={() => { setMainTab('fpga'); refreshFpga() }}>
           <span className="mt-ic">⊞</span> FPGA
         </div>
+        <div className={`maintab ${mainTab === 'sensors' ? 'active' : ''}`} onClick={() => setMainTab('sensors')}>
+          <span className="mt-ic">⊛</span> Sensors
+        </div>
         <div className={`maintab ${mainTab === 'code' ? 'active' : ''}`} onClick={() => { setMainTab('code'); refreshScripts() }}>
           <span className="mt-ic">{'</>'}</span> Code
         </div>
@@ -429,6 +550,22 @@ export default function App() {
       {mainTab === 'fpga' ? (
         /* ============================= FPGA (control + metrics) ============================= */
         <>
+          {/* environment selector — drives the sensor captures in the Sensors tab too */}
+          <div className="seg-toggle" role="group" aria-label="FPGA environment">
+            <span className="seg-label">Environment</span>
+            <button className={`seg ${fpgaMode === 'sim' ? 'on' : ''}`} onClick={() => setFpgaMode('sim')}>
+              <span className="seg-ic">◈</span> Simulation
+            </button>
+            <button className={`seg ${fpgaMode === 'real' ? 'on' : ''}`} onClick={() => setFpgaMode('real')}>
+              <span className="seg-ic">⌬</span> Hardware
+            </button>
+            <span className="seg-note">
+              {fpgaMode === 'sim'
+                ? 'simulator — averages freely, cleaner readout (no shot-noise floor)'
+                : 'ADF4351 + 64-ch AD7616 chain — realistic linewidth + shot noise'}
+            </span>
+          </div>
+
           <div className="stats" style={{ marginBottom: 18 }}>
             <div className="stat"><div className="k">Target FPGA</div><div className="v">XC7A35T<small> · CSG324</small></div></div>
             <div className="stat"><div className="k">Synthesis</div><div className="v">{fpga?.status ?? '…'}<small> · yosys</small></div></div>
@@ -561,7 +698,17 @@ export default function App() {
             <div className="card">
               <h2><span className="dot" />Reply &amp; readout</h2>
               <div className="hint">Last reply highlighted; the full command log is below.</div>
-              {!fpgaReply && <div className="muted">No command sent yet — try READ_DETECTORS above.</div>}
+              {!fpgaReply && (
+                <div className="fpga-emptyhelp">
+                  <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Available firmware commands — click one to run it, or type it in the Raw command box.</div>
+                  {fpga?.protocol?.map(p => (
+                    <button key={p.cmd} type="button" className="fpga-helpcmd" onClick={() => sendFpga(p.args === '—' ? p.cmd : `${p.cmd} ${p.cmd === 'READ_RNG' ? '32' : p.cmd === 'READ_DETECTOR' ? '0' : p.cmd === 'DRIVE_EMITTER' ? '0 50' : p.cmd === 'SET_EMITTER' ? '0 4095' : p.cmd === 'DRIVE_PATTERN' ? '50' : p.cmd === 'APPLY_PULSE' ? '0 2870000 63 200 0' : ''}`.trim())}>
+                      <span className="mono fpga-helpcmd-name">{p.cmd}{p.args !== '—' ? <span className="muted"> {p.args}</span> : null}</span>
+                      <span className="fpga-helpcmd-desc">{p.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
               {fpgaReply && (
                 <>
                   <div className={`verdict ${fpgaReply.ok ? 'ok' : 'bad'}`} style={{ marginBottom: 12 }}>
@@ -625,6 +772,183 @@ export default function App() {
                   <div className="muted fpga-proto-desc">{p.desc}</div>
                 </React.Fragment>
               ))}
+            </div>
+          </div>
+
+          {/* HARDWARE QRNG — physical entropy from the AD7616 noise floor */}
+          <div className="section-title">Hardware QRNG — physical entropy from the AD7616 noise floor</div>
+          <div className="card">
+            <h2><span className="dot" />Quantum RNG <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(qrng_entropy.v · READ_RNG)</span></h2>
+            <div className="hint">
+              A <b>dark</b> AD7616 channel's LSB is dominated by Johnson + shot noise. The FPGA pairs successive samples through a von-Neumann extractor (01→0, 10→1, 00/11 discarded) and packs debiased bits into 32-bit words. The 32-byte seed drives an Ed25519 keypair + self-signed X.509 device cert.
+            </div>
+            <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
+              <div className="field"><label>Entropy bytes</label>
+                <select value={qrngBytes} onChange={e => setQrngBytes(+e.target.value)}>
+                  <option value={32}>32 (Ed25519 seed)</option>
+                  <option value={64}>64</option>
+                  <option value={128}>128</option>
+                </select>
+              </div>
+              <div className="field" style={{ flex: 1, minWidth: 180 }}><label>Cert common name</label>
+                <input type="text" value={qrngCN} onChange={e => setQrngCN(e.target.value)} />
+              </div>
+              <div className="field" style={{ justifyContent: 'flex-end' }}><label>&nbsp;</label>
+                <button className="btn" onClick={runQrng} disabled={qrngLoading}>
+                  {qrngLoading ? <><span className="spinner" /> Harvesting…</> : 'Generate hardware key'}
+                </button>
+              </div>
+            </div>
+            {qrngErr && <div className="error">{qrngErr}</div>}
+            {qrng && (
+              <div className="fpga-qrng-out">
+                <div className="row" style={{ marginBottom: 8, gap: 10, flexWrap: 'wrap' }}>
+                  <div className="stat" style={{ flex: '0 0 auto', padding: '8px 10px' }}><div className="k">Source</div><div className="v" style={{ fontSize: 12 }}>{qrng.source}</div></div>
+                  <div className="stat" style={{ flex: '0 0 auto', padding: '8px 10px' }}><div className="k">Algorithm</div><div className="v">{qrng.algorithm}</div></div>
+                  <div className="stat" style={{ flex: '0 0 auto', padding: '8px 10px' }}><div className="k">Serial</div><div className="v mono" style={{ fontSize: 11 }}>{qrng.serial}</div></div>
+                  <div className="stat" style={{ flex: '0 0 auto', padding: '8px 10px' }}><div className="k">Extract rate</div><div className="v">{(qrng.extraction?.extract_rate * 100).toFixed(1)}%<small> · {qrng.extraction?.kept}/{qrng.extraction?.raw_bits} bits</small></div></div>
+                </div>
+                <div className="muted" style={{ fontSize: 11, margin: '6px 0 3px' }}>Entropy (hex, {qrng.n_bytes} B)</div>
+                <pre className="mono qrng-hex">{qrng.entropy_hex}</pre>
+                <details style={{ marginTop: 8 }}>
+                  <summary className="muted" style={{ cursor: 'pointer', fontSize: 12 }}>Ed25519 public key + X.509 certificate (PEM)</summary>
+                  <pre className="mono qrng-pem">{qrng.public_key_pem}\n{qrng.certificate_pem}</pre>
+                </details>
+              </div>
+            )}
+          </div>
+
+        </>
+      ) : mainTab === 'sensors' ? (
+        /* ============================= SENSORS (on-chip quantum sensors) ============================= */
+        <>
+          <div className="seg-toggle" role="group" aria-label="FPGA environment">
+            <span className="seg-label">Environment</span>
+            <button className={`seg ${fpgaMode === 'sim' ? 'on' : ''}`} onClick={() => setFpgaMode('sim')}>
+              <span className="seg-ic">◈</span> Simulation
+            </button>
+            <button className={`seg ${fpgaMode === 'real' ? 'on' : ''}`} onClick={() => setFpgaMode('real')}>
+              <span className="seg-ic">⌬</span> Hardware
+            </button>
+            <span className="seg-note">
+              {fpgaMode === 'sim'
+                ? 'simulator — averages freely, cleaner readout (no shot-noise floor)'
+                : 'ADF4351 + 64-ch AD7616 chain — realistic linewidth + shot noise'}
+            </span>
+          </div>
+
+          <div className="section-title">On-chip quantum sensors — compass · gyroscope · magneto-optic image</div>
+          <div className="hint" style={{ marginBottom: 14, color: 'var(--dim)', fontSize: 12.5 }}>
+            The same ADF4351 → J3 → A1 MW chain and 64-channel AD7616 readout run as quantum sensors.
+            Sweep the 4 NV &lt;111&gt; axes for the ODMR compass (B-vector → heading), run a Ramsey
+            π/2–T–π/2 for the gyroscope, and image the per-pixel field across the 8×8 array.
+            Opening this tab auto-captures an initial reading on all three; toggle the environment
+            above (or press Measure) to re-run.
+          </div>
+          <div className="sensor-grid">
+            <div className="card">
+              <h2><span className="dot" />ODMR compass (magnetometer)</h2>
+              <div className="hint">Zeeman doublet split per &lt;111&gt; axis reconstructs the ambient B-vector → heading + elevation. Default is a ~188 µT lab field (resolves ≥3 axes at the NV ~5 MHz linewidth); dial to Earth's field to see the linewidth limit.</div>
+              <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
+                <div className="field"><label>Bx (µT)</label><input type="number" step="any" value={compassBx} onChange={e => setCompassBx(+e.target.value)} /></div>
+                <div className="field"><label>By (µT)</label><input type="number" step="any" value={compassBy} onChange={e => setCompassBy(+e.target.value)} /></div>
+                <div className="field"><label>Bz (µT)</label><input type="number" step="any" value={compassBz} onChange={e => setCompassBz(+e.target.value)} /></div>
+                <div className="field"><label>Averages</label><input type="number" value={compassAvg} onChange={e => setCompassAvg(+e.target.value)} /></div>
+                <button className="btn" onClick={runCompass} disabled={compassLoading} style={{ alignSelf: 'flex-end' }}>
+                  {compassLoading ? 'Sweeping…' : 'Measure'}
+                </button>
+              </div>
+              <CompassRose data={compass} error={compassErr} loading={compassLoading} />
+            </div>
+
+            <div className="card">
+              <h2><span className="dot" />Ramsey gyroscope</h2>
+              <div className="hint">π/2–T–π/2; the accumulated phase Ω·T is the rotation rate.</div>
+              <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
+                <div className="field"><label>Rate (°/s)</label><input type="number" step="any" value={gyroRate} onChange={e => setGyroRate(+e.target.value)} /></div>
+                <div className="field"><label>Averages</label><input type="number" value={gyroAvg} onChange={e => setGyroAvg(+e.target.value)} /></div>
+                <button className="btn" onClick={runGyro} disabled={gyroLoading} style={{ alignSelf: 'flex-end' }}>
+                  {gyroLoading ? 'Running…' : 'Measure'}
+                </button>
+              </div>
+              <GyroPanel data={gyro} error={gyroErr} loading={gyroLoading} />
+            </div>
+
+            <div className="card" style={{ gridColumn: '1 / -1' }}>
+              <h2><span className="dot" />Magneto-optic image (64-pixel array)</h2>
+              <div className="hint">The FPGA returns all 64 AD7616 samples in one parallel frame; each pixel's ODMR doublet gives |B·n| → an 8×8 field image. Tune the gradient + averages and watch the sensitivity and structure resolve.</div>
+              <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
+                <div className="field"><label>Gradient (µT/mm)</label><input type="number" step="any" value={magGrad} onChange={e => setMagGrad(+e.target.value)} /></div>
+                <div className="field"><label>Averages</label><input type="number" value={magAvg} onChange={e => setMagAvg(+e.target.value)} /></div>
+                <button className="btn" onClick={runMag} disabled={magLoading} style={{ alignSelf: 'flex-end' }}>
+                  {magLoading ? 'Reading array…' : 'Image'}
+                </button>
+              </div>
+              <MagnetoImage data={mag} error={magErr} loading={magLoading} />
+            </div>
+          </div>
+
+          {/* =================== CONTACTLESS FIELD IMAGING =================== */}
+          <div className="section-title">Contactless field imaging — ferromagnetic · geomagnetic nav · temperature · current</div>
+          <div className="hint" style={{ marginBottom: 14, color: 'var(--dim)', fontSize: 12.5 }}>
+            Magnetic fields penetrate fog, smoke, water, tissue, packaging and non-magnetic walls — so the same
+            64-pixel array images the source through whatever is in the way. Each card models a different source:
+            a ferromagnetic dipole (object detection), the crustal anomaly field (GPS-denied navigation), a
+            temperature field (NV D-shift thermometry), or a current (Ampère).
+          </div>
+          <div className="sensor-grid">
+            <div className="card">
+              <h2><span className="dot" />Ferromagnetic detection (see through walls)</h2>
+              <div className="hint">A ferromagnetic object is a magnetic dipole; the array images its field through packaging, walls, tissue, soil. Detection fires when the peak clears the noise floor; bearing + distance locate it.</div>
+              <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
+                <div className="field"><label>Moment (A·m²)</label><input type="number" step="any" value={ferroMoment} onChange={e => setFerroMoment(+e.target.value)} /></div>
+                <div className="field"><label>Distance (mm)</label><input type="number" step="any" value={ferroDist} onChange={e => setFerroDist(+e.target.value)} /></div>
+                <div className="field"><label>Offset X (mm)</label><input type="number" step="any" value={ferroOffX} onChange={e => setFerroOffX(+e.target.value)} /></div>
+                <div className="field"><label>Offset Y (mm)</label><input type="number" step="any" value={ferroOffY} onChange={e => setFerroOffY(+e.target.value)} /></div>
+                <div className="field"><label>Averages</label><input type="number" value={fieldAvg} onChange={e => setFieldAvg(+e.target.value)} /></div>
+                <button className="btn" onClick={runFerro} disabled={ferroLoading} style={{ alignSelf: 'flex-end' }}>{ferroLoading ? 'Sweeping…' : 'Measure'}</button>
+              </div>
+              <SensorField data={ferro} error={ferroErr} loading={ferroLoading} promptText="Press Measure to image the dipole field." />
+            </div>
+
+            <div className="card">
+              <h2><span className="dot" />Geomagnetic navigation (GPS-denied)</h2>
+              <div className="hint">Match the local crustal-magnetic anomaly against a stored map to estimate position — works underwater / underground / indoors where GPS and optical both fail. ● true position, ◆ matched.</div>
+              <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
+                <div className="field"><label>Pos X</label><input type="number" step="any" value={navPosX} onChange={e => setNavPosX(+e.target.value)} /></div>
+                <div className="field"><label>Pos Y</label><input type="number" step="any" value={navPosY} onChange={e => setNavPosY(+e.target.value)} /></div>
+                <div className="field"><label>Anomaly (µT)</label><input type="number" step="any" value={navAnom} onChange={e => setNavAnom(+e.target.value)} /></div>
+                <div className="field"><label>Averages</label><input type="number" value={fieldAvg} onChange={e => setFieldAvg(+e.target.value)} /></div>
+                <button className="btn" onClick={runNav} disabled={navLoading} style={{ alignSelf: 'flex-end' }}>{navLoading ? 'Matching…' : 'Navigate'}</button>
+              </div>
+              <SensorField data={nav} error={navErr} loading={navLoading} promptText="Press Navigate to match the anomaly map." />
+            </div>
+
+            <div className="card">
+              <h2><span className="dot" />Temperature imaging (NV thermometry)</h2>
+              <div className="hint">The NV D resonance shifts with temperature, so the array is a contactless thermal image — a chip hotspot or a surface's map read through the diamond. Resolution scales with averages.</div>
+              <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
+                <div className="field"><label>Base (K)</label><input type="number" step="any" value={thermalBase} onChange={e => setThermalBase(+e.target.value)} /></div>
+                <div className="field"><label>Hotspot (K)</label><input type="number" step="any" value={thermalHot} onChange={e => setThermalHot(+e.target.value)} /></div>
+                <div className="field"><label>Hotspot X</label><input type="number" step="any" value={thermalHX} onChange={e => setThermalHX(+e.target.value)} /></div>
+                <div className="field"><label>Hotspot Y</label><input type="number" step="any" value={thermalHY} onChange={e => setThermalHY(+e.target.value)} /></div>
+                <div className="field"><label>Averages</label><input type="number" value={fieldAvg} onChange={e => setFieldAvg(+e.target.value)} /></div>
+                <button className="btn" onClick={runThermal} disabled={thermalLoading} style={{ alignSelf: 'flex-end' }}>{thermalLoading ? 'Reading…' : 'Measure'}</button>
+              </div>
+              <SensorField data={thermal} error={thermalErr} loading={thermalLoading} promptText="Press Measure to image the temperature field." />
+            </div>
+
+            <div className="card" style={{ gridColumn: '1 / -1' }}>
+              <h2><span className="dot" />Current imaging (Ampère, through enclosures)</h2>
+              <div className="hint">Every current makes a B field (µ₀I / 2πr); the array images it contactlessly — short-circuit localization, battery-cell current signatures, chip power-rail mapping, all through the enclosure.</div>
+              <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
+                <div className="field"><label>Current (A)</label><input type="number" step="any" value={currentI} onChange={e => setCurrentI(+e.target.value)} /></div>
+                <div className="field"><label>Depth (mm)</label><input type="number" step="any" value={currentDepth} onChange={e => setCurrentDepth(+e.target.value)} /></div>
+                <div className="field"><label>Wire offset (mm)</label><input type="number" step="any" value={currentOff} onChange={e => setCurrentOff(+e.target.value)} /></div>
+                <div className="field"><label>Averages</label><input type="number" value={fieldAvg} onChange={e => setFieldAvg(+e.target.value)} /></div>
+                <button className="btn" onClick={runCurrent} disabled={currentLoading} style={{ alignSelf: 'flex-end' }}>{currentLoading ? 'Reading…' : 'Measure'}</button>
+              </div>
+              <SensorField data={current} error={currentErr} loading={currentLoading} promptText="Press Measure to image the current field." />
             </div>
           </div>
         </>
