@@ -101,6 +101,61 @@ h q[0];
 cx q[0],q[1];
 cx q[1],q[2];
 measure q -> c;`,
+  qssc_backend: `# QSSC Qiskit backend -- simulator AND real hardware, with comments.
+#
+# qssc.QSSCBackend is a real Qiskit BackendV2. It models the 64-site spin-defect
+# chip: a full Aer thermal + depolarizing + readout noise model built from each
+# defect profile's real T1/T2 and gate times. Two ways to run it:
+#
+#   1. SIMULATOR  -- no hardware: Aer runs the circuit under the chip's physics.
+#   2. HARDWARE   -- an Artix-7 FPGA drives the emitters / microwave / detector;
+#                    pass hardware=make_connection(port=...). With no physical
+#                    board yet, make_connection(port=None) returns a SimulatedFPGA
+#                    that exercises the SAME control + optical-readout path.
+#
+# This is a LOCAL-PYTHON reference (the browser sandbox only builds a 'qc' and
+# the dashboard runs it on this backend). Run it yourself:
+#   pip install -e ".[api]"   then   python qssc_backend_example.py
+
+from qiskit import QuantumCircuit
+from qssc import QSSCBackend, make_connection
+
+# ---- a small circuit: 3-qubit GHZ ------------------------------------------
+qc = QuantumCircuit(3, 3)
+qc.h(0)
+qc.cx(0, 1)
+qc.cx(1, 2)
+qc.measure(range(3), range(3))
+
+# ============================ 1. SIMULATOR (full physics) ====================
+# noise_mode="real"   -> Aer density-matrix run with thermal (T1,T2,gate time) +
+#                        depolarizing + optical-readout noise from the NV profile.
+#                        "none" = ideal, "phenomenological" = fast analytic approx.
+# temperature_k=1e-3  -> 1 mK (cryo): T2 ~ 1.8 ms for 12C-purified NV, the regime
+#                        where Shor-15 / QFT recover. 300 = room temperature.
+sim = QSSCBackend(profile="NV", temperature_k=1e-3,
+                  noise_mode="real", shots=4096, seed=42)
+# NOTE: do NOT transpile against the 64-qubit QSSC target -- it expands the
+# circuit to the full 64-site register and hits the 28-qubit simulator cap.
+# QSSCBackend.run() transpiles to Aer internally, so pass the circuit as-is.
+res = sim.run(qc, shots=4096).result()
+print("SIM counts   :", res.get_counts())              # e.g. {'000':.., '111':..}
+print("SIM retention:", res.assessment["signal_retention"])  # signal survival
+print("SIM ideal    :", res.ideal_counts)              # noise-free reference
+print("SIM approx   :", res.approximate)               # True = analytic fallback
+
+# ============================ 2. HARDWARE (Artix-7) =========================
+# make_connection(port) opens a real FPGA on the serial port. With port=None it
+# returns SimulatedFPGA -- same EmitterController / DetectorInterface / microwave
+# API, so the code below is identical for the lab board and the simulator.
+hw = make_connection(port=None, profile="NV", temperature_k=1e-3)   # sim hardware
+# hw = make_connection(port="/dev/ttyUSB0", profile="NV")           # REAL board
+hw_backend = QSSCBackend(profile="NV", hardware=hw,
+                         noise_mode="real", shots=4096, seed=42)
+res_hw = hw_backend.run(qc, shots=4096).result()
+print("HW counts    :", res_hw.get_counts())
+print("HW optical   :", res_hw.optical)                 # on-chip readout (None
+                                                       # unless hardware attached)`,
 }
 
 function useAsync(fn, deps = []) {
@@ -130,6 +185,40 @@ function useAsync(fn, deps = []) {
 export default function App() {
   // ---- top-level tabs: Hardware (default) / History ----
   const [mainTab, setMainTab] = useState('hardware')
+
+  // ---- FPGA tab: synthesis metrics + live command protocol ----
+  const [fpga, setFpga] = useState(null)
+  const [fpgaErr, setFpgaErr] = useState(null)
+  const [fpgaLoading, setFpgaLoading] = useState(false)
+  const [fpgaBusy, setFpgaBusy] = useState(false)
+  const [fpgaReply, setFpgaReply] = useState(null)      // last {command, reply, ok}
+  const [fpgaLog, setFpgaLog] = useState([])            // most-recent-first command log
+  // parameterized command inputs (defaults match the NV centre: D≈2.87 GHz)
+  const [emIdx, setEmIdx] = useState(0)
+  const [emDur, setEmDur] = useState(50)
+  const [emLvl, setEmLvl] = useState(4095)
+  const [detSite, setDetSite] = useState(0)
+  const [mwQ, setMwQ] = useState(0)
+  const [mwFreq, setMwFreq] = useState(2870000)         // kHz (NV zero-field splitting ≈ 2.87 GHz)
+  const [mwAmp, setMwAmp] = useState(63)
+  const [mwDur, setMwDur] = useState(200)              // ns
+  const [mwPhase, setMwPhase] = useState(0)            // mrad
+  const [rawCmd, setRawCmd] = useState('')
+
+  const refreshFpga = useCallback(() => {
+    setFpgaLoading(true); setFpgaErr(null)
+    api.fpgaInfo().then(setFpga).catch(e => setFpgaErr(e.message)).finally(() => setFpgaLoading(false))
+  }, [])
+  useEffect(() => { if (mainTab === 'fpga' && !fpga) refreshFpga() }, [mainTab, fpga, refreshFpga])
+
+  const sendFpga = useCallback((command) => {
+    if (!command || fpgaBusy) return
+    setFpgaBusy(true)
+    api.fpgaCommand(command)
+      .then(r => { setFpgaReply(r); setFpgaLog(l => [{ ...r, t: new Date().toLocaleTimeString() }, ...l].slice(0, 40)) })
+      .catch(e => setFpgaReply({ command, reply: 'ERROR: ' + e.message, ok: false }))
+      .finally(() => setFpgaBusy(false))
+  }, [fpgaBusy])
 
   // ---- global control state ----
   const [profile, setProfile] = useState('NV')
@@ -326,6 +415,9 @@ export default function App() {
         <div className={`maintab ${mainTab === 'hardware' ? 'active' : ''}`} onClick={() => setMainTab('hardware')}>
           <span className="mt-ic">⬡</span> Hardware
         </div>
+        <div className={`maintab ${mainTab === 'fpga' ? 'active' : ''}`} onClick={() => { setMainTab('fpga'); refreshFpga() }}>
+          <span className="mt-ic">⊞</span> FPGA
+        </div>
         <div className={`maintab ${mainTab === 'code' ? 'active' : ''}`} onClick={() => { setMainTab('code'); refreshScripts() }}>
           <span className="mt-ic">{'</>'}</span> Code
         </div>
@@ -334,12 +426,214 @@ export default function App() {
         </div>
       </div>
 
-      {mainTab === 'code' ? (
+      {mainTab === 'fpga' ? (
+        /* ============================= FPGA (control + metrics) ============================= */
+        <>
+          <div className="stats" style={{ marginBottom: 18 }}>
+            <div className="stat"><div className="k">Target FPGA</div><div className="v">XC7A35T<small> · CSG324</small></div></div>
+            <div className="stat"><div className="k">Synthesis</div><div className="v">{fpga?.status ?? '…'}<small> · yosys</small></div></div>
+            <div className="stat"><div className="k">Logic cells</div><div className="v">{fpga?.total_cells ?? '—'}</div></div>
+            <div className="stat"><div className="k">RTL sim</div><div className="v">{fpga?.sim?.status === 'pass' ? 'PASS' : '—'}<small> · {fpga?.sim?.scenarios} tests</small></div></div>
+          </div>
+
+          <div className="grid cols-2">
+            {/* LEFT: resource utilisation + quality gates */}
+            <div className="card">
+              <h2><span className="dot" />Resource utilisation vs XC7A35T</h2>
+              <div className="hint">yosys synth_xilinx estimate (no P&amp;R / no timing). The 64 detector channels read fully in parallel — no analog MUX, no XADC.</div>
+              {fpgaLoading && <div className="muted"><span className="spinner" /> loading synthesis report…</div>}
+              {fpgaErr && <div className="error">{fpgaErr}</div>}
+              {fpga?.resources?.map(r => (
+                <div className="bar-row" key={r.name}>
+                  <span className="muted mono" style={{ fontSize: 11.5 }}>{r.label}</span>
+                  <div className="bar-track"><div className="bar-fill" style={{ width: `${Math.min(100, r.pct)}%` }} /></div>
+                  <span className="mono" style={{ fontSize: 11, textAlign: 'right' }}>{r.pct}%</span>
+                </div>
+              ))}
+              {fpga?.resources && (
+                <div className="legend" style={{ marginTop: 12 }}>
+                  {fpga.resources.map(r => (
+                    <div key={r.name}><b>{r.used}</b> / {r.available} {r.label}</div>
+                  ))}
+                </div>
+              )}
+              {fpga?.quality && (
+                <div className="row" style={{ marginTop: 14, marginBottom: 0 }}>
+                  <div className="stat" style={{ flex: 1, padding: '9px 10px' }}>
+                    <div className="k">Latches</div><span className={`chip ${fpga.quality.latches ? 'bad' : 'ok'}`}>{fpga.quality.latches} {fpga.quality.latches ? '⚠' : '✓'}</span>
+                  </div>
+                  <div className="stat" style={{ flex: 1, padding: '9px 10px' }}>
+                    <div className="k">Blackboxes</div><span className={`chip ${fpga.quality.blackboxes ? 'bad' : 'ok'}`}>{fpga.quality.blackboxes} {fpga.quality.blackboxes ? '⚠' : '✓'}</span>
+                  </div>
+                  <div className="stat" style={{ flex: 1, padding: '9px 10px' }}>
+                    <div className="k">Width warns</div><span className={`chip ${fpga.quality.width ? 'warn' : 'ok'}`}>{fpga.quality.width} {fpga.quality.width ? '⚠' : '✓'}</span>
+                  </div>
+                  <div className="stat" style={{ flex: 1, padding: '9px 10px' }}>
+                    <div className="k">Fits XC7A35T</div><span className={`chip ${fpga.quality.fits ? 'ok' : 'bad'}`}>{fpga.quality.fits ? 'yes ✓' : 'no ⚠'}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* RIGHT: RTL modules */}
+            <div className="card">
+              <h2><span className="dot" />RTL modules <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>({fpga?.modules?.length ?? 0})</span></h2>
+              <div className="hint">fpga/rtl/*.v — top <span className="mono">top_level</span> wires UART ↔ command parser ↔ SPI / ADC / emitter / MW.</div>
+              <div className="fpga-modlist">
+                {fpga?.modules?.map(m => (
+                  <div className="fpga-mod" key={m.file}>
+                    <span className="mono fpga-modname">{m.file}</span>
+                    <span className="muted">{m.desc}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* CONTROL PANEL */}
+          <div className="section-title">FPGA control — UART command protocol</div>
+          <div className="grid cols-2">
+            <div className="card">
+              <h2><span className="dot" />Command the FPGA {fpgaBusy ? <span className="spinner" style={{ marginLeft: 8 }} /> : null}</h2>
+              <div className="hint">Drives the SAME SimulatedFPGA the Qiskit backend uses (or a real board if QSSC_FPGA_PORT is set). Stateful: CALIBRATE builds the LUT, SET_EMITTER arms, READ reads. Localhost-only.</div>
+
+              <div className="fpga-quickrow">
+                <button type="button" onClick={() => sendFpga('READ_DETECTORS')}>READ_DETECTORS</button>
+                <button type="button" onClick={() => sendFpga('CALIBRATE')}>CALIBRATE</button>
+                <button type="button" onClick={() => sendFpga('CLEAR_EMITTERS')}>CLEAR_EMITTERS</button>
+                <button type="button" onClick={() => sendFpga('CLEAR_DETECTORS')}>CLEAR_DETECTORS</button>
+              </div>
+
+              <div className="fpga-fieldset">
+                <div className="fpga-legend">Emitter array · 3× TLC5947, 64ch</div>
+                <div className="row" style={{ marginBottom: 8 }}>
+                  <div className="field" style={{ flex: '0 0 70px' }}><label>index 0..63</label><input type="number" min="0" max="63" value={emIdx} onChange={e => setEmIdx(+e.target.value)} /></div>
+                  <div className="field" style={{ flex: '0 0 90px' }}><label>duration ms</label><input type="number" min="0" value={emDur} onChange={e => setEmDur(+e.target.value)} /></div>
+                  <div className="field" style={{ flex: '0 0 100px' }}><label>level 0..4095</label><input type="number" min="0" max="4095" value={emLvl} onChange={e => setEmLvl(+e.target.value)} /></div>
+                </div>
+                <div className="fpga-quickrow">
+                  <button type="button" onClick={() => sendFpga(`DRIVE_EMITTER ${emIdx} ${emDur}`)}>DRIVE_EMITTER</button>
+                  <button type="button" onClick={() => sendFpga(`SET_EMITTER ${emIdx} ${emLvl}`)}>SET_EMITTER</button>
+                  <button type="button" onClick={() => sendFpga(`DRIVE_PATTERN ${emDur}`)}>DRIVE_PATTERN</button>
+                </div>
+              </div>
+
+              <div className="fpga-fieldset">
+                <div className="fpga-legend">Detector readout · 4× AD7616, 16-bit</div>
+                <div className="row" style={{ marginBottom: 0 }}>
+                  <div className="field" style={{ flex: '0 0 90px' }}><label>site 0..63</label><input type="number" min="0" max="63" value={detSite} onChange={e => setDetSite(+e.target.value)} /></div>
+                  <div className="field" style={{ justifyContent: 'flex-end' }}><label>&nbsp;</label>
+                    <button type="button" onClick={() => sendFpga(`READ_DETECTOR ${detSite}`)}>READ_DETECTOR</button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="fpga-fieldset">
+                <div className="fpga-legend">Microwave pulse · ADF4351 PLL</div>
+                <div className="row" style={{ marginBottom: 8 }}>
+                  <div className="field" style={{ flex: '0 0 70px' }}><label>qubit</label><input type="number" min="0" max="63" value={mwQ} onChange={e => setMwQ(+e.target.value)} /></div>
+                  <div className="field" style={{ flex: 1 }}><label>freq kHz</label><input type="number" min="0" value={mwFreq} onChange={e => setMwFreq(+e.target.value)} /></div>
+                  <div className="field" style={{ flex: '0 0 70px' }}><label>amp</label><input type="number" min="0" value={mwAmp} onChange={e => setMwAmp(+e.target.value)} /></div>
+                </div>
+                <div className="row" style={{ marginBottom: 8 }}>
+                  <div className="field" style={{ flex: '0 0 110px' }}><label>duration ns</label><input type="number" min="0" value={mwDur} onChange={e => setMwDur(+e.target.value)} /></div>
+                  <div className="field" style={{ flex: '0 0 110px' }}><label>phase mrad</label><input type="number" value={mwPhase} onChange={e => setMwPhase(+e.target.value)} /></div>
+                </div>
+                <div className="fpga-quickrow">
+                  <button type="button" onClick={() => sendFpga(`APPLY_PULSE ${mwQ} ${mwFreq} ${mwAmp} ${mwDur} ${mwPhase}`)}>APPLY_PULSE</button>
+                </div>
+              </div>
+
+              <div className="fpga-fieldset">
+                <div className="fpga-legend">Raw command</div>
+                <div className="row" style={{ marginBottom: 0 }}>
+                  <div className="field" style={{ flex: 1 }}><label>command line</label>
+                    <input type="text" value={rawCmd} placeholder="e.g. READ_DETECTOR 3" onChange={e => setRawCmd(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') sendFpga(rawCmd.trim()) }} />
+                  </div>
+                  <div className="field" style={{ justifyContent: 'flex-end' }}><label>&nbsp;</label>
+                    <button type="button" onClick={() => sendFpga(rawCmd.trim())}>Send</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* RIGHT: reply + detector heatmap + log */}
+            <div className="card">
+              <h2><span className="dot" />Reply &amp; readout</h2>
+              <div className="hint">Last reply highlighted; the full command log is below.</div>
+              {!fpgaReply && <div className="muted">No command sent yet — try READ_DETECTORS above.</div>}
+              {fpgaReply && (
+                <>
+                  <div className={`verdict ${fpgaReply.ok ? 'ok' : 'bad'}`} style={{ marginBottom: 12 }}>
+                    <div className="verdict-h">{fpgaReply.ok ? 'OK ✓' : 'ERR'}<span className="verdict-tag">{fpgaReply.command.split(' ')[0]}</span></div>
+                    <div className="verdict-body">
+                      <div className="mono" style={{ fontSize: 12 }}>&gt; {fpgaReply.command}</div>
+                      <div className="mono" style={{ fontSize: 12, color: fpgaReply.ok ? 'var(--ok)' : 'var(--err)' }}>← {fpgaReply.reply}</div>
+                    </div>
+                  </div>
+                  {fpgaReply.command.startsWith('READ_DETECTORS') && (() => {
+                    const vals = fpgaReply.reply.split(/\s+/).filter(Boolean).map(Number)
+                    if (vals.length < 64) return null
+                    const mx = Math.max(...vals, 1)
+                    return (
+                      <div className="fpga-heatmap">
+                        <div className="fpga-hm-title">64-channel AD7616 frame · 8×8 (normalised to {mx})</div>
+                        <div className="fpga-hm-grid">
+                          {Array.from({ length: 8 }, (_, row) => (
+                            <div className="fpga-hm-row" key={row}>
+                              {vals.slice(row * 8, row * 8 + 8).map((v, i) => (
+                                <div className="fpga-hm-cell" key={i} title={`ch ${row * 8 + i}: ${v}`}
+                                  style={{ background: `rgba(34,211,238,${(v / mx).toFixed(3)})` }}>
+                                  <span>{v}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })()}
+                </>
+              )}
+              <div className="fpga-log">
+                <div className="muted" style={{ fontSize: 11.5, marginBottom: 6 }}>Command log · most recent first</div>
+                {fpgaLog.length === 0 && <div className="muted">—</div>}
+                {fpgaLog.map((l, i) => (
+                  <div className="fpga-logrow" key={i}>
+                    <span className="mono fpga-logt">{l.t}</span>
+                    <span className={`fpga-logok ${l.ok ? 'ok' : 'bad'}`}>{l.ok ? '✓' : '✗'}</span>
+                    <span className="mono fpga-logcmd">{l.command}</span>
+                    <span className="mono muted fpga-logreply">{l.reply.length > 64 ? l.reply.slice(0, 64) + '…' : l.reply}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* PROTOCOL REFERENCE */}
+          <div className="section-title">Command protocol reference</div>
+          <div className="card">
+            <h2><span className="dot" />Firmware command set <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(fpga/rtl/command_parser.v ↔ qssc.simulator)</span></h2>
+            <div className="hint">The Python FPGAConnection and the RTL command parser implement exactly these verbs. SET_THRESHOLD was removed by the AD7616 pivot → ERR.</div>
+            <div className="fpga-proto">
+              <div className="fpga-proto-hd">Command</div><div className="fpga-proto-hd">Args</div><div className="fpga-proto-hd">Reply</div><div className="fpga-proto-hd">Description</div>
+              {fpga?.protocol?.map(p => (
+                <React.Fragment key={p.cmd}>
+                  <div className="mono fpga-proto-cmd">{p.cmd}</div>
+                  <div className="mono fpga-proto-args">{p.args}</div>
+                  <div className="mono fpga-proto-reply">{p.reply}</div>
+                  <div className="muted fpga-proto-desc">{p.desc}</div>
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+        </>
+      ) : mainTab === 'code' ? (
         /* ============================= CODE (scripts) ============================= */
         <div className="grid cols-2">
           <div className="card">
             <h2><span className="dot" />Script editor</h2>
-            <div className="hint">Save Qiskit scripts (Python snippet or OpenQASM 2). Saved scripts appear as loadable entries in the Hardware circuit runner.</div>
+            <div className="hint">Save Qiskit scripts (Python snippet or OpenQASM 2). Saved scripts appear as loadable entries in the Hardware circuit runner. The <b>QSSC backend</b> example below shows the direct Python API (simulator + real hardware) and runs locally — the circuit snippets run in the browser.</div>
             <div className="row">
               <div className="field" style={{ flex: 1 }}>
                 <label>Name</label>
@@ -351,6 +645,19 @@ export default function App() {
                   <button className="ghost" type="button" onClick={newScript}>New</button>
                   <button type="button" onClick={saveScript}>{edId ? 'Update' : 'Save'}</button>
                 </div>
+              </div>
+            </div>
+            <div className="row" style={{ marginTop: 6 }}>
+              <div className="field" style={{ flex: 1 }}>
+                <label>Load example</label>
+                <select defaultValue="" onChange={e => { const k = e.target.value; if (k && CUSTOM_EXAMPLES[k]) { setEdCode(CUSTOM_EXAMPLES[k]); setEdName(k); e.target.value = ''; } }}>
+                  <option value="">pick one…</option>
+                  <option value="bell">Bell pair — runs in browser</option>
+                  <option value="ghz">GHZ — runs in browser</option>
+                  <option value="qft">QFT — runs in browser</option>
+                  <option value="qasm">OpenQASM 2 — runs in browser</option>
+                  <option value="qssc_backend">QSSC backend — simulator + real HW (local Python)</option>
+                </select>
               </div>
             </div>
             <textarea className="code-editor" value={edCode} spellCheck={false}

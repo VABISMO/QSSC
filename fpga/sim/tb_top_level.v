@@ -82,6 +82,21 @@ module tb_top_level;
     reg mw_gate_seen = 1'b0;
     always @(posedge clk_100mhz) if (mw_gate) mw_gate_seen <= 1'b1;
 
+    // ---- MW pulse-WIDTH timer: count cycles mw_gate is high, capture the
+    // width of the last completed pulse. At 100 MHz the RTL gate timer ticks
+    // every 10 ns (gate_cnt = duration_ns/10), so a 500 ns APPLY_PULSE must
+    // produce a mw_gate pulse exactly 50 clk cycles wide. This is the timing
+    // check that locks "the pulse lasts as long as qiskit asked for".
+    integer mw_gate_high = 0;     // cycles high in the current pulse
+    integer mw_gate_last = 0;     // width (cycles) of the last completed pulse
+    always @(posedge clk_100mhz) begin
+        if (mw_gate)        mw_gate_high <= mw_gate_high + 1;
+        else if (mw_gate_high != 0) begin
+            mw_gate_last <= mw_gate_high;
+            mw_gate_high  <= 0;
+        end
+    end
+
     // ---- DUT ---------------------------------------------------------------
     top_level dut (
         .clk_100mhz (clk_100mhz),
@@ -413,6 +428,17 @@ module tb_top_level;
             ok_count = ok_count + 1;  $display("TB: mw_gate pulsed after APPLY_PULSE  (PASS)");
         end else begin
             err_count = err_count + 1;  $display("TB: FAIL mw_gate did not pulse");
+        end
+        // Timing check: the 500 ns pulse (duration_ns=500) must gate the RF
+        // switch for exactly 50 clk cycles (100 MHz -> 10 ns/tick). The OK
+        // reply took ~240 cycles to clock out, so the 50-cycle gate has long
+        // completed and mw_gate_last holds its width.
+        if (mw_gate_last == 50) begin
+            ok_count = ok_count + 1;
+            $display("TB: mw_gate pulse width = %0d cycles (500 ns -> 50 @10ns/tick)  (PASS)", mw_gate_last);
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL mw_gate pulse width = %0d cycles (expect 50 for 500 ns)", mw_gate_last);
         end
 
         // ---- 8) APPLY_PULSE invalid freq (0) -> ERR --------------------

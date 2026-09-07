@@ -180,8 +180,12 @@ class MicrowaveController:
                         hardware primitive — see ``QSSCBackend.limitations()``).
     * ``freq_khz``    — RF frequency in kHz, e.g. ``3460000`` for 3.46 GHz.
     * ``amp``         — ADF4351 output power index 0..3 (``amp`` fraction × 3).
-    * ``duration_ns`` — pulse duration in ns (parsed; reserved by firmware for
-                        a future RF-gate extension).
+    * ``duration_ns`` — pulse duration in ns. The firmware arms an RF-switch
+                        gate timer (100 MHz -> 10 ns/tick) for exactly
+                        ``duration_ns`` after the ADF4351 locks, so the pulse
+                        width is faithful to the request (the iverilog
+                        testbench verifies a 500 ns APPLY_PULSE gates mw_gate
+                        for exactly 50 clk cycles).
     * ``phase``       — pulse phase in **milliradians** (0 = +X, 3142 ≈ π).
     """
 
