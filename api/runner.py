@@ -23,7 +23,7 @@ from qssc import (
     build_user_circuit, UserCircuitError,
 )
 from qssc.crypto import (
-    derive_keypair, von_neumann_extract, bits_to_bytes,
+    derive_keypair, von_neumann_extract, bits_to_bytes, entropy_health,
 )
 from qssc.qkd import simulate_bb84
 
@@ -228,13 +228,23 @@ def run_circuit(req: dict) -> dict:
         qc.measure(range(n), range(n))
         # plenty of shots so the VN extractor has raw bits even when biased
         raw_shots = max(int(shots), 8192)
+        # Entropy path (issue #45): the fixed default seed must NOT apply
+        # here — seed=42 makes every default call return the same entropy
+        # and the same Ed25519 private key. Without an explicit seed the
+        # run uses OS entropy (seed=None, which SimulatedFPGA and Aer both
+        # accept); an explicit seed still yields a deterministic stream for
+        # tests. The backend is rebuilt with the entropy seed so the
+        # simulated readout noise contributes to the randomness too.
+        qrng_seed = seed if "seed" in req else None
+        if qrng_seed != seed:
+            b = _backend(profile, temperature_k, qrng_seed, noise_mode)
         res = b.run(qc, shots=raw_shots).result()
         counts = res.get_counts()
         # expand the measured outcomes into a flat list and shuffle so that
         # adjacent pairs are ~independent samples (the backend returns a
         # histogram, not the per-shot sequence; on hardware the raw
         # per-shot sequence is used directly).
-        rng = np.random.default_rng(seed)
+        rng = np.random.default_rng(qrng_seed)
         flat = []
         for k, v in counts.items():
             s = k.replace(" ", "")
@@ -250,6 +260,14 @@ def run_circuit(req: dict) -> dict:
             return {"error": "insufficient quantum entropy from this run "
                              "(increase shots or cool the chip to reduce "
                              "readout bias)"}
+        # Health gate (issue #46): the extractor debiases iid streams only;
+        # a degenerate/correlated stream would otherwise reach the key
+        # derivation with healthy-looking per-pair stats.
+        health = entropy_health(bits)
+        if not health["passed"]:
+            return {"error": "extracted entropy failed the health gate "
+                             "(frequency / lag-1 correlation sanity check)",
+                    "health": health}
         entropy = bits_to_bytes(bits[:need_bits])
         # pad to >=52 bytes so derive_keypair has a serial-number source
         seed_block = entropy + bytes(entropy.hex().encode()[:40])
@@ -259,6 +277,7 @@ def run_circuit(req: dict) -> dict:
             "entropy_hex": entropy.hex(),
             "raw_bias_p1": round(p1, 4),
             "extraction": vstats,
+            "health": health,
             "symmetric_key_hex": key["symmetric_key_hex"],
             "public_key_pem": key["public_key_pem"],
             "private_key_pem": key["private_key_pem"],

@@ -236,8 +236,10 @@ class SimulatedFPGA:
                 # channel). Mirrors fpga/rtl/qrng_entropy.v: successive ADC
                 # LSBs are paired, 01->0 / 10->1 kept, 00/11 discarded, packed
                 # MSB-first. The raw LSB stream is mildly biased (p1 ~ 0.52,
-                # thermal + shot noise) so the extractor's work shows up in the
-                # returned stats. Reply: "<hex> <raw_bits> <kept> <extract_rate>".
+                # thermal/Johnson + ADC quantization noise — a dark channel has
+                # no photocurrent, hence no shot noise) so the extractor's work
+                # shows up in the returned stats. Reply:
+                # "<hex> <raw_bits> <kept> <extract_rate>".
                 n_bytes = int(parts[1]) if len(parts) > 1 else 32
                 if n_bytes <= 0 or n_bytes > 4096:
                     return "ERR"
@@ -360,11 +362,15 @@ class SimulatedFPGA:
         """Von-Neumann-debiased ADC LSB noise -> n_bytes hex + extraction stats.
 
         Models ``fpga/rtl/qrng_entropy.v`` in software: the LSB of a dark
-        AD7616 channel is a biased but independent bit stream (thermal + shot
-        noise, p1 ~ 0.52); pairing successive bits and keeping only 01 / 10
-        removes the bias. Returns ``"<hex> <raw_bits> <kept> <extract_rate>"``.
+        AD7616 channel is a biased but independent bit stream (thermal/Johnson
+        + ADC quantization noise, p1 ~ 0.52); pairing successive bits and
+        keeping only 01 / 10 removes the bias. The extracted block must pass
+        the :func:`qssc.crypto.entropy_health` sanity gate (issue #46) before
+        it leaves the device — a degenerate/correlated stream replies ``ERR``
+        instead of becoming key material. Returns
+        ``"<hex> <raw_bits> <kept> <extract_rate>"``.
         """
-        from .crypto import von_neumann_extract, bits_to_bytes
+        from .crypto import von_neumann_extract, bits_to_bytes, entropy_health
         need_bits = n_bytes * 8
         p1 = 0.52
         # von-Neumann keeps ~2*p1*(1-p1) of pairs (~50% for p1=0.52), i.e.
@@ -379,6 +385,9 @@ class SimulatedFPGA:
             raw_total += len(raw)
             kept_total += len(more)
             bits.extend(more)
+        health = entropy_health(bits[:need_bits])
+        if not health["passed"]:
+            return "ERR"
         out = bits_to_bytes(bits[:need_bits])
         rate = (kept_total / raw_total) if raw_total else 0.0
         return f"{out.hex()} {raw_total} {kept_total} {round(rate, 4)}"
