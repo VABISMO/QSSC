@@ -8,6 +8,12 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  # Manual trigger: lets a maintainer run CI on any ref (including fork PR
+  # branches that the pull_request event does not auto-start for -- GitHub
+  # gates first-time fork contributors behind an "Approve and run workflows"
+  # click; workflow_dispatch is the fallback so a PR is never stuck at 0
+  # check runs while waiting for that approval).
+  workflow_dispatch:
 
 # Cancel superseded runs on the same ref.
 concurrency:
