@@ -39,7 +39,8 @@
 //============================================================================
 module adc_reader #(
     parameter N_DET = 64,
-    parameter CLK_HZ = 100_000_000
+    parameter CLK_HZ = 100_000_000,
+    parameter [5:0]  ENTROPY_CH = 6'd0   // dark channel feeding qrng_entropy
 ) (
     input             clk,
     input             reset,
@@ -66,7 +67,14 @@ module adc_reader #(
     output reg        adc_resetn,     // shared reset (active low)
 
     // lock-in modulation reference (1 kHz square wave)
-    output reg        mod_sync
+    output reg        mod_sync,
+
+    // QRNG entropy tap: a 1-cycle pulse + the fresh 16-bit sample every time
+    // the free-running background scan refreshes the dark channel
+    // (ENTROPY_CH). Independent of the read_one/read_all host handshake, so
+    // qrng_entropy harvests continuously without disturbing READ_DETECTOR.
+    output reg        entropy_valid,
+    output reg [15:0] entropy_data
 );
     localparam [5:0] N6 = N_DET - 1;          // 63
 
@@ -139,6 +147,8 @@ module adc_reader #(
         code_valid <= 1'b0;
         code_idx   <= 6'd0;
         sweep_done <= 1'b0;
+        entropy_valid <= 1'b0;
+        entropy_data  <= 16'd0;
         for (p = 0; p < 64; p = p + 1) sample_ram[p] <= 16'd0;
     end
 
@@ -175,7 +185,9 @@ module adc_reader #(
             busy_seen  <= 1'b0;
             pair       <= 3'd0;
             chip       <= 2'd0;
+            entropy_valid <= 1'b0;
         end else begin
+            entropy_valid <= 1'b0;      // default: no fresh entropy this cycle
             case (sm_state)
                 // hold adc_resetn low for ~256 cycles at boot, then release
                 SM_RESET: begin
@@ -263,6 +275,15 @@ module adc_reader #(
                     adc_cs <= 4'b1111;
                     sample_ram[16*chip + pair]     <= shift[31:16];  // VA (bank A)
                     sample_ram[16*chip + 8 + pair] <= shift[15:0];   // VB (bank B)
+                    // QRNG entropy tap: pulse + emit the fresh sample when the
+                    // dark channel (ENTROPY_CH) is the one just refreshed.
+                    if ((16*chip + pair) == ENTROPY_CH) begin
+                        entropy_valid <= 1'b1;
+                        entropy_data  <= shift[31:16];
+                    end else if ((16*chip + 8 + pair) == ENTROPY_CH) begin
+                        entropy_valid <= 1'b1;
+                        entropy_data  <= shift[15:0];
+                    end
                     sm_state <= SM_GAP;
                     wait_cnt <= 8'd0;
                 end

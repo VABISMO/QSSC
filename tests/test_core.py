@@ -141,8 +141,8 @@ def test_simulated_fpga_protocol():
 def test_simulated_fpga_sensing_commands():
     # Sensing + status verbs added on top of the raw readout protocol:
     # ODMR_SWEEP / READ_COMPASS / READ_GYRO / READ_LOCKIN / RUN_SEQUENCE /
-    # STATUS / RESET. Each wraps the qssc.sensors physics (or models the #58
-    # RTL stub) and must reply with a parseable, in-range payload or ERR.
+    # STATUS / RESET. Each wraps the qssc.sensors physics (or models the
+    # pending-RTL stub) and must reply with a parseable, in-range payload or ERR.
     fpga = SimulatedFPGA("NV", seed=2)
     # ODMR_SWEEP: count-prefixed freq/code pairs, dip near D=2.87 MHz-kHz.
     sweep = fpga.send_command("ODMR_SWEEP 0 2860000 2880000 16").split()

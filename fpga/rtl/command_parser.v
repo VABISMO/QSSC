@@ -22,6 +22,10 @@
 //   CALIBRATE                              -> for each emitter: pump, read_all,
 //                                               store brightest detector
 //                                               -> cal_lut[em], then OK\n
+//   READ_RNG <n_bytes 1..256>             -> harvest von-Neumann-debiased AD7616
+//                                               LSB-noise entropy from a dark
+//                                               channel, reply "<hex> 0 0 0\n"
+//                                               (raw_bits/kept/rate host-computed)
 //
 // The emitter commands drive a 3x TLC5947 constant-current LED driver over a
 // 4-wire SPI: SET_EMITTER arms per-channel 12-bit grayscale, DRIVE_PATTERN
@@ -94,7 +98,15 @@ module command_parser #(
     output reg [11:0] pll_phase,        // -> ADF4351 R1 PHASE
     output reg [1:0]  pll_rf_pwr,       // -> ADF4351 R4 RF_PWR (4 levels)
     output reg [31:0] mw_gate_ns,       // -> RF-switch gate timer (duration, ns)
-    output reg        mw_gate_load      // 1-cycle pulse: arm the RF-switch gate
+    output reg        mw_gate_load,     // 1-cycle pulse: arm the RF-switch gate
+    // QRNG (qrng_entropy): READ_RNG <n_bytes> harvests von-Neumann-debiased
+    // AD7616 LSB-noise entropy and streams it as hex + a "0 0 0" stats footer
+    // (raw_bits/kept/rate are host-computed; the hex token is what the API
+    // consumes). harvest_en gates the extractor; rng_valid pulses per W-bit
+    // word.
+    output reg        rng_harvest_en,
+    input      [31:0] rng_word,
+    input             rng_valid
 );
     // ---- Command IDs -------------------------------------------------------
     localparam [3:0] CMD_DRIVE     = 4'd0;   // DRIVE_EMITTER (2 args)
@@ -107,6 +119,7 @@ module command_parser #(
     localparam [3:0] CMD_SET       = 4'd8;   // SET_EMITTER (2 args: index, level)
     localparam [3:0] CMD_PATTERN   = 4'd9;   // DRIVE_PATTERN (1 arg: duration_ms)
     localparam [3:0] CMD_CLEAR_EM  = 4'd10;  // CLEAR_EMITTERS (0 args)
+    localparam [3:0] CMD_RNG       = 4'd11;  // READ_RNG (1 arg: n_bytes 1..256)
 
     // ---- FSM states --------------------------------------------------------
     localparam [3:0] S_IDLE          = 4'd0;
@@ -128,6 +141,9 @@ module command_parser #(
     // (The 4-bit FSM was full at 0..15, so the state reg is widened to 5 bits
     //  and this state lives above the original range.)
     localparam [4:0] S_EM_WAIT       = 5'd16;
+    localparam [4:0] S_RNG_HARVEST   = 5'd17;  // READ_RNG: wait for a qrng word
+    localparam [4:0] S_RNG_EMIT      = 5'd18;  // READ_RNG: stream one hex nibble
+    localparam [4:0] S_RNG_STATS     = 5'd19;  // READ_RNG: load " 0 0 0\n" footer
 
     // ---- Line buffer ------------------------------------------------------
     reg [7:0] cmd_buffer [0:63];
@@ -170,6 +186,14 @@ module command_parser #(
     reg [5:0]  cal_max_det;
     reg [5:0]  cal_em;          // calibration emitter pixel 0..63
 
+    // ---- READ_RNG harvest/stream state ------------------------------------
+    reg [31:0] rng_word_buf;    // qrng word currently being streamed as hex
+    reg [2:0]  nibble_idx;      // 0..7 which nibble of rng_word_buf is next
+    reg [6:0]  rng_word_cnt;    // qrng words harvested so far this READ_RNG
+    reg [6:0]  rng_need_words;  // ceil(n_bytes/4) words to harvest
+    reg [2:0]  rng_last_bytes;  // 1..4 bytes emitted from the final word
+    reg [8:0]  rng_n_bytes;     // 1..256 bytes requested
+
     // ---- Calibration LUT (emitter pixel -> detector electrode) ------------
     reg [5:0] cal_lut [0:63];
     assign lut_rd_data = cal_lut[lut_rd_addr];
@@ -205,6 +229,14 @@ module command_parser #(
         end
     endfunction
 
+    // hex encode of a 4-bit nibble for the READ_RNG entropy stream (0-9, a-f).
+    function [7:0] hex_nib;
+        input [3:0] n;
+        begin
+            hex_nib = (n < 4'd10) ? (8'h30 + n) : (8'h61 + n - 8'd10);
+        end
+    endfunction
+
     // combinational decimal encoding of the latched detector sample (the live
     // det_code may change once we ack the ADC reader, so S_ENC must use
     // the snapshot taken in S_RONE_WAIT / S_RALL_WAIT).
@@ -215,6 +247,14 @@ module command_parser #(
     wire [7:0] code_sep = (read_all_mode && !code_is_last) ? 8'h20 : 8'h0A;
 
     wire tx_ready = (txst == 2'd0) && (tx_load == 1'b0);
+
+    // READ_RNG hex stream: the current nibble of the buffered QRNG word
+    // (nibble 0 = bits[31:28] ... nibble 7 = bits[3:0], MSB-first like the
+    // extractor packs bits). The final word may emit fewer than 8 nibbles.
+    wire [3:0] cur_nib        = rng_word_buf >> (4*(3'd7 - nibble_idx));
+    wire [7:0] hex_char       = hex_nib(cur_nib);
+    wire [3:0] nibs_this_word = (rng_word_cnt == rng_need_words - 7'd1)
+                                ? (rng_last_bytes << 1) : 4'd8;
 
     integer k;
     initial begin
@@ -263,6 +303,13 @@ module command_parser #(
         mw_gate_ns     = 32'd0;
         mw_gate_load   = 1'b0;
         pll_busy_seen  = 1'b0;
+        rng_harvest_en = 1'b0;
+        rng_word_buf   = 32'd0;
+        nibble_idx     = 3'd0;
+        rng_word_cnt   = 7'd0;
+        rng_need_words = 7'd0;
+        rng_last_bytes = 3'd0;
+        rng_n_bytes    = 9'd0;
         for (k = 0; k < 64; k = k + 1) cal_lut[k] = 6'd0;
     end
 
@@ -342,6 +389,10 @@ module command_parser #(
             mw_gate_ns     <= 32'd0;
             mw_gate_load   <= 1'b0;
             pll_busy_seen  <= 1'b0;
+            rng_harvest_en <= 1'b0;
+            rng_word_buf   <= 32'd0;
+            nibble_idx     <= 3'd0;
+            rng_word_cnt   <= 7'd0;
             tx_load        <= 1'b0;
             tx_din         <= 8'd0;
         end else begin
@@ -504,6 +555,19 @@ module command_parser #(
                             cmd_str[6]=="A" && cmd_str[7]=="T" && cmd_str[8]=="E") begin
                             cmd_id <= CMD_CALIBRATE; arg_count <= 3'd0;
                             fsm    <= S_DISPATCH;
+                        end else if (cmd_len == 4'd8 &&
+                            // READ_RNG (8 chars): R E A D _ R N G
+                            cmd_str[0]=="R" && cmd_str[1]=="E" && cmd_str[2]=="A" &&
+                            cmd_str[3]=="D" && cmd_str[4]=="_" && cmd_str[5]=="R" &&
+                            cmd_str[6]=="N" && cmd_str[7]=="G") begin
+                            cmd_id <= CMD_RNG; arg_count <= 3'd1;
+                            if (!is_eol && ch == 8'h20) begin
+                                parse_idx <= parse_idx + 7'd1;
+                                fsm       <= S_ARGSP;
+                            end else begin
+                                cmd_id <= CMD_ERR;   // READ_RNG needs n_bytes
+                                fsm    <= S_DISPATCH;
+                            end
                         end else begin
                             cmd_id <= CMD_ERR;
                             fsm    <= S_DISPATCH;
@@ -675,6 +739,29 @@ module command_parser #(
                             cal_max_det  <= 6'd0;
                             fsm          <= S_CAL_DRIVE;
                         end
+                        CMD_RNG : begin
+                            // READ_RNG <n_bytes 1..256>: harvest n_bytes of
+                            // von-Neumann-debiased entropy from qrng_entropy and
+                            // stream it as hex + a " 0 0 0\n" stats footer
+                            // (raw_bits/kept/extract_rate are host-computed; the
+                            // hex token is what the API consumes). ERR on
+                            // out-of-range n_bytes.
+                            if ($signed(arg_vals[0]) < 32'd1 ||
+                                $signed(arg_vals[0]) > 32'd256) begin
+                                reply_ok <= 1'b0;            // ERR
+                                fsm      <= S_REPLY_LOAD;
+                            end else begin
+                                rng_n_bytes    <= arg_vals[0][8:0];
+                                rng_need_words <= (arg_vals[0] + 32'd3) >> 2;
+                                rng_last_bytes <= (arg_vals[0][1:0] == 2'd0)
+                                                  ? 3'd4 : {1'b0, arg_vals[0][1:0]};
+                                rng_word_cnt   <= 7'd0;
+                                rng_harvest_en <= 1'b1;
+                                rall_loop      <= 1'b0;
+                                read_all_mode  <= 1'b0;
+                                fsm            <= S_RNG_HARVEST;
+                            end
+                        end
                         default : begin
                             reply_ok <= 1'b0;            // ERR
                             fsm      <= S_REPLY_LOAD;
@@ -827,6 +914,55 @@ module command_parser #(
                         reply_ok <= 1'b1;
                         fsm      <= S_REPLY_LOAD;
                     end
+                end
+
+                // ---- READ_RNG: harvest one qrng word at a time and stream it
+                // as hex. harvest_en pauses while a word is being emitted so no
+                // rng_valid pulse is missed (the extractor only accumulates
+                // while harvest_en is high and we are watching in S_RNG_HARVEST).
+                S_RNG_HARVEST : begin
+                    rng_harvest_en <= 1'b1;
+                    if (rng_valid) begin
+                        rng_word_buf   <= rng_word;
+                        nibble_idx     <= 3'd0;
+                        rng_harvest_en <= 1'b0;   // pause extractor during emit
+                        fsm            <= S_RNG_EMIT;
+                    end
+                end
+
+                S_RNG_EMIT : begin
+                    rng_harvest_en <= 1'b0;
+                    if (tx_ready) begin
+                        tx_load <= 1'b1;
+                        tx_din  <= hex_char;
+                        if (nibble_idx == nibs_this_word - 4'd1) begin
+                            // emitted the last nibble of this word
+                            rng_word_cnt <= rng_word_cnt + 7'd1;
+                            if (rng_word_cnt == rng_need_words - 7'd1)
+                                fsm <= S_RNG_STATS;
+                            else
+                                fsm <= S_RNG_HARVEST;   // re-assert harvest_en
+                        end else begin
+                            nibble_idx <= nibble_idx + 3'd1;
+                        end
+                    end
+                end
+
+                // READ_RNG footer: " 0 0 0\n" (raw_bits/kept/rate emitted as 0;
+                // the host parses them best-effort and computes the real stats).
+                S_RNG_STATS : begin
+                    rng_harvest_en <= 1'b0;
+                    reply_mem[0] <= 8'h20;  // ' '
+                    reply_mem[1] <= 8'h30;  // '0'
+                    reply_mem[2] <= 8'h20;  // ' '
+                    reply_mem[3] <= 8'h30;  // '0'
+                    reply_mem[4] <= 8'h20;  // ' '
+                    reply_mem[5] <= 8'h30;  // '0'
+                    reply_mem[6] <= 8'h0A;  // '\n'
+                    reply_len    <= 3'd7;
+                    reply_start  <= 3'd0;
+                    reply_idx    <= 3'd0;
+                    fsm          <= S_REPLY_SEND;
                 end
 
                 default : fsm <= S_IDLE;

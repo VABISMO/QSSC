@@ -128,6 +128,16 @@ module tb_top_level;
     localparam [15:0] ADC_VAL  = 16'd1234;          // recognisable sample value
     localparam [31:0] ADC_WORD = {ADC_VAL, ADC_VAL};
 
+    // QRNG test entropy: when entropy_mode is set, channel 0's VA sample (the
+    // dark channel feeding qrng_entropy) gets a toggling LSB so the von-Neumann
+    // extractor produces words. convst_cnt counts CONVST pulses; channel 0 is
+    // refreshed on the first CONVST of each 8-CONVST scan, so convst_cnt[3]
+    // toggles every scan -> alternating 0,1,0,1 LSB -> 100% von-Neumann keep.
+    reg         entropy_mode = 1'b0;
+    reg [19:0]  convst_cnt   = 20'd0;
+    wire [15:0] va_word      = entropy_mode ? {ADC_VAL[15:1], convst_cnt[3]} : ADC_VAL;
+    wire [31:0] adc_word_now = {va_word, ADC_VAL};
+
     reg [31:0] adc_sr;           // shift register driving adc_miso
     reg [6:0]  adc_bidx;         // bits shifted in the current CS-low session
     wire       any_cs_low = ~(&adc_cs);
@@ -139,7 +149,7 @@ module tb_top_level;
     // edge, then shift left so the next bit reaches the MSB.
     always @(negedge adc_sclk) begin
         if (any_cs_low) begin
-            if (adc_bidx == 7'd0)  adc_sr <= ADC_WORD;
+            if (adc_bidx == 7'd0)  adc_sr <= adc_word_now;
             else                   adc_sr <= {adc_sr[30:0], 1'b0};
             adc_bidx <= adc_bidx + 7'd1;
         end
@@ -151,7 +161,10 @@ module tb_top_level;
         if (any_cs_low === 1'b0) adc_bidx <= 7'd0;
     end
     // Also reset on the convst edge so each conversion's readout starts clean.
-    always @(posedge adc_convst) adc_bidx <= 7'd0;
+    always @(posedge adc_convst) begin
+        adc_bidx    <= 7'd0;
+        convst_cnt  <= convst_cnt + 20'd1;
+    end
 
     // CONVST -> BUSY: assert for a few cycles, then release (conversion done).
     reg [3:0] busy_cnt = 4'd0;
@@ -581,6 +594,36 @@ module tb_top_level;
         end else begin
             err_count = err_count + 1;
             $display("TB: FAIL CALIBRATE reply (got %0d bytes, first=0x%02h)",
+                     rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
+        end
+
+        // ---- 11) READ_RNG 4 -> 8 hex nibbles + " 0 0 0\n" ------------------
+        // Enable the toggling-LSB entropy model so the dark channel (ch 0) feeds
+        // the von-Neumann extractor. 4 bytes = 1 x 32-bit word = 8 hex chars,
+        // then the stats trailer " 0 0 0\n" (7 bytes) -> 15 bytes total. The
+        // extractor keeps 1 bit per 2 channel-0 samples (alternating LSB), so 32
+        // kept bits need 64 scans (~64*W_ADC_SCAN cycles, well under W_SAFE).
+        entropy_mode = 1'b1;
+        rx_log_cnt = 0;
+        cmd_bytes[0]="R";  cmd_bytes[1]="E";  cmd_bytes[2]="A";  cmd_bytes[3]="D";
+        cmd_bytes[4]="_";  cmd_bytes[5]="R";  cmd_bytes[6]="N";  cmd_bytes[7]="G";
+        cmd_bytes[8]=" ";  cmd_bytes[9]="4";  cmd_bytes[10]=8'h0A;
+        $display("TB: sending READ_RNG 4");
+        for (c=0;c<11;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(15, W_SAFE);
+        // Reply must be 8 hex chars (0-9a-f) followed by " 0 0 0\n".
+        if (rx_log_cnt >= 15 &&
+            ((rx_log[0] >= 8'h30 && rx_log[0] <= 8'h39) ||
+             (rx_log[0] >= 8'h61 && rx_log[0] <= 8'h66)) &&
+            rx_log[8]  === 8'h20 && rx_log[9]  === 8'h30 &&
+            rx_log[10] === 8'h20 && rx_log[11] === 8'h30 &&
+            rx_log[12] === 8'h20 && rx_log[13] === 8'h30 &&
+            rx_log[14] === 8'h0A) begin
+            ok_count = ok_count + 1;
+            $display("TB: READ_RNG 4 = 8 hex + trailer (PASS)");
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL READ_RNG 4 (got %0d bytes, b0=0x%02h)",
                      rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
         end
 

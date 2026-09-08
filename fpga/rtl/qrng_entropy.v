@@ -2,8 +2,9 @@
 // LSB noise.
 //
 // The 16-bit AD7616 sampling a DARK (unpumped) detector channel delivers a
-// noise floor whose least-significant bits are dominated by Johnson + shot
-// noise and are effectively independent between samples.  This module
+// noise floor whose least-significant bits are dominated by thermal/Johnson
+// + ADC quantization noise (a dark channel has no photocurrent, hence no
+// shot noise) and are effectively independent between samples.  This module
 // streams those LSBs through a von-Neumann extractor
 //   pair (b0,b1):  01 -> 0,  10 -> 1,  00 / 11 -> discard
 // and packs the debiased bits into W-bit words exposed to the command
@@ -14,11 +15,13 @@
 // is a simulated Hadamard coin flip (qc.h ; qc.measure).  The 1 kHz lock-in
 // mod_sync is intentionally NOT used here: entropy is harvested from a
 // quiescent channel with the microwave modulation off, so the LSB noise is
-// broadband thermal / shot noise, not the lock-in signal.
+// broadband thermal/Johnson + ADC quantization noise, not the lock-in signal.
 //
-// Top-level wiring (adc_reader dark channel -> here -> command_parser word
-// register) and re-synthesis are tracked as issue #58.  The Python
-// SimulatedFPGA mirrors this pipeline so the same host code drives both.
+// Top-level wiring: the adc_reader background scan taps a dark channel
+// (ENTROPY_CH, default channel 0) and feeds a fresh sample here every scan;
+// the command_parser READ_RNG verb harvests N bytes and streams them as hex.
+// The Python SimulatedFPGA mirrors this pipeline so the same host code drives
+// both.
 module qrng_entropy #
 (
     parameter W = 32                       // output word width (bits)
