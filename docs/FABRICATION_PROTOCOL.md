@@ -292,9 +292,48 @@ The negatively-charged boron vacancy, VB−, is a spin-1 (S=1) defect with zero-
 2. Spectra: couple edge emission to fiber + USB spectrometer. Expect broad Gaussian-like EL centered at the CQD PL peak (450–620 nm depending on synthesis).
 3. **ASE check:** drive a single pixel with short pulses (1 ms, 10 % duty) while stepping current; watch for FWHM narrowing from ~80 nm to < 25 nm and a super-linear L–I knee. **Do not** interpret this as lasing — it is ASE.
 
+> **At-the-sample optical power (mandatory, audit issue #14).** The CQD
+> radiance target (≥ 10 cd/m², Sec. 1) and the ODMR pump budget (~1 mW at the
+> sample, Sec. 5.2) sit ~4 decades apart (see the §5.2 link budget). Before any
+> ODMR run, place a **calibrated lab optical power meter** (µW-class thermal /
+> Si photodiode sensor head + meter, e.g. a Thorlabs PM100 series power sensor)
+> at the sample plane — **directly where the hBN carrier will sit** — and record
+> the green pump power with the driven pixel on. This is a **characterization
+> instrument**, not a design part of the chip (it lives on the bench, never on
+> the PCB): it reconciles the radiance spec with the watt-level pump budget and
+> tells you whether the on-chip CQD emitter actually delivers the ~1 mW the
+> ODMR step assumes, or whether the external 532 nm assist listed in §5.2 is
+> needed for the first measurement. Record the reading in the run log. No
+> discrete photodiode is added to the chip itself.
+
 ### 5.2 ODMR of VB− in hBN
 
 4. **Optical:** 532 nm CW laser (or the on-chip green CQD emitter), ~1 mW at the sample. Collect the VB− PL at **~850 nm** through a **650 nm red photographic long-pass filter** (passes the 850 nm NIR defect PL, blocks the 532 nm green pump) into the **on-chip graphene/MoS₂ detector array**. No Si APD / discrete photodiode — the readout is entirely on-chip.
+
+> **Radiance → watt link budget (audit issue #14).** The two headline optical
+> numbers are measured at different points in the chain and are **not
+> contradictory**:
+>
+> - **Radiance ≥ 10 cd/m²** (Sec. 1) is the CQD emitter's *surface brightness*
+>   into 2π — the spec the EL/ASE check verifies. Converting: 10 cd/m² ≈
+>   14.6 mW·sr⁻¹·m⁻² for a Lambertian green source (1 cd ≈ 1.46 mW·sr⁻¹ at
+>   532 nm via the photopic-luminous-efficiency peak). A single 1 mm² pixel
+>   radiating into 2π sr therefore emits ~14.6 mW·sr⁻¹·m⁻² × 1 mm² × … ≈
+>   **45–50 nW** isotropic-equivalent at the source surface.
+> - **~1 mW at the sample** (above) is the *pump irradiance* the VB⁻ ensemble
+>   needs for measurable ODMR — the on-chip CQD emitter is driven harder
+>   (overdrive into the ASE regime, Sec. 1.7) and the pump is coupled into the
+>   defect layer through the sol-gel SiO₂ waveguides with a < 5 µm gain-strip
+>   gap (Sec. 4.2), so the collected solid angle is large and the drive is
+>   concentrated onto the addressed 1 mm² pixel, not spread over 2π.
+>
+> The ~4-decade gap is therefore the **collection geometry + overdrive** factor
+> (Lambertian-spread → near-field concentration), not a missing watt. The build
+> drives the **on-chip CQD emitter** to ~1 mW at the sample; verify it with the
+> §5.1 power meter before relying on it for ODMR. If the on-chip emitter falls
+> short, the external 532 nm CW laser through the same optical path covers the
+> first characterization only — the chip's defining demo is the on-chip-pumped
+> ODMR.
 5. **Microwave:** sweep 3.30–3.60 GHz from the function generator through the CPW. Modulate MW at 1 kHz for lock-in detection of the ODMR dip.
 6. **Expected resonance:** the characteristic **7-line ¹⁴N hyperfine pattern** centred at **D ≈ 3.46 GHz** (coupling to 3 equivalent ¹⁴N, A/h ≈ 47 MHz, intensity ratios ≈ 1:3:6:7:6:3:1) [5]. ODMR contrast **0.5–3 %** (ensemble), linewidth **5–20 MHz** (broadened by strain and the ¹⁰B/¹¹B nuclear bath). At low resolution the seven lines merge into a single dip near 3.46 GHz.
 7. **Magnetic field sweep:** apply a static B₀ along the c-axis (a small permanent magnet on a linear stage); observe D shift following D(B) = D₀ ± γ_e·B₀ with γ_e/2π ≈ 28 GHz/T. The doublet splits symmetrically — confirms the spin-1 (S=1) triplet of VB−.
