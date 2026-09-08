@@ -424,14 +424,16 @@ the AD7616 analog/digital/ref rails); the 3× TLC5947 each get 100 nF on +3V3
 (`Cem{j}`), and the +12V_EMIT anode rail gets 22 µF bulk + 100 nF HF (C85/C86)
 at the die fanout.
 
-**Power estimation (rough).** FPGA ~0.3–0.5 W (1.0 V × ~0.3 A), 1.8 V aux ~30 mA,
-3.3 V I/O ~120 mA + head front-end via J12 (~80 mA: 16× TLV9004 + 4× AD7616
-~5 mA each, plus 64 Rf — no pull-ups, no comparators), ADF4351 ~30 mA,
-GVA-84+ ~65 mA at 5 V, emitter driver ~10 mA/emitter at 12 V (one/few firing;
-64×10 mA full-on ≈ 640 mA on the separate +12V_EMIT rail). The +3V3 rail now
-also carries only the 3× TLC5947 VCC (logic, ~5 mA each) + the head +3V3, not the
-old 8× 74HCT240 + 64 P-MOS gate drive. Total 5 V/3 A logic budget is well
-within source; the 12 V emitter budget is on its own J4 input.
+**Power estimation (rough).** FPGA ~0.75–0.95 W total (VCCINT 1.0 V × ~0.5–0.7 A
+for the active logic + 16 k BRAM + 90 DSP at 100 MHz, + VCCAUX 1.8 V ~30 mA +
+VCCIO 3.3 V ~120 mA — the earlier 0.3–0.5 W figure was VCCINT-only and
+understated the dynamic current; see §15D F12), head front-end via J12 (~80 mA:
+16× TLV9004 + 4× AD7616 ~5 mA each, plus 64 Rf — no pull-ups, no comparators),
+ADF4351 ~30 mA, GVA-84+ ~65 mA at 5 V, emitter driver ~10 mA/emitter at 12 V
+(one/few firing; 64×10 mA full-on ≈ 640 mA on the separate +12V_EMIT rail). The
++3V3 rail now also carries only the 3× TLC5947 VCC (logic, ~5 mA each) + the head
++3V3, not the old 8× 74HCT240 + 64 P-MOS gate drive. Total 5 V/3 A logic budget is
+well within source; the 12 V emitter budget is on its own J4 input.
 
 ---
 
@@ -1479,32 +1481,50 @@ table is the auditable summary.
 
 ## 15D. Pre-fab gate register (QSSC-004 F10–F12)
 
-Three findings from the QSSC-004 PCB physics audit (issue #25; full report on
-PR #26) are **gates to clear before the part order / fab release** — none of
-them requires a board respin, but ordering before they close risks
-re-ordering. They are registered here so they cannot be lost between the
-audit and the fab date. None of the three closes from this document alone:
-F10 needs the Ironwood quote drawing, F11 the solver run, F12 the θJA
-estimate — each is documented with its arithmetic so the close-out is a
-verification step, not a re-derivation.
+Findings from the QSSC-004 PCB physics audit (issue #25; full report on
+PR #26) registered here so they cannot be lost between the audit and the fab
+date. None requires a board respin, but ordering before the open ones close
+risks re-ordering. Status after this pass:
 
-### F10 · Mechanical registration of the head board — OPEN
+- **F10 · head-board mechanical registration — DOCUMENTED** (standoff spec +
+  ACF bond-force budget recorded below; gate = Ironwood quote drawing for the
+  stack-height number).
+- **F11 · 50 Ω geometry — OPEN** (IPC-2141 closed form gives ≈ 43 Ω at the
+  specced 0.30 mm; gate = impedance-solver run on the as-ordered prepreg).
+- **F11b · GND-plane signal-track contamination — DOCUMENTED** (both boards
+  route non-GND tracks on In1.Cu; disposition: document, do not re-route now,
+  flag a clean-plane re-route as a post-fab follow-up).
+- **F12 · thermal budget — DOCUMENTED** (per-layer power budget + heat paths
+  recorded below; gate = pick TEC re-spec ≥ 8 W or full-array duty-cycle limit).
+
+Each is documented with its arithmetic so the close-out is a verification
+step, not a re-derivation.
+
+### F10 · Mechanical registration of the head board — DOCUMENTED (gate: Ironwood drawing)
 
 The head board aligns to the main board **only through J12** (2×10, 2.54 mm)
-— no locating standoffs/pins are documented, and the ACF bond-force budget is
-open. The stack height itself is already deferred to the Ironwood quote
-drawing (§C3 z-height note: J12 pin length must span socket height + die
-thickness + head contact gap).
+— no locating standoffs/pins were documented, and the ACF bond-force budget was
+open. The stack height itself is deferred to the Ironwood quote drawing
+(§C3 z-height note: J12 pin length must span socket height + die thickness +
+head contact gap).
 
-- **Close-out:** add ≥ 2 locating standoffs/pins on **diagonal corners** of
-  the 150 × 140 mm head board (M2, matching the existing §C3 M2 mount-hole
-  pattern so one drill table serves both), spec the stack height from the
-  Ironwood quote drawing, and budget the ACF bonding force (recommended bond
-  pressure × the 20 × 20 mm contact area, from the ACF datasheet — the
-  spring-pin socket clamps the emitter face, so the *detector-face* ACF
-  joint is the only face whose contact force is not set by hardware).
-- **Gate:** all three documented in §1B (montaje) / §C3 before the standoff
-  + ACF order.
+- **Decided registration spec (documented here):** ≥ 2 **M2 locating standoffs
+  on diagonal corners** of the 150 × 140 mm head board, on the existing §C3
+  M2 mount-hole pattern so one drill table serves both boards. The standoffs
+  set the head↔main parallelism; J12 sets the in-plane registration; the
+  Ironwood SBT socket's alignment features set the die↔main registration.
+- **ACF bond-force budget (documented here):** the spring-pin socket clamps
+  the emitter face, so the *detector-face* ACF joint is the only face whose
+  contact force is not set by hardware. Required force = (recommended bond
+  pressure from the ACF datasheet, typically 1–3 MPa) × the 20 × 20 mm contact
+  area (400 mm²) ≈ **400–1200 N**, applied through the head-board back-face
+  tooling during the bonding step. Not a sustained service load — only the
+  bond-cycle force.
+- **Still open (the gate):** the stack-height *number* (socket height + die
+  thickness + head contact gap) and the J12 pin length come from the Ironwood
+  quote drawing. Once that drawing is in, mirror the three values into §1B
+  (montaje) / §C3 and order the standoffs + J12.
+- **Gate:** Ironwood quote drawing before the standoff + ACF order.
 
 ### F11 — 50 Ω geometry — OPEN
 
@@ -1526,24 +1546,76 @@ check impedance, so the solver run is the only verification step.
   §9 CPW geometry from the solver's number.
 - **Gate:** before impedance-controlled fab release.
 
-### F12 — Thermal budget of the sandwich — OPEN
+### F11b — GND-plane signal-track contamination — DOCUMENTED (post-fab follow-up)
+
+A second signal-integrity finding from the QSSC-004 board audit (not an
+issue-#25 pre-fab gate, but registered here so it is not lost between the audit
+and a future respin): both boards route signal tracks on the inner GND-plane
+layer (In1.Cu). The headless router used In1.Cu as an extra signal layer to
+close the last splits, so the "solid" GND plane is perforated by non-GND tracks.
+
+| board | In1.Cu non-GND track length | non-GND nets | note |
+|-------|-----------------------------|--------------|------|
+| main  | ~2279 mm                    | 72           | ~422 non-GND tracks on the plane, including `RF_OUT` itself |
+| head  | ~3658 mm                    | 93           | — |
+
+This is a **signal-integrity / return-current quality issue, NOT a
+fabricability blocker** — both boards are DRC-clean (0 errors / 0 unconnected /
+0 shorts) and inside the ALLPCB HDI envelope, so they fab and assemble exactly
+as routed. The cost is return-path inductance on the RF and high-speed SPI nets
+whose reference plane is now slotted.
+
+- **Disposition: document, do not re-route now.** Re-pulling those nets off
+  In1.Cu means re-running the router, which risks the current 0-split / 0-DRC
+  state that took many incremental FreeRouting cycles to reach (and which the
+  F11 50 Ω re-spec would perturb again). The boards are functional as routed;
+  the GND-plane contamination is a post-fab signal-integrity follow-up, not a
+  pre-fab gate.
+- **Follow-up (post-fab / next respin):** a controlled re-route that keeps
+  In1.Cu GND-only, with the signal escapes pushed onto F.Cu / B.Cu and the
+  other signal inner layer. Run the F11 impedance solver in the same pass so
+  the 50 Ω re-spec and the clean-plane re-route land together.
+
+### F12 — Thermal budget of the sandwich — DOCUMENTED (gate: TEC re-spec decision)
 
 At the full-array operating point the die emitters dissipate
 64 × (4–8 V) × 10.1 mA ≈ **2.6–5.2 W** *at the die* (§7), and the 3×
 TLC5947 sinks drop the remainder of the +12 V rail:
 (12 V − V_f) × 10.1 mA ≈ 40–81 mW per channel × 64 ≈ **2.6–5.2 W** on the
 main board, split per the BOM 24/24/16 channels → **0.97–1.94 W (chips 0/1)
-and 0.65–1.29 W (chip 2)**. Emitter-path worst case ≈ **5.2–10.3 W** before
-any logic. Against that, the fab protocol §4.4 sizes the chip-stabilisation
-TEC at "**< 5 W**" — a budget chosen for substrate temperature *stability*,
-not for lifting the emitter dissipation through the same path — and the heat
-path (die → Ironwood spring pins → F.Cu copper pour; head → ACF, a poor
-thermal conductor *by design* → J12) is nowhere modelled.
+and 0.65–1.29 W (chip 2)**. Against that, the fab protocol §4.4 sizes the
+chip-stabilisation TEC at "**< 5 W**" — a budget chosen for substrate
+temperature *stability*, not for lifting the emitter dissipation through the
+same path — and the heat path (die → Ironwood spring pins → F.Cu copper pour;
+head → ACF, a poor thermal conductor *by design* → J12) was nowhere modelled.
 
-- **Close-out:** a worst-case power budget **per layer** (die / main / head)
-  and a rough θJA path estimate. If the sum busts the "< 5 W" TEC sizing,
-  re-spec the TEC or document the steady-state ΔT at the operating point.
-- **Gate:** before TEC / cold-plate ordering (§1B).
+**Per-layer worst-case power budget (now documented):**
+
+| layer | dissipation | path to ambient |
+|-------|-------------|-----------------|
+| die — emitters, full-array | 2.6–5.2 W | die → 65× Ironwood spring pins in parallel (low net Rθ, but the socket body is insulating) → main F.Cu pour → board edge / TEC cold side |
+| main — 3× TLC5947 sinks | 2.6–5.2 W (0.97–1.94 W per chip) | HTSSOP exposed pad + thermal vias → In1.Cu GND plane → board |
+| main — FPGA (corrected) | 0.75–0.95 W | XC7A35T CSG324 junction → EP + thermal vias → In1.Cu; at this dissipation the junction stays within the commercial 85 °C ceiling on a via'd board (confirm against DS182 θJA at P&R) |
+| main — ADF4351 + GVA-84+ | ~0.1 + 0.33 W | local copper pour |
+| head — TIA + ADC front-end | ~0.26 W (80 mA × 3.3 V) | head copper → J12 (a deliberately poor thermal path, so head heat does not reach the die) |
+
+**Decision (pick one before TEC / cold-plate ordering):** the die-emitter
+dissipation (2.6–5.2 W) is the load the TEC must hold the substrate against for
+*stability*. At the full-array worst case (5.2 W) it marginally exceeds the
+"< 5 W" TEC sizing, and the FPGA / RF / TLC5947 sinks add ~3.7–6.5 W on the
+main board that leaves through the board, not the TEC.
+
+1. **Re-spec the TEC to ≥ 8 W** (recommended) so the full-array sustained load
+   is inside the cooling capacity with headroom for the board heat that reaches
+   the cold side; **or**
+2. **Duty-cycle the full array** so the *sustained* emitter dissipation stays
+   < 5 W (e.g. a pump duty cycle that time-averages the load under 5 W, or fewer
+   than 64 channels at the high-V_f corner), and document the steady-state ΔT.
+
+- **Gate:** pick close-out 1 or 2 and re-spec / confirm the TEC against it
+  before TEC / cold-plate ordering (§1B). The FPGA power figure used here
+  (0.75–0.95 W) is corrected from the earlier 0.3–0.5 W in §3 — see that
+  corrected estimate.
 
 ---
 
