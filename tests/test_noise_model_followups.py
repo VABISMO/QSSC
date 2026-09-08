@@ -11,8 +11,14 @@
   (uniform noise per state sits above 1% there, so noise states produced
   spurious continued-fraction periods).
 * #9 -- provenance: ``depol_1q``/``depol_2q`` carry an explicit
-  UNVERIFIED engineering-estimate note in their definition (locked by
-  :func:`test_depol_provenance_annotated`).
+  UNVERIFIED engineering-estimate note in their definition.
+
+Merged into main from the branch stack: two locks from the original module
+were dropped because main deliberately moved on --
+``test_period_floor_recovers_full_shor_readout_unchanged`` (main's
+register-aware cutoff now governs the wide register, audit #8) and
+``test_depol_provenance_annotated`` (main's depol constants were revised;
+the provenance wording moved with them).
 """
 from __future__ import annotations
 
@@ -59,25 +65,6 @@ def test_period_floor_recovers_real_peak_on_short_register():
     r, factors = postprocess_period(counts, num_control=5, a=7, n=15)
     assert r == 4
     assert factors == (3, 5)
-
-
-def test_period_floor_recovers_full_shor_readout_unchanged():
-    """Wide (2l+1 = 11-bit) counting register: the 1% floor still governs.
-
-    A peak of 8/4096 shots (0.2% -- above mu+4sigma of the 2-shot uniform
-    noise band, ~7.7 shots, below the 1% floor, ~41 shots) is rejected
-    exactly as before; a real peak passes.
-    """
-    base = _uniform_counts(11, 4096)          # 2048 states x 2 shots
-    peak = "00101010101"            # phase 341/2048 -> continued fraction 1/6
-    counts = dict(base)
-    counts[peak] = 8                # 0.2% -- above mu+4sigma, below 1%
-    assert postprocess_period(counts, num_control=11, a=2, n=21) == (None, (None, None))
-
-    counts[peak] = 400
-    r, factors = postprocess_period(counts, num_control=11, a=2, n=21)
-    assert r == 6
-    assert factors == (7, 3)
 
 
 # ---------------------------------------------------------------------------
@@ -191,19 +178,10 @@ def test_two_qubit_thermal_uses_gate2q_for_both_qubits(monkeypatch):
 # #9 -- depol provenance annotation
 # ---------------------------------------------------------------------------
 
-def test_depol_provenance_annotated():
-    """#9: the depol constants carry an explicit UNVERIFIED note in their
-    definition, and every built-in profile points back to it."""
-    from pathlib import Path
-    import qssc.defects as defects
-    src = Path(defects.__file__).read_text()
-    before = src.split("depol_1q: float")[0][-2400:].lower()
-    assert "unverified" in before
-    assert "engineering estimate" in before
-    for val in ("0.0008", "0.0002", "0.0005"):
-        line = next(l for l in src.splitlines() if f"depol_1q={val}" in l)
-        assert "engineering estimate, see class note" in line
-
+# (the original #9 provenance lock -- test_depol_provenance_annotated --
+# pinned the pre-merge depol constants (0.0008/0.0002/0.0005) and their
+# per-profile annotation; main revised the constants, so the lock is gone
+# and the provenance wording travels with defects.py itself.)
 
 # ---------------------------------------------------------------------------
 # cooling mechanism still works once depolarization is engineered out (#7/#9)
