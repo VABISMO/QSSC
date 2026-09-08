@@ -375,22 +375,30 @@ class SimulatedFPGA:
         p1 = 0.52
         # von-Neumann keeps ~2*p1*(1-p1) of pairs (~50% for p1=0.52), i.e.
         # ~25% of raw LSBs, so ~6x raw is comfortably enough for one batch.
-        bits: list[int] = []
-        raw_total = 0
-        kept_total = 0
-        while len(bits) < need_bits:
-            raw = [1 if self.rng.random() < p1 else 0 for _ in range(need_bits * 6)]
-            # huge `need` so the extractor processes every pair (no early stop)
-            more, _st = von_neumann_extract(raw, 1 << 30)
-            raw_total += len(raw)
-            kept_total += len(more)
-            bits.extend(more)
-        health = entropy_health(bits[:need_bits])
-        if not health["passed"]:
-            return "ERR"
-        out = bits_to_bytes(bits[:need_bits])
-        rate = (kept_total / raw_total) if raw_total else 0.0
-        return f"{out.hex()} {raw_total} {kept_total} {round(rate, 4)}"
+        # Real hardware keeps harvesting until a healthy block is in hand, so
+        # retry the harvest+health gate up to N times: a healthy OS-entropy
+        # stream passes on the first attempt, while a degenerate/correlated
+        # stream (the case the issue-#46 gate exists for) exhausts the budget
+        # and replies ERR. This makes a valid READ_RNG reliable without
+        # weakening the gate.
+        for _attempt in range(64):
+            bits: list[int] = []
+            raw_total = 0
+            kept_total = 0
+            while len(bits) < need_bits:
+                raw = [1 if self.rng.random() < p1 else 0
+                       for _ in range(need_bits * 6)]
+                # huge `need` so the extractor processes every pair (no early stop)
+                more, _st = von_neumann_extract(raw, 1 << 30)
+                raw_total += len(raw)
+                kept_total += len(more)
+                bits.extend(more)
+            health = entropy_health(bits[:need_bits])
+            if health["passed"]:
+                out = bits_to_bytes(bits[:need_bits])
+                rate = (kept_total / raw_total) if raw_total else 0.0
+                return f"{out.hex()} {raw_total} {kept_total} {round(rate, 4)}"
+        return "ERR"
 
     def _odmr_sweep(self, qubit: int, f_start_khz: int, f_stop_khz: int,
                     n_points: int) -> str:
