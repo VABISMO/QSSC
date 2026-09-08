@@ -303,6 +303,26 @@ textarea.code-editor:focus { outline: 1px solid var(--brand); border-color: var(
   .fpga-proto-cmd { border-top: 1px solid var(--border); padding-top: 10px; }
 }
 
+/* ---- command-reference modal (FPGA section) ---- */
+.cmd-ref-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(5, 9, 22, .72); backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+  animation: cmd-ref-fade .12s ease-out;
+}
+@keyframes cmd-ref-fade { from { opacity: 0; } to { opacity: 1; } }
+.cmd-ref-modal {
+  position: relative; background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  max-width: 920px; width: 100%; max-height: 86vh; overflow: auto; padding: 22px 24px 26px;
+}
+.cmd-ref-modal h2 { font-size: 15.5px; display: flex; align-items: center; gap: 9px; margin-right: 40px; }
+.cmd-ref-close {
+  position: absolute; top: 14px; right: 16px; width: 30px; height: 30px; padding: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 14px;
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px;
+}
+
 /* ---- hardware QRNG output ---- */
 .fpga-qrng-out { margin-top: 6px; }
 /* ---- FPGA empty-state command help ---- */
