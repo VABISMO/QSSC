@@ -142,3 +142,55 @@ def bits_to_bytes(bits: list[int]) -> bytes:
     # left-justify if not a whole multiple of 8
     val <<= (8 * nbytes - n)
     return val.to_bytes(nbytes, "big")
+
+
+def bytes_to_bits(data: bytes) -> list[int]:
+    """Expand bytes into a list of 0/1 bits, MSB first (inverse of
+    :func:`bits_to_bytes`). Used by the QRNG consumers to run the health
+    gate over a harvested byte block."""
+    return [(byte >> (7 - i)) & 1 for byte in data for i in range(8)]
+
+
+def entropy_health(bits: list[int]) -> dict:
+    """Lightweight sanity gate for a random bit stream (issue #46).
+
+    The von-Neumann extractor debiases *iid* streams only: a correlated or
+    degenerate input can still produce output whose per-pair extraction
+    stats look healthy.  This gate checks the two cheapest failure
+    signatures of the extracted bits:
+
+    * frequency (monobit): the ones fraction vs 0.5, as a two-sided
+      binomial p-value, and
+    * lag-1 transitions: P(bit[i+1] != bit[i]) vs 0.5, which iid uniform
+      bits satisfy (a stream with strong sample-to-sample correlation
+      drifts away from 0.5 or collapses to 0/1).
+
+    ``passed`` is a *sanity* verdict that rejects the degenerate cases
+    (constant, alternating, strongly biased or correlated streams) before
+    they become an Ed25519 seed.  It is **not** a NIST SP 800-90B health
+    test and cannot certify physical randomness — it is the cheap guard
+    the docs promise, nothing more.
+    """
+    import math
+
+    n = len(bits)
+    if n < 64:
+        return {"n": n, "passed": False, "reason": "too few bits (<64)"}
+    ones = sum(b & 1 for b in bits)
+    p1 = ones / n
+    # frequency: 2*ones - n is ~ Normal(0, n) under iid uniform
+    z_freq = abs(2 * ones - n) / math.sqrt(n)
+    freq_p = math.erfc(z_freq / math.sqrt(2))          # two-sided
+    # lag-1 transitions under iid uniform ~ Binomial(n-1, 0.5)
+    n_pairs = max(1, n - 1)
+    trans = sum(1 for i in range(n_pairs) if (bits[i] & 1) != (bits[i + 1] & 1))
+    z_trans = abs(2 * trans - n_pairs) / math.sqrt(n_pairs)
+    trans_p = math.erfc(z_trans / math.sqrt(2))
+    min_entropy = (-math.log2(max(p1, 1.0 - p1)) if 0.0 < p1 < 1.0 else 0.0)
+    passed = (freq_p >= 0.001 and trans_p >= 0.001 and min_entropy >= 0.25)
+    return {"n": n, "ones": ones, "p1": round(p1, 4),
+            "freq_p": round(freq_p, 4),
+            "transition_rate": round(trans / n_pairs, 4),
+            "trans_p": round(trans_p, 4),
+            "min_entropy_per_bit": round(min_entropy, 3),
+            "passed": bool(passed)}
