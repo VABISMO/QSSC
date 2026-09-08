@@ -29,13 +29,13 @@ NV-diamond *simulator* — into one coherent, renamed deliverable.
 | **Python core** | `qssc/` | `QSSCBackend` (Qiskit `BackendV2`), simulator, defect profiles, quantum circuits, fabrication-protocol model |
 | **REST backend** | `api/` | FastAPI app exposing the simulator, ODMR model, protocol and a circuit runner |
 | **Frontend** | `frontend/` | React 18 + Vite dashboard (ODMR chart, qubit grid, circuit runner, protocol viewer) |
-| **FPGA RTL** | `fpga/rtl` | 9 Verilog modules (Artix-7) — UART, SPI/ADF4351 PLL, 3× TLC5947 constant-current emitter driver + 8×8 CQD array, on-chip graphene/MoS₂ detector readout (TLV9004 TIA → AD7616 16-bit ADC → 9-wire SPI), command parser, top-level |
-| **Hardware** | `hardware/` | KiCad PCB, XDC constraints, CNC G-code, `HARDWARE_DESIGN.md` |
+| **FPGA RTL** | `fpga/rtl` | 9 Verilog modules (Artix-7) — UART, SPI/ADF4351 PLL, 64-ch CQD emitter drive (3× TLC5947), detector readout (TLV9004 TIA → 4× AD7616 parallel 16-bit ADC, 1 kHz lock-in host-side), command parser, top-level |
+| **Hardware** | `hardware/` | KiCad PCBs (main + detector head), XDC constraints, CNC G-code, datasheets, `HARDWARE_DESIGN.md` |
 | **Protocol** | `docs/FABRICATION_PROTOCOL.md` | 5-section lab fabrication protocol, validated against published studies |
 | **Protocol (HTML)** | `docs/protocol.html` | Branded, print-ready HTML render of the protocol (regenerate with `python3 tools/build_protocol_html.py`) |
 | **Presentation** | `presentation/index.html` | Self-contained HTML deck with software mocks and diagrams |
 | **PDFs** | `presentation/QSSC_presentation.pdf`, `docs/QSSC_fabrication_protocol.pdf` | Headless-Chromium exports of the presentation and protocol |
-| **Tests** | `tests/` | 149 software/physics tests (defects, simulator, circuits, backend, API, crypto, cross-platform) + a PCB DRC/connectivity track |
+| **Tests** | `tests/` | 149 software/physics tests (defects, simulator, circuits, backend, API, crypto, cross-platform) + a PCB DRC/connectivity track (skips without kicad-cli) |
 
 ## Quick start
 
@@ -45,7 +45,7 @@ python -m venv .venv && . .venv/bin/activate
 pip install -e ".[api,dev]"
 
 # run the test suite
-python -m pytest                       # 149 passed (software/physics suite)
+python -m pytest                       # 149 passed (software/physics suite; PCB DRC track needs kicad-cli)
 
 # try the CLI
 qssc info                              # backend / defect summary (defaults to NV)
@@ -92,15 +92,16 @@ the AD7616 readout and the TLC5947 emitter drivers. Everything below is
 specified relative to that canonical die.
 
 The chip integrates its own emitter and detector arrays and is read
-**electrically** — no camera, no alignment jig. The 8×8 CQD emitter array
-pumps the NV⁻ ensemble (green ~520–540 nm); a resonant microwave X-gate
+**electrically** — no camera, no alignment jig. The 64 CQD emitters (driven in
+parallel by 3× TLC5947 constant-current drivers) pump the NV⁻ ensemble
+(green ~520–540 nm); a resonant microwave X-gate
 (2.87 GHz) flips the spin to the dark ms=±1 state; the on-chip
 graphene/MoS₂ detector array measures the resulting photocurrent dip
 (ODMR). A 650 nm long-pass filter blocks the green pump and passes the NV
 PL (637–800 nm). Each detector electrode feeds a **TLV9004 transimpedance
-amplifier** and an **AD7616 16-bit ADC** (codes 0–65535); the Artix-7 reads
-all 64 channels over a **9-wire SPI bus** and applies **1 kHz lock-in**
-demodulation in the FPGA.
+amplifier** (16× quad chips), and **4× AD7616 16-bit ADCs** digitise all 64
+channels (codes 0–65535) over a **9-wire SPI** bus, with **1 kHz lock-in**
+demodulation host-side.
 
 ```mermaid
 flowchart TB
@@ -114,7 +115,7 @@ flowchart TB
   FILT["**650 nm long-pass filter** — blocks green pump, passes NV PL"]:::layer
   HOST["**CVD diamond spin-defect host** — NV⁻, D ≈ 2.87 GHz, T₂ ≈ 1.8 ms"]:::layer
   WG["**SU-8 / PDMS polymer waveguides** — couple pump + site PL"]:::layer
-  EM["**8×8 CQD ASE/LED emitter array** — ITO/PEDOT:PSS/CQD-PVA/ZnO/Ag, 520–540 nm"]:::layer
+  EM["**64 parallel CQD ASE/LED emitters (3× TLC5947)** — ITO/PEDOT:PSS/CQD-PVA/ZnO/Ag, 520–540 nm"]:::layer
   SUB["**ITO-coated glass substrate + Cu contacts** — 1–5 cm²"]:::layer
   TEC["**Peltier (TEC1-12706) + liquid cooling** — 295 K"]:::layer
 
@@ -125,12 +126,11 @@ flowchart TB
   HOST -- "spin init → ms=0 bright" --> HOST
   HOST -- "NV PL 637–800 nm (↑)" --> FILT
   FILT -- "passes PL, blocks pump" --> DET
-  DET -- "photocurrent (↓)" --> TIA["**TLV9004 TIA**"]:::elec
-  TIA --> ADC["**AD7616 · 16-bit ADC**"]:::elec
-  ADC -- "9-wire SPI" --> FPGA["**Artix-7 · 1 kHz lock-in**"]:::elec
+  DET -- "photocurrent (↓)" --> TIA["**TLV9004 TIA ×16**"]:::elec
+  TIA --> ADC["**4× AD7616 16-bit ADC · 1 kHz lock-in (host)**"]:::elec
   MW["**ADF4351 MW · 2.87 GHz**"]:::mw
   MW -. "resonant X-gate (phase ≈ π) → ms=±1 dark" .-> HOST
-  DET -. "ODMR dip = reduced photocurrent → bit 1" .-> FPGA
+  DET -. "ODMR dip = reduced photocurrent → bit 1" .-> ADC
 ```
 
 Readout: a pumped site with **no** resonant MW reads **bright** (high ADC
@@ -195,26 +195,26 @@ ready-made Bell / GHZ / QFT / QASM examples.
 
 ## FPGA control stack
 
-A single **Artix-7 XC7A35T** orchestrates a **3× TLC5947 constant-current
-driver** for the **8×8 on-chip CQD ASE/LED emitter array** (green ~520–540 nm,
-+12 V anode), the **on-chip graphene/MoS₂ photodetector array** read through a
-**TLV9004 transimpedance amplifier** into an **AD7616 16-bit parallel ADC**
-streamed over a **9-wire SPI bus** with **1 kHz lock-in** demodulation in the
-FPGA, an **ADF4351** microwave PLL, and a host UART link. **There is no camera
-and no alignment jig** — the chip integrates its own emitter and detector
-arrays and is read electrically (ODMR dip = reduced photocurrent at resonance).
+A single **Artix-7 XC7A35T-1CSG324C** orchestrates **64 individual on-chip CQD
+ASE/LED emitters** (green ~520–540 nm, constant-current-driven by 3× TLC5947
+PWM drivers off a +12 V emitter rail), the **on-chip graphene/MoS₂ photodetector
+array** read through 16× TLV9004 TIAs into **4× AD7616 parallel 16-bit ADCs**
+with **1 kHz lock-in** demodulation host-side, an **ADF4351** microwave PLL, and
+a host UART link. **There is no camera and no alignment jig** — the chip
+integrates its own emitter and detector arrays and is read electrically (ODMR
+dip = reduced photocurrent at resonance).
 The RTL ([`fpga/rtl/`](fpga/rtl), 9 modules + a self-checking
 [testbench](fpga/sim/tb_top_level.v)) is **parse-verified with pyverilog,
 functionally simulated with iverilog, and synthesised with yosys
 `synth_xilinx` (xc7)** — the testbench drives
-`DRIVE_EMITTER 3 4 50` (asserts emitter rows/cols + `OK` reply) and
-`READ_DETECTORS` (asserts the full 64-electrode stream `1000 1040 … 3520\n`,
-320 bytes, 10/10 checks pass). The yosys synthesis maps the design to the
-Series-7 cell library and confirms it fits the XC7A35T-1CSG324C with ~90 % of
-the part free (≈2063 LUTs / 9.9 %, 1016 FFs / 2.4 %, 8 DSP48E1 / 8.9 %, 0
+`DRIVE_EMITTER 3 100` (fires one emitter + `OK` reply) and
+`READ_DETECTORS` (asserts the 64-sample stream `1234 1234 … 1234\n`,
+320 bytes, 19/19 checks pass). The yosys synthesis maps the design to the
+Series-7 cell library and confirms it fits the XC7A35T-1CSG324C with ~87 % of
+the part free (≈2762 LUTs / 13.3 %, 2167 FFs / 5.2 %, 7 DSP48E1 / 7.8 %, 0
 inferred latches, 0 blackboxes). All three checks run in CI. (A first iverilog
-run caught two real handshake bugs pyverilog could not — an ADC-read busy race
-and a missing consumer-ack — now fixed.) Pin assignments live in
+run caught two real handshake bugs pyverilog could not — a readout busy race and
+a missing consumer-ack — now fixed.) Pin assignments live in
 [`fpga/constraints.xdc`](fpga/constraints.xdc); the synthesis flow + report
 live in [`fpga/synth/`](fpga/synth) (see
 [`hardware/HARDWARE_DESIGN.md`](hardware/HARDWARE_DESIGN.md) §17).
@@ -237,7 +237,7 @@ specification):
 
 | Command | Action | Reply |
 |---|---|---|
-| `DRIVE_EMITTER <row> <col> <duration_ms>` | drive CQD emitter pixel (row,col) | `OK` |
+| `DRIVE_EMITTER <index> <duration_ms>` | fire emitter `<index>` (0–63) | `OK` |
 | `APPLY_PULSE <qubit> <freq_khz> <amp> <duration_ns> <phase>` | program ADF4351 + gate the MW pulse | `OK` |
 | `READ_DETECTOR <site>` | digitise one detector electrode (AD7616) | `<code>` |
 | `READ_DETECTORS` | sweep all 64 electrodes, stream codes | `<code> <code> …` (64) |
@@ -331,30 +331,34 @@ failed test/parse/sim run blocks both deploys). It then:
 - [`hardware/HARDWARE_DESIGN.md`](hardware/HARDWARE_DESIGN.md) — the full
   hardware design document: system overview + block diagram, BOM, power
   sequencing, clocking, the FPGA↔PC UART protocol (§5), ADF4351 loop filter &
-  RF path, on-chip CQD emitter driver math, on-chip photodetector readout
-  (graphene/MoS₂ → TLV9004 TIA → AD7616 16-bit ADC → 9-wire SPI, 1 kHz lock-in,
-  650 nm long-pass filter), microwave antenna/CPW, controlled-impedance routing,
-  decoupling, the 6-layer two-board PCB stackup, critical-net trace geometry,
-  CNC G-code files, the KiCad project, and a references list (ADF4351 /
-  XC7A35T / AD7616 / TLV9004 / NV readout).
+  RF path, on-chip CQD emitter driver math (3× TLC5947), on-chip photodetector
+  readout (TLV9004 TIA + 4× AD7616 parallel 16-bit ADC → 9-wire SPI, host-side
+  1 kHz lock-in, 650 nm long-pass filter), microwave antenna/CPW, controlled-
+  impedance routing, decoupling, the two 6-layer PCB stackups, critical-net
+  trace geometry, CNC G-code files, the KiCad
+  project, and a references list (ADF4351 / XC7A35T / GVA-84+ / AD7616 /
+  TLC5947 / TLV9004 / NV readout).
 - [`fpga/rtl/`](fpga/rtl) — 9 Verilog modules: `top_level`, `command_parser`,
-  `uart_rx`/`uart_tx`, `spi_master` (ADF4351), `adf4351_ctrl`, `emitter_array`
-  (8×8 CQD crossbar), `tlc5947_ctrl` (3× TLC5947 constant-current emitter
-  driver), `adc_reader` (AD7616 16-bit ADC, 9-wire SPI + 1 kHz lock-in).
+  `uart_rx`/`uart_tx`, `spi_master` (ADF4351), `adf4351_ctrl`, `tlc5947_ctrl`
+  (emitter PWM), `emitter_array` (64 parallel CQD emitters via 3× TLC5947),
+  `adc_reader` (4× AD7616 parallel 16-bit ADC, 1 kHz lock-in host-side).
 - [`fpga/constraints.xdc`](fpga/constraints.xdc) — Artix-7 CSG324 pin
-  assignments and timing constraints (100 MHz TCXO, TLC5947 emitter + CQD
-  crossbar, AD7616 detector SPI, ADF4351 SPI; no camera domain).
+  assignments and timing constraints (100 MHz TCXO, TLC5947 emitter SPI,
+  AD7616 detector SPI, ADF4351 SPI; no camera domain).
 - [`fpga/sim/tb_top_level.v`](fpga/sim/tb_top_level.v) — self-checking testbench.
 - [`hardware/gcode/`](hardware/gcode) — CNC G-code substrate toolpaths for the
   microfluidic cylinder array, waveguide/sensor-grid routing, and square cavity
   chip carrier (described in `HARDWARE_DESIGN.md` §14).
-- [`hardware/pcb/`](hardware/pcb) — KiCad PCB project (`qssc.kicad_*`,
-  regenerated by `tools/gen_qssc_kicad.py`) — a complete **ERC-clean
-  schematic (0 errors) + DRC-clean placed 4-layer board** (0 violations,
-  0 unconnected; 130×85 mm FR4, full netlist on pads). Copper routing
-  (BGA fanout, 50 Ω RF microstrip, USB diff pair, analog guard rings,
-  plane pours) still needs one GUI `pcbnew` session — `kicad-cli` cannot
-  export DSN / import SES headless (documented frankly in
+- [`hardware/pcb/`](hardware/pcb) — KiCad 8 project (`qssc.kicad_*` main
+  board + `chip_module.kicad_*` detector head, regenerated by
+  `tools/gen_qssc_kicad.py`) — **two ERC-clean schematics + routed 6-layer
+  boards** (main 210×140 mm HDI + detector head 150×140 mm; full netlist on
+  pads; unrouted nets are a documented partial-routing state), with headless
+  BGA fanout, copper planes and signal/power routing
+  (`tools/route_qssc_pcb.py` + `tools/route_signals.py`). The first-route
+  boards carry **residual DRC violations** (main: clearance /
+  hole-clearance, head: track-width) — tracked by `tests/test_pcb_drc.py` /
+  `tests/test_pcb_head.py`, which skip on CI without kicad-cli (described in
   `HARDWARE_DESIGN.md` §15).
 
 ### Fabrication protocol
