@@ -273,14 +273,14 @@ class SimulatedFPGA:
                 # READ_LOCKIN <ref_khz> <n_cycles>: lock-in accumulator result
                 # (on-minus-off differential over n_cycles modulation cycles).
                 # Mirrors lockin_integrated_readout + the pending RTL lock-in
-                # accumulator (#58). Reply: "diff sigma snr_single snr_int".
+                # accumulator (RTL pending). Reply: "diff sigma snr_single snr_int".
                 ref_khz = int(parts[1]); n_cycles = int(parts[2])
                 if n_cycles <= 0 or n_cycles > 100000:
                     return "ERR"
                 return self._read_lockin(ref_khz, n_cycles)
             if head == "RUN_SEQUENCE":
                 # RUN_SEQUENCE <kind> <n_windows>: pulse-sequence engine stub
-                # (#58 RTL pending). kind in {ramsey, hahn, cpmg}; returns
+                # (RTL pending). kind in {ramsey, hahn, cpmg}; returns
                 # n_windows readout codes (one per optical read window).
                 kind = parts[1] if len(parts) > 1 else "ramsey"
                 n_windows = int(parts[2]) if len(parts) > 2 else 8
@@ -375,22 +375,30 @@ class SimulatedFPGA:
         p1 = 0.52
         # von-Neumann keeps ~2*p1*(1-p1) of pairs (~50% for p1=0.52), i.e.
         # ~25% of raw LSBs, so ~6x raw is comfortably enough for one batch.
-        bits: list[int] = []
-        raw_total = 0
-        kept_total = 0
-        while len(bits) < need_bits:
-            raw = [1 if self.rng.random() < p1 else 0 for _ in range(need_bits * 6)]
-            # huge `need` so the extractor processes every pair (no early stop)
-            more, _st = von_neumann_extract(raw, 1 << 30)
-            raw_total += len(raw)
-            kept_total += len(more)
-            bits.extend(more)
-        health = entropy_health(bits[:need_bits])
-        if not health["passed"]:
-            return "ERR"
-        out = bits_to_bytes(bits[:need_bits])
-        rate = (kept_total / raw_total) if raw_total else 0.0
-        return f"{out.hex()} {raw_total} {kept_total} {round(rate, 4)}"
+        # Real hardware keeps harvesting until a healthy block is in hand, so
+        # retry the harvest+health gate up to N times: a healthy OS-entropy
+        # stream passes on the first attempt, while a degenerate/correlated
+        # stream (the case the issue-#46 gate exists for) exhausts the budget
+        # and replies ERR. This makes a valid READ_RNG reliable without
+        # weakening the gate.
+        for _attempt in range(64):
+            bits: list[int] = []
+            raw_total = 0
+            kept_total = 0
+            while len(bits) < need_bits:
+                raw = [1 if self.rng.random() < p1 else 0
+                       for _ in range(need_bits * 6)]
+                # huge `need` so the extractor processes every pair (no early stop)
+                more, _st = von_neumann_extract(raw, 1 << 30)
+                raw_total += len(raw)
+                kept_total += len(more)
+                bits.extend(more)
+            health = entropy_health(bits[:need_bits])
+            if health["passed"]:
+                out = bits_to_bytes(bits[:need_bits])
+                rate = (kept_total / raw_total) if raw_total else 0.0
+                return f"{out.hex()} {raw_total} {kept_total} {round(rate, 4)}"
+        return "ERR"
 
     def _odmr_sweep(self, qubit: int, f_start_khz: int, f_stop_khz: int,
                     n_points: int) -> str:
@@ -461,7 +469,7 @@ class SimulatedFPGA:
                 f"{res['single_frame_snr']:.2f} {res['integrated_snr']:.2f}")
 
     def _run_sequence(self, kind: str, n_windows: int) -> str:
-        """Pulse-sequence engine stub (#58 RTL pending).
+        """Pulse-sequence engine stub (RTL pending).
 
         Models the optical readout of ``n_windows`` windows for a Ramsey / Hahn
         echo / CPMG sequence as a decaying fringe of photocurrent codes, so the

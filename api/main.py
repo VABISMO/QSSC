@@ -580,7 +580,7 @@ _FPGA_PROTOCOL = [
      "desc": "lock-in accumulator: on-minus-off differential over n cycles (lockin_integrated_readout)"},
     {"cmd": "RUN_SEQUENCE", "args": "kind n_windows",
      "reply": "<n> c0 c1 … / ERR",
-     "desc": "pulse-sequence engine stub: ramsey / hahn / cpmg → n readout codes (#58 RTL pending)"},
+     "desc": "pulse-sequence engine stub: ramsey / hahn / cpmg → n readout codes (RTL pending)"},
     {"cmd": "STATUS", "args": "—", "reply": "PLL_LOCKED … VCC3V3_mv … TEMP_C …",
      "desc": "board self-status: PLL lock, ADC busy, rail voltages, die temperature"},
     {"cmd": "RESET", "args": "—", "reply": "OK",

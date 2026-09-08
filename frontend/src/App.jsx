@@ -26,7 +26,7 @@ const FALLBACK_PROTOCOL = [
   { cmd: 'READ_COMPASS', args: '[n_avg]', desc: '4-axis ODMR doublet fit → ambient B-vector + heading (compass_measure)' },
   { cmd: 'READ_GYRO', args: 'T_ns', desc: 'Ramsey π/2–T–π/2 → rotation rate (gyro_measure)' },
   { cmd: 'READ_LOCKIN', args: 'ref_khz n_cycles', desc: 'lock-in accumulator: on-minus-off differential over n cycles (lockin_integrated_readout)' },
-  { cmd: 'RUN_SEQUENCE', args: 'kind n_windows', desc: 'pulse-sequence engine stub: ramsey / hahn / cpmg → n readout codes (#58 RTL pending)' },
+  { cmd: 'RUN_SEQUENCE', args: 'kind n_windows', desc: 'pulse-sequence engine stub: ramsey / hahn / cpmg → n readout codes (RTL pending)' },
   { cmd: 'STATUS', args: '—', desc: 'board self-status: PLL lock, ADC busy, rail voltages, die temperature' },
   { cmd: 'RESET', args: '—', desc: 'soft reset of the TLC5947 / ADF4351 / ADC peripheral state' },
 ]
@@ -806,7 +806,7 @@ export default function App() {
           <div className="card">
             <h2><span className="dot" />Quantum RNG <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(qrng_entropy.v · READ_RNG)</span></h2>
             <div className="hint">
-              A <b>dark</b> AD7616 channel's LSB is dominated by Johnson + shot noise. The FPGA pairs successive samples through a von-Neumann extractor (01→0, 10→1, 00/11 discarded) and packs debiased bits into 32-bit words. The 32-byte seed drives an Ed25519 keypair + self-signed X.509 device cert.
+              A <b>dark</b> AD7616 channel's LSB is dominated by thermal/Johnson + ADC quantization noise (a dark channel has no photocurrent, hence no shot noise). The FPGA pairs successive samples through a von-Neumann extractor (01→0, 10→1, 00/11 discarded) and packs debiased bits into 32-bit words. The 32-byte seed drives an Ed25519 keypair + self-signed X.509 device cert.
             </div>
             <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
               <div className="field"><label>Entropy bytes</label>
