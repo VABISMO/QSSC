@@ -345,18 +345,19 @@ def fpga_pin_list():
 # boards are independent: QSSC_Chip_EM on the main F.Cu, QSSC_Chip_DET on the
 # head B.Cu.  Symbol pin NUMBER == footprint pad name so fp_net_pads nets every
 # pad by name.  The optical die carries an 8x8 GRID of electrodes = 64 pads
-# evenly across the 20x20 mm (2x2 cm) face, ~2.5 mm pitch (user spec).  Each pad
-# escapes outward as a dog-bone via (route_signals._chip_fanout, pad-layer-
-# derived: F.Cu pads -> F.Cu stub + B.Cu via; B.Cu pads -> B.Cu stub + F.Cu via).
+# evenly across the 20x20 mm (2x2 cm) face, 2.54 mm pitch (standard pin-header
+# pitch; 8 pads -> 17.78 mm span).  Each pad escapes outward as a dog-bone via
+# (route_signals._chip_fanout, pad-layer-derived: F.Cu pads -> F.Cu stub + B.Cu
+# via; B.Cu pads -> B.Cu stub + F.Cu via).
 GRID_N = 8                                    # 8x8 electrodes = 64 per face
-GRID_PITCH = 2.5                              # mm; 8 pads -> 7 intervals = 17.5 mm span
-GRID_HALF = GRID_PITCH * (GRID_N - 1) / 2     # 8.75 mm -> grid spans -8.75..+8.75
+GRID_PITCH = 2.54                             # mm; standard 2.54 mm pin-header pitch; 7 intervals = 17.78 mm span
+GRID_HALF = GRID_PITCH * (GRID_N - 1) / 2     # 8.89 mm -> grid spans -8.89..+8.89
 
 def _chip_grid_xy(i):
     """(x, y) in mm of electrode #i (0..63) on the 8x8 grid, row-major
     (i = row*8 + col, row/col in 0..7), centered on the 20x20 mm die.
-    EM0/DET0 -> top-left (-8.75,-8.75); EM7 -> top-right (+8.75,-8.75);
-    EM63 -> bottom-right (+8.75,+8.75)."""
+    EM0/DET0 -> top-left (-8.89,-8.89); EM7 -> top-right (+8.89,-8.89);
+    EM63 -> bottom-right (+8.89,+8.89)."""
     row, col = divmod(i, GRID_N)
     return (round(-GRID_HALF + col * GRID_PITCH, 3),
             round(-GRID_HALF + row * GRID_PITCH, 3))
@@ -365,8 +366,8 @@ def _chip_grid_xy(i):
 def chip_pin_list_em():
     """Schematic pins for the die BOTTOM (emitter) face: 64 EM cathodes on the
     bottom edge + 1 EM_ANODE common-anode pad.  This face contacts the MAIN
-    board's F.Cu.  1.0 mm SYMBOL pitch (independent of the 2.5 mm PCB grid
-    pitch -- the die is an 8x8 grid at 2.5 mm, 17.5 mm span on the 20 mm body)."""
+    board's F.Cu.  1.0 mm SYMBOL pitch (independent of the 2.54 mm PCB grid
+    pitch -- the die is an 8x8 grid at 2.54 mm, 17.78 mm span on the 20 mm body)."""
     pins = []
     sp = 1.0
     x0 = -sp * 63 / 2
@@ -388,7 +389,7 @@ def chip_pin_list_det():
     is the shared detector common masa, edge-contacted -- see
     FABRICATION_PROTOCOL_P0.md: 130 contacts = 64 DET + 64 EM-cathode + 2 ITO
     commons).  This face contacts the DETECTOR HEAD's B.Cu.  1.0 mm SYMBOL pitch
-    (independent of the 2.5 mm PCB grid pitch)."""
+    (independent of the 2.54 mm PCB grid pitch)."""
     pins = []
     sp = 1.0
     x0 = -sp * 63 / 2
@@ -466,11 +467,11 @@ def _chip_fp_body(lib_id, value, descr, pads, layer="F.Cu"):
 
 def chip_footprint_em():
     """Footprint for the die BOTTOM (emitter) face on the MAIN board F.Cu: 64 EM
-    cathode pads on an 8x8 grid across the 20x20 mm face (~2.5 mm pitch) +
+    cathode pads on an 8x8 grid across the 20x20 mm face (2.54 mm pitch) +
     EM_ANODE common-anode pad on the LEFT edge.  ACF direct-contact pads
     (F.Cu + F.Mask, NO F.Paste -- the die is clamped face-down, not soldered).
     EM_ANODE is on the left edge (clear of the 8x8 grid, whose leftmost column
-    is at x=-8.75) so its fanout via does not collide with the grid dog-bones."""
+    is at x=-8.89) so its fanout via does not collide with the grid dog-bones."""
     def pad(name, x, y, w=1.2, h=1.2):
         return L(A("pad"), S(name), A("smd"), A("rect"),
                  L(A("at"), A(round(x, 3)), A(round(y, 3))),
@@ -482,20 +483,20 @@ def chip_footprint_em():
                   L(A("size"), A(0.5), A(1.5)),
                   L(A("layers"), S("F.Cu"), S("F.Mask"))))
     return _chip_fp_body("qssc:QSSC_Chip_EM", "QSSC_Chip_EM",
-                         "QSSC die BOTTOM face: 64 CQD emitter cathodes on an 8x8 grid + common anode; 20x20 mm ACF contact pads (~2.5 mm pitch) on F.Cu",
+                         "QSSC die BOTTOM face: 64 CQD emitter cathodes on an 8x8 grid + common anode; 20x20 mm ACF contact pads (2.54 mm pitch) on F.Cu",
                          pads, "F.Cu")
 
 
 def chip_footprint_det():
     """Footprint for the die TOP (detector) face on the DETECTOR HEAD B.Cu: 64
-    DET pads on an 8x8 grid across the 20x20 mm face (~2.5 mm pitch) + 1
+    DET pads on an 8x8 grid across the 20x20 mm face (2.54 mm pitch) + 1
     DET_COMMON common-back-electrode pad on the LEFT edge (the continuous ITO
     film shared by all 64 graphene pixels -- edge-contacted, mirrors EM_ANODE
     on the emitter face).  ACF direct-contact pads (B.Cu + B.Mask, NO B.Paste
     -- the head is clamped face-down onto the die, not soldered).  Pads on B.Cu
     so the head's bottom face contacts the die's top face when the two boards
     are stacked.  DET_COMMON is on the left edge (clear of the 8x8 grid, whose
-    leftmost column is at x=-8.75) so its fanout via does not collide with the
+    leftmost column is at x=-8.89) so its fanout via does not collide with the
     grid dog-bones."""
     def pad(name, x, y, w=1.2, h=1.2):
         return L(A("pad"), S(name), A("smd"), A("rect"),
@@ -508,7 +509,7 @@ def chip_footprint_det():
                   L(A("size"), A(0.5), A(1.5)),
                   L(A("layers"), S("B.Cu"), S("B.Mask"))))
     return _chip_fp_body("qssc:QSSC_Chip_DET", "QSSC_Chip_DET",
-                         "QSSC die TOP face: 64 graphene detector electrodes on an 8x8 grid + DET_COMMON ITO back-electrode; 20x20 mm ACF contact pads on B.Cu (~2.5 mm pitch)",
+                         "QSSC die TOP face: 64 graphene detector electrodes on an 8x8 grid + DET_COMMON ITO back-electrode; 20x20 mm ACF contact pads on B.Cu (2.54 mm pitch)",
                          pads, "B.Cu")
 
 
@@ -518,83 +519,134 @@ def chip_footprint():
     return chip_footprint_em()
 
 
-# ---- Ironwood SBT open-top spring-pin SOCKET for the die emitter face --------
-# The user requires a REAL commercial socket that fits the 20x20 mm die whose 64
-# emitter cathodes sit on an 8x8 grid at 2.5 mm PITCH (17.5 mm span; the 0.30 mm
-# figure that appeared in an earlier draft was the P0-prototype PAD size, NOT
-# the pitch -- the production die is 2.5 mm pitch, 1.2 mm pads).  Ironwood
-# Electronics SBT (Stamped Spring Pin) sockets are a MADE-TO-ORDER commercial
-# product for arbitrary pin arrays / IC bodies 1-50 mm (footprint +2.5 mm/side,
-# open-top clamshell lid, hardware/screw mount, >100k cycles, -55..+150 C,
-# <100 mOhm/pin); 2.5 mm is routine spring-pin territory (not the exotic
-# sub-0.5 mm HDI spring pins), so a custom 8x8 SBT array is a standard quote,
-# not a research part.  Off-the-shelf QFP/BGA sockets do not match a 2.5 mm 8x8
-# grid, so the socket is an Ironwood custom SBT quoted against the die drawing.
-# The SBT spring pins transfer 1:1 die-pad -> PCB-pad at the SAME 2.5 mm grid
-# positions, so the 65 contact pads reuse the QSSC_Chip_EM pad geometry -- but
-# they SOLDER to the board (F.Cu + F.Paste + F.Mask; the ACF QSSC_Chip_EM pads
-# carry no paste).  4 NPTH mount holes at the socket corners (solder-less
-# hardware mount).  The mount-hole drill/positions below are SANE DEFAULTS --
-# FINALIZE them from the Ironwood quote drawing.
-SOCKET_BODY_HALF = 12.5     # 25x25 mm body (+2.5 mm/side over the 20 mm die)
+# ---- Standard 2.54 mm female-header chip SOCKET (both boards) ---------------
+# The chip is a P1-style pin-scaffold module: a double-ended carrier whose 2.54 mm
+# male pin-header pins ARE the 64 per-pixel electrodes (CQD emitter paste molded
+# on the bottom pins, graphene/MoS2 detector paste molded on the top pins) + 1
+# common electrode, exactly the P1·0 prototype approach (see
+# FABRICATION_PROTOCOL_P1.md) scaled to production.  It plugs BETWEEN the two
+# boards: the MAIN board carries a 2.54 mm female-header socket on F.Cu (emitter
+# face, 64 EM cathodes + EM_ANODE), the DETECTOR HEAD carries the matching 2.54 mm
+# female-header socket on B.Cu (detector face, 64 DET + DET_COMMON).  2.54 mm is
+# the standard pin-header pitch -- the 8x8 grid spans 17.78 mm on the 20 mm body,
+# and the socket is built from off-the-shelf 1x8 / 2x... female-header strips (or
+# individual machined socket receptacles) on a 2.54 mm grid: an ALLPCB-fabricable
+# through-hole part, NOT a custom spring-pin socket.  Pad NAMES == QSSC_Chip_EM
+# / QSSC_Chip_DET so chip_net_map_em/det() net every contact identically and
+# route_signals._chip_fanout dog-bones them with the SAME escape geometry as the
+# ACF die footprints.  The EM_ANODE / DET_COMMON common pad sits ONE GRID STEP
+# left of the 8x8 grid (x = -GRID_HALF - GRID_PITCH = -11.43) so a standard 1.7 mm
+# THT pad clears the leftmost grid column (0.84 mm edge-to-edge).  4 NPTH M2
+# mount holes at the corners clamp + align the sandwich (head standoffs thread
+# through these).
+SOCKET_BODY_HALF = 12.5     # 25x25 mm body outline (+2.5 mm/side over the 20 mm die)
 SOCKET_CRTYD_HALF = 13.5    # courtyard half-extent (contains body + 4 NPTH pads)
-SOCKET_MNT = 11.5           # mount-hole centre offset (just inside body corners)
-SOCKET_MNT_DRILL = 2.5      # M2 screw clearance drill (finalize from drawing)
-SOCKET_MNT_PAD = 3.5        # NPTH keep-out pad diameter (finalize from drawing)
+SOCKET_MNT = 11.5           # M2 mount-hole centre offset (just inside body corners)
+SOCKET_MNT_DRILL = 2.5      # M2 screw clearance drill
+SOCKET_MNT_PAD = 3.5        # NPTH keep-out pad diameter
 SOCKET_MNT_POS = [(-SOCKET_MNT, -SOCKET_MNT), (+SOCKET_MNT, -SOCKET_MNT),
                   (-SOCKET_MNT, +SOCKET_MNT), (+SOCKET_MNT, +SOCKET_MNT)]
+# common-electrode pad sits one 2.54 mm grid step left of the 8x8 grid's leftmost
+# column (clears a 1.7 mm THT pad by 0.84 mm edge-to-edge).
+SOCKET_COMMON_X = round(-GRID_HALF - GRID_PITCH, 3)   # -11.43 mm
 
 
-def socket_footprint():
-    """Ironwood SBT open-top spring-pin socket footprint for the die EMITTER
-    (bottom) face on the MAIN board F.Cu.  65 solder pads (64 EM cathodes on the
-    8x8 grid across the 20x20 mm face + EM_ANODE on the LEFT edge) at the SAME
-    ~2.5 mm grid positions as QSSC_Chip_EM (the SBT spring pins transfer 1:1
-    die-pad -> PCB pad), but on F.Cu + F.Paste + F.Mask (soldered socket, not
-    ACF contact).  ~25x25 mm body outline + 4 NPTH corner mount holes.  Pad
-    NAMES == QSSC_Chip_EM so chip_net_map_em() nets every pad identically and
-    route_signals._chip_fanout dog-bones them with the SAME escape geometry."""
-    def pad(name, x, y, w=1.2, h=1.2):
-        return L(A("pad"), S(name), A("smd"), A("rect"),
-                 L(A("at"), A(round(x, 3)), A(round(y, 3))),
-                 L(A("size"), A(w), A(h)),
-                 L(A("layers"), S("F.Cu"), S("F.Paste"), S("F.Mask")))
-    pads = [pad(f"EM{i}", *_chip_grid_xy(i)) for i in range(64)]
-    pads.append(L(A("pad"), S("EM_ANODE"), A("smd"), A("rect"),
-                  L(A("at"), A(-9.9), A(0)),
-                  L(A("size"), A(0.5), A(1.5)),
-                  L(A("layers"), S("F.Cu"), S("F.Paste"), S("F.Mask"))))
-    # 4 NPTH mount holes (solder-less hardware mount; no net, no symbol pin).
+def _chip_socket_pad(name, x, y):
+    """One 2.54 mm female-header through-hole pad: 1.7 mm circle, 1.0 mm drill
+    (standard for a 0.64 mm square pin-header / female-socket pin).  Plated
+    through-hole on *.Cu + *.Mask so it solders from the opposite face from the
+    socket body."""
+    return L(A("pad"), S(name), A("thru_hole"), A("circle"),
+             L(A("at"), A(round(x, 3)), A(round(y, 3))),
+             L(A("size"), A(1.7), A(1.7)),
+             L(A("drill"), A(1.0)),
+             L(A("layers"), S("*.Cu"), S("*.Mask")))
+
+
+def _chip_socket_body(lib_id, value, descr, pads, layer="F.Cu"):
+    """(footprint ...) wrapper for a 2.54 mm female-header chip socket.  Fab /
+    silk / courtyard land on the socket's own face layer (F.* for the main board
+    emitter socket on F.Cu, B.* for the head detector socket on B.Cu).
+    through_hole attr (off-the-shelf THT female-header part)."""
+    fab = "F.Fab" if layer == "F.Cu" else "B.Fab"
+    silk = "F.SilkS" if layer == "F.Cu" else "B.SilkS"
+    crtyd = "F.CrtYd" if layer == "F.Cu" else "B.CrtYd"
+    b, cy = SOCKET_BODY_HALF, SOCKET_CRTYD_HALF
+    return L(A("footprint"), S(lib_id),
+             L(A("layer"), S(layer)),
+             L(A("version"), A(20240108)),
+             L(A("generator"), S("gen_qssc_kicad")),
+             L(A("generator_version"), S("8.0")),
+             L(A("descr"), S(descr)),
+             L(A("attr"), A("through_hole")),
+             L(A("property"), S("Reference"), S("U"),
+               L(A("at"), A(0), A(-cy), A(0)),
+               L(A("effects"), L(A("font"), L(A("size"), A(0.8), A(0.8))))),
+             L(A("property"), S("Value"), S(value),
+               L(A("at"), A(0), A(cy), A(0)),
+               L(A("effects"), L(A("font"), L(A("size"), A(0.8), A(0.8))))),
+             L(A("fp_rect"), L(A("start"), A(-b), A(-b)), L(A("end"), A(b), A(b)),
+               L(A("stroke"), L(A("width"), A(0.05)), L(A("type"), A("solid"))),
+               L(A("fill"), A("none")), L(A("layer"), S(fab)), L(A("uuid"), S(u()))),
+             L(A("fp_rect"), L(A("start"), A(-b), A(-b)), L(A("end"), A(b), A(b)),
+               L(A("stroke"), L(A("width"), A(0.12)), L(A("type"), A("solid"))),
+               L(A("fill"), A("none")), L(A("layer"), S(silk)), L(A("uuid"), S(u()))),
+             L(A("fp_rect"), L(A("start"), A(-cy), A(-cy)), L(A("end"), A(cy), A(cy)),
+               L(A("stroke"), L(A("width"), A(0.05)), L(A("type"), A("solid"))),
+               L(A("fill"), A("none")), L(A("layer"), S(crtyd)), L(A("uuid"), S(u()))),
+             *pads)
+
+
+def _socket_mnt_pads():
+    """4 NPTH M2 corner mount holes (solder-less hardware clamp/alignment; no
+    net, no symbol pin)."""
+    pads = []
     for mx, my in SOCKET_MNT_POS:
         pads.append(L(A("pad"), S(""), A("np_thru_hole"), A("circle"),
                       L(A("at"), A(round(mx, 3)), A(round(my, 3))),
                       L(A("size"), A(SOCKET_MNT_PAD), A(SOCKET_MNT_PAD)),
                       L(A("drill"), A(SOCKET_MNT_DRILL)),
                       L(A("layers"), S("*.Cu"), S("*.Mask"))))
-    b, cy = SOCKET_BODY_HALF, SOCKET_CRTYD_HALF
-    return L(A("footprint"), S("qssc:Ironwood_SBT"),
-             L(A("layer"), S("F.Cu")),
-             L(A("version"), A(20240108)),
-             L(A("generator"), S("gen_qssc_kicad")),
-             L(A("generator_version"), S("8.0")),
-             L(A("descr"), S("Ironwood SBT open-top spring-pin socket for the 20x20 mm / 2.5 mm-pitch (8x8 grid) QSSC die emitter face; 64 EM cathode + EM_ANODE solder pads on F.Cu; 4 NPTH mount holes (custom part -- finalize hole drill/positions from the Ironwood quote drawing)")),
-             L(A("attr"), A("smd")),
-             L(A("property"), S("Reference"), S("U"),
-               L(A("at"), A(0), A(-cy), A(0)),
-               L(A("effects"), L(A("font"), L(A("size"), A(0.8), A(0.8))))),
-             L(A("property"), S("Value"), S("Ironwood_SBT"),
-               L(A("at"), A(0), A(cy), A(0)),
-               L(A("effects"), L(A("font"), L(A("size"), A(0.8), A(0.8))))),
-             L(A("fp_rect"), L(A("start"), A(-b), A(-b)), L(A("end"), A(b), A(b)),
-               L(A("stroke"), L(A("width"), A(0.05)), L(A("type"), A("solid"))),
-               L(A("fill"), A("none")), L(A("layer"), S("F.Fab")), L(A("uuid"), S(u()))),
-             L(A("fp_rect"), L(A("start"), A(-b), A(-b)), L(A("end"), A(b), A(b)),
-               L(A("stroke"), L(A("width"), A(0.12)), L(A("type"), A("solid"))),
-               L(A("fill"), A("none")), L(A("layer"), S("F.SilkS")), L(A("uuid"), S(u()))),
-             L(A("fp_rect"), L(A("start"), A(-cy), A(-cy)), L(A("end"), A(cy), A(cy)),
-               L(A("stroke"), L(A("width"), A(0.05)), L(A("type"), A("solid"))),
-               L(A("fill"), A("none")), L(A("layer"), S("F.CrtYd")), L(A("uuid"), S(u()))),
-             *pads)
+    return pads
+
+
+def chip_socket_footprint_em():
+    """Standard 2.54 mm female-header chip SOCKET for the die EMITTER (bottom)
+    face on the MAIN board F.Cu.  64 EM cathode through-hole pads on the 8x8 grid
+    (2.54 mm pitch, 17.78 mm span) + EM_ANODE common-anode pad one grid step left
+    of the grid, all 1.7 mm / 1.0 mm THT for a standard female-header strip /
+    machined socket.  The P1-style pin-scaffold chip module plugs its male emitter
+    pins DOWN into this socket.  4 NPTH M2 corner mount holes clamp + align the
+    sandwich.  Pad NAMES == QSSC_Chip_EM so chip_net_map_em() nets every contact
+    identically and route_signals._chip_fanout dog-bones them with the SAME
+    escape geometry as the ACF die footprint."""
+    pads = [_chip_socket_pad(f"EM{i}", *_chip_grid_xy(i)) for i in range(64)]
+    pads.append(_chip_socket_pad("EM_ANODE", SOCKET_COMMON_X, 0))
+    pads.extend(_socket_mnt_pads())
+    return _chip_socket_body(
+        "qssc:ChipSocket_2.54_EM", "ChipSocket_2.54_EM",
+        "Standard 2.54 mm female-header chip socket for the QSSC die EMITTER (bottom) face on the main board F.Cu; 64 EM cathode + EM_ANODE through-hole pads on a 2.54 mm 8x8 grid (17.78 mm span) + 4 NPTH M2 mount holes; the P1-style pin-scaffold chip module plugs its male emitter pins into this socket",
+        pads, "F.Cu")
+
+
+def chip_socket_footprint_det():
+    """Standard 2.54 mm female-header chip SOCKET for the die DETECTOR (top) face
+    on the DETECTOR HEAD B.Cu.  64 DET through-hole pads on the 8x8 grid (2.54 mm
+    pitch) + DET_COMMON common-back-electrode pad one grid step left of the grid,
+    all 1.7 mm / 1.0 mm THT.  The socket body sits on B.Cu (the head's bottom
+    face, which faces the chip); the P1-style pin-scaffold chip module plugs its
+    male detector pins UP into it.  Solder-side is F.Cu (the head's top face) --
+    the F.Cu area directly over the 8x8 grid must stay clear of SMD parts for
+    through-hole soldering access (verified during placement regen).  4 NPTH M2
+    corner mount holes.  Pad NAMES == QSSC_Chip_DET so chip_net_map_det() nets
+    every contact identically."""
+    pads = [_chip_socket_pad(f"DET{i}", *_chip_grid_xy(i)) for i in range(64)]
+    pads.append(_chip_socket_pad("DET_COMMON", SOCKET_COMMON_X, 0))
+    pads.extend(_socket_mnt_pads())
+    return _chip_socket_body(
+        "qssc:ChipSocket_2.54_DET", "ChipSocket_2.54_DET",
+        "Standard 2.54 mm female-header chip socket for the QSSC die DETECTOR (top) face on the detector head B.Cu; 64 DET + DET_COMMON through-hole pads on a 2.54 mm 8x8 grid (17.78 mm span) + 4 NPTH M2 mount holes; the P1-style pin-scaffold chip module plugs its male detector pins into this socket",
+        pads, "B.Cu")
 
 
 # ---- Conn_02x10_BTB -- board-to-board connector (main <-> detector head) -----
@@ -946,12 +998,16 @@ def authored_symbols():
                                   (-34.0, -10.16, 34.0, 16.51), value="QSSC_Chip_EM"))
     syms.append(custom_symbol_def("qssc", "QSSC_Chip_DET", "U", chip_pin_list_det(),
                                   (-34.0, -10.16, 34.0, 10.16), value="QSSC_Chip_DET"))
-    # Ironwood_SBT -- the commercial spring-pin SOCKET that holds the die emitter
-    # face on the main board (replaces the ACF QSSC_Chip_EM pad field).  Same 65
-    # electrical pins (64 EM + EM_ANODE) as QSSC_Chip_EM so chip_net_map_em() nets
-    # every contact; the 4 NPTH mount holes are footprint-only (no symbol pin).
-    syms.append(custom_symbol_def("qssc", "Ironwood_SBT", "U", chip_pin_list_em(),
-                                  (-34.0, -10.16, 34.0, 16.51), value="Ironwood_SBT"))
+    # ChipSocket_2.54_EM / ChipSocket_2.54_DET -- standard 2.54 mm female-header
+    # chip SOCKETS (off-the-shelf through-hole part).  ChipSocket_2.54_EM holds the
+    # die emitter face on the main board F.Cu (same 65 electrical pins as
+    # QSSC_Chip_EM); ChipSocket_2.54_DET holds the detector face on the head B.Cu
+    # (same 65 pins as QSSC_Chip_DET).  chip_net_map_em/det() net every contact;
+    # the 4 NPTH mount holes are footprint-only (no symbol pin).
+    syms.append(custom_symbol_def("qssc", "ChipSocket_2.54_EM", "U", chip_pin_list_em(),
+                                  (-34.0, -10.16, 34.0, 16.51), value="ChipSocket_2.54_EM"))
+    syms.append(custom_symbol_def("qssc", "ChipSocket_2.54_DET", "U", chip_pin_list_det(),
+                                  (-34.0, -10.16, 34.0, 10.16), value="ChipSocket_2.54_DET"))
     # Conn_02x10_BTB -- board-to-board connector between the main board and the
     # detector head (9-wire AD7616 SPI + 3V3/5V/GND).  Replicates the standard
     # 2x10 generic connector pin layout; the footprint is authored inline.
@@ -1073,7 +1129,8 @@ def replicated_symbol(lib, name, refpref, stdpinlist, value=None):
 SYM_NAME = {
     "qssc:XC7A35T_CSG324": "XC7A35T_CSG324",
     "qssc:QSSC_Chip": "QSSC_Chip", "qssc:QSSC_Chip_EM": "QSSC_Chip_EM",
-    "qssc:QSSC_Chip_DET": "QSSC_Chip_DET", "qssc:Ironwood_SBT": "Ironwood_SBT",
+    "qssc:QSSC_Chip_DET": "QSSC_Chip_DET",
+    "qssc:ChipSocket_2.54_EM": "ChipSocket_2.54_EM", "qssc:ChipSocket_2.54_DET": "ChipSocket_2.54_DET",
     "qssc:Conn_02x10_BTB": "Conn_02x10_BTB",
     "qssc:GVA-84": "GVA-84+",
     "qssc:AP2127K-1.0": "AP2127K-1.0", "qssc:AMS1117-1.8": "AMS1117-1.8",
@@ -1343,22 +1400,24 @@ def build_main_board():
     # The old design mated a swappable chip MODULE here via a 60-pin Samtec
     # LSHM-130 (J11) carrying a 64:1 analog MUX, one TIA, and an 8x8 emitter
     # crossbar.  That is GONE: every channel is now parallel.  The 130-pad bare
-    # die (65 pads/face: 64 electrodes + 1 common; 8x8 grid at 2.5 mm pitch, 1.2 mm
-    # pads) is clamped between this main board (die BOTTOM / emitter face on F.Cu,
-    # via the soldered Ironwood SBT socket) and the head board (die TOP /
-    # detector face on B.Cu, ACF contact).  On THIS (main) board the 64
+    # die (65 pads/face: 64 electrodes + 1 common; 8x8 grid at 2.54 mm pitch, 1.7 mm
+    # THT pads) is clamped between this main board (die BOTTOM / emitter face on
+    # F.Cu, via a standard 2.54 mm female-header socket ChipSocket_2.54_EM) and the
+    # head board (die TOP / detector face on B.Cu, via the matching
+    # ChipSocket_2.54_DET).  On THIS (main) board the 64
     # emitter_cat{i} cathode pads fan out to the 3x TLC5947 constant-current LED
     # driver, and the EM_ANODE pad is the common +12V_EMIT anode rail.  The 64
     # EM signal nets escape outward on F.Cu; the dog-bone vias (0.20 mm via 1.0 mm
     # out) drop to B.Cu for the router.
     # ==========================================================================
-    # The die sits EMITTER-DOWN in an Ironwood SBT open-top spring-pin socket
-    # (qssc:Ironwood_SBT) on F.Cu -- a real commercial socket (made-to-order,
-    # 0.30 mm pitch / 20 mm body) replaces the ACF QSSC_Chip_EM pad field.  The
-    # 65 contact pads net identically (chip_net_map_em) so the dog-bone fanout is
-    # unchanged; the head PCB still contacts the detector/TOP face via ACF/pogo
-    # (QSSC_Chip_DET on B.Cu).  Die removable (socket lid).
-    add("Uchip", "qssc:Ironwood_SBT", "Ironwood_SBT", "qssc:Ironwood_SBT",
+    # The die sits EMITTER-DOWN plugged into a standard 2.54 mm female-header
+    # SOCKET (qssc:ChipSocket_2.54_EM) on F.Cu -- an off-the-shelf through-hole
+    # part (8x8 grid at 2.54 mm pitch, 17.78 mm span on the 20 mm die body).  The
+    # P1-style pin-scaffold chip module plugs its male emitter pins DOWN into this
+    # socket.  The 65 contact pads net identically (chip_net_map_em) so the
+    # dog-bone fanout is unchanged; the head PCB carries the matching
+    # ChipSocket_2.54_DET on B.Cu for the detector/TOP face.  Die removable.
+    add("Uchip", "qssc:ChipSocket_2.54_EM", "ChipSocket_2.54_EM", "qssc:ChipSocket_2.54_EM",
         80, 55, pins=chip_net_map_em())
 
     # mw_gate drives the RF switch on THIS board (ADF4351 -> GVA-84+ -> SMA), so it
@@ -1714,10 +1773,12 @@ def build_emitter_driver():
 
 def build_detector_head():
     """Build the DETECTOR HEAD board components: the die TOP (detector) face
-    (QSSC_Chip_DET on B.Cu -- the head's bottom face contacts the die top face),
-    the 64-ch TLV9004 TIA + 4x AD7616 analog front-end (build_detector_analog),
-    and the BTB DAUGHTER connector (J12) that brings in +3V3 / +5V / GND and
-    carries the 9-wire AD7616 SPI back to the FPGA on the main board.
+    (ChipSocket_2.54_DET on B.Cu -- the head's bottom face contacts the die top
+    face via a standard 2.54 mm female-header socket; the P1-style pin-scaffold
+    chip module plugs its male detector pins UP into it), the 64-ch TLV9004 TIA +
+    4x AD7616 analog front-end (build_detector_analog), and the BTB DAUGHTER
+    connector (J12) that brings in +3V3 / +5V / GND and carries the 9-wire AD7616
+    SPI back to the FPGA on the main board.
 
     Power: +3V3 and +5V arrive through J12 (passive connector pins -- ERC sees
     no power_out driver), so they get PWR_FLAGs.  +5V_A (the AD7616 analog rail)
@@ -1725,7 +1786,7 @@ def build_detector_head():
     build_detector_analog) -- also flagged.  The head has no FPGA, no RF, no USB,
     no emitter driver -- it is purely the detector analog front-end + the die
     detector face."""
-    add("Uchip", "qssc:QSSC_Chip_DET", "QSSC_Chip_DET", "qssc:QSSC_Chip_DET",
+    add("Uchip", "qssc:ChipSocket_2.54_DET", "ChipSocket_2.54_DET", "qssc:ChipSocket_2.54_DET",
         80, 55, pins=chip_net_map_det())
     build_detector_analog()
     add_btb_connector("daughter")
@@ -1903,8 +1964,10 @@ def load_footprint_mod(fp_lib_id):
         return chip_footprint_em()
     if fp_lib_id == "qssc:Conn_02x10_BTB":  # board-to-board connector (authored)
         return conn_02x10_footprint()
-    if fp_lib_id == "qssc:Ironwood_SBT":    # die emitter-face spring-pin socket (authored)
-        return socket_footprint()
+    if fp_lib_id == "qssc:ChipSocket_2.54_EM":  # 2.54 mm female-header emitter socket (authored)
+        return chip_socket_footprint_em()
+    if fp_lib_id == "qssc:ChipSocket_2.54_DET":  # 2.54 mm female-header detector socket (authored)
+        return chip_socket_footprint_det()
     lib, name = fp_lib_id.split(":", 1)
     p = Path(FP_LIB) / f"{lib}.pretty" / f"{name}.kicad_mod"
     return parse(p.read_text())
@@ -2339,16 +2402,24 @@ def assign_pcb_positions():
     # assign_pcb_positions_head); this board carries FPGA + emitter + RF + USB +
     # power + the die EMITTER face (QSSC_Chip_EM).
     # Layout zones:
-    #   centre        QSSC_Chip_EM die (64 EM cathodes + EM_ANODE on F.Cu, 20x20 mm)
+    #   centre        ChipSocket_2.54_EM die (64 EM cathodes + EM_ANODE on F.Cu, 20x20 mm)
     #   right         FPGA CSG324 (324-ball BGA, moved off-centre to clear the die) + config flash
     #   top           power chain (left) + RF chain (ADF4351 -> GVA-84 -> SMA right edge)
-    #   bottom        USB (FT232 + USB-C bottom edge) + reset/JTAG (left edge)
+    #   bottom-left   USB-C (J10) + FT232 USB cluster -- all user-facing connectors
+    #                 live in the LEFT x<60 strip (the only main-board region NOT
+    #                 covered by the stacked detector head board, which spans main
+    #                 x[60,210]); reset/JTAG/MW-gate/5V+12V barrels also on the left
     #   top-left      BTB HOST J12 (9-wire SPI + power to the detector head)
     #   below die     3x TLC5947 constant-current LED driver (UE0/1/2 + Riref/Cem)
     # Edge-mount connectors sit at the board edge by design:
-    #   J2 barrel jack  -> left edge (rot 180, opening faces -x)
-    #   J10 USB-C       -> bottom edge (rot 180, opening overhangs +y)
-    #   J3 SMA          -> right edge (rot 0, jack overhangs +x)
+    #   J2 5V barrel   -> left edge (rot 180, opening faces -x)
+    #   J4 12V barrel  -> left edge (rot 180, opening faces -x)
+    #   J10 USB-C      -> bottom-LEFT edge (rot 180, opening overhangs +y) -- in the
+    #                     x<60 exposed strip so it is visible/reachable in a case
+    #                     (was bottom-centre x74, hidden under the head board)
+    #   J3 SMA         -> right edge (rot 0, jack overhangs +x past the head's edge)
+    #   J8 MW_GATE     -> left edge (x10, y56) -- was x150 under the head board
+    #                     (through-hole pins collided with the stacked head board)
     # Rotations are chosen so the footprint's native pad geometry is preserved
     # (USB-C and SMA pads collapse/short when rotated 90 deg -- see DRC notes).
     fixed = {
@@ -2369,7 +2440,7 @@ def assign_pcb_positions():
         # runs on B.Cu up to y~55 and across to the die EM_ANODE pad on the LEFT
         # edge (70,55) -- mid-height, clear of the EM (bottom) dog-bone via field.
         # C85/C86 bulk+HF decouple it right at the anode fanout (just left of the
-        # Ironwood_SBT socket courtyard x66.5, y~52/58).
+        # ChipSocket_2.54_EM socket courtyard x66.5, y~52/58).
         "J4": (10, 72, 180), "F2": (24, 72, 0), "C85": (64, 52, 0), "C86": (64, 58, 0),
         # ---- quantum die (centre) + FPGA (moved right off the die) ----
         "Uchip": (80, 55, 0),
@@ -2391,13 +2462,21 @@ def assign_pcb_positions():
         # VREFP decoupling just below-left of the FPGA.
         "U8": (106, 58, 0), "R75": (114, 54, 0), "R76": (114, 58, 0),
         "R77": (114, 62, 0), "C40": (118, 70, 0),
-        # USB (bottom): FT232 + USB-C bottom-edge + CC pulls.  FT232 moved off the
-        # die (was 76,62 -> inside the die courtyard) to below it.
-        "J1": (76, 90, 0), "J10": (74, 134, 180), "R71": (60, 100, 0), "R72": (64, 100, 0),
-        "J8": (150, 8, 0),
-        # RF chain (top-right): U3 ADF4351 + U5 GVA-84 -> J3 SMA right edge (moved
-        # to x204 for the wider 210 mm board; clear of the front-end which starts y=24).
-        "U3": (92, 30, 0), "U5": (106, 40, 0), "J3": (204, 12, 0),
+        # USB (bottom): FT232 + USB-C + CC pulls.  2026-09-08 the user dragged the
+        # whole USB-C + damping cluster UP ~20 mm in KiCad and moved FT232 right to
+        # the y~84 connector row; these are the exact saved coordinates back-ported
+        # so regen preserves the user's manual placement.
+        "J1": (115.9, 83.725, 0), "J10": (32.175, 114, 180), "R71": (24.175, 106, 0), "R72": (28.175, 106, 0),
+        "J8": (10, 92, 0),
+        # RF chain (top-right): U3 ADF4351 + U5 GVA-84 -> J3 SMA.  2026-09-08 the
+        # user dragged J3 off the right edge to (142.11,83) -- mid-board, lined up
+        # with FT232 on the y~84 row.  NOTE: SMA_Amphenol_132289_EdgeMount is an
+        # edge-launch footprint whose origin sits on a board edge so the jack
+        # overhangs off-board; at (142.11,83) it is NOT on any edge (board is
+        # 210x140, edges at x=0/210, y=0/140).  Routing to its pads is valid, but
+        # the mechanical connector launch needs either a board edge/cutout or a
+        # bulkhead/right-angle SMA -- flag for the user to confirm in KiCad.
+        "U3": (92, 30, 0), "U5": (106, 40, 0), "J3": (142.1125, 83, 0),
         "R67": (84, 26, 0), "C31": (84, 30, 0), "R68": (84, 34, 0),
         "C32": (100, 26, 0), "C33": (100, 30, 0), "R73": (100, 34, 0),
         "C34": (100, 40, 0), "C35": (110, 34, 0), "C36": (110, 40, 0), "L2": (110, 46, 0),
@@ -2413,10 +2492,15 @@ def assign_pcb_positions():
         "C41": (104, 46, 0),
         "J7": (10, 40, 0), "J9": (10, 26, 0),
         # ---- production-hardening pass 2026-09 (see add() block + §16) ----
-        # USB VBUS Schottky + bulk near the USB-C bottom edge (left of the die).
-        "D_USB": (66, 96, 0), "C84": (60, 92, 0),
-        # USB DP/DM series damping (right of the FT232, below the die)
-        "R78": (86, 84, 0), "R79": (90, 84, 0),
+        # USB VBUS Schottky + bulk near the USB-C connector (left of the die).
+        # 2026-09-08 user dragged this cluster up ~20 mm with J10.
+        "D_USB": (22.175, 100, 0), "C84": (30.175, 98, 0),
+        # USB DP/DM series damping next to the USB-C connector so the USB-C +
+        # its VBUS/CC/damping cluster is visible and reachable in a case.
+        # 2026-09-08 user dragged these up ~20 mm with J10; FT232 (J1) now sits
+        # on the same y~84 row (see above).  The DP/DM_F diff pair runs from
+        # FT232 to here.
+        "R78": (38.175, 102, 0), "R79": (42.175, 102, 0),
         # AMS1117 stability bulk + input bulk (clear of the SOT-223 courtyards
         # x[29.5,38.5]: 22uF output caps at x42, input bulk at x28)
         "C49": (40, 20, 0), "C50": (42, 28, 0), "C51": (28, 20, 0),
@@ -2433,6 +2517,15 @@ def assign_pcb_positions():
         "R80": (16, 22, 0), "R81": (16, 26, 0), "R82": (16, 30, 0),
         # Reset pull-down + debounce cap (J7 SW_PUSH pads reach x16.5, courtyard x18 -> x24)
         "R83": (24, 40, 0), "C68": (24, 44, 0),
+        # ---- emitter driver cluster (3x TLC5947 + 3x Riref + 3x Cem) ----
+        # 2026-09-08 the user dragged the whole cluster DOWN ~28 mm in KiCad (was
+        # y=78/86 just below the die -> y~106/114) and shifted x from 40/60/100 to
+        # ~56/79/103.  These explicit entries OVERRIDE the procedural UE/Riref/Cem
+        # branches below (the `if c["ref"] in fixed` check is first) so regen
+        # preserves the user's manual placement.
+        "UE0": (56.25, 105.8, 0), "UE1": (78.635, 106.35, 0), "UE2": (103.35, 105.575, 0),
+        "Riref0": (56.25, 113.8, 0), "Riref1": (78.635, 114.35, 0), "Riref2": (103.35, 113.575, 0),
+        "Cem0": (61.25, 113.8, 0), "Cem1": (83.635, 114.35, 0), "Cem2": (108.35, 113.575, 0),
     }
     for c in COMPONENTS:
         if c["ref"] in fixed:
