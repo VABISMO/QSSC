@@ -62,7 +62,16 @@ def track_width_nm(t):
 # separate ``VIATYPE_BLIND`` and ``VIATYPE_BURIED``. The blind vias these
 # tools place all start on an outer layer, so BLIND is the correct half of
 # the split on the newer bindings.
-VIATYPE_BLIND_BURIED = getattr(pcbnew, "VIATYPE_BLIND_BURIED", pcbnew.VIATYPE_BLIND)
+# Use a two-step lookup so the fallback is never evaluated when the primary
+# name exists (getattr evaluates its default arg eagerly -- the bare
+# pcbnew.VIATYPE_BLIND below used to crash on KiCad <= 9 even though
+# VIATYPE_BLIND_BURIED is present).
+if hasattr(pcbnew, "VIATYPE_BLIND_BURIED"):
+    VIATYPE_BLIND_BURIED = pcbnew.VIATYPE_BLIND_BURIED
+elif hasattr(pcbnew, "VIATYPE_BLIND"):
+    VIATYPE_BLIND_BURIED = pcbnew.VIATYPE_BLIND
+else:  # no blind/buried enum at all -- fall back to THROUGH so import never fails
+    VIATYPE_BLIND_BURIED = pcbnew.VIATYPE_THROUGH
 
 
 def exit_cleanly(code=0):
