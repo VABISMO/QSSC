@@ -1952,6 +1952,24 @@ def fp_net_pads(fp, netmap, net_index):
     return fp
 
 
+def fp_restamp_uuids(fp):
+    """Give every uuid in a loaded library footprint a FRESH value (recursive).
+
+    A system .kicad_mod carries ONE set of item uuids; stamping N instances of
+    that footprint verbatim duplicates all of them N times (every 0603 pad on
+    the board shared one uuid, all 16 TLV9004s reported pad uuids 16x). KiCad
+    resolves DRC findings uuid->item, so duplicates made violation reports name
+    arbitrary instances ("Pad 7 [DET_TIA57] von UT14" for a pad nowhere near
+    UT14). Re-stamp per instance so every uuid on the board is unique."""
+    for i, c in enumerate(fp):
+        if isinstance(c, list) and c:
+            if c[0] == ("atom", "uuid"):
+                fp[i] = L(A("uuid"), S(u()))
+            else:
+                fp_restamp_uuids(c)
+    return fp
+
+
 def emit_pcb(cfg):
     nets = all_nets()
     net_index = {n: i + 1 for i, n in enumerate(nets)}  # 0 reserved for unconnected
@@ -1982,6 +2000,7 @@ def emit_pcb(cfg):
         if not any(isinstance(x, list) and x and x[0] == ("atom", "uuid") for x in fp[1:]):
             fp.insert(2, L(A("uuid"), S(u())))
         fp = fp_net_pads(fp, c["pins"], net_index)
+        fp = fp_restamp_uuids(fp)
         footprints.append(fp)
 
     # Copper layer stack is cfg-driven: the main board is 6-layer HDI

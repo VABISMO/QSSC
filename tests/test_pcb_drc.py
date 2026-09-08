@@ -16,7 +16,13 @@ severity is masked, so we assert on violations + footprint errors, not
 unconnected, and confirm the unconnected severity is indeed "ignore" so a
 future rule change can't silently regress.
 
-Skips automatically where ``kicad-cli`` is not on PATH (CI has no KiCad).
+DRC runs with ``--refill-zones``: the checker evaluates the zone fill stored in
+the .kicad_pcb, and a fill computed before the last routing pass would report
+every later via/tracks-vs-plane as a 0.0 mm clearance phantom. Refilling makes
+the gate evaluate the ROUTING, not the fill's age; the fill freshness of the
+committed board is asserted separately in test_pcb_drc_freshness (so stale
+fills can still never hide behind the refill). CI installs KiCad and runs this
+unconditionally -- no skips.
 """
 from __future__ import annotations
 
@@ -26,19 +32,18 @@ import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 PCB = REPO / "hardware" / "pcb" / "qssc.kicad_pcb"
 PRO = REPO / "hardware" / "pcb" / "qssc.kicad_pro"
 
 
-def _have_kicad_cli() -> bool:
-    return shutil.which("kicad-cli") is not None
-
-
-pytestmark = pytest.mark.skipif(not _have_kicad_cli(),
-                                reason="kicad-cli not on PATH")
+def _run_drc(pcb: Path, out: Path):
+    return subprocess.run(
+        ["kicad-cli", "pcb", "drc", "--refill-zones", "--format", "json",
+         "--output", str(out), str(pcb)],
+        capture_output=True, text=True,
+    )
 
 
 def _severity(pro_path: Path, rule: str) -> str | None:
@@ -59,11 +64,7 @@ def test_drc_zero_violations(tmp_path):
     shutil.copy(PRO, dst_pro)
 
     out = tmp_path / "drc.json"
-    res = subprocess.run(
-        ["kicad-cli", "pcb", "drc", "--format", "json",
-         "--output", str(out), str(dst_pcb)],
-        capture_output=True, text=True,
-    )
+    res = _run_drc(dst_pcb, out)
     assert res.returncode == 0, f"kicad-cli pcb drc failed:\n{res.stderr}"
 
     data = json.loads(out.read_text())
@@ -91,4 +92,36 @@ def test_drc_zero_violations(tmp_path):
     assert sev == "ignore", (
         f"unconnected_items severity is {sev!r}, expected 'ignore'; "
         f"{len(unconnected)} unconnected item(s) would then be hard errors"
+    )
+
+
+def test_drc_committed_fills_are_fresh(tmp_path):
+    """The committed board's stored zone fill must be CURRENT: DRC on the board
+    as-committed (NO --refill-zones) must agree with the refilled verdict above.
+    A fill computed before the last routing/via pass turns every later
+    copper-vs-plane pair into a phantom clearance/hole-clearance violation --
+    that is how a board silently regresses in the GUI while the refilled CI
+    stays green. If this fails, re-pour the zones and commit the fresh fill
+    (``kicad-cli pcb drc --refill-zones --save-board ...``)."""
+    dst_pcb = tmp_path / "qssc.kicad_pcb"
+    dst_pro = tmp_path / "qssc.kicad_pro"
+    shutil.copy(PCB, dst_pcb)
+    shutil.copy(PRO, dst_pro)
+
+    out = tmp_path / "drc-stored.json"
+    res = subprocess.run(
+        ["kicad-cli", "pcb", "drc", "--format", "json",
+         "--output", str(out), str(dst_pcb)],
+        capture_output=True, text=True,
+    )
+    assert res.returncode == 0, f"kicad-cli pcb drc failed:\n{res.stderr}"
+
+    data = json.loads(out.read_text())
+    zone_types = {"clearance", "hole_clearance"}
+    stale = [v for v in data.get("violations", [])
+             if v.get("type") in zone_types]
+    assert stale == [], (
+        f"{len(stale)} stored-fill DRC violation(s) -- the committed zone fill "
+        f"is stale relative to the committed copper:\n"
+        + json.dumps(stale[:6], indent=2)
     )

@@ -41,7 +41,12 @@ jobs:
           pip install -e ".[api,dev]"
 
       - name: Run tests with coverage
+        # The PCB gate track has its own job (needs the kicad-cli/pcbnew
+        # binding from the distro KiCad -- see the `pcb` job below); here the
+        # software/physics/FPGA-sim/gcode suites run. No PCB test is SKIPPED
+        # anywhere: they run unconditionally in the pcb job.
         run: pytest --cov=qssc --cov=api --cov-report=term --cov-report=xml
+          --ignore-glob='tests/test_pcb_*'
 
       - name: CLI smoke test
         run: |
@@ -134,6 +139,33 @@ jobs:
           grep -q "synth_xilinx COMPLETE" fpga/synth/synth.log
           ! grep -qi "inferred latch" fpga/synth/synth.log
           grep -q "Fits XC7A35T.*yes" fpga/synth/SYNTH_REPORT.md
+
+  # ──────────────────────────────────────────────────────────────────────
+  # PCB — KiCad gates: DRC, stackup, connectivity graph, pin audit,
+  # routing rules + the full headless pipeline smoke (QSSC_SLOW=1).
+  # No skips: the committed boards are regression gates, so a missing
+  # KiCad or a stale zone fill FAILS the build.
+  # ──────────────────────────────────────────────────────────────────────
+  pcb:
+    name: PCB (KiCad DRC + connectivity)
+    runs-on: ubuntu-24.04
+    env:
+      QSSC_SLOW: "1"   # run the full routing-pipeline smoke too (~5 min there)
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install KiCad (kicad-cli + pcbnew python binding)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y kicad
+      - name: Install package (api + dev extras)
+        # The pcbnew binding is ABI-tied to the interpreter KiCad was built
+        # against (the distro python), so this venv layers OVER system
+        # site-packages instead of using setup-python.
+        run: |
+          python3 -m venv --system-site-packages .venv-pcb
+          .venv-pcb/bin/pip install -e ".[api,dev]"
+      - name: PCB test gates (DRC, connectivity, pin audit, routing)
+        run: .venv-pcb/bin/pytest tests/test_pcb_*.py
 
   # ──────────────────────────────────────────────────────────────────────
   # Frontend dashboard build

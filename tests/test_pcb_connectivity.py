@@ -17,7 +17,9 @@ connections on the PCBs to the chip and the components"): a board can be
 schematic-clean and DRC-clean yet still have dozens of nets whose pads are
 joined only by coincident labels, or half-routed die nets whose via dangles.
 
-Skips where ``pcbnew`` (system KiCad) is not importable (CI / .venv).
+No skips: ``tests/_pcb_env.ensure_pcbnew()`` resolves KiCad's binding (and
+applies the repo's swig compat patch); CI installs KiCad and runs this
+unconditionally. A missing board file is a FAILURE, not a skip.
 """
 from __future__ import annotations
 
@@ -25,7 +27,9 @@ from pathlib import Path
 
 import pytest
 
-pcbnew = pytest.importorskip("pcbnew")
+from _pcb_env import ensure_pcbnew
+
+pcbnew = ensure_pcbnew()
 
 REPO = Path(__file__).resolve().parent.parent
 BOARDS = {
@@ -71,11 +75,14 @@ class _UF:
 
 def _pad_layer_set(pad):
     """Layers a pad's copper lives on. A drilled pad (PTH/NPTH) has a barrel on
-    every copper layer; an SMD pad lives on its one surface layer only."""
+    every copper layer; an SMD pad lives on its one surface layer only.
+    NB: read the pad's LAYER SET, not GetLayer() -- KiCad 10 returns the
+    unflipped m_layer (0 == F.Cu) for back-side pads even when the copper
+    actually sits on B.Cu (IsOnLayer(B_Cu)=True, GetLayerSet()=={B.Cu,...})."""
     drill = pad.GetDrillSize()
     if drill.x > 0 or drill.y > 0:
         return None          # sentinel: all copper layers
-    return {pad.GetLayer()}
+    return set(pad.GetLayerSet().Seq())
 
 
 def _via_layer_set(board, via):
@@ -116,6 +123,41 @@ def _seg_seg_dist2(ax, ay, bx, by, cx, cy, dx_, dy_):
         _seg_point_dist2(cx, cy, dx_, dy_, bx, by),
     )
     return best
+
+
+def _orient(ax, ay, bx, by, px, py):
+    """Sign of the cross product AB x AP (+1/-1/0)."""
+    d = (bx - ax) * (py - ay) - (by - ay) * (px - ax)
+    return (d > 0) - (d < 0)
+
+
+def _on_seg(ax, ay, bx, by, px, py):
+    """Collinear point P: is it inside AB's bounding box?"""
+    return (min(ax, bx) <= px <= max(ax, bx)
+            and min(ay, by) <= py <= max(ay, by))
+
+
+def _seg_seg_intersect(ax, ay, bx, by, cx, cy, dx_, dy_):
+    """True if segments AB and CD share at least one point -- proper X
+    crossings AND collinear overlaps. The endpoint-distance fallback below
+    cannot see these (no endpoint touches the other segment), but two
+    same-net tracks that cross on one layer ARE electrically joined; a
+    first-route board has many such crossings."""
+    d1 = _orient(cx, cy, dx_, dy_, ax, ay)
+    d2 = _orient(cx, cy, dx_, dy_, bx, by)
+    d3 = _orient(ax, ay, bx, by, cx, cy)
+    d4 = _orient(ax, ay, bx, by, dx_, dy_)
+    if d1 != d2 and d3 != d4:
+        return True
+    if d1 == 0 and _on_seg(cx, cy, dx_, dy_, ax, ay):
+        return True
+    if d2 == 0 and _on_seg(cx, cy, dx_, dy_, bx, by):
+        return True
+    if d3 == 0 and _on_seg(ax, ay, bx, by, cx, cy):
+        return True
+    if d4 == 0 and _on_seg(ax, ay, bx, by, dx_, dy_):
+        return True
+    return False
 
 
 def _bbox_touches_seg(bx0, by0, bx1, by1, ax, ay, bxp, byp, expand):
@@ -236,7 +278,11 @@ def _touch(a, b) -> bool:
     """True if two copper geometries (same/shared layer) physically touch."""
     ta, tb = a["kind"], b["kind"]
     if ta == "trk" and tb == "trk":
-        # same layer (already filtered); segments touch if within combined half-widths
+        # same layer (already filtered); segments touch if they intersect OR
+        # come within the combined half-widths
+        if _seg_seg_intersect(a["ax"], a["ay"], a["bx"], a["by"],
+                              b["ax"], b["ay"], b["bx"], b["by"]):
+            return True
         d2 = _seg_seg_dist2(a["ax"], a["ay"], a["bx"], a["by"],
                             b["ax"], b["ay"], b["bx"], b["by"])
         reach = a["hw"] + b["hw"] + EPS_NM
@@ -310,29 +356,98 @@ def _dangling_non_plane(board_path: Path) -> list[str]:
                   if netnames.get(nc) and netnames[nc] not in PLANE_NETS)
 
 
+# Known pad-only (dangling, zero-copper) non-plane nets -- explicit, ratcheting
+# acceptance. ``mod_sync`` is the FPGA's 1 kHz lock-in modulation reference
+# (adc_reader.v drives it as a square wave) that currently has no destination
+# pad: the host modulates the microwave drive and the physical MW-gate drive is
+# a future addition. HARDWARE_DESIGN.md documents this as the schematic's one
+# intentional ``label_dangling`` ("1 label_dangling (mod_sync) -- all benign").
+# Any OTHER pad-only net is a netlist defect (a net with a single pad can never
+# be connected) and fails here.
+KNOWN_DANGLING = {
+    "main": {"mod_sync"},
+    "head": set(),
+}
+
+
 @pytest.mark.parametrize("name,path", list(BOARDS.items()))
 def test_no_dangling_non_plane_nets(name: str, path: Path):
-    if not path.exists():
-        pytest.skip(f"{path} not present")
-    dangling = _dangling_non_plane(path)
-    sample = ", ".join(dangling[:20]) + (" ..." if len(dangling) > 20 else "")
-    assert dangling == [], (
-        f"{name}: {len(dangling)} non-plane net(s) have NO copper at all "
-        f"(pad-only, dangling): {sample}"
+    assert path.exists(), (
+        f"{name}: board file {path} is missing -- it is committed source of "
+        "truth and must exist"
     )
+    dangling = _dangling_non_plane(path)
+    unexpected = [n for n in dangling if n not in KNOWN_DANGLING[name]]
+    assert not unexpected, (
+        f"{name}: {len(unexpected)} non-plane net(s) have NO copper at all "
+        f"(pad-only, dangling): {', '.join(unexpected[:20])}. A pad-only net "
+        f"can never carry current -- net its partner pad or leave the pad "
+        f"unnetted."
+    )
+
+
+# Known split nets -- the explicit, ratcheting acceptance list. This is NOT a
+# skip: the graph check runs on every net, and any net that regresses (a new
+# split on a previously complete net) FAILS here. Shrink the sets as routing
+# completes -- never grow them.
+#
+# main (1): USB_DM. Upstream b322859 (PR #39) placed 0.20 mm HDI via-in-pads
+#   on the 10 trapped interior config/JTAG/SPI/clock BGA balls, closing 8 of
+#   the 11 previously split nets (CONF_DONE, SPI_CCLK, SPI_D2, SPI_D3, TDI,
+#   TMS, VREFP, clk_100mhz); upstream 5816e5c (pcb/refclk-shorts-fix) then
+#   routed refclk_25m to U3.ADF4351 pad 29 and closed em_blank by making its
+#   via-in-pad blind F.Cu->In3.Cu. Only the USB-C D- pair tie (USB_DM) remains
+#   -- a documented manual touch-up (90-ohm diff pair, hand-routed).
+#
+# head (29): the die-bus escape re-route is under way. Upstream commit
+#   33c2a12 (PR #34, "head board DRC-clean for production") had deleted the
+#   In1.Cu + In3.Cu routing of the DET bus as "FreeRouting artifacts"
+#   (~1800 tracks + their vias) without re-routing it -- 97 nets regressed
+#   from complete to split (129 on this metric: all DET_IN but 10, most
+#   DET_TIA, the J12 ADC SPI wires), hidden from `kicad-cli pcb drc` by
+#   chip_module.kicad_pro's unconnected_items/track_dangling/via_dangling
+#   "ignore" settings. Upstream 2b24f91 (PR #40, FreeRouting cycle 1) re-routed
+#   the bus and closed 100 of the 129 splits; the 15 DET_IN + 14 DET_TIA nets
+#   below remain. This list documents that state; every entry must disappear
+#   again as the bus is re-routed.
+KNOWN_SPLIT = {
+    "main": {
+        "USB_DM",
+    },
+    "head": {
+        "DET_IN15", "DET_IN21", "DET_IN28", "DET_IN29", "DET_IN3", "DET_IN30",
+        "DET_IN36", "DET_IN38", "DET_IN42", "DET_IN43", "DET_IN45", "DET_IN48",
+        "DET_IN59", "DET_IN7", "DET_IN9",
+        "DET_TIA10", "DET_TIA11", "DET_TIA19", "DET_TIA20", "DET_TIA30",
+        "DET_TIA34", "DET_TIA4", "DET_TIA47", "DET_TIA50", "DET_TIA52",
+        "DET_TIA54", "DET_TIA56", "DET_TIA6", "DET_TIA8",
+    },
+}
 
 
 @pytest.mark.parametrize("name,path", list(BOARDS.items()))
 def test_nets_one_component(name: str, path: Path):
     """Every non-plane net's pads must sit in a single connected copper
     component -- a split net is a half-routed connection (the die-bus
-    dog-bone via that never closed to its TLC5947/TIA target)."""
-    if not path.exists():
-        pytest.skip(f"{path} not present")
+    dog-bone via that never closed to its TLC5947/TIA target). Nets on
+    ``KNOWN_SPLIT[name]`` are the committed, explicitly accepted incomplete
+    routes; any split OUTSIDE that set is a regression and fails."""
+    assert path.exists(), (
+        f"{name}: board file {path} is missing -- it is committed source of "
+        "truth and must exist"
+    )
     split = _split_nets(path)
-    sample = ", ".join(f"{k}({v})" for k, v in sorted(split.items())[:20])
-    sample += " ..." if len(split) > 20 else ""
-    assert split == {}, (
-        f"{name}: {len(split)} non-plane net(s) are split across >1 copper "
-        f"component (pads not all connected): {sample}"
+    unexpected = {k: v for k, v in split.items() if k not in KNOWN_SPLIT[name]}
+    stale = sorted(set(KNOWN_SPLIT[name]) - set(split))
+    sample = ", ".join(f"{k}({v})" for k, v in sorted(unexpected.items())[:20])
+    assert not unexpected, (
+        f"{name}: {len(unexpected)} non-plane net(s) are split across >1 "
+        f"component and are NOT on the accepted KNOWN_SPLIT list: {sample}. "
+        f"If this net was ALWAYS split, add it to KNOWN_SPLIT with a comment; "
+        f"if it used to be complete, this is a routing regression."
+    )
+    assert not stale, (
+        f"{name}: net(s) {stale} are on the KNOWN_SPLIT acceptance list but "
+        f"are now fully connected -- shrink KNOWN_SPLIT (the ratchet only "
+        f"tightens)."
     )
