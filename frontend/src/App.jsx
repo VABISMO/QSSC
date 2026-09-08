@@ -12,23 +12,23 @@ import {
 // commands, so every command we added is always visible. The live API list
 // (fpga.protocol) takes precedence when it serves the full set.
 const FALLBACK_PROTOCOL = [
-  { cmd: 'DRIVE_EMITTER', args: 'index duration_ms', desc: 'pump one CQD emitter at full grayscale (gs=4095)' },
-  { cmd: 'SET_EMITTER', args: 'index level(0..4095)', desc: "arm one channel's 12-bit grayscale level" },
-  { cmd: 'DRIVE_PATTERN', args: 'duration_ms', desc: 'fire ALL armed channels in parallel' },
-  { cmd: 'CLEAR_EMITTERS', args: '—', desc: 'disarm all channels (gs=0)' },
-  { cmd: 'APPLY_PULSE', args: 'qubit freq_khz amp duration_ns phase_mrad', desc: 'program the ADF4351 microwave pulse' },
-  { cmd: 'READ_DETECTOR', args: 'site', desc: 'one AD7616 16-bit photocurrent sample' },
-  { cmd: 'READ_DETECTORS', args: '—', desc: 'all 64 detector channels in one parallel frame' },
-  { cmd: 'CLEAR_DETECTORS', args: '—', desc: 'no-op on the ADC (no counters to clear)' },
-  { cmd: 'CALIBRATE', args: '—', desc: 'emitter→site→detector sweep, builds the readout LUT' },
-  { cmd: 'READ_RNG', args: 'n_bytes', desc: 'harvest n_bytes of von-Neumann-debiased AD7616 LSB-noise entropy (qrng_entropy.v)' },
-  { cmd: 'ODMR_SWEEP', args: 'qubit f_start_khz f_stop_khz n_points', desc: 'sweep the ADF4351 across the NV resonance, one AD7616 sample per point' },
-  { cmd: 'READ_COMPASS', args: '[n_avg]', desc: '4-axis ODMR doublet fit → ambient B-vector + heading (compass_measure)' },
-  { cmd: 'READ_GYRO', args: 'T_ns', desc: 'Ramsey π/2–T–π/2 → rotation rate (gyro_measure)' },
-  { cmd: 'READ_LOCKIN', args: 'ref_khz n_cycles', desc: 'lock-in accumulator: on-minus-off differential over n cycles (lockin_integrated_readout)' },
-  { cmd: 'RUN_SEQUENCE', args: 'kind n_windows', desc: 'pulse-sequence engine stub: ramsey / hahn / cpmg → n readout codes (RTL pending)' },
-  { cmd: 'STATUS', args: '—', desc: 'board self-status: PLL lock, ADC busy, rail voltages, die temperature' },
-  { cmd: 'RESET', args: '—', desc: 'soft reset of the TLC5947 / ADF4351 / ADC peripheral state' },
+  { cmd: 'DRIVE_EMITTER', args: 'index duration_ms', reply: 'OK / ERR', desc: 'pump one CQD emitter at full grayscale (gs=4095)' },
+  { cmd: 'SET_EMITTER', args: 'index level(0..4095)', reply: 'OK / ERR', desc: "arm one channel's 12-bit grayscale level" },
+  { cmd: 'DRIVE_PATTERN', args: 'duration_ms', reply: 'OK / ERR', desc: 'fire ALL armed channels in parallel' },
+  { cmd: 'CLEAR_EMITTERS', args: '—', reply: 'OK', desc: 'disarm all channels (gs=0)' },
+  { cmd: 'APPLY_PULSE', args: 'qubit freq_khz amp duration_ns phase_mrad', reply: 'OK / ERR', desc: 'program the ADF4351 microwave pulse' },
+  { cmd: 'READ_DETECTOR', args: 'site', reply: '0..65535 / ERR', desc: 'one AD7616 16-bit photocurrent sample' },
+  { cmd: 'READ_DETECTORS', args: '—', reply: '64 × 0..65535', desc: 'all 64 detector channels in one parallel frame' },
+  { cmd: 'CLEAR_DETECTORS', args: '—', reply: 'OK', desc: 'no-op on the ADC (no counters to clear)' },
+  { cmd: 'CALIBRATE', args: '—', reply: 'OK', desc: 'emitter→site→detector sweep, builds the readout LUT' },
+  { cmd: 'READ_RNG', args: 'n_bytes', reply: '<hex> <raw> <kept> <rate> / ERR', desc: 'harvest n_bytes of von-Neumann-debiased AD7616 LSB-noise entropy (qrng_entropy.v)' },
+  { cmd: 'ODMR_SWEEP', args: 'qubit f_start_khz f_stop_khz n_points', reply: '<n> f0 c0 f1 c1 … / ERR', desc: 'sweep the ADF4351 across the NV resonance, one AD7616 sample per point' },
+  { cmd: 'READ_COMPASS', args: '[n_avg]', reply: '<B_nT> <heading°> <elev°> <sens_µT> <axes> / ERR', desc: '4-axis ODMR doublet fit → ambient B-vector + heading (compass_measure)' },
+  { cmd: 'READ_GYRO', args: 'T_ns', reply: '<rate_dps> <noise_dps> <t2_µs> <grade> / ERR', desc: 'Ramsey π/2–T–π/2 → rotation rate (gyro_measure)' },
+  { cmd: 'READ_LOCKIN', args: 'ref_khz n_cycles', reply: '<diff> <sigma> <snr1> <snrN> / ERR', desc: 'lock-in accumulator: on-minus-off differential over n cycles (lockin_integrated_readout)' },
+  { cmd: 'RUN_SEQUENCE', args: 'kind n_windows', reply: '<n> c0 c1 … / ERR', desc: 'pulse-sequence engine stub: ramsey / hahn / cpmg → n readout codes (RTL pending)' },
+  { cmd: 'STATUS', args: '—', reply: 'PLL_LOCKED … VCC3V3_mv … TEMP_C …', desc: 'board self-status: PLL lock, ADC busy, rail voltages, die temperature' },
+  { cmd: 'RESET', args: '—', reply: 'OK', desc: 'soft reset of the TLC5947 / ADF4351 / ADC peripheral state' },
 ]
 
 const PROFILES = [
@@ -229,6 +229,10 @@ export default function App() {
   const [mwDur, setMwDur] = useState(200)              // ns
   const [mwPhase, setMwPhase] = useState(0)            // mrad
   const [rawCmd, setRawCmd] = useState('')
+  // command-reference modal (FPGA section) — the full firmware-command table
+  // opens in a modal triggered by the "Command reference" button under the
+  // Raw command fieldset, instead of being rendered inline as a section.
+  const [cmdRefOpen, setCmdRefOpen] = useState(false)
   // hardware QRNG (ADC-noise entropy -> Ed25519 keypair + cert)
   const [qrng, setQrng] = useState(null)
   const [qrngErr, setQrngErr] = useState(null)
@@ -247,6 +251,14 @@ export default function App() {
     api.fpgaInfo().then(setFpga).catch(e => setFpgaErr(e.message)).finally(() => setFpgaLoading(false))
   }, [])
   useEffect(() => { if (mainTab === 'fpga' && !fpga) refreshFpga() }, [mainTab, fpga, refreshFpga])
+
+  // Close the command-reference modal on Escape (overlay click + ✕ also close it).
+  useEffect(() => {
+    if (!cmdRefOpen) return
+    const onKey = (e) => { if (e.key === 'Escape') setCmdRefOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [cmdRefOpen])
 
   const sendFpga = useCallback((command) => {
     if (!command || fpgaBusy) return
@@ -716,6 +728,10 @@ export default function App() {
                   </div>
                 </div>
               </div>
+
+              <div className="fpga-quickrow" style={{ marginTop: 2 }}>
+                <button type="button" className="ghost" onClick={() => setCmdRefOpen(true)}>Command reference</button>
+              </div>
             </div>
 
             {/* RIGHT: reply + detector heatmap + log */}
@@ -783,23 +799,30 @@ export default function App() {
             </div>
           </div>
 
-          {/* PROTOCOL REFERENCE */}
-          <div className="section-title">Command protocol reference</div>
-          <div className="card">
-            <h2><span className="dot" />Firmware command set <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(fpga/rtl/command_parser.v ↔ qssc.simulator)</span></h2>
-            <div className="hint">The Python FPGAConnection and the RTL command parser implement exactly these verbs. SET_THRESHOLD was removed by the AD7616 pivot → ERR.</div>
-            <div className="fpga-proto">
-              <div className="fpga-proto-hd">Command</div><div className="fpga-proto-hd">Args</div><div className="fpga-proto-hd">Reply</div><div className="fpga-proto-hd">Description</div>
-              {fpga?.protocol?.map(p => (
-                <React.Fragment key={p.cmd}>
-                  <div className="mono fpga-proto-cmd">{p.cmd}</div>
-                  <div className="mono fpga-proto-args">{p.args}</div>
-                  <div className="mono fpga-proto-reply">{p.reply}</div>
-                  <div className="muted fpga-proto-desc">{p.desc}</div>
-                </React.Fragment>
-              ))}
-            </div>
-          </div>
+          {/* COMMAND-REFERENCE MODAL (replaces the inline protocol-reference section) */}
+          {cmdRefOpen && (() => {
+            const proto = (fpga?.protocol?.length >= FALLBACK_PROTOCOL.length ? fpga.protocol : FALLBACK_PROTOCOL)
+            return (
+              <div className="cmd-ref-overlay" onClick={() => setCmdRefOpen(false)} role="dialog" aria-modal="true" aria-label="Firmware command set">
+                <div className="cmd-ref-modal" onClick={e => e.stopPropagation()}>
+                  <button type="button" className="cmd-ref-close" onClick={() => setCmdRefOpen(false)} aria-label="Close command reference">✕</button>
+                  <h2><span className="dot" />Firmware command set <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(fpga/rtl/command_parser.v ↔ qssc.simulator)</span></h2>
+                  <div className="hint">The Python FPGAConnection and the RTL command parser implement exactly these verbs. SET_THRESHOLD was removed by the AD7616 pivot → ERR.</div>
+                  <div className="fpga-proto">
+                    <div className="fpga-proto-hd">Command</div><div className="fpga-proto-hd">Args</div><div className="fpga-proto-hd">Reply</div><div className="fpga-proto-hd">Description</div>
+                    {proto.map(p => (
+                      <React.Fragment key={p.cmd}>
+                        <div className="mono fpga-proto-cmd">{p.cmd}</div>
+                        <div className="mono fpga-proto-args">{p.args}</div>
+                        <div className="mono fpga-proto-reply">{p.reply}</div>
+                        <div className="muted fpga-proto-desc">{p.desc}</div>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
 
           {/* HARDWARE QRNG — physical entropy from the AD7616 noise floor */}
           <div className="section-title">Hardware QRNG — physical entropy from the AD7616 noise floor</div>
