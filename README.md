@@ -359,23 +359,31 @@ failed test/parse/sim run blocks both deploys). It then:
 
 ### Fabrication protocol
 
-- [`docs/FABRICATION_PROTOCOL_Diamond.md`](docs/FABRICATION_PROTOCOL_Diamond.md)
-  — 5-section lab fabrication protocol for the **canonical NV-diamond** compute
-  chip (CQD emitter array, CVD diamond + NV⁻ engineering, on-chip graphene/MoS₂
-  photodetectors, waveguides/stacking/thermal management, safety), validated
-  against landmark publications.
-- [`docs/FABRICATION_PROTOCOL.md`](docs/FABRICATION_PROTOCOL.md) — hBN V_B⁻
-  sensor-variant protocol (CQD emitter array, hBN exfoliation + defect
-  engineering + PMMA, on-chip 2D photodetectors, …).
-- [`docs/FABRICATION_PROTOCOL_SiC.md`](docs/FABRICATION_PROTOCOL_SiC.md) —
-  SiC V_Si variant.
-- [`docs/protocol.html`](docs/protocol.html) /
-  [`protocol_diamond.html`](docs/protocol_diamond.html) /
-  [`protocol_sic.html`](docs/protocol_sic.html) — branded, print-ready HTML
-  renders (regenerate with `python3 tools/build_protocol_html.py`).
-- [`docs/QSSC_fabrication_protocol.pdf`](docs/QSSC_fabrication_protocol.pdf) /
-  [`…_diamond.pdf`](docs/QSSC_fabrication_protocol_diamond.pdf) /
-  [`…_sic.pdf`](docs/QSSC_fabrication_protocol_sic.pdf) — PDF exports.
+- The canonical protocols live as **structured Python data** in
+  [`qssc/protocol.py`](qssc/protocol.py) — served by the REST API
+  (`/api/protocol`) and rendered by the dashboard protocol viewer. The
+  standalone `docs/FABRICATION_PROTOCOL*.md` / `.html` / `.pdf` renderings
+  were removed in `a3ab46b` so the API and dashboard consume one source
+  (decision: [ADR-0007](docs/adr/0007-fabrication-protocol-as-python-data.md)).
+- [`docs/fabrication/QSSC_fabrication_protocol_diamond.pdf`](docs/fabrication/QSSC_fabrication_protocol_diamond.pdf)
+  — non-canonical reference PDF export of the NV-diamond protocol
+  (CQD emitter array, CVD diamond + NV⁻ engineering, on-chip
+  graphene/MoS₂ photodetectors, waveguides/stacking/thermal management,
+  safety).
+
+### Architecture & decision records
+
+- [`docs/architecture/`](docs/architecture) — Mermaid diagram hub
+  complementing the diagrams above: end-to-end system overview (incl.
+  host software), the `READ_DETECTORS` signal chain, the FPGA RTL module
+  graph, and the power/clock trees.
+- [`docs/adr/`](docs/adr) — architecture decision records (ADR-0001 …
+  ADR-0008): why the readout pivoted to 4× AD7616, why the die sits in a
+  two-board sandwich, why 3× TLC5947 on +12 V_EMIT, why CSG324, and the
+  docs-layout decisions (incl. datasheets staying in `hardware/`).
+- [`hardware/datasheets/DATASHEETS.md`](hardware/datasheets/DATASHEETS.md)
+  — per-component datasheet index; the authoritative component reference
+  (kept next to the hardware design doc, see ADR-0008).
 
 ### Presentation
 
