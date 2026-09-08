@@ -2488,9 +2488,16 @@ def assign_pcb_positions_head():
     main x[140,208] and lands at head x[80,148] here.  Spacing is unchanged so
     the verified non-overlap is preserved.
 
-    Zones: die centre-left (20,55) -> TIA bank (y24-43) -> 4x AD7616 2x2 grid
-    (y44-92 + 7-cap decoupling columns) -> 64x Rf/Cf feedback (y100-124) ->
-    +5V_A ferrite rail + DET_REF divider at the zone edges -> J12 top-left."""
+    Zones: die centre-left (20,55) -> 4x4 TLV9004 TIA grid with each TIA's 4
+    Rf/Cf feedback pairs clustered BESIDE it (y16-56, ~3mm summing-node traces,
+    channels A,B left / C,D right of each TIA) -> 4x AD7616 2x2 grid (y60-107 +
+    7-cap decoupling columns) -> +5V_A ferrite rail at the bottom edge; DET_REF
+    divider left of the TIA grid; J12 top-left.  Clustering Rf/Cf at the TIA
+    (instead of a remote bottom bank) keeps the inverting-input summing node to
+    a ~3mm trace -- minimal parasitic C on the TIA input -- AND means no
+    feedback route has to cross the AD7616 zone, which is what stalled the
+    router (3 FreeRouting cycles converged at 20 split nets with the Rf/Cf bank
+    83mm from the TIAs).  Netlist is unchanged; only placement moves."""
     fixed = {
         "Uchip": (20, 55, 0),     # die TOP/detector face (B.Cu pads face the die)
         "J12": (50, 14, 0),       # BTB DAUGHTER -- mates with main J12 (110,14)
@@ -2498,55 +2505,61 @@ def assign_pcb_positions_head():
     for c in COMPONENTS:
         if c["ref"] in fixed:
             c["pcb_x"], c["pcb_y"], c["pcb_rot"] = fixed[c["ref"]]
-        elif c["ref"].startswith("UT"):          # 16x TLV9004 TIA (8 cols x 2 rows)
-            j = int(c["ref"][2:]); r, col = j // 8, j % 8
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 84 + col * 8, 24 + r * 8, 0
-        elif c["ref"].startswith("Cut"):         # 16x TLV9004 decoupling (8 cols x 2 rows)
-            j = int(c["ref"][3:]); r, col = j // 8, j % 8
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 84 + col * 8, 37 + r * 3, 0
-        elif c["ref"].startswith("UAD"):         # 4x AD7616 ADC (2x2 grid, 14mm LQFP-80)
+        elif c["ref"].startswith("UT"):          # 16x TLV9004 TIA (4x4 grid, 16mm col x 10mm row)
+            j = int(c["ref"][2:]); col, row = j % 4, j // 4
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 84 + col * 16, 20 + row * 10, 0
+        elif c["ref"].startswith("Cut"):         # 16x TLV9004 decoupling (below each TIA, near V+/V- pins)
+            j = int(c["ref"][3:]); col, row = j % 4, j // 4
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 84 + col * 16, 20 + row * 10 + 5.0, 0
+        elif c["ref"].startswith("UAD"):         # 4x AD7616 ADC (2x2 grid, 14mm LQFP-80), shifted +16mm y
             j = int(c["ref"][3:])
-            grid = [(90, 52), (126, 52), (90, 82), (126, 82)]
+            grid = [(90, 68), (126, 68), (90, 98), (126, 98)]
             c["pcb_x"], c["pcb_y"], c["pcb_rot"] = grid[j][0], grid[j][1], 0
-        elif c["ref"].startswith("CuaB"):        # AD7616 VCC bulk 10uF (per chip, decap column)
+        elif c["ref"].startswith("CuaB"):        # AD7616 VCC bulk 10uF (per chip, decap column, +16mm y)
             j = int(c["ref"][4:]); x = 104 if j in (0, 2) else 140
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = x, (44 if j in (0, 1) else 74) + 3, 0
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = x, (60 if j in (0, 1) else 90) + 3, 0
         elif c["ref"].startswith("Cua"):         # AD7616 VCC HF 100nF (per chip)
             j = int(c["ref"][3:]); x = 104 if j in (0, 2) else 140
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = x, (44 if j in (0, 1) else 74) + 0, 0
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = x, (60 if j in (0, 1) else 90) + 0, 0
         elif c["ref"].startswith("Cud"):         # AD7616 VDRIVE 100nF (per chip)
             j = int(c["ref"][3:]); x = 104 if j in (0, 2) else 140
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = x, (44 if j in (0, 1) else 74) + 6, 0
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = x, (60 if j in (0, 1) else 90) + 6, 0
         elif c["ref"].startswith("Cur"):         # AD7616 REFCAP 100nF (per chip)
             j = int(c["ref"][3:]); x = 104 if j in (0, 2) else 140
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = x, (44 if j in (0, 1) else 74) + 9, 0
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = x, (60 if j in (0, 1) else 90) + 9, 0
         elif c["ref"].startswith("Crio"):        # AD7616 REFINOUT 100nF (per chip)
             j = int(c["ref"][4:]); x = 104 if j in (0, 2) else 140
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = x, (44 if j in (0, 1) else 74) + 12, 0
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = x, (60 if j in (0, 1) else 90) + 12, 0
         elif c["ref"].startswith("Crgc"):        # AD7616 REGCAP 1uF (per chip)
             j = int(c["ref"][4:]); x = 104 if j in (0, 2) else 140
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = x, (44 if j in (0, 1) else 74) + 15, 0
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = x, (60 if j in (0, 1) else 90) + 15, 0
         elif c["ref"].startswith("Crgd"):        # AD7616 REGCAPD 1uF (per chip)
             j = int(c["ref"][4:]); x = 104 if j in (0, 2) else 140
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = x, (44 if j in (0, 1) else 74) + 18, 0
-        elif c["ref"].startswith("Rf"):           # 64x TIA feedback R (8 cols x 8 rows)
-            i = int(c["ref"][2:]); r, col = i // 8, i % 8
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 84 + col * 8, 104 + r * 3, 0
-        elif c["ref"].startswith("Cf"):           # 64x TIA feedback C (8 cols x 8 rows, +3mm x)
-            i = int(c["ref"][2:]); r, col = i // 8, i % 8
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 87 + col * 8, 104 + r * 3, 0
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = x, (60 if j in (0, 1) else 90) + 18, 0
+        elif c["ref"].startswith("Rf"):           # 64x TIA feedback R -- clustered BESIDE its TIA (vertical)
+            i = int(c["ref"][2:]); j, k = i // 4, i % 4   # TIA j, channel k (A,B,C,D)
+            cx, cy = 84 + (j % 4) * 16, 20 + (j // 4) * 10
+            sx = -1 if k < 2 else 1            # channels A,B left of TIA; C,D right
+            sy = -1 if k in (0, 3) else 1      # A,D top (pins 1/14); B,C bottom (pins 7/8)
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = cx + sx * 5.2, cy + sy * 2.2, 90
+        elif c["ref"].startswith("Cf"):           # 64x TIA feedback C -- beside its Rf (outer column, vertical)
+            i = int(c["ref"][2:]); j, k = i // 4, i % 4
+            cx, cy = 84 + (j % 4) * 16, 20 + (j // 4) * 10
+            sx = -1 if k < 2 else 1
+            sy = -1 if k in (0, 3) else 1
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = cx + sx * 7.0, cy + sy * 2.2, 90
         elif c["ref"] == "FB_A":                 # +5V_A ferrite (zone bottom-left)
             c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 80, 128, 0
         elif c["ref"] == "C_Abulk":              # +5V_A bulk/HF decoupling
             c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 86, 128, 0
         elif c["ref"] == "C_ahf":
             c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 86, 132, 0
-        elif c["ref"] == "Rref1":               # DET_REF 1.65V divider (zone top)
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 80, 18, 0
+        elif c["ref"] == "Rref1":               # DET_REF 1.65V divider (left of TIA grid, clear of die/J12)
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 40, 30, 0
         elif c["ref"] == "Rref2":
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 84, 18, 0
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 44, 30, 0
         elif c["ref"] == "Cref":
-            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 88, 18, 0
+            c["pcb_x"], c["pcb_y"], c["pcb_rot"] = 48, 30, 0
         else:
             c.setdefault("pcb_x", 20)
             c.setdefault("pcb_y", 70)

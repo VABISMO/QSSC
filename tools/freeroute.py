@@ -192,6 +192,16 @@ else:
     cmd = ["xvfb-run", "-a", java_exe, "-jar", str(jar),
            "-de", str(dsn), "-do", str(ses), "-mt", MT, "-mp", MP]
 print("  ", " ".join(map(str, cmd)))
+
+# Delete any STALE session file before launching FreeRouting. If FreeRouting
+# fails to run (missing jar, crash, bad DSN) it produces no new SES, and the
+# check below would otherwise see LAST cycle's SES still on disk and silently
+# re-import those old routes on top of the current board -- duplicating tracks
+# and churning the file. A failed run must abort, not paper over with stale.
+if ses.exists():
+    ses.unlink()
+    print(f"  removed stale {ses.name} (will abort if FreeRouting produces none)")
+
 with open(log, "w") as lf:
     p = subprocess.run(cmd, stdout=lf, stderr=subprocess.STDOUT)
 print(f"  freerouting exit: {p.returncode}  ses exists: {ses.exists()}  size:",

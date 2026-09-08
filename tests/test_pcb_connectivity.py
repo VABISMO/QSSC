@@ -71,11 +71,21 @@ class _UF:
 
 def _pad_layer_set(pad):
     """Layers a pad's copper lives on. A drilled pad (PTH/NPTH) has a barrel on
-    every copper layer; an SMD pad lives on its one surface layer only."""
+    every copper layer; an SMD pad lives on its one surface layer only.
+
+    NB: ``pad.GetLayer()`` is NOT authoritative for SMD pads in KiCad 8 -- it
+    returns F_Cu for a B.Cu SMD pad (the pad's real layer set is
+    [B.Cu, B.Mask], and IsOnLayer(B_Cu) is True, but GetLayer() defaults to the
+    front copper).  Using GetLayer() here makes the union-find place every B.Cu
+    detector-die pad on F.Cu, so it never shares a layer with its B.Cu escape
+    stub -> the net is falsely reported "split" even though it is routed
+    end-to-end.  Derive the copper layer set from ``GetLayerSet()`` instead,
+    keeping only real copper layers (layer id <= B_Cu; masks/silk are all >B_Cu)."""
     drill = pad.GetDrillSize()
     if drill.x > 0 or drill.y > 0:
         return None          # sentinel: all copper layers
-    return {pad.GetLayer()}
+    copper = [l for l in pad.GetLayerSet().Seq() if l <= pcbnew.B_Cu]
+    return set(copper) if copper else {pad.GetLayer()}
 
 
 def _via_layer_set(board, via):
