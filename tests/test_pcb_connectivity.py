@@ -391,52 +391,36 @@ def test_no_dangling_non_plane_nets(name: str, path: Path):
 # split on a previously complete net) FAILS here. Shrink the sets as routing
 # completes -- never grow them.
 #
-# main (11): the headless router cannot escape every interior 0.8 mm-pitch
-#   CSG324 BGA ball, so those nets genuinely span >1 copper component.
+# main (1): USB_DM. Upstream b322859 (PR #39) placed 0.20 mm HDI via-in-pads
+#   on the 10 trapped interior config/JTAG/SPI/clock BGA balls, closing 8 of
+#   the 11 previously split nets (CONF_DONE, SPI_CCLK, SPI_D2, SPI_D3, TDI,
+#   TMS, VREFP, clk_100mhz); upstream 5816e5c (pcb/refclk-shorts-fix) then
+#   routed refclk_25m to U3.ADF4351 pad 29 and closed em_blank by making its
+#   via-in-pad blind F.Cu->In3.Cu. Only the USB-C D- pair tie (USB_DM) remains
+#   -- a documented manual touch-up (90-ohm diff pair, hand-routed).
 #
-# head (129): the ENTIRE die-bus escape is currently OPEN. Upstream commit
-#   33c2a12 (PR #34, "head board DRC-clean for production") deleted the
+# head (29): the die-bus escape re-route is under way. Upstream commit
+#   33c2a12 (PR #34, "head board DRC-clean for production") had deleted the
 #   In1.Cu + In3.Cu routing of the DET bus as "FreeRouting artifacts"
-#   (~1800 tracks + their vias) without re-routing it -- e.g. DET_IN0 went
-#   from 42 copper items (die pad -> In1.Cu -> In3.Cu weave -> In4.Cu ->
-#   TIA front-end) down to 15, leaving the die pad and the TIA pads in
-#   separate components. 97 nets regressed from complete to split, including
-#   the J12 ADC SPI wires (adc_sclk/adc_miso/adc_cs*/adc_busy/adc_resetn).
-#   KiCad's own DRC does NOT see this: chip_module.kicad_pro sets
-#   unconnected_items/track_dangling/via_dangling to ``ignore`` (to silence
-#   plane-net zone noise). Re-enabled, kicad-cli pcb drc reports 279
-#   unconnected connections over 132 nets -- minus the plane nets
-#   (GND/+3V3/+5V_A) exactly the 129 nets below. This list documents that
-#   state; every entry must disappear again as the bus is re-routed.
+#   (~1800 tracks + their vias) without re-routing it -- 97 nets regressed
+#   from complete to split (129 on this metric: all DET_IN but 10, most
+#   DET_TIA, the J12 ADC SPI wires), hidden from `kicad-cli pcb drc` by
+#   chip_module.kicad_pro's unconnected_items/track_dangling/via_dangling
+#   "ignore" settings. Upstream 2b24f91 (PR #40, FreeRouting cycle 1) re-routed
+#   the bus and closed 100 of the 129 splits; the 15 DET_IN + 14 DET_TIA nets
+#   below remain. This list documents that state; every entry must disappear
+#   again as the bus is re-routed.
 KNOWN_SPLIT = {
     "main": {
-        "CONF_DONE", "SPI_CCLK", "SPI_D2", "SPI_D3",
-        "TDI", "TMS", "USB_DM", "VREFP",
-        "clk_100mhz", "em_blank", "refclk_25m",
+        "USB_DM",
     },
     "head": {
-        "DET_IN0", "DET_IN1", "DET_IN10", "DET_IN11", "DET_IN12", "DET_IN13",
-        "DET_IN14", "DET_IN15", "DET_IN16", "DET_IN17", "DET_IN18", "DET_IN19",
-        "DET_IN2", "DET_IN20", "DET_IN21", "DET_IN22", "DET_IN23", "DET_IN25",
-        "DET_IN28", "DET_IN29", "DET_IN3", "DET_IN30", "DET_IN31", "DET_IN32",
-        "DET_IN35", "DET_IN36", "DET_IN37", "DET_IN38", "DET_IN39", "DET_IN4",
-        "DET_IN41", "DET_IN42", "DET_IN43", "DET_IN44", "DET_IN45", "DET_IN46",
-        "DET_IN47", "DET_IN48", "DET_IN49", "DET_IN5", "DET_IN50", "DET_IN51",
-        "DET_IN52", "DET_IN54", "DET_IN55", "DET_IN56", "DET_IN57", "DET_IN59",
-        "DET_IN6", "DET_IN61", "DET_IN63", "DET_IN7", "DET_IN8", "DET_IN9",
-        "DET_REF", "DET_TIA0", "DET_TIA1", "DET_TIA10", "DET_TIA11", "DET_TIA15",
-        "DET_TIA16", "DET_TIA17", "DET_TIA18", "DET_TIA19", "DET_TIA2", "DET_TIA20",
-        "DET_TIA21", "DET_TIA22", "DET_TIA23", "DET_TIA24", "DET_TIA25", "DET_TIA27",
-        "DET_TIA29", "DET_TIA30", "DET_TIA31", "DET_TIA32", "DET_TIA33", "DET_TIA34",
-        "DET_TIA35", "DET_TIA36", "DET_TIA37", "DET_TIA38", "DET_TIA39", "DET_TIA4",
-        "DET_TIA40", "DET_TIA41", "DET_TIA42", "DET_TIA43", "DET_TIA44", "DET_TIA45",
-        "DET_TIA46", "DET_TIA47", "DET_TIA48", "DET_TIA49", "DET_TIA5", "DET_TIA50",
-        "DET_TIA51", "DET_TIA52", "DET_TIA53", "DET_TIA54", "DET_TIA55", "DET_TIA56",
-        "DET_TIA57", "DET_TIA58", "DET_TIA59", "DET_TIA6", "DET_TIA60", "DET_TIA61",
-        "DET_TIA62", "DET_TIA7", "DET_TIA8", "DET_TIA9", "adc_busy", "adc_cs0",
-        "adc_cs1", "adc_cs2", "adc_cs3", "adc_miso", "adc_refc1", "adc_refc2",
-        "adc_refio1", "adc_refio2", "adc_resetn", "adc_rgc0", "adc_rgc1", "adc_rgc2",
-        "adc_rgc3", "adc_rgd3", "adc_sclk",
+        "DET_IN15", "DET_IN21", "DET_IN28", "DET_IN29", "DET_IN3", "DET_IN30",
+        "DET_IN36", "DET_IN38", "DET_IN42", "DET_IN43", "DET_IN45", "DET_IN48",
+        "DET_IN59", "DET_IN7", "DET_IN9",
+        "DET_TIA10", "DET_TIA11", "DET_TIA19", "DET_TIA20", "DET_TIA30",
+        "DET_TIA34", "DET_TIA4", "DET_TIA47", "DET_TIA50", "DET_TIA52",
+        "DET_TIA54", "DET_TIA56", "DET_TIA6", "DET_TIA8",
     },
 }
 

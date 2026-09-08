@@ -3,7 +3,7 @@
 [![CI](https://github.com/VABISMO/QSSC/actions/workflows/ci.yml/badge.svg)](https://github.com/VABISMO/QSSC/actions/workflows/ci.yml)
 [![License: Apache-2.0 NC](https://img.shields.io/badge/license-Apache--2.0%20NC-blue.svg)](LICENSE)
 [![Python 3.10–3.12](https://img.shields.io/badge/python-3.10–3.12-blue.svg)](https://www.python.org)
-[![Tests](https://img.shields.io/badge/tests-205%20passed-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-206%20passed-brightgreen.svg)](#testing)
 
 A room-temperature **solid-state spin-defect** quantum platform: a Qiskit
 backend, an FPGA control stack with PCB design, a validated chip-fabrication
@@ -45,7 +45,7 @@ python -m venv .venv && . .venv/bin/activate
 pip install -e ".[api,dev]"
 
 # run the test suite
-python -m pytest                       # 205 passed (the PCB gates additionally need KiCad: apt install kicad)
+python -m pytest                       # 210 passed, 7 skipped (with KiCad + iverilog installed)
 
 # try the CLI
 qssc info                              # backend / defect summary (defaults to NV)
@@ -358,10 +358,11 @@ failed test/parse/sim run blocks both deploys). It then:
   DRC, zone-fill freshness, connectivity graph, per-datasheet pin audit,
   routing rules, board-uuid uniqueness, track-width rules, and the J12
   board-to-board pinout mirror — see `tests/test_pcb_*.py` (CI installs KiCad
-  and runs them unconditionally). KNOWN: the head's die-bus escape
-  (In1.Cu/In3.Cu) was removed in commit 33c2a12 and is not yet re-routed —
-  the connectivity graph test tracks the affected nets in its ratchet until
-  the bus is routed again.
+  and runs them unconditionally). KNOWN: the head's die-bus escape (In1.Cu/
+  In3.Cu), removed in commit 33c2a12, is re-routed since the FreeRouting
+  cycle 1 (2b24f91) — 100 of the 129 regressed die-bus nets are closed, 15
+  DET_IN + 14 DET_TIA remain (ratcheted in `tests/test_pcb_connectivity.py`).
+  On the main board only the USB-C D- pair tie (USB_DM) remains split.
 
 ### Fabrication protocol
 
