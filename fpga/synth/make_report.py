@@ -123,7 +123,7 @@ def main(log_path: str, out_path: str) -> int:
     lines = []
     lines.append("# QSSC FPGA — yosys synthesis report\n")
     lines.append(f"- **Target:** Xilinx Artix-7 XC7A35T-1CSG324C (QSSC single-board control FPGA)")
-    lines.append(f"- **Flow:** `yosys synth_xilinx -family xc7` (synthesis only, **no P&R / no timing**)")
+    lines.append(f"- **Flow:** `yosys synth_xilinx -family xc7 -abc9` (synthesis only, **no P&R / no timing**; -abc9 pinned — see synth_yosys.ys)")
     lines.append(f"- **Top module:** `top_level`")
     lines.append(f"- **Status:** {'COMPLETE' if complete else 'INCOMPLETE — see log'}\n")
 
@@ -173,10 +173,11 @@ def main(log_path: str, out_path: str) -> int:
                  "clock-tree insertion, or bitstream generation. Those require Xilinx Vivado, which is "
                  "not available in this environment. The iverilog testbench (`fpga/sim`) covers "
                  "**functional** correctness; this yosys pass covers **synthesizability + resource fit**.")
-    lines.append("- The 64 detector channels are read fully in parallel: each `det_in[i]` LVCMOS input "
-                 "feeds a 16-bit fabric counter (no analog MUX, no XADC). A MCP4725 DAC sets the "
-                 "board comparator threshold over I2C (`SET_THRESHOLD`); the 64 emitters are driven "
-                 "individually (`emitter_en[63:0]`, no 8x8 matrix).\n")
+    lines.append("- The 64 detector channels are digitised fully in parallel by 4x AD7616 16-bit ADCs "
+                 "sharing one 9-wire SPI bus (`adc_reader.v`, no analog MUX, no XADC, no comparator/"
+                 "threshold DAC). The 64 CQD emitters are driven in parallel by 3x TLC5947 "
+                 "constant-current sinks (`tlc5947_ctrl.v`); `qrng_entropy.v` von-Neumann-debiases a "
+                 "dark-channel LSB stream for the `READ_RNG` verb (HARDWARE_DESIGN.md §15E).\n")
 
     Path(out_path).write_text("\n".join(lines))
     # exit non-zero only on hard failure (incomplete or blackboxes), not on warnings.

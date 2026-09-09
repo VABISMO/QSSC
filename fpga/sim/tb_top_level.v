@@ -597,12 +597,14 @@ module tb_top_level;
                      rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
         end
 
-        // ---- 11) READ_RNG 4 -> 8 hex nibbles + " 0 0 0\n" ------------------
+        // ---- 11) READ_RNG 4 -> 8 hex nibbles + " 00064 0 0\n" ---------------
         // Enable the toggling-LSB entropy model so the dark channel (ch 0) feeds
         // the von-Neumann extractor. 4 bytes = 1 x 32-bit word = 8 hex chars,
-        // then the stats trailer " 0 0 0\n" (7 bytes) -> 15 bytes total. The
-        // extractor keeps 1 bit per 2 channel-0 samples (alternating LSB), so 32
-        // kept bits need 64 scans (~64*W_ADC_SCAN cycles, well under W_SAFE).
+        // then the stats footer " 00064 0 0\n" (11 bytes) -> 19 bytes total. The
+        // footer's decimal field is the raw-sample count this request consumed:
+        // 32 kept bits x 2 samples/pair = 64 samples -> "00064". kept/rate stay
+        // "0" placeholders; the host derives them. 64 scans (~64*W_ADC_SCAN
+        // cycles, well under W_SAFE and the parser's 1.34 s watchdog).
         entropy_mode = 1'b1;
         rx_log_cnt = 0;
         cmd_bytes[0]="R";  cmd_bytes[1]="E";  cmd_bytes[2]="A";  cmd_bytes[3]="D";
@@ -610,17 +612,19 @@ module tb_top_level;
         cmd_bytes[8]=" ";  cmd_bytes[9]="4";  cmd_bytes[10]=8'h0A;
         $display("TB: sending READ_RNG 4");
         for (c=0;c<11;c=c+1) uart_send_byte(cmd_bytes[c]);
-        wait_for_bytes(15, W_SAFE);
-        // Reply must be 8 hex chars (0-9a-f) followed by " 0 0 0\n".
-        if (rx_log_cnt >= 15 &&
+        wait_for_bytes(19, W_SAFE);
+        // Reply must be 8 hex chars (0-9a-f) followed by " 00064 0 0\n".
+        if (rx_log_cnt >= 19 &&
             ((rx_log[0] >= 8'h30 && rx_log[0] <= 8'h39) ||
              (rx_log[0] >= 8'h61 && rx_log[0] <= 8'h66)) &&
             rx_log[8]  === 8'h20 && rx_log[9]  === 8'h30 &&
-            rx_log[10] === 8'h20 && rx_log[11] === 8'h30 &&
-            rx_log[12] === 8'h20 && rx_log[13] === 8'h30 &&
-            rx_log[14] === 8'h0A) begin
+            rx_log[10] === 8'h30 && rx_log[11] === 8'h30 &&
+            rx_log[12] === 8'h36 && rx_log[13] === 8'h34 &&
+            rx_log[14] === 8'h20 && rx_log[15] === 8'h30 &&
+            rx_log[16] === 8'h20 && rx_log[17] === 8'h30 &&
+            rx_log[18] === 8'h0A) begin
             ok_count = ok_count + 1;
-            $display("TB: READ_RNG 4 = 8 hex + trailer (PASS)");
+            $display("TB: READ_RNG 4 = 8 hex + \" 00064 0 0\" footer (PASS)");
         end else begin
             err_count = err_count + 1;
             $display("TB: FAIL READ_RNG 4 (got %0d bytes, b0=0x%02h)",

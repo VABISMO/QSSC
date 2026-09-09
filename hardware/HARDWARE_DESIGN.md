@@ -1619,6 +1619,130 @@ main board that leaves through the board, not the TEC.
 
 ---
 
+## 15E. On-board QRNG physics — the dark-channel LSB entropy source (issues #46/#47)
+
+The board carries a **hardware true-random-number generator** built entirely
+from the existing detector chain: `adc_reader` taps one fixed dark detector
+channel (`ENTROPY_CH`, default channel 0) out of its free-running background
+scan, `qrng_entropy` von-Neumann-debiases the LSB stream, and
+`command_parser` serves the debiased words to the host via the `READ_RNG`
+verb. The host API (`/api/fpga/qrng`) derives Ed25519 key material from it
+after an entropy sanity gate. This section states *what the entropy actually
+is* — and what it is not — with the same physics rigor as §15C.
+
+> **Honest sourcing.** The entropy is **classical analog noise**:
+> Johnson (thermal) noise of the TIA feedback resistor plus ADC
+> quantization/input dither. Thermal noise is the standard physical TRNG
+> source (fluctuation–dissipation: a resistor at temperature T is a noise
+> source with √(4kTR) bandwidth-limited), but this board does **not** measure
+> vacuum fluctuations, and no quantum-origin randomness claim is made here.
+> What makes it a *proper* QRNG is that the bits come from a measured
+> physical noise process on real silicon — not from a software PRNG, not
+> from the simulated Qiskit `qrand` Hadamard coin flip, and not from a
+> counter reading.
+
+### E1. Where the entropy lives: a dark channel's LSBs
+
+A dark (unpumped) detector channel carries **no photocurrent**
+(`I_ph ≈ 0`), so there is **no shot noise** — shot noise is
+signal-proportional (`√(2qI·BW)`) and dominates Johnson noise only above
+`I > 2kT/(q·R_f) ≈ 52 nA` (§15C1 numbers). What remains at the ADC input is
+the noise floor of the front end itself:
+
+| quantity | formula | value |
+|---|---|---|
+| LSB size (±5 V range, 16-bit) | `Δ = 10 V / 2^16` | ≈ **153 µV** |
+| Rf Johnson noise at the TIA output | `√(4kT·R_f·BW)`, BW = 159 kHz | ≈ **51 µV RMS** (§15C1) |
+| ADC quantization noise | `Δ/√12` | ≈ **44 µV RMS** |
+| total noise floor (lower bound) | `√(51² + 44²)` | ≈ **67 µV RMS ≈ 0.44 LSB** (the AD7616's input-referred noise adds further dither on top) |
+
+The dark channel's DC level (DET_REF 1.65 V → code ≈ 43581 in the ±5 V
+range) therefore sits at a fixed code with a ≥ 0.44-LSB-wide noise
+distribution on top. **The LSB of each sample is a noise-driven coin
+flip**: whether the code lands on `n` or `n+1` is decided by the thermal
+noise sample. Higher bits are (near-)deterministic — the DC level — which is
+exactly why the tap feeds only the LSB into the extractor.
+
+### E2. Why successive samples are independent
+
+The TIA feedback bandwidth is 159 kHz (§15C1) → noise correlation time
+`τ ≈ RC = 1 µs`. The background scan taps the entropy channel **once per
+full scan**: 8 CONVSTs × 4 chips × (≈1 µs AD7616 conversion + 2.56 µs SPI
+readout at SCLK = 12.5 MHz + overhead) ≈ **93 µs** — so successive
+entropy-channel samples are **~90 τ apart**. The LSB stream is therefore
+independent sample-to-sample (the precondition the von-Neumann extractor
+needs), at a raw rate of **≈ 10.8 kS/s**.
+
+### E3. Yield: where the DC level sits inside a code bin
+
+The per-sample flip behavior depends on `d` — the distance from the dark DC
+level to the nearest code boundary, effectively uniform in `[0, Δ]` per
+channel. With per-sample noise `σ ≈ 0.44 LSB`:
+
+| quantity | formula | range |
+|---|---|---|
+| LSB ones-fraction | `p1 = Q(d/σ)` (or `1 − Q`) | 0.5 (d → 0) down to ~0.011 (d = Δ) |
+| VN yield per sample | `p1·(1 − p1)` | **~1 % … 25 %** of raw samples |
+| debiased throughput | `yield × 10.8 kS/s` | **≈ 0.1–2.7 kb/s ≈ 15–340 B/s** |
+| 256-byte `READ_RNG` at full yield | `2048 bits / 0.25 per sample / 10.8 kS/s` | ≈ **0.8 s** |
+
+The parser guards starvation with a 2^27-cycle (≈ 1.34 s) harvest watchdog
+(`RNG_WATCHDOG_CYCLES`): a well-placed site answers well inside the window
+even at the worst documented yield (~1 % → 32 kept bits need ~3200 raw
+samples = 0.3 s at the 10.8 kS/s scan rate), and a 256-byte request
+completes in ≲ 0.8 s at full yield. A starved or stuck channel (DC parked
+far inside a code bin, or a frozen LSB) instead answers **ERR** — the
+request can no longer hang the control link forever. `ENTROPY_CH` is a
+parameter: if the default channel turns out starved on the first board,
+route the tap to a better-sited channel.
+
+### E4. Debiasing, audit stats and the health gate
+
+1. **Von-Neumann extraction on-FPGA** (`qrng_entropy.v`): successive LSBs
+   are paired; mixed pairs are kept, `00/11` discarded (the RTL emits the
+   *second* sample's bit — `01 → 1, 10 → 0` — the mirror image of the
+   canonical map in `qssc.crypto.von_neumann_extract`, which keeps the
+   first; both are the classic von-Neumann debiaser and yield exactly
+   unbiased bits given independence). This removes first-order bias for
+   *independent* bits; it cannot fix correlation.
+2. **Audit stats in the reply** (`READ_RNG` → `"<hex> 00064 0 0\n"`): the
+   decimal field is the number of raw LSB samples this request actually fed
+   to the extractor — the parser snapshots the extractor's `samples_seen`
+   counter at dispatch and pulses `rng_flush` so the delivered word is
+   built *only* from post-flush samples (which also guarantees
+   **kept ≤ raw/2 is checkable from the reply itself**: a reply with
+   `kept > raw/2` would prove a bug). The 24-bit counter cannot wrap within
+   one request, and a delta above 65535 — a 256-byte request at a sub-~6 %
+   yield — saturates the footer at `65535`: a conservative lower bound that
+   keeps the audit checkable (kept ≤ 2048 ≤ 65535/2 in every case). The
+   trailing `0 0` are placeholders; the host derives `kept = n_bytes·8` and
+   `rate = kept/raw` (the `/api/fpga/qrng` endpoint does exactly that).
+3. **Health gate** (issue #46): the extracted block must pass
+   `qssc.crypto.entropy_health` (monobit frequency, lag-1 transitions,
+   min-entropy estimate) before it becomes key material — the simulator is
+   gated in `SimulatedFPGA._harvest_entropy`, the hardware path in the
+   `/api/fpga/qrng` endpoint (HTTP 502 on failure). This is a *sanity*
+   guard against degenerate/correlated streams; it is **not** a NIST
+   SP 800-90B health test and cannot certify physical randomness.
+
+### E5. Bring-up characterization — OPEN
+
+- **Verify the entropy-channel statistics on the first working board**: LSB
+  ones-fraction, per-sample flip rate and lag-1 correlation over ≥ 10^6
+  samples (the host-side `entropy_health` output is the quick check; a
+  fuller characterization feeds the yield table above with measured `p1`).
+- **Keep the entropy channel dark during harvesting**: the channel's
+  emitter pixel must not be driven (`SET_EMITTER … 0` / excluded from
+  `DRIVE_PATTERN`, and not part of the 1 kHz mod_sync pump pattern) — a
+  pumped channel adds a deterministic PL signal plus shot noise, and its
+  LSBs stop being a noise measurement (the health gate catches gross
+  cases, but the design intent is an unpumped channel).
+- **Confirm the end-to-end yield** (kept/raw from real `READ_RNG` replies)
+  against the E3 table; if the default channel is starved, re-route
+  `ENTROPY_CH`.
+
+---
+
 ## 16. References
 
 - ADF4351 data sheet (Rev. A), Analog Devices — register map and loop-filter
@@ -1640,6 +1764,10 @@ main board that leaves through the board, not the TEC.
 - TLC5947 24-channel 12-bit PWM constant-current LED driver data sheet, Texas
   Instruments (SBVS114B) — 64-channel CQD emitter cathode sink, 3× daisy-chained:
   <https://www.ti.com/lit/ds/symlink/tlc5947.pdf>
+- J. von Neumann, "Various techniques used in connection with random digits,"
+  NIST Applied Mathematics Series 12 (1951) — the pairing extractor
+  (mixed pairs kept, `00/11` discarded) implemented by `qrng_entropy.v` /
+  `qssc.crypto.von_neumann_extract` (§15E).
 - Full verified pinouts + canonical datasheet URLs for every active component
   are in [`hardware/datasheets/DATASHEETS.md`](datasheets/DATASHEETS.md); the
   BOM is [`datasheets/BOM.csv`](datasheets/BOM.csv).

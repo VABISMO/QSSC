@@ -29,7 +29,7 @@ NV-diamond *simulator* — into one coherent, renamed deliverable.
 | **Python core** | `qssc/` | `QSSCBackend` (Qiskit `BackendV2`), simulator, defect profiles, quantum circuits, fabrication-protocol model |
 | **REST backend** | `api/` | FastAPI app exposing the simulator, ODMR model, protocol and a circuit runner |
 | **Frontend** | `frontend/` | React 18 + Vite dashboard (ODMR chart, qubit grid, circuit runner, protocol viewer) |
-| **FPGA RTL** | `fpga/rtl` | 9 Verilog modules (Artix-7) — UART, SPI/ADF4351 PLL, 64-ch CQD emitter drive (3× TLC5947), detector readout (TLV9004 TIA → 4× AD7616 parallel 16-bit ADC, 1 kHz lock-in host-side), command parser, top-level |
+| **FPGA RTL** | `fpga/rtl` | 10 Verilog modules (Artix-7) — UART, SPI/ADF4351 PLL, 64-ch CQD emitter drive (3× TLC5947), detector readout (TLV9004 TIA → 4× AD7616 parallel 16-bit ADC, 1 kHz lock-in host-side), hardware QRNG (`qrng_entropy` von-Neumann extractor), command parser, top-level |
 | **Hardware** | `hardware/` | KiCad PCBs (main + detector head), XDC constraints, CNC G-code, datasheets, `HARDWARE_DESIGN.md` |
 | **Protocol** | `docs/FABRICATION_PROTOCOL.md` | 5-section lab fabrication protocol, validated against published studies |
 | **Protocol (HTML)** | `docs/protocol.html` | Branded, print-ready HTML render of the protocol (regenerate with `python3 tools/build_protocol_html.py`) |
@@ -203,16 +203,18 @@ with **1 kHz lock-in** demodulation host-side, an **ADF4351** microwave PLL, and
 a host UART link. **There is no camera and no alignment jig** — the chip
 integrates its own emitter and detector arrays and is read electrically (ODMR
 dip = reduced photocurrent at resonance).
-The RTL ([`fpga/rtl/`](fpga/rtl), 9 modules + a self-checking
+The RTL ([`fpga/rtl/`](fpga/rtl), 10 modules + a self-checking
 [testbench](fpga/sim/tb_top_level.v)) is **parse-verified with pyverilog,
 functionally simulated with iverilog, and synthesised with yosys
-`synth_xilinx` (xc7)** — the testbench drives
-`DRIVE_EMITTER 3 100` (fires one emitter + `OK` reply) and
+`synth_xilinx` (xc7, `-abc9` pinned)** — the testbench drives
+`DRIVE_EMITTER 3 100` (fires one emitter + `OK` reply),
+`READ_RNG 4` (asserts the 8-hex-digit debiased word + the
+`" 00064 0 0"` raw-sample stats footer) and
 `READ_DETECTORS` (asserts the 64-sample stream `1234 1234 … 1234\n`,
 320 bytes, 19/19 checks pass). The yosys synthesis maps the design to the
-Series-7 cell library and confirms it fits the XC7A35T-1CSG324C with ~87 % of
-the part free (≈2762 LUTs / 13.3 %, 2167 FFs / 5.2 %, 7 DSP48E1 / 7.8 %, 0
-inferred latches, 0 blackboxes). All three checks run in CI. (A first iverilog
+Series-7 cell library and confirms it fits the XC7A35T-1CSG324C with ~80 % of
+the part free (≈4091 LUTs / 19.7 %, 3998 FFs / 9.6 %, 668 CARRY4, 7 DSP48E1 /
+7.8 %, 0 inferred latches, 0 blackboxes). All three checks run in CI. (A first iverilog
 run caught two real handshake bugs pyverilog could not — a readout busy race and
 a missing consumer-ack — now fixed.) Pin assignments live in
 [`fpga/constraints.xdc`](fpga/constraints.xdc); the synthesis flow + report
@@ -338,10 +340,12 @@ failed test/parse/sim run blocks both deploys). It then:
   trace geometry, CNC G-code files, the KiCad
   project, and a references list (ADF4351 / XC7A35T / GVA-84+ / AD7616 /
   TLC5947 / TLV9004 / NV readout).
-- [`fpga/rtl/`](fpga/rtl) — 9 Verilog modules: `top_level`, `command_parser`,
+- [`fpga/rtl/`](fpga/rtl) — 10 Verilog modules: `top_level`, `command_parser`,
   `uart_rx`/`uart_tx`, `spi_master` (ADF4351), `adf4351_ctrl`, `tlc5947_ctrl`
   (emitter PWM), `emitter_array` (64 parallel CQD emitters via 3× TLC5947),
-  `adc_reader` (4× AD7616 parallel 16-bit ADC, 1 kHz lock-in host-side).
+  `adc_reader` (4× AD7616 parallel 16-bit ADC, 1 kHz lock-in host-side),
+  `qrng_entropy` (dark-channel LSB von-Neumann extractor, `READ_RNG` +
+  entropy-health-gated key material, HARDWARE_DESIGN.md §15E).
 - [`fpga/constraints.xdc`](fpga/constraints.xdc) — Artix-7 CSG324 pin
   assignments and timing constraints (100 MHz TCXO, TLC5947 emitter SPI,
   AD7616 detector SPI, ADF4351 SPI; no camera domain).

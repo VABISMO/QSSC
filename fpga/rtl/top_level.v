@@ -195,8 +195,10 @@ module top_level (
     wire        entropy_valid;
     wire [15:0] entropy_data;
     wire        rng_harvest_en;
+    wire        rng_flush;
     wire [31:0] rng_word;
     wire        rng_valid;
+    wire [23:0] rng_samples_seen;
 
     adc_reader #(.N_DET(64), .CLK_HZ(100_000_000), .ENTROPY_CH(6'd0)) det_inst (
         .clk         (clk_100mhz),
@@ -225,18 +227,23 @@ module top_level (
     assign mod_sync = mod_sync_int;
 
     // ---- On-FPGA QRNG: von-Neumann-debias the dark-channel LSB noise -------
-    // Free-running: every fresh channel-0 sample (entropy_valid) feeds the
-    // extractor; command_parser gates harvesting via rng_harvest_en (READ_RNG)
-    // and reads back debiased 32-bit words on rng_valid.
+    // Free-running: every fresh dark-channel sample (entropy_valid) feeds the
+    // extractor; command_parser gates harvesting via rng_harvest_en (READ_RNG),
+    // pulses rng_flush at request start (fresh extractor state per request) and
+    // reads back debiased 32-bit words on rng_valid. rng_samples_seen loops
+    // back into the parser so READ_RNG can report the raw-sample count it
+    // actually consumed.
     qrng_entropy #(.W(32)) rng_inst (
         .clk            (clk_100mhz),
         .rst            (reset_sync),
         .adc_data       (entropy_data),
         .adc_valid      (entropy_valid),
         .harvest_en     (rng_harvest_en),
+        .flush          (rng_flush),
         .rng_word       (rng_word),
         .rng_valid      (rng_valid),
-        .bits_harvested ()
+        .bits_harvested (),
+        .samples_seen   (rng_samples_seen)
     );
 
     // ---- Calibration LUT readback (write-only in this build) ---------------
@@ -286,8 +293,10 @@ module top_level (
         .mw_gate_ns       (mw_gate_ns_w),
         .mw_gate_load     (mw_gate_load),
         .rng_harvest_en   (rng_harvest_en),
+        .rng_flush        (rng_flush),
         .rng_word         (rng_word),
-        .rng_valid        (rng_valid)
+        .rng_valid        (rng_valid),
+        .rng_samples_seen (rng_samples_seen)
     );
 
     assign pll_phase  = pll_phase_w;
