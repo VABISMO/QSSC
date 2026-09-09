@@ -41,6 +41,9 @@ cd "$ROOT"
     exit 1
 }
 
+# abc9 drops an abc.history byproduct next to the netlist — not a build output.
+rm -f "$ROOT/abc.history"
+
 # --- build the human report --------------------------------------------------
 # make_report.py exits non-zero if it sees hard problems (blackboxes / incomplete);
 # we still want the report printed so don't let `set -e` abort here.

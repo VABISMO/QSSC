@@ -566,8 +566,11 @@ _FPGA_PROTOCOL = [
      "desc": "no-op on the ADC (no counters to clear)"},
     {"cmd": "CALIBRATE", "args": "—", "reply": "OK",
      "desc": "emitter→site→detector sweep, builds the readout LUT"},
-    {"cmd": "READ_RNG", "args": "n_bytes", "reply": "<hex> <raw> <kept> <rate> / ERR",
-     "desc": "harvest n_bytes of von-Neumann-debiased AD7616 LSB-noise entropy (qrng_entropy.v)"},
+    {"cmd": "READ_RNG", "args": "n_bytes", "reply": "<hex> <raw> 0 0 / ERR",
+     "desc": "harvest n_bytes of von-Neumann-debiased AD7616 LSB-noise entropy "
+             "(qrng_entropy.v; <raw> = raw LSB samples consumed, zero-padded; "
+             "kept/rate are '0' placeholders — the host derives kept = n*8 and "
+             "rate = kept/raw)"},
     {"cmd": "ODMR_SWEEP", "args": "qubit f_start_khz f_stop_khz n_points",
      "reply": "<n> f0 c0 f1 c1 … / ERR",
      "desc": "sweep the ADF4351 across the NV resonance, one AD7616 sample per point"},

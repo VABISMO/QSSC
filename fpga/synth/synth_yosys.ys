@@ -26,15 +26,23 @@ read_verilog fpga/rtl/top_level.v
 hierarchy -check -top top_level
 
 # Quick structural checks BEFORE synthesis: report any latches the front-end
-# inferred (combinational always @* blocks that hold state). synth_xilinx
-# runs `proc` internally too, but an explicit -latches warn surfaces them in
-# the log up front.
-proc -latches warn
+# inferred (combinational always @* blocks that hold state). `proc` converts
+# the always-blocks; the assert then FAILS the run if any latch survived, so
+# a regression cannot slip through as a warning in a long log.
+proc
+select -assert-none t:$_DLATCH_*
+select -clear
 
 # --- Xilinx-flavour synthesis (7-series LUT/FF/CARRY/BRAM/DSP mapping) ------
 # -run <from>:<to> lets us stop before techmapping if we want, but we want the
 # full flow through to a Vivado-compatible cell library.
-synth_xilinx -top top_level -family xc7 -edif fpga/synth/qssc_top.edif
+#
+# -abc9 is PINNED explicitly: recent oss-cad-suite builds (the CI pin,
+# 2026-08-26) default synth_xilinx to -abc9 ON, while older/distro builds
+# (e.g. Arch's yosys 0.66) leave it off. Pinning keeps the netlist — and the
+# LUT/CARRY4 counts in SYNTH_REPORT.md — reproducible across tool versions
+# (verified: the committed netlist reproduces bit-exactly only with -abc9).
+synth_xilinx -top top_level -family xc7 -abc9 -edif fpga/synth/qssc_top.edif
 
 # --- reports ----------------------------------------------------------------
 # Cell counts in the Xilinx tech-mapped netlist (LUT1..LUT6, FDRE/FDCE,

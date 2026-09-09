@@ -24,8 +24,10 @@
 //                                               -> cal_lut[em], then OK\n
 //   READ_RNG <n_bytes 1..256>             -> harvest von-Neumann-debiased AD7616
 //                                               LSB-noise entropy from a dark
-//                                               channel, reply "<hex> 0 0 0\n"
-//                                               (raw_bits/kept/rate host-computed)
+//                                               channel, reply "<hex> 00064 0 0\n"
+//                                               (footer: ' ' + 5 zero-padded
+//                                               decimal raw-sample count + " 0 0"
+//                                               + LF; kept/rate host-derived)
 //
 // The emitter commands drive a 3x TLC5947 constant-current LED driver over a
 // 4-wire SPI: SET_EMITTER arms per-channel 12-bit grayscale, DRIVE_PATTERN
@@ -100,11 +102,14 @@ module command_parser #(
     output reg [31:0] mw_gate_ns,       // -> RF-switch gate timer (duration, ns)
     output reg        mw_gate_load,     // 1-cycle pulse: arm the RF-switch gate
     // QRNG (qrng_entropy): READ_RNG <n_bytes> harvests von-Neumann-debiased
-    // AD7616 LSB-noise entropy and streams it as hex + a "0 0 0" stats footer
-    // (raw_bits/kept/rate are host-computed; the hex token is what the API
-    // consumes). harvest_en gates the extractor; rng_valid pulses per W-bit
-    // word.
+    // AD7616 LSB-noise entropy and streams it as hex + a " 00064 0 0\n" stats
+    // footer (raw = samples_seen delta, the raw LSB samples this request fed
+    // to the extractor, decimal; kept/rate are host-derived). harvest_en
+    // gates the extractor, flush drops the partial pair/word on dispatch
+    // (keeps kept <= raw/2 per request); rng_valid pulses per W-bit word.
     output reg        rng_harvest_en,
+    output reg        rng_flush,
+    input      [23:0] rng_samples_seen,  // running raw-sample counter (24-bit)
     input      [31:0] rng_word,
     input             rng_valid
 );
@@ -143,7 +148,8 @@ module command_parser #(
     localparam [4:0] S_EM_WAIT       = 5'd16;
     localparam [4:0] S_RNG_HARVEST   = 5'd17;  // READ_RNG: wait for a qrng word
     localparam [4:0] S_RNG_EMIT      = 5'd18;  // READ_RNG: stream one hex nibble
-    localparam [4:0] S_RNG_STATS     = 5'd19;  // READ_RNG: load " 0 0 0\n" footer
+    localparam [4:0] S_RNG_STATS     = 5'd19;  // READ_RNG: build the stats footer
+    localparam [4:0] S_RNG_TAIL      = 5'd20;  // READ_RNG: stream the stats footer
 
     // ---- Line buffer ------------------------------------------------------
     reg [7:0] cmd_buffer [0:63];
@@ -187,12 +193,25 @@ module command_parser #(
     reg [5:0]  cal_em;          // calibration emitter pixel 0..63
 
     // ---- READ_RNG harvest/stream state ------------------------------------
+    localparam [26:0] RNG_WATCHDOG_CYCLES = 27'd134_217_727;  // 2^27-1 = 1.34 s
+    // @ 100 MHz. A healthy dark channel completes one 32-bit word well inside
+    // this window even at the worst documented von-Neumann yield (~1 %: 32
+    // kept bits need ~3200 raw samples = 0.3 s at the 10.8 kS/s channel-scan
+    // rate, HARDWARE_DESIGN.md §15E); a stuck/degenerate LSB instead ERRs.
     reg [31:0] rng_word_buf;    // qrng word currently being streamed as hex
     reg [2:0]  nibble_idx;      // 0..7 which nibble of rng_word_buf is next
     reg [6:0]  rng_word_cnt;    // qrng words harvested so far this READ_RNG
     reg [6:0]  rng_need_words;  // ceil(n_bytes/4) words to harvest
     reg [2:0]  rng_last_bytes;  // 1..4 bytes emitted from the final word
     reg [8:0]  rng_n_bytes;     // 1..256 bytes requested
+    reg [23:0] rng_raw_start;   // samples_seen when READ_RNG started (raw =
+                                // rng_samples_seen - rng_raw_start; the 24-bit
+                                // counter cannot wrap within one request, and
+                                // the footer saturates the delta at 65535 —
+                                // see the rng_raw_count wire below)
+    reg [26:0] rng_watchdog;    // harvest inactivity timer -> ERR, not a hang
+    reg [7:0]  rng_tail [0:10]; // footer bytes: ' ' d d d d d ' ' 0 ' ' 0 LF
+    reg [3:0]  rng_tail_idx;    // footer streaming cursor (0..10)
 
     // ---- Calibration LUT (emitter pixel -> detector electrode) ------------
     reg [5:0] cal_lut [0:63];
@@ -256,6 +275,17 @@ module command_parser #(
     wire [3:0] nibs_this_word = (rng_word_cnt == rng_need_words - 7'd1)
                                 ? (rng_last_bytes << 1) : 4'd8;
 
+    // READ_RNG footer: decimal encoding of this request's raw-sample delta.
+    // enc_dec is 16-bit (5 digits), so a delta above 65535 — a 256-byte
+    // request at a sub-~6% von-Neumann yield consumes more than 2^16 raw
+    // samples — saturates the footer at "65535": a conservative lower bound
+    // that still keeps kept <= raw/2 checkable host-side (kept <= 2048).
+    // enc_dec returns {len, tenk..ones} with the digits already ASCII.
+    wire [23:0] rng_raw_delta = rng_samples_seen - rng_raw_start;
+    wire [15:0] rng_raw_count = (rng_raw_delta > 24'd65535)
+                                ? 16'hFFFF : rng_raw_delta[15:0];
+    wire [47:0] enc_raw       = enc_dec(rng_raw_count);
+
     integer k;
     initial begin
         buf_idx        = 7'd0;
@@ -304,12 +334,16 @@ module command_parser #(
         mw_gate_load   = 1'b0;
         pll_busy_seen  = 1'b0;
         rng_harvest_en = 1'b0;
+        rng_flush      = 1'b0;
         rng_word_buf   = 32'd0;
         nibble_idx     = 3'd0;
         rng_word_cnt   = 7'd0;
         rng_need_words = 7'd0;
         rng_last_bytes = 3'd0;
         rng_n_bytes    = 9'd0;
+        rng_raw_start  = 24'd0;
+        rng_watchdog   = 27'd0;
+        rng_tail_idx   = 4'd0;
         for (k = 0; k < 64; k = k + 1) cal_lut[k] = 6'd0;
     end
 
@@ -390,9 +424,13 @@ module command_parser #(
             mw_gate_load   <= 1'b0;
             pll_busy_seen  <= 1'b0;
             rng_harvest_en <= 1'b0;
+            rng_flush      <= 1'b0;
             rng_word_buf   <= 32'd0;
             nibble_idx     <= 3'd0;
             rng_word_cnt   <= 7'd0;
+            rng_raw_start  <= 24'd0;
+            rng_watchdog   <= 27'd0;
+            rng_tail_idx   <= 4'd0;
             tx_load        <= 1'b0;
             tx_din         <= 8'd0;
         end else begin
@@ -408,6 +446,7 @@ module command_parser #(
             det_clear      <= 1'b0;
             det_code_ack   <= 1'b0;
             mw_gate_load   <= 1'b0;
+            rng_flush      <= 1'b0;
 
             // Line accumulation only while idle and no line pending.
             if (fsm == S_IDLE && !line_ready && rx_valid) begin
@@ -742,8 +781,9 @@ module command_parser #(
                         CMD_RNG : begin
                             // READ_RNG <n_bytes 1..256>: harvest n_bytes of
                             // von-Neumann-debiased entropy from qrng_entropy and
-                            // stream it as hex + a " 0 0 0\n" stats footer
-                            // (raw_bits/kept/extract_rate are host-computed; the
+                            // stream it as hex + a " 00064 0 0\n" stats footer
+                            // (raw = the raw-sample delta reported in the
+                            // footer; kept/extract_rate are host-derived; the
                             // hex token is what the API consumes). ERR on
                             // out-of-range n_bytes.
                             if ($signed(arg_vals[0]) < 32'd1 ||
@@ -757,6 +797,9 @@ module command_parser #(
                                                   ? 3'd4 : {1'b0, arg_vals[0][1:0]};
                                 rng_word_cnt   <= 7'd0;
                                 rng_harvest_en <= 1'b1;
+                                rng_raw_start  <= rng_samples_seen;
+                                rng_watchdog   <= 27'd0;
+                                rng_flush      <= 1'b1;   // fresh extractor state
                                 rall_loop      <= 1'b0;
                                 read_all_mode  <= 1'b0;
                                 fsm            <= S_RNG_HARVEST;
@@ -922,11 +965,21 @@ module command_parser #(
                 // while harvest_en is high and we are watching in S_RNG_HARVEST).
                 S_RNG_HARVEST : begin
                     rng_harvest_en <= 1'b1;
+                    rng_flush      <= 1'b0;   // flush was a one-cycle pulse
                     if (rng_valid) begin
                         rng_word_buf   <= rng_word;
                         nibble_idx     <= 3'd0;
                         rng_harvest_en <= 1'b0;   // pause extractor during emit
+                        rng_watchdog   <= 27'd0;  // healthy: keep resetting
                         fsm            <= S_RNG_EMIT;
+                    end else if (rng_watchdog >= RNG_WATCHDOG_CYCLES) begin
+                        // no qrng word completed in time (stuck/degenerate
+                        // dark channel): refuse instead of hanging forever.
+                        rng_harvest_en <= 1'b0;
+                        reply_ok       <= 1'b0;   // ERR
+                        fsm            <= S_REPLY_LOAD;
+                    end else begin
+                        rng_watchdog <= rng_watchdog + 27'd1;
                     end
                 end
 
@@ -948,21 +1001,40 @@ module command_parser #(
                     end
                 end
 
-                // READ_RNG footer: " 0 0 0\n" (raw_bits/kept/rate emitted as 0;
-                // the host parses them best-effort and computes the real stats).
+                // READ_RNG footer: build " 00064 0 0\n" in one cycle. raw =
+                // the raw LSB samples this request fed to the extractor
+                // (decimal, zero-padded to 5 digits); kept and rate stay "0"
+                // placeholders — the host derives kept = n_bytes*8 and
+                // rate = kept/raw.
                 S_RNG_STATS : begin
                     rng_harvest_en <= 1'b0;
-                    reply_mem[0] <= 8'h20;  // ' '
-                    reply_mem[1] <= 8'h30;  // '0'
-                    reply_mem[2] <= 8'h20;  // ' '
-                    reply_mem[3] <= 8'h30;  // '0'
-                    reply_mem[4] <= 8'h20;  // ' '
-                    reply_mem[5] <= 8'h30;  // '0'
-                    reply_mem[6] <= 8'h0A;  // '\n'
-                    reply_len    <= 3'd7;
-                    reply_start  <= 3'd0;
-                    reply_idx    <= 3'd0;
-                    fsm          <= S_REPLY_SEND;
+                    rng_tail[0]  <= 8'h20;                 // ' '
+                    rng_tail[1]  <= enc_raw[39:32];        // ten-thousands
+                    rng_tail[2]  <= enc_raw[31:24];        // thousands
+                    rng_tail[3]  <= enc_raw[23:16];        // hundreds
+                    rng_tail[4]  <= enc_raw[15:8];         // tens
+                    rng_tail[5]  <= enc_raw[7:0];          // ones
+                    rng_tail[6]  <= 8'h20;                 // ' '
+                    rng_tail[7]  <= 8'h30;                 // '0' (kept: host)
+                    rng_tail[8]  <= 8'h20;                 // ' '
+                    rng_tail[9]  <= 8'h30;                 // '0' (rate: host)
+                    rng_tail[10] <= 8'h0A;                 // '\n'
+                    rng_tail_idx   <= 4'd0;
+                    fsm            <= S_RNG_TAIL;
+                end
+
+                // Stream the footer (11 bytes: ' ' + 5 zero-padded raw digits
+                // + " 0 0" + LF). Too long for the 8-byte reply_mem, so it
+                // goes out through tx_load like the hex stream above.
+                S_RNG_TAIL : begin
+                    if (tx_ready) begin
+                        tx_load <= 1'b1;
+                        tx_din  <= rng_tail[rng_tail_idx];
+                        if (rng_tail_idx == 4'd10)
+                            fsm <= S_IDLE;            // footer was the last byte
+                        else
+                            rng_tail_idx <= rng_tail_idx + 4'd1;
+                    end
                 end
 
                 default : fsm <= S_IDLE;
