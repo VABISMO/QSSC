@@ -17,6 +17,7 @@ from qssc import SimulatedFPGA
 from qssc.crypto import (
     bits_to_bytes, bytes_to_bits, entropy_health, von_neumann_extract,
 )
+import api.main as main_mod
 from api.runner import run_circuit
 
 
@@ -139,3 +140,77 @@ def test_qrand_health_gate_rejects_degenerate_stream(monkeypatch):
     assert res.get("error", "").startswith("extracted entropy failed")
     assert res["health"]["passed"] is False
     assert "symmetric_key_hex" not in res
+
+
+# -- /api/fpga/qrng endpoint (hardware path, issue #46) -----------------------
+
+class _StubDevice:
+    """Stand-in for SimulatedFPGA / FPGAConnection with a canned reply."""
+
+    def __init__(self, reply: str):
+        self.reply = reply
+
+    def send_command(self, cmd: str) -> str:
+        return self.reply
+
+
+def _client():
+    from fastapi.testclient import TestClient
+    from api.main import app
+    return TestClient(app)
+
+
+def test_qrng_endpoint_accepts_rtl_zero_stats_reply(monkeypatch):
+    """The firmware footer currently emits "0 0 0" placeholders (issue #47).
+    The endpoint must accept that reply, gate it, derive kept = n_bytes * 8
+    and leave rate at 0.0 while no raw count is reported on-wire."""
+    rng = np.random.default_rng(7)
+    entropy = rng.integers(0, 256, size=32, dtype=np.uint8).tobytes()
+    monkeypatch.setattr(
+        main_mod, "_fpga",
+        lambda: _StubDevice(f"{entropy.hex()} 0 0 0"))
+    with _client() as c:
+        r = c.get("/api/fpga/qrng")
+    assert r.status_code == 200
+    j = r.json()
+    assert j["source"] == "hardware-adc-noise"
+    assert j["entropy_hex"] == entropy.hex()
+    assert j["extraction"] == {"raw_bits": 0, "kept": 256,
+                               "extract_rate": 0.0}
+    assert j["health"]["passed"] is True
+    assert "public_key_pem" in j
+
+
+def test_qrng_endpoint_accepts_simulator_stats_reply(monkeypatch):
+    """The software simulator reports "<hex> <raw_bits> <kept> <rate>" with
+    real extraction stats; that format must keep working."""
+    rng = np.random.default_rng(8)
+    entropy = rng.integers(0, 256, size=32, dtype=np.uint8).tobytes()
+    monkeypatch.setattr(
+        main_mod, "_fpga",
+        lambda: _StubDevice(f"{entropy.hex()} 128 32 0.25"))
+    with _client() as c:
+        r = c.get("/api/fpga/qrng")
+    assert r.status_code == 200
+    j = r.json()
+    # rate is recomputed host-side from kept/raw (round-trips to 0.25)
+    assert j["extraction"] == {"raw_bits": 128, "kept": 32,
+                               "extract_rate": 0.25}
+    assert j["health"]["passed"] is True
+
+
+def test_qrng_endpoint_gates_degenerate_entropy(monkeypatch):
+    """A degenerate extracted block (issue #46) must not become key material
+    on the hardware path either -- the endpoint refuses with 502 + health
+    breakdown and leaks no key material."""
+    monkeypatch.setattr(
+        main_mod, "_fpga",
+        lambda: _StubDevice("55" * 32 + " 128 32"))   # alternating bits
+    with _client() as c:
+        r = c.get("/api/fpga/qrng")
+    assert r.status_code == 502
+    detail = r.json()["detail"]
+    assert detail["error"].startswith("FPGA QRNG entropy failed the health")
+    assert detail["health"]["passed"] is False
+    assert "private_key_pem" not in r.json()
+    assert "entropy_hex" not in r.json()

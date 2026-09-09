@@ -715,6 +715,10 @@ def fpga_qrng(n_bytes: int = 32, common_name: str = "QSSC-hw-qrng",
     ``qrand`` algorithm in the Hardware tab, which is a simulated Hadamard
     coin flip (``qc.h ; qc.measure``). Ed25519 needs a 32-byte seed, so
     ``n_bytes`` is clamped to >= 32.
+
+    The reply is gated by ``qssc.crypto.entropy_health`` (issue #46) before it
+    can become key material — a degenerate/correlated extraction is refused
+    with 502 + the health breakdown instead.
     """
     if not _is_local(request):
         raise HTTPException(403, "FPGA QRNG endpoint is localhost-only.")
@@ -727,18 +731,38 @@ def fpga_qrng(n_bytes: int = 32, common_name: str = "QSSC-hw-qrng",
         raise HTTPException(502, "FPGA QRNG returned ERR")
     parts = reply.split()
     hexstr = parts[0]
-    stats = {"raw_bits": 0, "kept": 0, "extract_rate": 0.0}
-    if len(parts) >= 4:
-        try:
-            stats = {"raw_bits": int(parts[1]), "kept": int(parts[2]),
-                     "extract_rate": float(parts[3])}
-        except ValueError:
-            pass
+    # Reply stats: the software simulator reports "<hex> <raw_bits> <kept>
+    # <rate>"; the firmware footer still emits "0 0 0" placeholders (issue
+    # #47 — raw/kept/rate are not counted on-wire yet). "kept" is always
+    # host-known though — it is the number of bits actually delivered
+    # (n_bytes * 8) — and extract_rate follows from kept/raw whenever a real
+    # raw count is reported.
+    try:
+        raw_bits = int(parts[1]) if len(parts) >= 4 else 0
+        kept = int(parts[2]) if len(parts) >= 4 else 0
+        rate = float(parts[3]) if len(parts) >= 4 else 0.0
+    except ValueError:
+        raw_bits, kept, rate = 0, 0, 0.0
+    if kept == 0:
+        kept = n_bytes * 8
+    if raw_bits > 0:
+        rate = kept / raw_bits
+    stats = {"raw_bits": raw_bits, "kept": kept,
+             "extract_rate": round(rate, 4)}
     try:
         entropy = bytes.fromhex(hexstr)
     except ValueError:
         raise HTTPException(502, "FPGA QRNG returned malformed hex")
-    from qssc.crypto import derive_keypair
+    # Health gate (issue #46): a degenerate/correlated block must not become
+    # key material on the hardware path either. Refuse BEFORE any key is
+    # derived so no key material can leak in the 502.
+    from qssc.crypto import bytes_to_bits, derive_keypair, entropy_health
+    health = entropy_health(bytes_to_bits(entropy))
+    if not health["passed"]:
+        raise HTTPException(502, {
+            "error": "FPGA QRNG entropy failed the health gate (issue #46)",
+            "health": health,
+        })
     try:
         kp = derive_keypair(entropy, common_name=common_name)
     except ValueError as exc:
@@ -748,6 +772,7 @@ def fpga_qrng(n_bytes: int = 32, common_name: str = "QSSC-hw-qrng",
         "n_bytes": n_bytes,
         "entropy_hex": entropy.hex(),
         "extraction": stats,
+        "health": health,
         **kp,
     }
 
