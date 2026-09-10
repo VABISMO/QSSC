@@ -210,12 +210,57 @@ def _strip_plane_blocks(dsn_path, plane_nets):
     dsn_path.write_text(txt)
     return removed
 
+
+def _loosen_clearance(dsn_path, minclr):
+    """Align FreeRouting's clearance floor to the board's actual min_clearance.
+
+    KiCad's ExportSpecctraDSN writes the netclass/default clearance (often
+    150 um = 0.15 mm) which can be STRICTER than the board's min_clearance
+    (e.g. 0.10 mm). FreeRouting then flags every pad/track pair that sits
+    between min_clearance and the netclass clearance as a "violation" -- on a
+    dense fine-pitch board that is ~1000 constant violations the optimizer
+    can never clean (they are KiCad-legal placements, not routing faults), and
+    a route that finishes with unresolved violations writes a 0-byte SES.
+
+    Setting MINCLR=<um> (e.g. MINCLR=100 for a 0.10 mm min_clearance board)
+    rewrites every (clearance X) with X > MINCLR down to MINCLR, so the
+    autorouter uses the board's REAL design rule. Imported routes still pass
+    KiCad DRC because MINCLR equals (never undercuts) min_clearance. Leave
+    MINCLR unset to keep the DSN clearances as exported (boards that already
+    route clean). Returns the number of clearance values lowered.
+    """
+    import re as _re
+
+    txt = dsn_path.read_text()
+    n = 0
+
+    def _sub(m):
+        nonlocal n
+        x = float(m.group(1))
+        if x > minclr:
+            n += 1
+            return f"(clearance {minclr:g}"
+        return m.group(0)
+
+    txt = _re.sub(r"\(clearance\s+([\d.]+)", _sub, txt)
+    dsn_path.write_text(txt)
+    return n
+
+
 dropped = _truncate_plane_net_pins(dsn, PLANE_NETS)
 print(f"  truncated {dropped} plane-net pin refs ({', '.join(sorted(PLANE_NETS))}) "
       f"to 1 each in DSN -> autorouter routes signals only")
 stripped = _strip_plane_blocks(dsn, PLANE_NETS)
 print(f"  stripped {stripped} (plane ...) polygon blocks from DSN "
       f"-> FreeRouting routes signals only, planes re-poured after")
+
+_minclr_env = os.environ.get("MINCLR")
+if _minclr_env:
+    _minclr = float(_minclr_env)
+    _lowered = _loosen_clearance(dsn, _minclr)
+    print(f"  loosened {_lowered} DSN clearance rules > {_minclr:g}um -> {_minclr:g}um "
+          f"(MINCLR env; aligns autorouter to board min_clearance so KiCad-legal "
+          f"placements stop registering as FreeRouting violations)")
 
 # FreeRouting 2.4.1 CLI: -de <dsn> -do <ses> -mp <passes> -mt <threads>.
 # -mp makes it autoroute (without -mp it loads + exits). -mt 1 = single-thread
