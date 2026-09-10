@@ -83,16 +83,13 @@ const QUBIT_CFG = {
 
 // helpers for shor / period / qftnos: the circuit width is a function of the
 // integer N being factored (shor/period = 3·bitlen(N)+1, qftnos = 2·bitlen(N)+1).
-// We keep BOTH fields visible & editable: editing N derives the qubit count, and
-// editing the qubit count snaps N to a semiprime of the matching bit-length.
+// We keep N editable and show the qubit count as a READ-ONLY derived readout
+// (shor/period = 3·bitlen(N)+1, qftnos = 2·bitlen(N)+1). Editing the qubit
+// count no longer silently snaps N to a semiprime -- that bidirectional
+// coupling made "inputs change by themselves" when the user touched the
+// qubits field.
 const bitLen = (n) => (n <= 1 ? 1 : Math.floor(Math.log2(n)) + 1)
-const SHOR_GOOD_N = { 4: 15, 5: 21, 6: 35, 7: 77, 8: 143, 9: 323, 10: 527, 11: 649 }
 const derivedQubits = (algo, n) => algo === 'qftnos' ? 2 * bitLen(n) + 1 : 3 * bitLen(n) + 1
-const qubitsToN = (algo, q) => {
-  const l = algo === 'qftnos' ? Math.round((q - 1) / 2) : Math.round((q - 1) / 3)
-  const lb = Math.max(2, l)
-  return SHOR_GOOD_N[lb] || ((1 << (lb - 1)) + 1)   // smallest lb-bit integer
-}
 
 const downloadPem = (filename, text) => {
   const blob = new Blob([text], { type: 'application/x-pem-file' })
@@ -464,7 +461,12 @@ export default function App() {
     if (algo === 'custom') {
       return { code: customCode, profile, temperature_k: temperature, seed, shots, noise_mode: noiseMode }
     }
-    const body = { algorithm: algo, profile, temperature_k: temperature, seed, shots, noise_mode: noiseMode }
+    const body = { algorithm: algo, profile, temperature_k: temperature, shots, noise_mode: noiseMode }
+    // qrand: do NOT send the fixed seed -- the backend uses OS entropy when no
+    // seed is present (issue #45), so each UI run yields fresh quantum entropy
+    // and a new Ed25519 key. Sending seed=42 made every default qrand run
+    // return the identical histogram / identical private key.
+    if (algo !== 'qrand') body.seed = seed
     if (algo === 'shor' || algo === 'period' || algo === 'qftnos') body.n = nShor
     if (algo === 'math') { body.op = mathOp; body.a = mathA; body.b = mathB; body.bits = numQubits }
     if (algo === 'grover') { body.n_items = numQubits; body.marked = groverMarked }
@@ -1173,10 +1175,9 @@ export default function App() {
                   </div>
                   <div className="field">
                     <label>Circuit qubits n</label>
-                    <input type="number" min={2} value={numQubits} onChange={e => {
-                      const q = Math.max(2, Math.floor(+e.target.value) || 2)
-                      setNumQubits(q); setNShor(qubitsToN(algo, q))
-                    }} />
+                    <input type="number" min={2} value={numQubits} readOnly
+                           style={{ color: 'var(--muted)' }}
+                           title="Derived from N — edit N above to change the circuit width" />
                   </div>
                   <div className="field"><label>&nbsp;</label>
                     <div className="muted" style={{ paddingTop: 9 }}>

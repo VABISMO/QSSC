@@ -121,13 +121,23 @@ export function BarCounts({ counts, max = 8 }) {
   const top = Math.max(...entries.map(e => e[1]), 1)
   return (
     <div className="counts">
-      {entries.map(([state, n]) => (
-        <div className="bar-row" key={state}>
-          <span className="mono">{state}</span>
-          <div className="bar-track"><div className="bar-fill" style={{ width: `${(n / top) * 100}%` }} /></div>
-          <span className="mono" style={{ textAlign: 'right', color: 'var(--muted)' }}>{n}</span>
-        </div>
-      ))}
+      {/* qiskit bitstrings are MSB-first (leftmost char = q_{n-1}); reverse so
+          the displayed string reads q0..q_{n-1} left-to-right, matching the
+          QubitGrid (cell idx = qubit idx, q0 top-left). The raw counts keys are
+          unchanged -- only the display label is reversed, so a state like
+          qiskit "001" (q0=1) shows as "100" and its leftmost bar bit lines up
+          with grid cell 0 instead of looking like cell 2. */}
+      <div className="counts-axis mono">q0 ← state → qₙ₋₁  (matches grid cell order)</div>
+      {entries.map(([state, n]) => {
+        const disp = String(state).replace(/ /g, '').split('').reverse().join('')
+        return (
+          <div className="bar-row" key={state}>
+            <span className="mono" title={`qiskit MSB-first: ${state}`}>{disp}</span>
+            <div className="bar-track"><div className="bar-fill" style={{ width: `${(n / top) * 100}%` }} /></div>
+            <span className="mono" style={{ textAlign: 'right', color: 'var(--muted)' }}>{n}</span>
+          </div>
+        )
+      })}
     </div>
   )
 }
