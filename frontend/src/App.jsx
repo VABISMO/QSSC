@@ -1391,7 +1391,7 @@ export default function App() {
                   ? 'Phase-register marginal (ancilla collapsed): bar counts sum to shots, the recovered signal peak is concentrated.'
                   : 'Top bitstrings from the most recent run (most-probable first).'}</div>
                 {displayCounts
-                  ? <BarCounts counts={displayCounts} recovered={runRecovered} />
+                  ? <BarCounts counts={displayCounts} recovered={runRecovered} shots={shots} />
                   : runErr
                     ? <div className="muted">Last run failed — see the error above.</div>
                     : <div className="muted">No run yet — execute a circuit on the left.</div>}
