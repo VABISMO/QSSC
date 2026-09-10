@@ -418,6 +418,20 @@ class QSSCBackend(BackendV2):
         # real control/readout timings from the defect profile
         self._g1q = prof.gate_1q_ns * 1e-9
         self._g2q = prof.gate_2q_ns * 1e-9
+        # Temperature-scaled 2q depolarization: 2q gate fidelity improves at
+        # cryogenic T (phonon / charge noise fall). depol_2q is the 300 K value,
+        # depol_2q_cryo_floor the asymptotic cryo limit; the effective depol at
+        # this temperature is floor + (room-floor)*(T/300)**exp, -> room at 300 K
+        # and -> floor as T -> 0. cryo_floor 0 = flat (back-compat). Used by the
+        # noise model, the Target error, and the signal_retention estimate so
+        # the three cannot disagree. See defects.py DefectProfile.depol_2q_*.
+        floor = prof.depol_2q_cryo_floor
+        if floor > 0.0 and temperature_k < 300.0:
+            self._depol_2q = floor + (prof.depol_2q - floor) * (
+                temperature_k / 300.0) ** prof.depol_temp_exponent
+        else:
+            self._depol_2q = prof.depol_2q
+        self._depol_1q = prof.depol_1q
         self._readout_t = prof.readout_ns * 1e-9
         self._init_t = prof.init_ns * 1e-9
         # Per-qubit transition frequency: each site carries its own detuned
@@ -486,7 +500,7 @@ class QSSCBackend(BackendV2):
         # overhead is paid -- see the __init__ coupling comment).
         nbr = set(self._neighbor_pairs())
         tq = {(i, j): InstructionProperties(duration=self._g2q,
-                                            error=self.profile.depol_2q)
+                                            error=self._depol_2q)
               for (i, j) in nbr}
         for g in (CXGate(), CZGate(), SwapGate(),
                   CPhaseGate(__import__("qiskit").circuit.Parameter("theta"))):
@@ -516,7 +530,7 @@ class QSSCBackend(BackendV2):
         active = self._active_qubits(circuit)
         nm = NoiseModel()
         g1q, g2q = self._g1q, self._g2q
-        dep1, dep2 = self.profile.depol_1q, self.profile.depol_2q
+        dep1, dep2 = self._depol_1q, self._depol_2q
         one_q_gates = ["x", "y", "h", "rz", "ry", "s", "t", "sx"]
         for q in active:
             s = self.sites[q]
@@ -725,15 +739,18 @@ class QSSCBackend(BackendV2):
         # phase estimation) have a tiny logical depth but decompose to a 2q-gate
         # count that scales **quadratically** with the block's register width w
         # (an n-bit multiplier/QFT/adder is O(n^2) entangling gates). The stored
-        # `factor` is the cost of a reference width-4 instance, so each block's
-        # cost is scaled by (w/4)^2 -- this is why increasing the number of
-        # qubits/bits makes the operation slower (longer decomposed duration)
-        # and pushes it further past the T2 coherence window.
+        # `factor` is the 2q-gate count of a reference width-4 instance of an
+        # *efficient* arithmetic construction, so each block's cost is scaled by
+        # (w/4)^2. This models a REAL Shor / arithmetic circuit (Beauregard /
+        # Vedral-Barenco-Ekert O(n^2) mod-exp, QFT n(n-1)/2), NOT the exponential
+        # CNOT count Qiskit produces when it naively decomposes a generic
+        # UnitaryGate -- the Aer sim still runs that exact unitary, but the
+        # coherence/depolarization physics must reflect the real gate count.
         block_factor = {
-            "unitary": 256, "c-unitary": 256,          # mod-mult / controlled-U
-            "IQFT": 80, "QFT": 80, "qft": 80,          # QFT on control register
-            "rgqft_multiplier": 128, "CDKMRippleCarryAdder": 96,
-            "DraperQFTAdder": 64, "PhaseEstimation": 160,
+            "unitary": 32, "c-unitary": 32,            # mod-mult / controlled-U, ~2n^2
+            "IQFT": 8, "QFT": 8, "qft": 8,             # QFT on control register, ~n^2/2
+            "rgqft_multiplier": 32, "CDKMRippleCarryAdder": 16,
+            "DraperQFTAdder": 8, "PhaseEstimation": 40,
         }
         n_compiled = 0
         decomp_2q = 0
@@ -741,7 +758,7 @@ class QSSCBackend(BackendV2):
             name = inst.operation.name
             if name in one_q or name in two_q or name in ("measure", "barrier"):
                 continue
-            factor = block_factor.get(name, 64)  # generic compiled block
+            factor = block_factor.get(name, 8)  # generic compiled block
             # block width (qubits): scale cost quadratically with width.
             try:
                 w = int(inst.operation.num_qubits)
@@ -786,8 +803,8 @@ class QSSCBackend(BackendV2):
         _, _, _, t_circuit, est_2q, est_1q = self._decomposed_cost(circuit)
         t2 = max(self._t2, 1e-15)
         coherence_survival = math.exp(-t_circuit / t2)
-        d1 = self.profile.depol_1q
-        d2 = self.profile.depol_2q
+        d1 = self._depol_1q
+        d2 = self._depol_2q
         depol_survival = ((1.0 - d1) ** max(est_1q, 0)
                          * (1.0 - d2) ** max(est_2q, 0))
         signal_retention = coherence_survival * depol_survival

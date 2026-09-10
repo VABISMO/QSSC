@@ -344,9 +344,12 @@ def test_assess_circuit_exposes_signal_retention():
               4), abs=1e-4)
     # A Bell circuit is short: spin coherence + depolarization survive well, so
     # the on-chip spin gate works and the circuit IS within (spin) coherence.
+    # depolarization_survival for one Bell (1 cx) at hBN's realistic depol_2q=0.05
+    # is ~0.95 (one 5%-depol 2q gate) -> well above a "survives well" 0.90 bar; the
+    # old >0.95 bar was tied to the aspirational depol_2q=0.006 (~0.994).
     assert a_short["coherence_survival"] > 0.5
-    assert a_short["depolarization_survival"] > 0.95
-    assert a_short["signal_retention"] > 0.5
+    assert a_short["depolarization_survival"] > 0.90
+    assert a_short["signal_retention"] > 0.45
     assert a_short["within_coherence"] is True
     # The descriptive optical channel still reports a bad photon budget at 300 K
     # (V_HOM ~ 2e-7 -> optical_survival ~ 0, within_optical_coherence False), but

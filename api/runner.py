@@ -64,14 +64,16 @@ def run_circuit(req: dict) -> dict:
     res = None
 
     # Hard cap on the integer N for the period-finding / factoring algorithms.
-    # N=15 -> 13 qubits, runs in <1 s, and is the largest N that factors at
-    # 300 K NV (the spin-coherence physics guard: 2q depol over the decomposed
-    # mod-exp eats the signal for wider circuits). N=21 -> 16 qubits: a single
-    # Aer ideal run is ~22-50 s, 3 retry attempts blow the 120 s frontend poll
-    # timeout (the "shor hangs from the panel" symptom), and at 300 K it
-    # decoheres to factors=None anyway. Larger N (e.g. 35 -> 19 qubits) makes
-    # Aer's statevector sim hang outright. So cap at 15 -- the working demo.
-    MAX_FACTOR_N = 15
+    # This is a TIME cap on the QUBIT COUNT (not memory, not an N value): Shor's
+    # controlled mod-exp is a compiled block, so _run_real takes the statevector
+    # phenomenological path (16q statevector = 1 MB, never a density matrix).
+    # Each Aer ideal run grows ~exponentially with qubit count -- 16q is
+    # ~22-50 s/attempt, 19q (N>=32 for shor) takes minutes and may hang -- so we
+    # reject anything wider than 16 qubits up front. shor/period = 3*bitlen(N)+1
+    # -> N <= 31; qftnos = 2*bitlen(N)+1 -> N <= 127. There is NO per-mode limit:
+    # in real mode at 300 K the deeper circuit decoheres to factors=None (the
+    # real T2 physics), and at low temperature (or in ideal/no-noise mode) it
+    # factors. Let the physics show, not an arbitrary rejection.
 
     if algo == "bell":
         from qiskit import QuantumCircuit
@@ -89,10 +91,12 @@ def run_circuit(req: dict) -> dict:
         n = int(req.get("n", 15))
         if n < 2 or is_prime(n):
             return {"error": "n must be a composite integer > 1"}
-        if n > MAX_FACTOR_N:
-            return {"error": f"N={n} is too large for the in-browser simulator "
-                             f"(> {MAX_FACTOR_N} -> >13 qubits; Aer hangs). "
-                             f"Use N <= {MAX_FACTOR_N}."}
+        nq = (3 * n.bit_length() + 1) if algo in ("shor", "period") else (2 * n.bit_length() + 1)
+        if nq > 16:
+            return {"error": f"N={n} -> {nq} qubits is too large for the in-browser "
+                             f"simulator (>16 qubits -> each Aer run takes minutes "
+                             f"and may hang). Use N <= 31 (shor/period) or <= 127 "
+                             f"(qftnos)."}
         rng = np.random.default_rng(seed)
         chosen_a = req.get("a")
         a = r = factors = qc = counts = None
@@ -101,14 +105,20 @@ def run_circuit(req: dict) -> dict:
         marginal_counts = None
         # fewer retries for larger N: each attempt's Aer run grows ~exponentially
         # with qubit count, so 8 attempts at N=21 would exceed the 120 s timeout.
-        max_attempts = 8 if n <= 15 else 3
+        max_attempts = 8 if n <= 15 else 2
         for attempt in range(max_attempts):
             a = (chosen_a if (chosen_a is not None and attempt == 0)
                  else select_coprime(n, rng))
             qc = create_shor_circuit(n, a=a, rng=rng)[0]
             res = b.run(qc, shots=shots).result()
             counts = res.get_counts()
-            _ret = float(res.assessment.get("signal_retention", 0.0) or 0.0)
+            # ideal/no-noise mode skips the signal_retention gate: there is no
+            # noise to reject, so the analytic retention (coherence x depol,
+            # which can underflow toward 0 for a deep circuit) must not hide a
+            # real period that the noise-free Aer counts clearly show
+            # (postprocess_period docstring: ideal inputs pass None, skip gate).
+            _ret = (None if noise_mode == "none"
+                    else float(res.assessment.get("signal_retention", 0.0) or 0.0))
             _reveal = {}
             r, factors = postprocess_period(counts,
                                             qc.metadata["counting_bits"], a, n,
@@ -142,10 +152,12 @@ def run_circuit(req: dict) -> dict:
 
     elif algo == "period":
         n = int(req.get("n", 15))
-        if n > MAX_FACTOR_N:
-            return {"error": f"N={n} is too large for the in-browser simulator "
-                             f"(> {MAX_FACTOR_N} -> >13 qubits; Aer hangs). "
-                             f"Use N <= {MAX_FACTOR_N}."}
+        nq = (3 * n.bit_length() + 1) if algo in ("shor", "period") else (2 * n.bit_length() + 1)
+        if nq > 16:
+            return {"error": f"N={n} -> {nq} qubits is too large for the in-browser "
+                             f"simulator (>16 qubits -> each Aer run takes minutes "
+                             f"and may hang). Use N <= 31 (shor/period) or <= 127 "
+                             f"(qftnos)."}
         rng = np.random.default_rng(seed)
         a = req.get("a") or select_coprime(n, rng)
         if gcd(a, n) != 1:
@@ -159,7 +171,10 @@ def run_circuit(req: dict) -> dict:
         # period 1. postprocess_period skips trivial / odd candidates, and the
         # signal_retention gate rejects noise-dominated runs so a starved run
         # cannot report a noise-artifact period (audit issue #8).
-        _ret = float(res.assessment.get("signal_retention", 0.0) or 0.0)
+        # ideal/no-noise mode skips the signal_retention gate (no noise to
+        # reject -- see the shor branch for the rationale).
+        _ret = (None if noise_mode == "none"
+                else float(res.assessment.get("signal_retention", 0.0) or 0.0))
         _cb = qc.metadata["counting_bits"]
         _reveal = {}
         r, _ = postprocess_period(counts, _cb, a, n,
@@ -348,24 +363,29 @@ def run_circuit(req: dict) -> dict:
         n = int(req.get("n", 15))
         if n < 2 or is_prime(n):
             return {"error": "n must be a composite integer > 1"}
-        if n > MAX_FACTOR_N:
-            return {"error": f"N={n} is too large for the in-browser simulator "
-                             f"(> {MAX_FACTOR_N} -> >13 qubits; Aer hangs). "
-                             f"Use N <= {MAX_FACTOR_N}."}
+        nq = (3 * n.bit_length() + 1) if algo in ("shor", "period") else (2 * n.bit_length() + 1)
+        if nq > 16:
+            return {"error": f"N={n} -> {nq} qubits is too large for the in-browser "
+                             f"simulator (>16 qubits -> each Aer run takes minutes "
+                             f"and may hang). Use N <= 31 (shor/period) or <= 127 "
+                             f"(qftnos)."}
         rng = np.random.default_rng(seed)
         chosen_a = req.get("a")
         a = r = factors = qc = counts = None
         attempt = 0
         recovered = None
         marginal_counts = None
-        max_attempts = 8 if n <= 15 else 3
+        max_attempts = 8 if n <= 15 else 2
         for attempt in range(max_attempts):
             a = (chosen_a if (chosen_a is not None and attempt == 0)
                  else select_coprime(n, rng))
             qc, a = create_qft_nos_circuit(n, a=a, rng=rng)
             res = b.run(qc, shots=shots).result()
             counts = res.get_counts()
-            _ret = float(res.assessment.get("signal_retention", 0.0) or 0.0)
+            # ideal/no-noise mode skips the signal_retention gate (no noise to
+            # reject -- see the shor branch for the rationale).
+            _ret = (None if noise_mode == "none"
+                    else float(res.assessment.get("signal_retention", 0.0) or 0.0))
             _reveal = {}
             r, factors = postprocess_period_swapless(counts,
                                                      qc.metadata["counting_bits"],
