@@ -51,16 +51,25 @@ from .simulator import (
 
 logger = logging.getLogger(__name__)
 
-# Classical simulation ceiling. The chip has 64 physical detector sites (the
-# 8x8 grid), but a quantum circuit is simulated classically by Aer as a
-# statevector / density matrix, which is O(2^n) in memory. AerSimulator's
-# default target tops out at 28 qubits (a 2^28 statevector ~4 GB); on the free
-# Render worker the practical safe width is lower (see API cap). Circuits
-# wider than this cannot be exactly simulated on any classical machine and
-# are rejected with a clear error instead of silently returning fake
-# all-zero counts. The grid still shows all 64 sites; only the *simulated*
-# subset that was measured lights up.
-SIM_MAX_QUBITS = 28
+# Classical simulation ceiling = the full 64-site chip. Circuits up to 28
+# qubits use Aer's statevector method (exact, O(2^n) memory -- 2^28 ~ 4 GB).
+# Wider circuits (29..64) use the matrix_product_state (MPS) method, which is
+# O(n * chi^2) instead of O(2^n): a 2^64 statevector is exabytes (impossible),
+# but low-entanglement circuits (H/product states, GHZ, QFT) keep a small MPS
+# bond dimension chi and simulate 64 qubits in under a second. High-entanglement
+# circuits (Shor mod-exp, multipliers) blow chi up and are capped separately by
+# the runner's N / register caps (they also decohere at 300 K). Circuits wider
+# than 64 (more than the physical chip) are rejected with a clear error.
+SIM_MAX_QUBITS = 64
+# statevector width ceiling (above this Aer's statevector method runs out of
+# memory; switch to MPS).
+SV_MAX_QUBITS = 28
+# basis gates for MPS transpilation. We transpile against an explicit basis
+# (not the AerSimulator Target) because the MPS Target's coupling map caps at
+# 63 qubits -- transpiling basis-only with no coupling map is all-to-all and
+# reaches the full 64.
+_MPS_BASIS = ["u", "u1", "u2", "u3", "cx", "x", "h", "s", "t",
+              "rz", "ry", "rx", "measure", "reset"]
 
 
 # ---------------------------------------------------------------------------
@@ -595,11 +604,9 @@ class QSSCBackend(BackendV2):
         mode = options.get("noise_mode", self.noise_mode)
         if circuit.num_qubits > SIM_MAX_QUBITS:
             raise ValueError(
-                f"circuit uses {circuit.num_qubits} qubits, but the classical "
-                f"simulator is bounded at {SIM_MAX_QUBITS} (a 2^{circuit.num_qubits} "
-                f"statevector cannot be held in memory). The chip has 64 physical "
-                f"sites; the simulator runs circuits on a classical subset. Use a "
-                f"smaller register or a lower N.")
+                f"circuit uses {circuit.num_qubits} qubits, but the chip has "
+                f"{SIM_MAX_QUBITS} physical sites -- the circuit is wider than "
+                f"the detector grid. Use a smaller register or a lower N.")
         ideal_counts = self._run_ideal(circuit, shots)
         assessment = self.assess_circuit(circuit)
         approximate = False
@@ -619,18 +626,36 @@ class QSSCBackend(BackendV2):
                           noise_mode=mode, approximate=approximate)
 
     def _run_ideal(self, circuit: QuantumCircuit, shots: int) -> dict:
-        """Fast ideal statevector simulation via Aer (no noise model).
+        """Ideal simulation via Aer (no noise model).
+
+        Circuits up to ``SV_MAX_QUBITS`` (28) use the statevector method --
+        exact and fastest. Wider circuits (29..64) use the matrix_product_state
+        (MPS) method, which is O(n * chi^2) instead of O(2^n): a 2^64
+        statevector is exabytes (impossible), but a low-entanglement circuit
+        (H/product states, GHZ, QFT) keeps a small MPS bond dimension and
+        simulates 64 qubits in under a second. MPS is transpiled against an
+        explicit basis-gate set (not the AerSimulator Target, whose MPS coupling
+        map caps at 63 qubits) so the full 64-site chip width is reachable.
 
         Raises on failure rather than silently returning fake all-zero
         counts -- a circuit that Aer cannot simulate (too wide, unsupported
-        op...) must surface as a real error, not a fabricated |0...0>
-        result that would mislead the dashboard into showing "everything
-        measured zero". The width guard in :meth:`_execute` rejects
-        over-wide circuits first; this catch-all only fires for unexpected
-        Aer failures.
+        op, bond dimension blew up on a high-entanglement circuit...) must
+        surface as a real error, not a fabricated |0...0> result that would
+        mislead the dashboard into showing "everything measured zero". The
+        width guard in :meth:`_execute` rejects over-wide circuits first;
+        this catch-all only fires for unexpected Aer failures.
         """
-        aer = AerSimulator(seed_simulator=self._seed)
-        t_circ = transpile(circuit, aer, optimization_level=1)
+        n = circuit.num_qubits
+        if n <= SV_MAX_QUBITS:
+            aer = AerSimulator(seed_simulator=self._seed)
+            t_circ = transpile(circuit, aer, optimization_level=1)
+            return aer.run(t_circ, shots=shots).result().get_counts()
+        # wide circuit -> matrix_product_state, transpiled basis-only (no
+        # Target coupling-map cap) so 64 qubits is reachable.
+        aer = AerSimulator(method="matrix_product_state",
+                           seed_simulator=self._seed)
+        t_circ = transpile(circuit, basis_gates=_MPS_BASIS,
+                           optimization_level=1, layout_method="trivial")
         return aer.run(t_circ, shots=shots).result().get_counts()
 
     def _run_real(self, circuit: QuantumCircuit, shots: int,
@@ -900,45 +925,83 @@ class QSSCBackend(BackendV2):
         err_per_cl = np.zeros(nbits)
         for cl, pq in meas_map.items():
             err_per_cl[cl] = float(self.sites[pq].readout_err) if pq < len(self.sites) else self.profile.readout_error
-        noisy_int = np.copy(drawn)
+        # Two execution paths. The int-packed path (nbits < 64) preserves the
+        # exact rng stream every existing test anchors against (e.g. SiC
+        # symmetric mul==12). The bit-matrix path (nbits >= 64) is width-
+        # agnostic: a 64-bit bitstring overflows int64 (2^64-1 > int64 max) so
+        # numpy's >>/xor ufuncs and rng.integers(0, 2**nbits) fail -- operate on
+        # a (shots, nbits) uint8 bit matrix instead.
+        if nbits < 64:
+            noisy_int = np.copy(drawn)
+            if asym == 0.0:
+                # Symmetric: one flip prob per clbit (back-compat rng stream).
+                flip = rng.random((shots, nbits)) < err_per_cl[::-1][None, :]
+                for i in range(nbits):
+                    noisy_int = np.where(flip[:, i], np.bitwise_xor(noisy_int, 1 << i), noisy_int)
+            else:
+                # Asymmetric: p_bright_to_dark = ro*(1-asym), p_dark_to_bright =
+                # ro*(1+asym), applied per the current (true) bit value.
+                p0to1 = np.zeros(nbits)   # true 0 (bright) -> read 1 (dark)
+                p1to0 = np.zeros(nbits)   # true 1 (dark)   -> read 0 (bright)
+                for cl, pq in meas_map.items():
+                    ro = float(self.sites[pq].readout_err) if pq < len(self.sites) else self.profile.readout_error
+                    p0to1[cl] = float(np.clip(ro * (1.0 - asym), 0.0, 1.0))
+                    p1to0[cl] = float(np.clip(ro * (1.0 + asym), 0.0, 1.0))
+                p0to1_ord = p0to1[::-1]   # bit i (LSB) <-> cl = nbits-1-i
+                p1to0_ord = p1to0[::-1]
+                for i in range(nbits):
+                    bit_i = (noisy_int >> i) & 1
+                    flip = np.where(bit_i == 0,
+                                    rng.random(shots) < p0to1_ord[i],
+                                    rng.random(shots) < p1to0_ord[i])
+                    noisy_int = np.where(flip, np.bitwise_xor(noisy_int, 1 << i), noisy_int)
+            # --- signal-retention damping: blend with uniform ----------------
+            # Use the SAME _signal_survival estimate as assess_circuit (coherence
+            # * cumulative per-gate depolarization over the decomposed gate
+            # counts), so the analytic limit agrees with the physical-feasibility
+            # verdict: a Shor run whose assessment reports a near-destroyed
+            # signal must decohere to a near-uniform distribution here, not
+            # recover its factors.
+            _, _, _, _, signal_retention, _, _, _ = self._signal_survival(circuit)
+            damping = 1.0 - signal_retention
+            uniform = rng.integers(0, 2 ** nbits, size=shots)
+            final_int = np.where(rng.random(shots) < damping, uniform, noisy_int)
+            unique, cnts = np.unique(final_int, return_counts=True)
+            counts = {format(int(v), f"0{nbits}b"): int(c) for v, c in zip(unique, cnts)}
+            return counts
+        # --- wide path (nbits >= 64): bit-matrix ----------------------------
+        drawn_list = [int(v) for v in drawn]
+        bits = np.zeros((shots, nbits), dtype=np.uint8)
+        for i in range(nbits):
+            bits[:, i] = [(d >> i) & 1 for d in drawn_list]   # bit i (clbit i)
         if asym == 0.0:
-            # Symmetric: one flip prob per clbit (back-compat rng stream).
             flip = rng.random((shots, nbits)) < err_per_cl[::-1][None, :]
-            for i in range(nbits):
-                noisy_int = np.where(flip[:, i], np.bitwise_xor(noisy_int, 1 << i), noisy_int)
+            bits = np.where(flip, 1 - bits, bits).astype(np.uint8)
         else:
-            # Asymmetric: p_bright_to_dark = ro*(1-asym), p_dark_to_bright =
-            # ro*(1+asym), applied per the current (true) bit value.
-            p0to1 = np.zeros(nbits)   # true 0 (bright) -> read 1 (dark)
-            p1to0 = np.zeros(nbits)   # true 1 (dark)   -> read 0 (bright)
+            p0to1 = np.zeros(nbits)
+            p1to0 = np.zeros(nbits)
             for cl, pq in meas_map.items():
                 ro = float(self.sites[pq].readout_err) if pq < len(self.sites) else self.profile.readout_error
                 p0to1[cl] = float(np.clip(ro * (1.0 - asym), 0.0, 1.0))
                 p1to0[cl] = float(np.clip(ro * (1.0 + asym), 0.0, 1.0))
-            p0to1_ord = p0to1[::-1]   # bit i (LSB) <-> cl = nbits-1-i
+            p0to1_ord = p0to1[::-1]
             p1to0_ord = p1to0[::-1]
             for i in range(nbits):
-                bit_i = (noisy_int >> i) & 1
-                flip = np.where(bit_i == 0,
-                                rng.random(shots) < p0to1_ord[i],
-                                rng.random(shots) < p1to0_ord[i])
-                noisy_int = np.where(flip, np.bitwise_xor(noisy_int, 1 << i), noisy_int)
-        # --- signal-retention damping: blend with uniform --------------------
-        # Use the SAME _signal_survival estimate as assess_circuit (coherence *
-        # cumulative per-gate depolarization over the decomposed gate counts), so
-        # the analytic limit agrees with the physical-feasibility verdict: a
-        # Shor run whose assessment reports a near-destroyed signal must decohere
-        # to a near-uniform distribution here, not recover its factors. Before
-        # this used only the T2 term and omitted the (temperature-independent)
-        # cumulative depolarization, understating decoherence for compiled-block
-        # circuits that hide ~10^3 entangling gates.
+                is_zero = bits[:, i] == 0
+                fz = rng.random(shots) < p0to1_ord[i]
+                fo = rng.random(shots) < p1to0_ord[i]
+                flip = np.where(is_zero, fz, fo)
+                bits[flip, i] = 1 - bits[flip, i]
         _, _, _, _, signal_retention, _, _, _ = self._signal_survival(circuit)
         damping = 1.0 - signal_retention
-        uniform = rng.integers(0, 2 ** nbits, size=shots)
-        final_int = np.where(rng.random(shots) < damping, uniform, noisy_int)
-        # --- back to counts --------------------------------------------------
-        unique, cnts = np.unique(final_int, return_counts=True)
-        counts = {format(int(v), f"0{nbits}b"): int(c) for v, c in zip(unique, cnts)}
+        uniform_bits = rng.integers(0, 2, size=(shots, nbits), dtype=np.uint8)
+        damped = rng.random(shots) < damping
+        bits = np.where(damped[:, None], uniform_bits, bits)
+        # repack to qiskit MSB-first bitstrings (clbit i -> string index nbits-1-i)
+        counts = {}
+        for row in bits:
+            bs = ''.join(str(int(b)) for b in row[::-1])
+            counts[bs] = counts.get(bs, 0) + 1
         return counts
 
     def _drive_optical_readout(self, circuit: QuantumCircuit, counts: dict, shots: int) -> dict:
