@@ -6,52 +6,57 @@ import React from 'react'
 // readout, no camera).
 // ---------------------------------------------------------------------------
 export function QubitGrid({ sites, counts, numClbits }) {
-  // Per-qubit P(measured |1⟩) across ALL counts. Qiskit bitstrings are
-  // MSB-first, so classical bit i maps to string index (numClbits-1-i). A cell
-  // lights with intensity = that bit's measured-1 probability, so an entangled
-  // Bell/GHZ run visibly lights its measured qubits even when the single top
-  // bitstring is all-zeros (the old "light the top bitstring" rendering went
-  // dark for any run whose top outcome was |0...0⟩).
+  // Show the TOP (best-statistics) measured bitstring: cell i lights iff the
+  // most-counted outcome has classical bit i = 1. Qiskit bitstrings are
+  // MSB-first, so bit i (qubit i) maps to string index (numClbits-1-i). The lit
+  // intensity encodes the top state's share of total shots (confidence) -- a
+  // dominant result lights brightly, a noise-dominated near-uniform run lights
+  // dimly. This keeps the grid consistent with the measurement histogram's top
+  // bar and the reported result, instead of showing the marginal P(|1⟩) which
+  // readout noise pushes toward ~0.5 everywhere (every cell lit, the reported
+  // "grid shows all 1..9 lit but the result is 15" mismatch).
   const total = counts ? Object.values(counts).reduce((s, c) => s + (+c), 0) : 0
-  const p1 = Array.from({ length: 64 }, () => 0)
+  let topBits = null, confidence = 0
   if (counts && total > 0 && numClbits) {
+    let topBs = null, topN = -1
     for (const [bs, c] of Object.entries(counts)) {
-      const n = +c
-      for (let i = 0; i < numClbits && i < 64; i++) {
-        const s = numClbits - 1 - i
-        if (s >= 0 && s < bs.length && bs[s] === '1') p1[i] += n
-      }
+      if (+c > topN) { topN = +c; topBs = bs }
     }
-    for (let i = 0; i < 64; i++) p1[i] = total ? p1[i] / total : 0
+    confidence = topN / total
+    topBits = String(topBs).replace(/ /g, '')
+  }
+  const bitOn = (i) => {
+    if (!topBits) return false
+    const s = numClbits - 1 - i
+    return s >= 0 && s < topBits.length && topBits[s] === '1'
   }
   const cells = Array.from({ length: 64 }, (_, idx) => {
     const r = Math.floor(idx / 8), c = idx % 8
     const site = sites && sites[idx]
     const measured = !!(numClbits && idx < numClbits)
-    return { idx, r, c, prob: p1[idx], measured, usable: site ? site.intensity > 100 : false }
+    const on = measured && bitOn(idx)
+    return { idx, r, c, on, measured, confidence, usable: site ? site.intensity > 100 : false }
   })
   return (
     <div>
       <div className="qgrid">
         {cells.map(cell => {
-          const lit = cell.prob > 0
-          // intensity (measured-|1⟩ probability) is encoded in the BACKGROUND
-          // alpha via the --lit CSS var (0.2..1.0), NOT in whole-cell opacity
-          // -- opacity would dim the number too and make it unreadable at every
-          // intensity. The number itself stays full-opacity with a black
-          // outline (styles.css) so it reads on both the dark floor and the
-          // bright gradient.
-          const style = lit ? { '--lit': (0.2 + 0.8 * cell.prob).toFixed(3) } : undefined
+          const lit = cell.on
+          // intensity = top-state confidence (0.35..1.0), encoded in the
+          // BACKGROUND alpha via the --lit CSS var, NOT in whole-cell opacity
+          // -- opacity would dim the number too. The number stays full-opacity
+          // with a black outline (styles.css) so it reads on both floors.
+          const style = lit ? { '--lit': (0.35 + 0.65 * cell.confidence).toFixed(3) } : undefined
           return (
             <div key={cell.idx}
                  className={`qcell ${lit ? 'on' : ''} ${cell.measured ? 'measured' : ''} ${cell.usable ? 'usable' : ''}`}
                  style={style}
-                 title={`q${cell.idx} (${cell.r},${cell.c})${cell.measured ? ` · P(|1⟩)=${(cell.prob * 100).toFixed(0)}%` : ''}`}>{cell.idx}</div>
+                 title={`q${cell.idx} (${cell.r},${cell.c})${cell.measured ? ` · top bit=${lit ? 1 : 0} · confidence ${(cell.confidence * 100).toFixed(0)}%` : ''}`}>{cell.idx}</div>
           )
         })}
       </div>
       <div className="qgrid-legend">
-        <span><span className="sw" style={{ background: 'var(--grad)' }} />|1⟩ readout (P)</span>
+        <span><span className="sw" style={{ background: 'var(--grad)' }} />|1⟩ in top result</span>
         <span><span className="sw" style={{ background: '#0c1430', border: '1px solid #263056' }} />defect site</span>
         <span><span className="sw" style={{ background: '#0c1430', border: '1px solid #1d2748' }} />dark</span>
       </div>
@@ -155,7 +160,7 @@ export function BarCounts({ counts, max = 8 }) {
 // serves `optical_readout`, those server values override per-field (server is
 // then computing the same temperature/profile-dependent formulas).
 //
-// Temperature dependence (honest teaching model, anchored at 300 K):
+// Temperature dependence (teaching model, anchored at 300 K):
 //   readout noise ~ N0 * sqrt(T/300)        (graphene dark current + TIA thermal)
 //   ODMR contrast ~ C0 * clamp(1 + 0.5*(300-T)/300, 0.5, 1.6)  (spin polarisation)
 //   ASE gain      ~ 1.15 * (1 + 0.10*(300-T)/300)              (semiconductor gain)
@@ -576,7 +581,7 @@ export function CalibrationPanel({ profile, temperature, seed, run, running, res
 }
 
 // ---------------------------------------------------------------------------
-// Verdict — the honest physical-feasibility assessment of the latest run.
+// Verdict — the physical-feasibility assessment of the latest run.
 // ---------------------------------------------------------------------------
 export function Verdict({ assessment }) {
   if (!assessment) return null

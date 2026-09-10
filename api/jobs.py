@@ -29,17 +29,22 @@ MONGO_URL = "mongodb://127.0.0.1:27017/"
 MONGO_DB = "qssc"
 MONGO_COLL = "jobs"
 
-# Hard cap on an in-process job (seconds). Mirrors the rq `job_timeout=300`.
-# A watchdog marks the job failed if it exceeds this, so one runaway job can
-# not hold a fallback worker indefinitely. (Python cannot hard-kill the worker
-# thread, but the request-layer resource caps bound the normal case.)
-JOB_TIMEOUT_S = 300
+# Hard cap on an in-process job (seconds). The frontend polls GET /api/jobs/{id}
+# for MAX_POLLS*600ms = 120 s, so a job still running past that is already a
+# timeout in the UI. Marking it failed here at 120 s frees the bookkeeping and
+# surfaces a real error instead of an indefinite "queued". (Python cannot
+# hard-kill the worker thread, so the thread may keep running in the background
+# -- the larger worker pool below + the runner N/qubit cap keep that rare.)
+JOB_TIMEOUT_S = 120
 
 _redis = None
 _queue = None
 _mongo = None
-# in-process fallback
-_fallback_exec = ThreadPoolExecutor(max_workers=2)
+# in-process fallback. 4 workers so one slow/stuck job (e.g. a large Shor run
+# that escaped the runner cap, or an Aer sim that hung) does not starve the
+# queue for everyone else -- the "panel hangs because one Shor job is stuck"
+# symptom. The runner's MAX_FACTOR_N / qubit caps prevent the common case.
+_fallback_exec = ThreadPoolExecutor(max_workers=4)
 _fallback_store: dict[str, dict] = {}
 _fallback_lock = threading.Lock()
 

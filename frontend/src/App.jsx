@@ -1157,7 +1157,16 @@ export default function App() {
                     <label>{QUBIT_CFG[algo].label}</label>
                     <input type="number" min={QUBIT_CFG[algo].min} max={QUBIT_CFG[algo].max}
                            step={QUBIT_CFG[algo].step} value={numQubits}
-                           onChange={e => setNumQubits(+e.target.value)} />
+                           onChange={e => {
+                             const cfg = QUBIT_CFG[algo]
+                             // enforce the [min,max] clamp: HTML max does not stop
+                             // the user typing a larger value, and a too-large
+                             // register blows the simulator's qubit cap (mul
+                             // uses 4*n qubits -> n=10 = 40q > 28q cap -> the
+                             // "nonsensical false error"). math n<=6 = 24q max.
+                             const v = +e.target.value || cfg.def
+                             setNumQubits(Math.min(cfg.max, Math.max(cfg.min, v)))
+                           }} />
                   </div>
                   <div className="field"><label>&nbsp;</label>
                     <div className="muted" style={{ paddingTop: 9 }}>{QUBIT_CFG[algo].hint}</div>
@@ -1168,8 +1177,11 @@ export default function App() {
                 <div className="row">
                   <div className="field">
                     <label>{algo === 'period' ? 'Integer N (find period)' : 'Integer to factor (N)'}</label>
-                    <input type="number" min={2} value={nShor} onChange={e => {
-                      const n = Math.max(2, Math.floor(+e.target.value) || 2)
+                    <input type="number" min={2} max={15} value={nShor} onChange={e => {
+                      // cap at 15: N=15 -> 13 qubits is the largest that factors at
+                      // 300 K NV and finishes <1 s (N=21 -> 16 qubits takes >120 s
+                      // and decoheres to no factors; N=35 hangs Aer).
+                      const n = Math.min(15, Math.max(2, Math.floor(+e.target.value) || 2))
                       setNShor(n); setNumQubits(derivedQubits(algo, n))
                     }} />
                   </div>

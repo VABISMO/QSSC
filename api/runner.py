@@ -63,6 +63,16 @@ def run_circuit(req: dict) -> dict:
     t0 = time.perf_counter()
     res = None
 
+    # Hard cap on the integer N for the period-finding / factoring algorithms.
+    # N=15 -> 13 qubits, runs in <1 s, and is the largest N that factors at
+    # 300 K NV (the spin-coherence physics guard: 2q depol over the decomposed
+    # mod-exp eats the signal for wider circuits). N=21 -> 16 qubits: a single
+    # Aer ideal run is ~22-50 s, 3 retry attempts blow the 120 s frontend poll
+    # timeout (the "shor hangs from the panel" symptom), and at 300 K it
+    # decoheres to factors=None anyway. Larger N (e.g. 35 -> 19 qubits) makes
+    # Aer's statevector sim hang outright. So cap at 15 -- the working demo.
+    MAX_FACTOR_N = 15
+
     if algo == "bell":
         from qiskit import QuantumCircuit
         n = max(2, int(req.get("num_qubits", 2)))
@@ -79,11 +89,18 @@ def run_circuit(req: dict) -> dict:
         n = int(req.get("n", 15))
         if n < 2 or is_prime(n):
             return {"error": "n must be a composite integer > 1"}
+        if n > MAX_FACTOR_N:
+            return {"error": f"N={n} is too large for the in-browser simulator "
+                             f"(> {MAX_FACTOR_N} -> >13 qubits; Aer hangs). "
+                             f"Use N <= {MAX_FACTOR_N}."}
         rng = np.random.default_rng(seed)
         chosen_a = req.get("a")
         a = r = factors = qc = counts = None
         attempt = 0
-        for attempt in range(8):
+        # fewer retries for larger N: each attempt's Aer run grows ~exponentially
+        # with qubit count, so 8 attempts at N=21 would exceed the 120 s timeout.
+        max_attempts = 8 if n <= 15 else 3
+        for attempt in range(max_attempts):
             a = (chosen_a if (chosen_a is not None and attempt == 0)
                  else select_coprime(n, rng))
             qc = create_shor_circuit(n, a=a, rng=rng)[0]
@@ -110,6 +127,10 @@ def run_circuit(req: dict) -> dict:
 
     elif algo == "period":
         n = int(req.get("n", 15))
+        if n > MAX_FACTOR_N:
+            return {"error": f"N={n} is too large for the in-browser simulator "
+                             f"(> {MAX_FACTOR_N} -> >13 qubits; Aer hangs). "
+                             f"Use N <= {MAX_FACTOR_N}."}
         rng = np.random.default_rng(seed)
         a = req.get("a") or select_coprime(n, rng)
         if gcd(a, n) != 1:
@@ -300,11 +321,16 @@ def run_circuit(req: dict) -> dict:
         n = int(req.get("n", 15))
         if n < 2 or is_prime(n):
             return {"error": "n must be a composite integer > 1"}
+        if n > MAX_FACTOR_N:
+            return {"error": f"N={n} is too large for the in-browser simulator "
+                             f"(> {MAX_FACTOR_N} -> >13 qubits; Aer hangs). "
+                             f"Use N <= {MAX_FACTOR_N}."}
         rng = np.random.default_rng(seed)
         chosen_a = req.get("a")
         a = r = factors = qc = counts = None
         attempt = 0
-        for attempt in range(8):
+        max_attempts = 8 if n <= 15 else 3
+        for attempt in range(max_attempts):
             a = (chosen_a if (chosen_a is not None and attempt == 0)
                  else select_coprime(n, rng))
             qc, a = create_qft_nos_circuit(n, a=a, rng=rng)

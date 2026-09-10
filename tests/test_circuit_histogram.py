@@ -38,23 +38,34 @@ SHOTS = 2048
 
 # -- frontend logic, mirrored from frontend/src/components.jsx ------------------
 
-def grid_per_qubit_p1(counts: dict, num_clbits: int) -> list[float]:
-    """Per-qubit P(measured |1>) as the QubitGrid computes it.
+def grid_top_bitstring(counts: dict, num_clbits: int) -> list[int]:
+    """The bit each QubitGrid cell shows (1 = lit) under the top-bitstring rule.
 
-    Qiskit bitstrings are MSB-first, so classical bit i (qubit i) maps to
-    string index ``num_clbits - 1 - i``. Cell i in the grid shows this value.
+    The grid lights cell i iff the most-counted (best-statistics) outcome has
+    classical bit i = 1. Qiskit bitstrings are MSB-first, so bit i (qubit i)
+    maps to string index ``num_clbits - 1 - i``. This mirrors the
+    ``QubitGrid`` component: the lit cells are exactly the 1-bits of the top
+    counts entry, so the grid agrees with the histogram's top bar and the
+    reported numeric result (instead of the old marginal P(|1>) which readout
+    noise pushed toward ~0.5 everywhere -> every cell lit).
     """
-    total = sum(counts.values())
-    p1 = [0.0] * num_clbits
+    if not counts or num_clbits <= 0:
+        return [0] * num_clbits
+    top = max(counts, key=counts.get).replace(" ", "")
+    out = [0] * num_clbits
+    for i in range(num_clbits):
+        s = num_clbits - 1 - i
+        if 0 <= s < len(top) and top[s] == "1":
+            out[i] = 1
+    return out
+
+
+def grid_confidence(counts: dict) -> float:
+    """The top state's share of total shots (the grid's lit intensity)."""
+    total = sum(counts.values()) if counts else 0
     if total <= 0:
-        return p1
-    for bs, c in counts.items():
-        bs = bs.replace(" ", "")
-        for i in range(num_clbits):
-            s = num_clbits - 1 - i
-            if 0 <= s < len(bs) and bs[s] == "1":
-                p1[i] += c
-    return [p / total for p in p1]
+        return 0.0
+    return max(counts.values()) / total
 
 
 def histogram_display(state: str) -> str:
@@ -73,14 +84,25 @@ def test_grid_uses_qiskit_msb_first_convention():
     """The grid maps qubit i to string index num_clbits-1-i (qiskit MSB-first).
 
     A deterministic 3-qubit state |001> (q0=1, q1=0, q2=0) -> qiskit string
-    "001". The grid must light cell 0 (q0), not cell 2.
+    "001". The grid lights cell 0 (q0), not cell 2.
     """
     # |001>: only q0 is |1>; qiskit prints c2 c1 c0 = "001"
-    counts = {"001": 1000}
-    p1 = grid_per_qubit_p1(counts, 3)
-    assert p1[0] == pytest.approx(1.0)   # q0 lit
-    assert p1[1] == pytest.approx(0.0)
-    assert p1[2] == pytest.approx(0.0)
+    grid = grid_top_bitstring({"001": 1000}, 3)
+    assert grid == [1, 0, 0]   # q0 lit, q1/q2 dark
+
+
+def test_grid_lights_only_top_bitstring_ones():
+    """The grid lights exactly the 1-bits of the TOP counts entry, no others.
+
+    Reproduces the user's math-mul case: result 15 = 0b1111 in a 10-bit
+    register -> qiskit top state "0000001111" -> grid lights cells 0-3 only,
+    not 0-9. The old marginal renderer lit every cell because noise pushed
+    each marginal toward 0.5.
+    """
+    counts = {"0000001111": 1500, "0000001110": 12, "0000011111": 5}
+    grid = grid_top_bitstring(counts, 10)
+    assert grid == [1, 1, 1, 1, 0, 0, 0, 0, 0, 0]
+    assert sum(grid) == 4    # exactly the four 1-bits of 15
 
 
 def test_histogram_display_matches_grid_order():
@@ -88,18 +110,17 @@ def test_histogram_display_matches_grid_order():
 
     For qiskit "001" (q0=1), the reversed display is "100"; reading it
     left-to-right (position 0..2) gives [1,0,0] which matches the grid's
-    per-qubit P(|1>) = [1,0,0]. The RAW qiskit string read left-to-right gives
+    top-bitstring cells [1,0,0]. The RAW qiskit string read left-to-right gives
     [0,0,1] which would imply cell 2 -- the mismatch the user saw.
     """
     state = "001"                      # qiskit MSB-first: q2=0,q1=0,q0=1
-    grid = grid_per_qubit_p1({state: 1}, 3)
+    grid = grid_top_bitstring({state: 1}, 3)
     disp = histogram_display(state)    # "100" after fix
-    # histogram left-to-right bit pattern
     hist_bits = [int(ch) for ch in disp]
-    assert hist_bits == [int(round(p)) for p in grid]
+    assert hist_bits == grid
     # and the raw (pre-fix) string would NOT match -- this is the bug
     raw_bits = [int(ch) for ch in state]
-    assert raw_bits != [int(round(p)) for p in grid]
+    assert raw_bits != grid
 
 
 def test_grover_asymmetric_top_state_lights_correct_grid_cell():
@@ -113,11 +134,31 @@ def test_grover_asymmetric_top_state_lights_correct_grid_cell():
                      "profile": "NV", "temperature_k": ROOM, "seed": SEED,
                      "shots": SHOTS, "noise_mode": "real"})
     top = max(r["counts"], key=r["counts"].get)
-    p1 = grid_per_qubit_p1(r["counts"], r["num_clbits"])
-    # q0 is the amplified qubit -> highest P(|1>) among the three
-    assert p1.index(max(p1)) == 0, (top, p1)
+    grid = grid_top_bitstring(r["counts"], r["num_clbits"])
+    # q0 is the amplified qubit -> cell 0 is lit
+    assert grid[0] == 1, (top, grid)
     # the fixed histogram display of the top state has its leftmost bit = 1
     assert histogram_display(top)[0] == "1", (top, histogram_display(top))
+
+
+def test_math_mul_grid_matches_result_and_histogram():
+    """The reported bug: math mul a=3 b=5 bits=4 -> result 15, histogram
+    "1111000000" (q0-leftmost reversed of "0000001111"), but the grid showed
+    every cell lit. After the fix the grid lights cells 0-3 (the four 1-bits of
+    15), matching both the histogram's top bar and the numeric result=15.
+    """
+    r = run_circuit({"algorithm": "math", "op": "mul", "a": 3, "b": 5,
+                     "bits": 4, "profile": "NV", "temperature_k": ROOM,
+                     "seed": SEED, "shots": SHOTS, "noise_mode": "real"})
+    assert r["result"] == 15
+    top = max(r["counts"], key=r["counts"].get)
+    grid = grid_top_bitstring(r["counts"], r["num_clbits"])
+    disp = histogram_display(top)
+    # the grid's lit cells == the histogram's left-to-right 1-bits
+    assert grid == [int(ch) for ch in disp]
+    # the lit cells are exactly the 1-bits of the numeric result (15 = 0b1111)
+    assert grid[:4] == [1, 1, 1, 1]
+    assert sum(grid) == bin(r["result"]).count("1")
 
 
 # -- bug 2: input sensitivity -------------------------------------------------
@@ -194,3 +235,20 @@ def test_qft_is_uniform_regardless_of_x():
                      "profile": "NV", "temperature_k": ROOM, "seed": SEED,
                      "shots": SHOTS, "noise_mode": "real"})
     assert a["uniform"] is True and b["uniform"] is True
+
+
+# -- bug 3: runaway N hangs the panel (N / qubit cap) --------------------------
+
+@pytest.mark.parametrize("algo", ["shor", "period", "qftnos"])
+@pytest.mark.parametrize("n", [21, 35])
+def test_factor_n_cap_rejects_too_large(algo, n):
+    """N > 15 (>13 qubits) must be rejected up front so the Aer statevector sim
+    cannot hang the in-process fallback worker past the 120 s frontend timeout
+    (the "shor hangs from the panel" symptom). N=21 -> 16 qubits takes >120 s
+    and decoheres to no factors at 300 K; N=35 -> 19 qubits hangs Aer outright.
+    N=15 is the largest that factors at 300 K NV and runs in <1 s."""
+    r = run_circuit({"algorithm": algo, "n": n, "profile": "NV",
+                     "temperature_k": ROOM, "seed": SEED, "shots": SHOTS,
+                     "noise_mode": "real"})
+    assert "error" in r
+    assert "too large" in r["error"].lower()
