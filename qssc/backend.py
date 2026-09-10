@@ -30,6 +30,7 @@ from qiskit import QuantumCircuit, transpile
 from qiskit.circuit import Measure
 from qiskit.circuit.library.standard_gates import (
     HGate, XGate, YGate, SGate, TGate, RZGate, RYGate, CXGate, CZGate, CPhaseGate,
+    SwapGate,
 )
 from qiskit.providers import BackendV2, Options, QubitProperties
 from qiskit.providers import JobStatus
@@ -410,10 +411,26 @@ class QSSCBackend(BackendV2):
         self._g2q = prof.gate_2q_ns * 1e-9
         self._readout_t = prof.readout_ns * 1e-9
         self._init_t = prof.init_ns * 1e-9
-        qprops = [QubitProperties(t1=s.t1, t2=s.t2, frequency=prof.zero_field_splitting)
+        # Per-qubit transition frequency: each site carries its own detuned
+        # frequency (strain + local B + 14N hyperfine shift around the zero-
+        # field splitting), so the QubitProperties report the REAL per-qubit
+        # frequency -- the individual microwave-addressing fingerprint -- not a
+        # single uniform 2.87 GHz for every qubit.
+        qprops = [QubitProperties(t1=s.t1, t2=s.t2, frequency=s.frequency)
                   for s in self.sites]
-        coupling = CouplingMap([(i, j) for i in range(self._n_qubits)
-                                for j in range(self._n_qubits) if i != j])
+        # Nearest-neighbour dipole coupling: real NV magnetic dipole-dipole
+        # falls as 1/r**3, so only grid-adjacent (Manhattan-distance-1) sites
+        # couple -- not all-to-all. This coupling map is the physical topology
+        # (truthful Target metadata). Execution transpilation still targets
+        # AerSimulator (all-to-all) so NO SWAP routing overhead is inserted:
+        # the defect-spin compute route uses directly-coupled qubit sets, not
+        # a SWAP-routed surface code, and adding ~3-5x SWAP 2q-gate overhead
+        # would push NV's depolarization budget below the postprocess cutoff
+        # (wrong physics -- NV computes Shor-15 at 300 K; see
+        # qssc-spin-gate-not-photon). The 2q noise model below still noised
+        # every executed 2q gate (all active pairs) so a logical cx on non-
+        # neighbour qubits is never silently noiseless.
+        coupling = CouplingMap(self._neighbor_pairs())
         self._target = Target(dt=1e-9, qubit_properties=qprops,
                               num_qubits=self._n_qubits, coupling_map=coupling)
         self._build_target()
@@ -427,6 +444,23 @@ class QSSCBackend(BackendV2):
         self._dm_qubit_limit = 10
 
     # -- target / noise ----------------------------------------------------
+    def _neighbor_pairs(self) -> list:
+        """Directed (i, j) coupling edges for the grid: Manhattan-distance-1
+        neighbours over all sites (the 8x8 grid is always complete, so dead /
+        unusable sites remain topology nodes -- a real dead NV site is still a
+        physical grid location, just non-participating). Real NV magnetic
+        dipole-dipole falls as 1/r**3, so only nearest neighbours couple."""
+        pairs = []
+        n = len(self.sites)
+        for i in range(n):
+            si = self.sites[i]
+            for j in range(i + 1, n):
+                sj = self.sites[j]
+                if abs(si.row - sj.row) + abs(si.col - sj.col) == 1:
+                    pairs.append((i, j))
+                    pairs.append((j, i))
+        return pairs
+
     def _build_target(self):
         sq = {(i,): InstructionProperties(duration=self._g1q,
                                           error=self.profile.depol_1q)
@@ -435,10 +469,17 @@ class QSSCBackend(BackendV2):
                   RZGate(__import__("qiskit").circuit.Parameter("theta")),
                   RYGate(__import__("qiskit").circuit.Parameter("theta"))):
             self._target.add_instruction(g, sq)
+        # 2q gates exist only on grid-neighbour pairs (the physical dipole
+        # coupling topology from _neighbor_pairs), so the Target truthfully
+        # declares where a native 2q gate lives. SwapGate is added so a real
+        # transpiler routing against this Target can insert SWAPs on neighbour
+        # edges (execution here still routes via AerSimulator, so no SWAP
+        # overhead is paid -- see the __init__ coupling comment).
+        nbr = set(self._neighbor_pairs())
         tq = {(i, j): InstructionProperties(duration=self._g2q,
                                             error=self.profile.depol_2q)
-              for i in range(self._n_qubits) for j in range(self._n_qubits) if i != j}
-        for g in (CXGate(), CZGate(),
+              for (i, j) in nbr}
+        for g in (CXGate(), CZGate(), SwapGate(),
                   CPhaseGate(__import__("qiskit").circuit.Parameter("theta"))):
             self._target.add_instruction(g, tq)
         self._target.add_instruction(
@@ -507,7 +548,20 @@ class QSSCBackend(BackendV2):
                                          ["cx", "cz", "cp", "swap"], [q, j])
             except Exception as exc:  # pragma: no cover
                 logger.debug("real noise build skipped pair %s,%s: %s", q, j, exc)
-            nm.add_readout_error(ReadoutError([[1 - ro, ro], [ro, 1 - ro]]), [q])
+            # Asymmetric readout: NV spin readout distinguishes the BRIGHT
+            # state (ms=0, high fluorescence) from the DARK states (ms=+-1,
+            # the ODMR dip), and the two misassignment rates differ -- the
+            # bright state is easier to identify than the dark. readout_asymmetry
+            # splits the symmetric per-site readout error ro into
+            #   p_bright_to_dark = ro*(1-asym)  (true ms=0 read as ms=+-1)
+            #   p_dark_to_bright = ro*(1+asym)  (true ms=+-1 read as ms=0)
+            # ReadoutError matrix row i = true state i, col j = recorded j:
+            #   [[P(0|0), P(1|0)], [P(0|1), P(1|1)]]  with state 0 = bright.
+            asym = float(self.profile.readout_asymmetry)
+            p_b2d = float(np.clip(ro * (1.0 - asym), 0.0, 1.0))
+            p_d2b = float(np.clip(ro * (1.0 + asym), 0.0, 1.0))
+            nm.add_readout_error(
+                ReadoutError([[1.0 - p_b2d, p_b2d], [p_d2b, 1.0 - p_d2b]]), [q])
         return nm
 
     # -- BackendV2 API -----------------------------------------------------
@@ -834,14 +888,41 @@ class QSSCBackend(BackendV2):
                 cl = circuit.find_bit(instr.clbits[0]).index
                 pq = circuit.find_bit(instr.qubits[0]).index
                 meas_map[cl] = min(pq, len(self.sites) - 1)
+        # Readout error. Symmetric readout (readout_asymmetry == 0, the ensemble
+        # sensor case) uses a single flip probability per clbit -- bit-identical
+        # to the original single-draw path (same rng consumption -> same noise
+        # realization, so symmetric profiles are unaffected). Asymmetric readout
+        # (the single-shot NV case: ms=0 bright vs ms=+-1 dark) flips a 0->1
+        # and a 1->0 at DIFFERENT rates, applied state-conditionally with two
+        # draws per bit -- matching the ReadoutError in _build_real_noise_model
+        # so this analytic path cannot disagree with the qiskit noise-model path.
+        asym = float(self.profile.readout_asymmetry)
         err_per_cl = np.zeros(nbits)
         for cl, pq in meas_map.items():
             err_per_cl[cl] = float(self.sites[pq].readout_err) if pq < len(self.sites) else self.profile.readout_error
-        # bit i (from LSB) corresponds to classical bit cl = nbits-1-i
-        flip = rng.random((shots, nbits)) < err_per_cl[::-1][None, :]
         noisy_int = np.copy(drawn)
-        for i in range(nbits):
-            noisy_int = np.where(flip[:, i], np.bitwise_xor(noisy_int, 1 << i), noisy_int)
+        if asym == 0.0:
+            # Symmetric: one flip prob per clbit (back-compat rng stream).
+            flip = rng.random((shots, nbits)) < err_per_cl[::-1][None, :]
+            for i in range(nbits):
+                noisy_int = np.where(flip[:, i], np.bitwise_xor(noisy_int, 1 << i), noisy_int)
+        else:
+            # Asymmetric: p_bright_to_dark = ro*(1-asym), p_dark_to_bright =
+            # ro*(1+asym), applied per the current (true) bit value.
+            p0to1 = np.zeros(nbits)   # true 0 (bright) -> read 1 (dark)
+            p1to0 = np.zeros(nbits)   # true 1 (dark)   -> read 0 (bright)
+            for cl, pq in meas_map.items():
+                ro = float(self.sites[pq].readout_err) if pq < len(self.sites) else self.profile.readout_error
+                p0to1[cl] = float(np.clip(ro * (1.0 - asym), 0.0, 1.0))
+                p1to0[cl] = float(np.clip(ro * (1.0 + asym), 0.0, 1.0))
+            p0to1_ord = p0to1[::-1]   # bit i (LSB) <-> cl = nbits-1-i
+            p1to0_ord = p1to0[::-1]
+            for i in range(nbits):
+                bit_i = (noisy_int >> i) & 1
+                flip = np.where(bit_i == 0,
+                                rng.random(shots) < p0to1_ord[i],
+                                rng.random(shots) < p1to0_ord[i])
+                noisy_int = np.where(flip, np.bitwise_xor(noisy_int, 1 << i), noisy_int)
         # --- signal-retention damping: blend with uniform --------------------
         # Use the SAME _signal_survival estimate as assess_circuit (coherence *
         # cumulative per-gate depolarization over the decomposed gate counts), so
@@ -934,9 +1015,12 @@ class QSSCBackend(BackendV2):
             "Deep algorithms (Shor, large multipliers) with depth >> T2/gate "
             "are NOT physically executable at room temperature — they need "
             "cryogenic cooling or quantum error correction.",
-            "All-to-all microwave coupling is modelled; real hardware routes "
-            "via the ADF4351 PLL with per-site pulses (no native 2-qubit gate "
-            "between arbitrary distant sites without mediating modes).",
+            "Nearest-neighbour dipole coupling (grid Manhattan-distance-1) is "
+            "modelled -- real NV magnetic dipole-dipole falls as 1/r**3, so "
+            "only adjacent sites couple; real hardware routes via the ADF4351 "
+            "PLL with per-site microwave pulses, each addressed by the qubit's "
+            "detuned transition frequency (no native 2-qubit gate between "
+            "arbitrary distant sites without mediating modes).",
             f"Optical readout fidelity ~{self.profile.readout_error*100:.0f}% "
             "error; on-chip CQD pump + graphene/MoS2 detector + lock-in readout "
             "(no camera).",

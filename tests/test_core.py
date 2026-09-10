@@ -447,6 +447,97 @@ def test_assess_optical_fields():
     assert a_cold["within_coherence"] is True
 
 
+def _readout_matrix(nm, qubit=0):
+    """Pull the 2x2 readout-error matrix for a qubit out of a NoiseModel
+    (qiskit-aer stores per-qubit readout errors in _local_readout_errors)."""
+    local = nm._local_readout_errors
+    for qubits, err in local.items():
+        if qubit in tuple(qubits):
+            return err.probabilities
+    raise AssertionError(f"no readout error recorded for qubit {qubit}")
+
+
+def test_nearest_neighbor_coupling():
+    # The Target's coupling map must reflect the physical dipole topology:
+    # Manhattan-distance-1 grid neighbours only, NOT all-to-all. Real NV
+    # magnetic dipole-dipole falls as 1/r**3 -> only adjacent sites couple.
+    b = QSSCBackend("NV", sites=_quick_sites(16), seed=0)
+    cm = b.target.build_coupling_map()
+    edges = set(cm.get_edges())
+    # (0,1) is a grid edge (row 0 col 0 -> row 0 col 1): the Bell pair.
+    assert (0, 1) in edges and (1, 0) in edges
+    # (0,8) is a grid edge (row 0 col 0 -> row 1 col 0): vertical neighbour.
+    assert (0, 8) in edges
+    # (0,2) is Manhattan-distance 2 -> NOT an edge (no long-range coupling).
+    assert (0, 2) not in edges
+    assert (0, 15) not in edges  # diagonal/corner, distance 2
+    # every edge is between Manhattan-distance-1 sites.
+    sites = b.sites
+    for i, j in edges:
+        d = abs(sites[i].row - sites[j].row) + abs(sites[i].col - sites[j].col)
+        assert d == 1, (i, j, d)
+
+
+def test_per_qubit_frequency_detuning():
+    # Real NV sites are NOT all on the same 2.87 GHz transition: strain + local
+    # B + 14N hyperfine detune each site by ~MHz, which is the individual
+    # microwave-addressing fingerprint (a single antenna hits only the on-
+    # resonance qubit). auto_align now draws a per-site detuning.
+    import dataclasses
+    nv = get_profile("NV")
+    sites = auto_align(nv, grid=8, temperature_k=300.0,
+                       rng=np.random.default_rng(0))
+    freqs = np.array([s.frequency for s in sites])
+    zfs = nv.zero_field_splitting
+    spread = nv.frequency_detuning_spread_hz
+    assert spread > 0
+    # not all identical -- addressability requires distinct frequencies.
+    assert len(set(np.round(freqs, 0))) > 1
+    # detuning within +/-2*spread of the zero-field splitting.
+    assert (np.abs(freqs - zfs) <= 2 * spread + 1.0).all()
+    # mean sits on the zero-field splitting (zero-mean detuning).
+    assert abs(np.mean(freqs) - zfs) < 0.5 * spread
+    # surfaced in as_dict
+    assert "frequency_ghz" in sites[0].as_dict()
+    # back-compat: a 0-spread profile -> every site on the ZFS (identical).
+    flat = dataclasses.replace(nv, frequency_detuning_spread_hz=0.0)
+    fsites = auto_align(flat, grid=8, temperature_k=300.0,
+                        rng=np.random.default_rng(0))
+    ffreqs = [s.frequency for s in fsites]
+    assert all(f == pytest.approx(zfs) for f in ffreqs)
+    # QubitProperties carry the per-site frequency into the Target.
+    b = QSSCBackend(nv, sites=sites, seed=0)
+    qfreqs = [b.target.qubit_properties[i].frequency for i in range(len(sites))]
+    assert len(set(np.round(qfreqs, 0))) > 1
+
+
+def test_asymmetric_readout():
+    # NV spin readout is asymmetric: ms=0 BRIGHT vs ms=+-1 DARK, and the two
+    # misassignment rates differ (bright is easier to identify than dark).
+    from qiskit import QuantumCircuit
+    nv = QSSCBackend("NV", sites=_quick_sites(4), seed=0, noise_mode="real")
+    qc = QuantumCircuit(2, 2)
+    qc.measure([0, 1], [0, 1])
+    nm = nv._build_real_noise_model(qc)
+    m = _readout_matrix(nm, qubit=0)
+    # matrix is [[P(0|0), P(1|0)], [P(0|1), P(1|1)]] with state 0 = bright.
+    assert len(m) == 2 and len(m[0]) == 2
+    # both rows sum to 1 (stochastic).
+    assert sum(m[0]) == pytest.approx(1.0)
+    assert sum(m[1]) == pytest.approx(1.0)
+    # asymmetric: bright->dark (m[0][1]) != dark->bright (m[1][0]); NV asym
+    # 0.3 makes dark->bright LARGER (ro*(1+asym)) than bright->dark.
+    assert m[1][0] > m[0][1]
+    assert m[1][0] != pytest.approx(m[0][1])
+    # back-compat: a 0-asymmetry profile -> symmetric readout.
+    import dataclasses
+    sym = dataclasses.replace(get_profile("NV"), readout_asymmetry=0.0)
+    b_sym = QSSCBackend(sym, sites=_quick_sites(4), seed=0, noise_mode="real")
+    nm_sym = b_sym._build_real_noise_model(qc)
+    ms = _readout_matrix(nm_sym, qubit=0)
+    assert ms[0][1] == pytest.approx(ms[1][0])  # symmetric
+
+
 def test_room_temp_nv_spin_compute_works():
     # The explicit "what works what not" guard, corrected for the on-chip SPIN
     # gate: NV Shor-15 at 300 K uses ~10^3 SPIN (microwave/dipole) 2q gates.

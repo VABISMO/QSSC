@@ -569,12 +569,14 @@ class QubitSite:
     t1: float          # s
     t2: float          # s
     readout_err: float
+    frequency: float = 0.0   # ms=0<->ms=+-1 transition frequency (Hz), per-site
     usable: bool = True
 
     def as_dict(self) -> dict:
         d = asdict(self)
         d["t1_ms"] = self.t1 * 1e3
         d["t2_us"] = self.t2 * 1e6
+        d["frequency_ghz"] = self.frequency / 1e9
         return d
 
 
@@ -623,6 +625,19 @@ def auto_align(profile: DefectProfile | str = "NV",
     sites: List[QubitSite] = []
     for idx in range(n_needed):
         r, c = divmod(idx, grid)
+        # Per-site transition-frequency detuning (microwave addressability):
+        # real NV sites are not all on the 2.87 GHz ZFS -- local strain + local
+        # B + the 14N hyperfine shift detune each site by ~MHz. That detuning
+        # is the individual-addressing mechanism (a global MW antenna hits only
+        # the site whose detuning brings it into the ODMR linewidth). Drawn
+        # from N(0, spread), clipped to +/-2*spread; 0 spread -> no detuning
+        # (all sites identical, back-compat).
+        spread = prof.frequency_detuning_spread_hz
+        if spread > 0:
+            detune = float(np.clip(rng.normal(0.0, spread), -2.0 * spread, 2.0 * spread))
+        else:
+            detune = 0.0
+        freq = prof.zero_field_splitting + detune
         coupled = rng.random() < p_usable
         if coupled:
             code = int(make_detector_response({idx}, prof, rng=rng, n_sites=n_needed)[idx])
@@ -638,13 +653,14 @@ def auto_align(profile: DefectProfile | str = "NV",
                 qubit_id=idx, row=r, col=c,
                 x_um=x_um, y_um=y_um, intensity=float(code),
                 t1=t1, t2=t2, readout_err=err,
+                frequency=freq,
                 usable=code > DETECT_THRESHOLD and t2 > 1e-6,
             ))
         else:
             sites.append(QubitSite(qubit_id=idx, row=r, col=c,
                                    x_um=0.0, y_um=0.0, intensity=0.0,
                                    t1=t1, t2=t2, readout_err=prof.readout_error,
-                                   usable=False))
+                                   frequency=freq, usable=False))
     if progress is not None and task is not None:
         progress.update(task, completed=max_retries)
     return sites[:n_needed]

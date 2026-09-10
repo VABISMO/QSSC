@@ -108,6 +108,26 @@ class DefectProfile:
     optical_t2_room_fs: float = 0.0    # optical T2 at 300 K (fs) -- phonon-broadened ZPL
     t2_opt_exponent: float = 5.0       # optical T2 ~ t2_room_opt*(300/T)**exp (teaching)
     hom_visibility_max: float = 1.0    # transform-limited ideal cap (aspirational)
+    # --- Per-site frequency spread (microwave addressability) + readout asymmetry -
+    # NOTE: ASPIRATIONAL / TEACHING MODEL, not a measured device or a supplier-
+    # quoted number (see the NOTE above the gate timings). Real NV sites are NOT
+    # all on the same transition frequency: local strain + local B-field + the
+    # 14N hyperfine shift detune each site's ms=0<->ms=+-1 line by ~MHz around
+    # the 2.87 GHz zero-field splitting. That detuning IS the individual
+    # microwave-addressing mechanism -- a global MW antenna drives only the
+    # qubit whose detuning brings it into the ~5 MHz ODMR linewidth, so every
+    # site is independently addressable without a per-site antenna.
+    # ``frequency_detuning_spread_hz`` is the per-site detuning sigma (Hz);
+    # auto_align draws each site's detuning from N(0, spread). Default 0 = no
+    # detuning (all sites identical, back-compat).
+    frequency_detuning_spread_hz: float = 0.0
+    # Real NV spin readout is ASYMMETRIC: ms=0 is the BRIGHT state (high
+    # fluorescence), ms=+-1 is DARK (the ODMR dip). The bright->dark and
+    # dark->bright misassignment rates differ -- the bright state is easier to
+    # distinguish than the dark. ``readout_asymmetry`` in [-1, 1] splits the
+    # symmetric ``readout_error`` ``ro`` into p_bright_to_dark = ro*(1-asym) and
+    # p_dark_to_bright = ro*(1+asym). Default 0 = symmetric (back-compat).
+    readout_asymmetry: float = 0.0
     # Human readable notes + literature citations for every number above
     notes: str = ""
     references: tuple = ()
@@ -157,6 +177,15 @@ HBN_VB = DefectProfile(
     optical_t2_room_fs=5.0,
     t2_opt_exponent=5.0,
     hom_visibility_max=1.0,
+    # Per-site frequency detuning + asymmetric readout (TEACHING MODEL, not
+    # supplier-quoted): hBN V_B- strain broadening is larger than NV -> ~5 MHz
+    # per-site spread (still addressable against the tens-of-MHz ensemble
+    # linewidth). hBN is an ENSEMBLE sensor: its readout is a continuous
+    # ensemble photocurrent that averages the bright/dark contrast over many
+    # defects, so the single-shot bright/dark asymmetry is largely washed out
+    # -> small readout_asymmetry 0.05.
+    frequency_detuning_spread_hz=5.0e6,
+    readout_asymmetry=0.05,
     notes="Room-temperature optically addressable S=1 spin in 2D hBN; D~3.46 GHz, "
           "characteristic 7-line 14N hyperfine fingerprint (A~47 MHz). Optical channel "
           "values are a teaching placeholder (V_B- photon-gate regime not quoted here).",
@@ -202,6 +231,14 @@ NV_DIAMOND = DefectProfile(
     optical_t2_room_fs=5.0,
     t2_opt_exponent=5.0,
     hom_visibility_max=1.0,
+    # Per-site frequency detuning + asymmetric readout (TEACHING MODEL, not
+    # supplier-quoted): NV strain shifts are ~MHz -> 2 MHz per-site spread,
+    # within the ~5 MHz ODMR linewidth so each site is still individually
+    # addressable by a narrow MW pulse from the global antenna; readout
+    # asymmetry 0.10 (ms=0 bright vs ms=+-1 dark -- modest, well-calibrated
+    # single-shot readout keeps the bright/dark bias small).
+    frequency_detuning_spread_hz=2.0e6,
+    readout_asymmetry=0.10,
     notes="Workhorse room-temperature defect; D~2.87 GHz. Best-in-class RT coherence "
           "(1.8 ms) requires 12C purification; natural-abundance diamond is ~0.5-0.7 ms. "
           "Optical channel: 300 K V_HOM ~ 2e-7 (photon 2q gate decoheres); cryo V -> 1 "
@@ -248,6 +285,15 @@ SIC_VS = DefectProfile(
     optical_t2_room_fs=5.0,
     t2_opt_exponent=5.0,
     hom_visibility_max=1.0,
+    # Per-site frequency detuning + asymmetric readout (TEACHING MODEL, not
+    # supplier-quoted): V_Si inhomogeneous spread ~1 MHz (narrow ensemble
+    # linewidth ~1-2 MHz). V_Si is an ENSEMBLE sensor read out as a continuous
+    # photocurrent that averages the bright/dark contrast over many defects,
+    # so the single-shot readout asymmetry is washed out -> readout_asymmetry
+    # 0.0 (symmetric ensemble readout; SiC retention is also marginal at
+    # ~0.6%, so the near-symmetric readout keeps the weak signal peak on top).
+    frequency_detuning_spread_hz=1.0e6,
+    readout_asymmetry=0.0,
     notes="V_Si (V2) is S=3/2 in 4H-SiC; 2|D|=70 MHz, ZPL 916 nm. Room-T ensemble "
           "T2 ~ tens of us (natural) up to ~100 us (isotopically purified). Optical "
           "channel values are a teaching placeholder (V_Si photon-gate regime not quoted here).",
