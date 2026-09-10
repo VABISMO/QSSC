@@ -1304,5 +1304,16 @@ class QSSCBackend(BackendV2):
             "fpga": self.fpga_compatibility(),
             "limitations": self.limitations(),
             "references": list(self.profile.references),
-            "sites": [s.as_dict() for s in self.sites],
+            "sites": [self._site_view(s) for s in self.sites],
         }
+
+    def _site_view(self, s) -> dict:
+        """Per-qubit view for /api/backend/info: the resonance frequency
+        (zero-field splitting + per-site strain/B/hyperfine detuning) and the
+        detuning from the nominal d_ghz, which is how each qubit is individually
+        addressed by a narrow microwave pulse (the addressing mechanism)."""
+        d = s.as_dict()
+        zfs = self.profile.zero_field_splitting
+        d["resonance_ghz"] = round(s.frequency / 1e9, 6)
+        d["detuning_mhz"] = round((s.frequency - zfs) / 1e6, 4)
+        return d

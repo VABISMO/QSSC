@@ -73,6 +73,63 @@ export function QubitGrid({ sites, counts, numClbits, recovered }) {
 }
 
 // ---------------------------------------------------------------------------
+// QubitFrequencyTable — per-qubit resonance table. Each of the 64 die sites
+// (pins) is identified by its own ms=0↔ms=±1 transition frequency: the zero-
+// field splitting D plus a per-site strain / local-B / hyperfine detuning.
+// That detuning IS the individual-microwave-addressing mechanism — a narrow
+// MW pulse at f_i hits only qubit i (within the ODMR linewidth), so the table
+// is the "which pin resonates at which frequency" map the calibration sweep
+// produces. Readout is per-site (no camera); T₂ is the coherence budget.
+// ---------------------------------------------------------------------------
+export function QubitFrequencyTable({ sites, dGhz, loading, error }) {
+  if (loading) return <div className="muted"><span className="spinner" /> loading qubit resonances…</div>
+  if (error) return <div className="error">{error}</div>
+  if (!sites || !sites.length) return <div className="muted">no site data</div>
+  const rows = sites
+  const detunes = rows.map(s => s.detuning_mhz).filter(v => v != null && !isNaN(v))
+  const spread = detunes.length ? Math.max(...detunes) - Math.min(...detunes) : 0
+  return (
+    <div>
+      <div className="hint" style={{ marginBottom: 8 }}>
+        Each pin / qubit resonates at D{dGhz ? `=${dGhz}` : ''} GHz ± its per-site detuning. A narrow
+        MW pulse at f<sub>i</sub> addresses only qubit i — this table is the resonance map. Detuning
+        spread: <b>{spread.toFixed(2)} MHz</b>.
+      </div>
+      <div className="qfreq-scroll">
+        <table className="qfreq">
+          <thead>
+            <tr>
+              <th>Pin</th><th>R</th><th>C</th>
+              <th>Resonance (GHz)</th>
+              <th>Detuning (MHz)</th>
+              <th>T₂ (µs)</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(s => {
+              const det = s.detuning_mhz
+              const pos = det > 0
+              return (
+                <tr key={s.qubit_id} className={s.usable === false ? 'drop' : ''}>
+                  <td className="mono">q{s.qubit_id}</td>
+                  <td>{s.row}</td>
+                  <td>{s.col}</td>
+                  <td className="mono">{(s.resonance_ghz != null ? s.resonance_ghz : s.frequency_ghz).toFixed(6)}</td>
+                  <td className={`mono det ${pos ? 'pos' : 'neg'}`}>{det != null ? (det > 0 ? '+' : '') + det.toFixed(3) : '—'}</td>
+                  <td className="mono">{(s.t2_us != null ? s.t2_us : 0).toFixed(1)}</td>
+                  <td>{s.usable === false ? <span className="tag bad">dropout</span> : <span className="tag ok">ok</span>}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // OdmrChart — SVG line chart of the ODMR contrast vs frequency.
 // ---------------------------------------------------------------------------
 export function OdmrChart({ data, error }) {

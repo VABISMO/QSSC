@@ -63,6 +63,29 @@ def is_prime(n: int, k: int = 8) -> bool:
     return True
 
 
+def perfect_power(n: int) -> Optional[tuple[int, int]]:
+    """Return ``(base, exp)`` with ``exp >= 2`` if ``n = base**exp``, else None.
+
+    This is Shor's classical preprocessing step 1: for ``N = p**k`` the quantum
+    period-finding gcd step ``gcd(a**(r/2) +/- 1, N)`` gives TRIVIAL factors for
+    every coprime base ``a`` (because ``a**(r/2) = +/- 1 mod p**k`` -> one gcd
+    is 1, the other is N), so the factor is recovered classically instead of
+    by the quantum circuit. Prime powers (9=3**2, 25=5**2, 27=3**3, ...) are
+    exactly the composites that "run but return no factors" through the quantum
+    path alone. Integer root via nearest-integer rounding + a +/-1 guard band
+    (avoids float rounding error on large powers).
+    """
+    if n < 4:
+        return None
+    max_k = int(math.log2(n)) + 1
+    for k in range(2, max_k + 1):
+        b = round(n ** (1.0 / k))
+        for cand in (b - 1, b, b + 1):
+            if cand >= 2 and cand ** k == n:
+                return (cand, k)
+    return None
+
+
 def select_coprime(n: int, rng=None) -> int:
     """Pick a random ``a`` with 1 < a < n and gcd(a, n) == 1."""
     rng = rng or np.random.default_rng()
