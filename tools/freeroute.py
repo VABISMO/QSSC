@@ -169,9 +169,53 @@ def _truncate_plane_net_pins(dsn_path, plane_nets):
     dsn_path.write_text(txt[:i_net] + net_section + txt[net_end:])
     return dropped
 
+def _strip_plane_blocks(dsn_path, plane_nets):
+    """Remove the ``(plane <net> (polygon ...))`` blocks from the DSN's
+    ``(structure ...)`` section. KiCad's ExportSpecctraDSN emits the zone
+    OUTLINE polygons as Specctra ``(plane ...)`` forms; FreeRouting 2.4.1
+    turns each into a ConductionArea and tries to fill/render it, which on a
+    full-board plane hits a NullPointerException in
+    ``ConductionArea.ensureDetailedFillCache`` (ShapeSearchTree.overlapping-
+    TreeEntries, currentObject null) in the Swing paint thread. A route that
+    finishes with unresolved violations then writes a 0-byte SES, so the whole
+    cycle is wasted. Power/ground are poured by route_qssc_pcb AFTER
+    autorouting (the standard Specctra flow -- planes are never autorouted),
+    so FreeRouting does not need the plane polygons at all: stripping them
+    (a) avoids the fill/render NPE, (b) removes plane-clearance violations
+    from the autorouter's DRC count so the optimizer can clean the remaining
+    signal-to-signal ones, and (c) frees the full-board routing corridor the
+    plane keepout was reserving. The KiCad board keeps its zones; the SES
+    import only adds signal tracks, and route_qssc_pcb re-pours fresh planes
+    around them afterwards. Returns the number of plane blocks removed."""
+    txt = dsn_path.read_text()
+    removed = 0
+    for nm in plane_nets:
+        pat = f"(plane {nm}"
+        k = txt.find(pat)
+        while k != -1:
+            after = k + len(pat)
+            if after < len(txt) and not txt[after].isspace():
+                k = txt.find(pat, k + 1)
+                continue
+            d, m = 1, k + 1
+            while m < len(txt) and d > 0:
+                if txt[m] == "(":
+                    d += 1
+                elif txt[m] == ")":
+                    d -= 1
+                m += 1
+            txt = txt[:k] + txt[m:]
+            removed += 1
+            k = txt.find(pat, k)
+    dsn_path.write_text(txt)
+    return removed
+
 dropped = _truncate_plane_net_pins(dsn, PLANE_NETS)
 print(f"  truncated {dropped} plane-net pin refs ({', '.join(sorted(PLANE_NETS))}) "
       f"to 1 each in DSN -> autorouter routes signals only")
+stripped = _strip_plane_blocks(dsn, PLANE_NETS)
+print(f"  stripped {stripped} (plane ...) polygon blocks from DSN "
+      f"-> FreeRouting routes signals only, planes re-poured after")
 
 # FreeRouting 2.4.1 CLI: -de <dsn> -do <ses> -mp <passes> -mt <threads>.
 # -mp makes it autoroute (without -mp it loads + exits). -mt 1 = single-thread
@@ -184,13 +228,24 @@ print(f"== FreeRouting ({jar.name}) java={java_exe} ==")
 # own Swing GUI on the inherited $DISPLAY instead -- the routing window appears and
 # you can watch the fanout + autoroute passes draw live. Still resource-capped by the
 # systemd-run caller, so it cannot block the machine either way.
+# Optional -us (updating_strategy: Greedy/Global/Hybrid) and -is (selection:
+# Sequential/random/prioritized) via env US=/IS=. Global + random escapes the
+# local minimum where the Greedy optimizer stalls at 0% on fine-pitch escapes
+# blocked by the autorouter's own fanout vias -- Global re-routes whole nets
+# (rip-up), not just shove, so it can tear out a blocking 0.60 mm via and re-close
+# the net it was strangling.
+extra = []
+if os.environ.get("US"):
+    extra += ["-us", os.environ["US"]]
+if os.environ.get("IS"):
+    extra += ["-is", os.environ["IS"]]
 if os.environ.get("NO_XVFB"):
     cmd = [java_exe, "-jar", str(jar),
-           "-de", str(dsn), "-do", str(ses), "-mt", MT, "-mp", MP]
+           "-de", str(dsn), "-do", str(ses), "-mt", MT, "-mp", MP] + extra
     print(f"  NO_XVFB=1 -> GUI on DISPLAY={os.environ.get('DISPLAY', '(none)')}")
 else:
     cmd = ["xvfb-run", "-a", java_exe, "-jar", str(jar),
-           "-de", str(dsn), "-do", str(ses), "-mt", MT, "-mp", MP]
+           "-de", str(dsn), "-do", str(ses), "-mt", MT, "-mp", MP] + extra
 print("  ", " ".join(map(str, cmd)))
 
 # Delete any STALE session file before launching FreeRouting. If FreeRouting
