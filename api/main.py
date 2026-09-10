@@ -89,7 +89,7 @@ class RunRequest(BaseModel):
     op: str = "add"                  # math op
     num1: float = 2.0
     num2: Optional[float] = None
-    num_qubits: int = Field(2, ge=1, le=20)         # bell / qft / qrand
+    num_qubits: int = Field(2, ge=1, le=64)         # bell / qft / qrand (full 64-site chip via MPS)
     n_items: Optional[int] = None    # grover: search space = 2^n_items
     marked: Optional[int] = None     # grover: marked index
     iterations: int = Field(1, ge=1, le=100)        # grover

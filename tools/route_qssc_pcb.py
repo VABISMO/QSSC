@@ -141,7 +141,7 @@ def _find_plane_layer(board, label):
     Iterate the full layer-ID range filtered to copper layers: KiCad >= 10
     interleaves tech layers with copper, so raw copper IDs are no longer
     contiguous (F.Cu=0, B.Cu=2, In1.Cu=4, In2.Cu=6, ...)."""
-    for lid in range(board.GetCopperLayerStackMaxId() + 1):
+    for lid in range(pcbnew.PCB_LAYER_ID_COUNT):
         if not pcbnew.IsCopperLayer(lid):
             continue
         try:
@@ -192,6 +192,11 @@ def _add_gnd_or_pwr_zone(board, layer, netcode, bbox):
     z.SetLayer(layer)
     z.SetNetCode(netcode)
     z.SetAssignedPriority(0)
+    # 0.20 mm pour clearance (HDI-appropriate; the 0.5 mm board default starves
+    # dense via fields -- two routing vias <0.35 mm apart can't keep a 0.5 mm
+    # pullback on both sides, so the plane edges trip clearance DRC). 0.20 mm is
+    # twice the 0.10 mm board min_clearance and pours cleanly around 0.20 mm vias.
+    z.SetLocalClearance(200000)
     # solid (full) pad connection -- these are plane/flood pours, so we want a
     # direct copper connection, not thermal-relief spokes that can starve at
     # edge/adjacent pads and trip the starved_thermal DRC rule.

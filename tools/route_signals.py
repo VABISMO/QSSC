@@ -191,12 +191,14 @@ BGA_VIA_DRILL_NM = 100_000         # 0.10 mm HDI drill
 #     so the rail TRACK (Task 7, on the rail layer) can connect the balls. These
 #     are TIE vias (no escape track); they mark keepout on the signal layers and
 #     get a vip_net allowed override so the Task-7 rail can pass their own area.
-#   * shadowed signals/config/JTAG: THROUGH via-in-pad escaping on In3/In4 (pad-
+#   * signals/config/JTAG/VREFP: THROUGH via-in-pad escaping on In3/In4 (pad-
 #     free under the BGA), column parity (even col -> In3, odd -> In4) so a +X
 #     escape passes under same-row neighbours that sit on the OTHER inner layer.
-#   * unshadowed signals: no VIP, escape on F.Cu as before.
-# In3/In4/B.Cu thus carry only ~27 through-VIPs (11 power + ~16 shadowed
-# signals), not 117 -- sparse enough for the line router to thread escapes.
+#     EVERY netted signal ball gets a VIP (the old unshadowed-skip is gone);
+#     keeping them all (even if the line router fails) lets FreeRouting close
+#     the net from the via later (via_dangling is ignore).
+# In3/In4/B.Cu thus carry the power VIPs + every signal VIP; the line router
+# threads escapes around the keepout grid, FreeRouting closes the rest.
 PLANE_NETS = {"GND", "+3V3"}
 POWER_NETS = {"+1V0", "+1V8", "+5V", "+5V_RF", "+5V_IN",
               "+12V_EMIT", "+12V_EMIT_IN"}
@@ -330,13 +332,14 @@ class _FpProxy:
     snapshots).  Position is the footprint origin (die body centre for the
     QSSC_Chip, the BGA array centre for the FPGA) -- captured BEFORE
     _clear_tracks so swig still resolves GetPosition()."""
-    __slots__ = ("ref", "pads", "x", "y")
+    __slots__ = ("ref", "pads", "x", "y", "flayer")
 
-    def __init__(self, ref, pads, x=0, y=0):
+    def __init__(self, ref, pads, x=0, y=0, flayer=0):
         self.ref = ref
         self.pads = pads
         self.x = x
         self.y = y
+        self.flayer = flayer       # footprint's own copper face (F_CU / B_CU)
 
     def GetReference(self):
         return self.ref
@@ -368,7 +371,8 @@ def _capture_pads(board):
                 has_hole=(p.GetDrillSize().x > 0),
                 cu_layers=cu_layers or [p.GetLayer()],
             ))
-        fps.append(_FpProxy(fp.GetReference(), pads, fpos.x, fpos.y))
+        fps.append(_FpProxy(fp.GetReference(), pads, fpos.x, fpos.y,
+                            fp.GetLayer()))
     return fps
 
 
@@ -1146,8 +1150,10 @@ def _bga_fanout(board, x0, y0, routed, fps=None):
       * GND  -> microvia  F.Cu->In1.Cu  (no signal-layer keepout)
       * +3V3 -> blind via F.Cu->In2.Cu  (no signal-layer keepout)
       * +1V0/+1V8 -> through via-in-pad tying to the rail layer (In3/In4)
-      * shadowed signal/config/JTAG -> through via-in-pad escaping on In3/In4
-      * unshadowed signal -> no VIP (F.Cu escape)
+      * signal/config/JTAG/VREFP -> through via-in-pad escaping on In3.Cu
+        (even column) / In4.Cu (odd column). EVERY netted signal ball gets one
+        (the old "unshadowed rightmost-column -> F.Cu escape" skip is gone --
+        F.Cu escape is impossible under the 0.8 mm pad field).
 
     Returns (vip_net, pad_vip, vip_vias):
 
@@ -1160,12 +1166,12 @@ def _bga_fanout(board, x0, y0, routed, fps=None):
       pad_vip : (x,y) pad-centre -> (esc_lay, seed_cells) for SHADOWED SIGNAL
                 balls; tells _route_pair which inner layer to escape on. Power
                 and plane balls are NOT here (no _route_pair escape).
-      vip_vias: net_name -> [PCB_VIA, ...] for every via placed, so build() can
-                REMOVE a SIGNAL net's vias if it ends up UNROUTED (a through
-                via-in-pad whose net never escaped dangles on In3/In4/B.Cu).
-                PLANE-net and POWER-net vias are never removed (not in
-                fail_set): GND/+3V3 tie to a plane; +1V0/+1V8 tie to a rail the
-                Task-7 power-router will connect.
+      vip_vias: net_name -> [PCB_VIA, ...] for every via placed. build() KEEPS
+                them all (even for nets the line router failed to escape) so the
+                later FreeRouting pass has a connection point on In3/In4/B.Cu.
+                via_dangling is `ignore`, so an unclosed VIP is DRC-clean.
+                PLANE-net (GND/+3V3) and POWER-net (+1V0/+1V8) vias tie to their
+                plane / rail and are likewise kept.
 
     Through-via barrels mark keepout in ``routed`` on the inner signal layers +
     B.Cu (radius BGA_VIP_MARK_RADIUS on the escape/rail layer, MARK_RADIUS on
@@ -1247,7 +1253,6 @@ def _bga_fanout(board, x0, y0, routed, fps=None):
     # relaxing a cell a neighbour already owns.
     vip_cell_nets: dict[tuple, set] = {}
     for y, rowpads in by_row.items():
-        xs = sorted({p.GetPosition().x for p in rowpads})
         for p in rowpads:
             nm = p.GetNetname()
             x = p.GetPosition().x
@@ -1269,8 +1274,18 @@ def _bga_fanout(board, x0, y0, routed, fps=None):
                 esc_lay = POWER_RAIL_LAYER[nm]
                 v = _through_vip(x, y, p)
             else:                                 # signal / config / JTAG / VREFP
-                if (x + BGA_PITCH_NM) not in xs:
-                    continue                      # unshadowed -> escapes on F.Cu
+                # EVERY netted signal ball gets a through via-in-pad escaping on
+                # In3.Cu (even column) / In4.Cu (odd column). The old code skipped
+                # "unshadowed" rightmost-column balls (no netted ball 0.8 mm to the
+                # right in the same row) and left them for an F.Cu escape -- but an
+                # F.Cu escape is impossible under the dense 0.8 mm CSG324 pad field,
+                # so FreeRouting could never close those nets (16 stuck FPGA escape
+                # nets: TMS/TDO/adc_cs2/adc_miso/...). Giving every signal ball a
+                # VIP + keepout UP FRONT means the rail router (Task 7) and the
+                # signal router route AROUND it. Adding the vias post-hoc (the
+                # bga_fanout_fix.py approach) shorted the +1V8/+1V0 rail tracks on
+                # In3/In4 because those rails were routed before the via existed --
+                # the keepout grid only protects a via placed BEFORE routing.
                 col = (x - x_min) // BGA_PITCH_NM
                 esc_lay = IN3_CU if (col % 2 == 0) else IN4_CU
                 v = _through_vip(x, y, p)
@@ -1324,15 +1339,16 @@ def _bga_fanout(board, x0, y0, routed, fps=None):
 
 def _chip_fanout(board, x0, y0, routed, fps=None):
     """Dog-bone fanout for a QSSC_Chip die FACE.  The die carries an 8x8 GRID of
-    64 electrodes across the 20x20 mm face at 2.5 mm pitch (1.2 mm pads -> 1.3 mm
-    inter-pad gaps, 17.5 mm span).  The main board carries QSSC_Chip_EM (64 EM
-    cathodes on F.Cu + EM_ANODE on the F.Cu left edge); the detector head carries
-    QSSC_Chip_DET (64 DET electrodes on B.Cu).
+    64 electrodes across the 20x20 mm face at 2.54 mm pitch (1.7 mm THT pads ->
+    0.84 mm inter-pad gaps, 17.78 mm span).  The main board carries
+    ChipSocket_2.54_EM (64 EM cathodes + EM_ANODE on a 2.54 mm female-header
+    socket on F.Cu); the detector head carries ChipSocket_2.54_DET (64 DET
+    electrodes on the matching socket on B.Cu).
 
     Each netted die pad gets a short 0.15 mm stub on the pad's OWN layer (F.Cu
     for EM, B.Cu for DET) outward toward the nearest die edge, to a 0.20 mm
-    through-via 1.0 mm out (in the 1.3 mm inter-pad gap).  At 2.5 mm pitch the
-    via clears the adjacent-row/col pad by 0.80 mm (>> 0.15 mm netclass), so NO
+    through-via 1.0 mm out (in the 0.84 mm inter-pad gap).  At 2.54 mm pitch the
+    via clears the adjacent-row/col pad by ~0.54 mm (>> 0.15 mm netclass), so NO
     shorting -- the 68/98 shorting_items seen in the OLD 0.30 mm-pitch design
     (where a 1.0 mm stub blew PAST the 0.30 mm-pitch neighbour) cannot occur
     here.  The through-via barrel ties the pad to the OPPOSITE surface (B.Cu for
@@ -1400,22 +1416,26 @@ def _chip_fanout(board, x0, y0, routed, fps=None):
         nm = p.GetNetname()
         nc = p.GetNetCode()
         px, py = p.GetPosition().x, p.GetPosition().y
-        # REAL pad copper layer from the layer set. p.GetLayer() returns F_CU
-        # for a pad on the head board's FLIPPED die footprint even though the
-        # pad sits on B.Cu -- using it would place the stub on F.Cu, leaving the
-        # B.Cu die pad floating. Pick the primary surface: F.Cu if present,
-        # else B.Cu, else the first copper layer.
-        cu = p.cu_layers
-        if F_CU in cu:
-            pad_lay = F_CU
-        elif B_CU in cu:
-            pad_lay = B_CU
-        else:
-            pad_lay = cu[0]
+        # Die-contact face from the FOOTPRINT's own layer (the socket body sits
+        # on F.Cu for the main-board ChipSocket_2.54_EM, B.Cu for the head
+        # ChipSocket_2.54_DET).  The pad's copper layer set cannot disambiguate
+        # the new THT socket pads: a thru_hole pad is on *.Cu (every copper
+        # layer), so "F_CU in cu" is true on BOTH boards and would wrongly place
+        # the head's stub on F.Cu (leaving the B.Cu die pad floating and
+        # inverting the escape layer).  The footprint layer is reliable here --
+        # the PAD.GetLayer() flip quirk (a pad on a flipped B.Cu footprint
+        # reports F_CU) does NOT affect FOOTPRINT.GetLayer(), which returns B_CU
+        # for a back-side footprint.  _FpProxy stores flayer; a native FOOTPRINT
+        # (fps=None path) exposes GetLayer() instead.  This also matches the old
+        # ACF behaviour (F.Cu SMD pads -> F_CU; B.Cu SMD pads -> B_CU).
+        fp_lay = getattr(chip, "flayer", None)
+        if fp_lay is None:
+            fp_lay = chip.GetLayer()
+        pad_lay = B_CU if fp_lay == B_CU else F_CU
         esc_lay = B_CU if pad_lay == F_CU else F_CU  # opposite, clear surface
         # stub outward toward the nearest die edge (perpendicular to it).  For an
         # interior 8x8 pad this points toward the nearest side; the via lands in
-        # the 1.3 mm gap, clear of the 2.5 mm-pitch neighbours (see docstring).
+        # the 0.84 mm gap, clear of the 2.54 mm-pitch neighbours (see docstring).
         ddx, ddy = px - cx0, py - cy0
         if abs(ddy) >= abs(ddx):
             dx, dy = 0, (1 if ddy > 0 else -1)       # top/bottom edge -> +/-y
@@ -1428,7 +1448,7 @@ def _chip_fanout(board, x0, y0, routed, fps=None):
         ix = int((vx - x0) // GRID_NM)
         iy = int((vy - y0) // GRID_NM)
         r = BGA_VIP_MARK_RADIUS
-        # through-via barrel sits in the 1.3 mm gap (past the pad edge), so mark
+        # through-via barrel sits in the 0.84 mm gap (past the pad edge), so mark
         # its keepout on EVERY signal layer so other nets do not short to it.
         for lay in SIGNAL_LAYERS:
             _mark(routed, ix, iy, lay, r)
@@ -1508,13 +1528,9 @@ def build(board) -> dict:
     # The chip dog-bone vias are a COMPLETE fanout (pad -> 0.15 mm stub ->
     # through-via) that the line router finishes on the escape surface; unlike a
     # BGA via-in-pad that never escaped (a true dangling barrel), a dog-bone via
-    # is a valid net tie the line router routes FROM. So the failed-net VIP
-    # removal block below must NEVER tear them down (else dead stubs end in
-    # mid-air). Track them by (x,y) position (swig proxies re-wrap on access, so
-    # id() is unreliable) so the removal loop can skip them while still dropping
-    # BGA VIPs of nets that genuinely never escaped.
-    chip_via_pos = {(int(v.GetX()), int(v.GetY()))
-                    for vs in cv_vias.values() for v in vs}
+    # is a valid net tie the line router routes FROM. The failed-net VIP removal
+    # block was removed (see below) -- ALL VIPs stay so FreeRouting can close the
+    # net from the via, so the dog-bone vias are kept implicitly.
     # BGA pad bounding box (nm) for the edge-escape phase 2b: the FPGA footprint
     # from the snapshot. None if there is no BGA -> phase 2b skips.
     bga_bbox = None
@@ -1637,7 +1653,8 @@ def build(board) -> dict:
     # members) so they claim the still-empty escape layer before short local
     # nets fill it.  A chip net NOT in structured_chip (none expected -- every
     # netted die pad gets a via) is left for FreeRouting.  The dog-bone vias are
-    # preserved by the chip_via_pos guard in the VIP-removal block below.
+    # kept implicitly -- the failed-net VIP removal block was removed so ALL
+    # VIPs (BGA + chip) stay for FreeRouting to close.
     structured_chip = set(via_pads.keys())
     for net in sorted(net_pads,
                       key=lambda n: (0 if n in vip_net else 1, -_span(net_pads[n]),
@@ -1724,26 +1741,17 @@ def build(board) -> dict:
         if _DEBUG:
             print(f"  DEBUG rf_fence: {nv_fence} GND return vias")
 
-    # Remove through via-in-pad vias on SIGNAL nets that were attempted but
-    # FAILED: a through VIP whose net never escaped dangles on In3/In4/B.Cu
-    # (via_dangling). Plane nets (GND/+3V3) are never in fail_set (excluded from
-    # net_pads). Power rails (+1V0/+1V8/+5V/+5V_RF/+5V_IN) CAN now be in fail_set
-    # (a rail segment may be unreachable), but their BGA through-vias MUST stay --
-    # they tie the FPGA power balls to the rail layer regardless of whether the
-    # rail track reached the regulator, and removing them would disconnect the
-    # balls. So only SIGNAL-net VIPs are removed. Done nets keep theirs.
-    # EXCEPTION: the 128 QSSC_Chip dog-bone vias are a complete fanout (pad +
-    # 0.15 mm stub + through-via) the GUI finishes on B.Cu, NOT a dangling
-    # via-in-pad -- tearing them down would leave 128 dead stubs in mid-air. So
-    # they are kept regardless of whether the line router escaped them.
-    fail_set = set(fail)
-    for net, vs in vip_vias.items():
-        if net in fail_set and net not in POWER_NETS:
-            for v in vs:
-                if (int(v.GetX()), int(v.GetY())) in chip_via_pos:
-                    continue
-                board.Remove(v)
-                bga_vias -= 1
+    # KEEP every through via-in-pad (signal + power + chip dog-bone), even for
+    # nets the line router FAILED to escape. The old code removed a FAILED
+    # signal net's BGA VIPs to avoid a dangling barrel on In3/In4/B.Cu
+    # (via_dangling) -- but that removal ran BEFORE FreeRouting, so the later
+    # autorouter was left with NO via to connect and the net stayed split
+    # forever (the 16 stuck FPGA escape nets). via_dangling is `ignore` in the
+    # project rules, so a VIP whose net FreeRouting has not yet closed is
+    # DRC-clean; keeping it gives FreeRouting the connection point it needs.
+    # Power-rail VIPs were already never removed (they tie the FPGA power balls
+    # to the rail layer); chip dog-bone vias are a complete pad+stub+via fanout
+    # the line router routes FROM. bga_vias reflects every VIP placed.
     return {"routed": done, "unrouted": fail, "partial_power": partial,
             "single": single, "tracks": nt, "vias": nv,
             "bga_fanout_vias": bga_vias, "excluded": sorted(EXCLUDE_NETS)}

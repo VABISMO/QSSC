@@ -20,7 +20,7 @@ from api import main as main_mod
 from api.main import app
 
 BELL = {"algorithm": "bell", "profile": "NV", "num_qubits": 2,
-        "shots": 512, "seed": 1, "noise_mode": "real"}
+        "shots": 512, "seed": 1, "noise_mode": "real", "temperature_k": 4.0}
 GHZ_PY = ("from qiskit import QuantumCircuit\n"
           "qc = QuantumCircuit(3, 3)\n"
           "qc.h(0); qc.cx(0, 1); qc.cx(1, 2)\n"
@@ -147,7 +147,8 @@ def test_circuit_run_sync_bell(client):
 def test_circuit_run_sync_shor_factors(client):
     r = client.post("/api/circuit/run", params={"sync": True},
                     json={"algorithm": "shor", "profile": "NV", "n": 15,
-                          "shots": 2048, "seed": 7, "noise_mode": "phenomenological"})
+                          "shots": 2048, "seed": 7, "noise_mode": "phenomenological",
+                          "temperature_k": 1e-3})
     assert r.status_code == 200
     j = r.json()["result"]
     # Shor-15 factors 3 x 5 (phenomenological mode is ideal-ish for small n)
@@ -158,7 +159,8 @@ def test_circuit_run_sync_shor_factors(client):
 
 def test_custom_circuit_python(client):
     r = client.post("/api/circuit/custom", params={"sync": True},
-                    json={"code": GHZ_PY, "profile": "NV", "shots": 256, "seed": 2})
+                    json={"code": GHZ_PY, "profile": "NV", "shots": 256, "seed": 2,
+                          "temperature_k": 4.0})
     assert r.status_code == 200
     counts = r.json()["result"]["counts"]
     assert sum(counts.values()) == 256
@@ -346,16 +348,19 @@ def test_circuit_run_qft_20_qubits(client):
 
 def test_too_wide_circuit_errors_not_faked(client):
     """Regression: a circuit wider than the classical simulation ceiling
-    (math mul bits=8 -> 32 qubits > SIM_MAX_QUBITS=28) used to silently fall
-    back to fake all-zero counts. It must now return an error."""
+    (math mul bits=17 -> 68 qubits > SIM_MAX_QUBITS=64) used to silently fall
+    back to fake all-zero counts. It must now return an error. (The cap was
+    28 statevector qubits; raising to 64 via the Aer MPS path moved the ceiling,
+    so the over-width probe must move past 64 too -- bits=8 -> 32q is now a
+    legitimate MPS run, not an error.)"""
     r = client.post("/api/circuit/run", params={"sync": True},
                     json={"algorithm": "math", "profile": "NV", "op": "mul",
-                          "a": 3, "b": 5, "bits": 8, "shots": 256, "seed": 3,
+                          "a": 3, "b": 5, "bits": 17, "shots": 256, "seed": 3,
                           "noise_mode": "real"})
     assert r.status_code == 200
     j = r.json()
     assert j["status"] == "failed"
-    assert "32 qubits" in j["result"]["error"] or "bounded" in j["result"]["error"]
+    assert "68 qubits" in j["result"]["error"] or "wider than" in j["result"]["error"]
 
 
 # --- async job lifecycle ----------------------------------------------------

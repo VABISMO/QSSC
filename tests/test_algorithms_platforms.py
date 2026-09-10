@@ -53,11 +53,27 @@ def test_auto_align_readout_anchored(profile):
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("profile", PLATFORMS)
 def test_bell_on_platform(profile):
+    # Bell uses a single SPIN (microwave / magnetic-dipole) CX 2q gate -- the
+    # on-chip entangling mechanism, NOT a photon-mediated gate. The circuit is
+    # shallow (~250 ns), so every platform's spin T2 (hBN ~ 2 us, SiC ~ 40 us,
+    # NV ~ 1.8 ms) comfortably exceeds it: Bell keeps its |00>+|11> correlations
+    # at 300 K. Room-temperature spin entanglement is documented for NV (Neumann
+    # 2008, Dolde 2013). The descriptive optical channel reports a bad photon
+    # budget at 300 K (within_optical_coherence False) but that is informational
+    # only -- it does NOT gate the spin CX, so within_coherence is True.
     r = _run("bell", profile, ROOM, num_qubits=2, shots=1024)
     assert "error" not in r
     assert sum(r["counts"].values()) == 1024
+    assert r["assessment"]["within_coherence"] is True       # spin gate fits @ 300 K
     top = max(r["counts"], key=r["counts"].get)
-    assert top in ("00", "11")  # Bell -> only 00 / 11 dominate
+    assert top in ("00", "11")                                # Bell correlations survive
+    assert r["assessment"]["within_optical_coherence"] is False  # descriptive photon budget
+    r_cold = _run("bell", profile, COLD, num_qubits=2, shots=1024)
+    assert "error" not in r_cold
+    assert sum(r_cold["counts"].values()) == 1024
+    assert r_cold["assessment"]["within_optical_coherence"] is True
+    top_cold = max(r_cold["counts"], key=r_cold["counts"].get)
+    assert top_cold in ("00", "11")
 
 
 @pytest.mark.parametrize("profile", PLATFORMS)

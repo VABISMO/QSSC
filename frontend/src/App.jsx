@@ -66,9 +66,9 @@ const SEQS = [
 // = the number of key-exchange rounds.
 const QUBIT_CFG = {
   custom:  null,                                  // custom circuit defines its own width
-  bell:    { min: 2, max: 20, step: 1, def: 4,  label: 'Qubits n',         hint: 'GHZ chain on n qubits (H + CNOT ladder)' },
-  qrand:   { min: 2, max: 20, step: 1, def: 8,  label: 'Qubits n',         hint: 'n qubits prepared in |+⟩ → von-Neumann-extracted entropy' },
-  qft:     { min: 2, max: 20, step: 1, def: 4,  label: 'Qubits n',         hint: 'QFT of an n-qubit computational-basis state' },
+  bell:    { min: 2, max: 64, step: 1, def: 4,  label: 'Qubits n',         hint: 'GHZ chain on n qubits (H + CNOT ladder) — full 64-site chip via MPS' },
+  qrand:   { min: 2, max: 64, step: 1, def: 8,  label: 'Qubits n',         hint: 'n qubits prepared in |+⟩ → von-Neumann-extracted entropy — full 64-site chip via MPS' },
+  qft:     { min: 2, max: 64, step: 1, def: 4,  label: 'Qubits n',         hint: 'QFT of an n-qubit computational-basis state — full 64-site chip via MPS' },
   grover:  { min: 2, max: 8,  step: 1, def: 3,  label: 'Search qubits n',  hint: 'search space of 2ⁿ items' },
   math:    { min: 2, max: 6,  step: 1, def: 4,  label: 'Word qubits n',    hint: 'n-bit arithmetic register' },
   // shor / period / qftnos: the qubit count is a CONSEQUENCE of the integer N
@@ -83,16 +83,13 @@ const QUBIT_CFG = {
 
 // helpers for shor / period / qftnos: the circuit width is a function of the
 // integer N being factored (shor/period = 3·bitlen(N)+1, qftnos = 2·bitlen(N)+1).
-// We keep BOTH fields visible & editable: editing N derives the qubit count, and
-// editing the qubit count snaps N to a semiprime of the matching bit-length.
+// We keep N editable and show the qubit count as a READ-ONLY derived readout
+// (shor/period = 3·bitlen(N)+1, qftnos = 2·bitlen(N)+1). Editing the qubit
+// count no longer silently snaps N to a semiprime -- that bidirectional
+// coupling made "inputs change by themselves" when the user touched the
+// qubits field.
 const bitLen = (n) => (n <= 1 ? 1 : Math.floor(Math.log2(n)) + 1)
-const SHOR_GOOD_N = { 4: 15, 5: 21, 6: 35, 7: 77, 8: 143, 9: 323, 10: 527, 11: 649 }
 const derivedQubits = (algo, n) => algo === 'qftnos' ? 2 * bitLen(n) + 1 : 3 * bitLen(n) + 1
-const qubitsToN = (algo, q) => {
-  const l = algo === 'qftnos' ? Math.round((q - 1) / 2) : Math.round((q - 1) / 3)
-  const lb = Math.max(2, l)
-  return SHOR_GOOD_N[lb] || ((1 << (lb - 1)) + 1)   // smallest lb-bit integer
-}
 
 const downloadPem = (filename, text) => {
   const blob = new Blob([text], { type: 'application/x-pem-file' })
@@ -464,7 +461,12 @@ export default function App() {
     if (algo === 'custom') {
       return { code: customCode, profile, temperature_k: temperature, seed, shots, noise_mode: noiseMode }
     }
-    const body = { algorithm: algo, profile, temperature_k: temperature, seed, shots, noise_mode: noiseMode }
+    const body = { algorithm: algo, profile, temperature_k: temperature, shots, noise_mode: noiseMode }
+    // qrand: do NOT send the fixed seed -- the backend uses OS entropy when no
+    // seed is present (issue #45), so each UI run yields fresh quantum entropy
+    // and a new Ed25519 key. Sending seed=42 made every default qrand run
+    // return the identical histogram / identical private key.
+    if (algo !== 'qrand') body.seed = seed
     if (algo === 'shor' || algo === 'period' || algo === 'qftnos') body.n = nShor
     if (algo === 'math') { body.op = mathOp; body.a = mathA; body.b = mathB; body.bits = numQubits }
     if (algo === 'grover') { body.n_items = numQubits; body.marked = groverMarked }
@@ -541,8 +543,19 @@ export default function App() {
   const running = job && job.status !== 'finished' && job.status !== 'failed'
 
   const runCounts = result && (result.counts || (result.result && result.result.counts))
+  // For period-finding (shor/period/qftnos) the backend also returns
+  // marginal_counts: the full measured-bitstring distribution collapsed onto
+  // the counting register, keyed by each counting value's *representative*
+  // full bitstring. Its bars sum to shots, concentrate each phase peak into one
+  // bar (instead of smearing it across the measured-ancilla states), and the
+  // recovered-signal bar count then equals recovered.count. Prefer it for the
+  // histogram + grid when present; fall back to the raw full-bitstring counts
+  // for math / ideal / anything that does not marginalize.
+  const runMarginal = result && (result.marginal_counts || (result.result && result.result.marginal_counts))
+  const displayCounts = runMarginal || runCounts
   const runAssessment = result && result.assessment
   const runBits = result && result.num_clbits
+  const runRecovered = result && (result.recovered || (result.result && result.result.recovered))
 
   return (
     <div className="app">
@@ -1155,7 +1168,16 @@ export default function App() {
                     <label>{QUBIT_CFG[algo].label}</label>
                     <input type="number" min={QUBIT_CFG[algo].min} max={QUBIT_CFG[algo].max}
                            step={QUBIT_CFG[algo].step} value={numQubits}
-                           onChange={e => setNumQubits(+e.target.value)} />
+                           onChange={e => {
+                             const cfg = QUBIT_CFG[algo]
+                             // enforce the [min,max] clamp: HTML max does not stop
+                             // the user typing a larger value, and a too-large
+                             // register blows the simulator's qubit cap (mul
+                             // uses 4*n qubits -> n=10 = 40q > 28q cap -> the
+                             // "nonsensical false error"). math n<=6 = 24q max.
+                             const v = +e.target.value || cfg.def
+                             setNumQubits(Math.min(cfg.max, Math.max(cfg.min, v)))
+                           }} />
                   </div>
                   <div className="field"><label>&nbsp;</label>
                     <div className="muted" style={{ paddingTop: 9 }}>{QUBIT_CFG[algo].hint}</div>
@@ -1166,17 +1188,19 @@ export default function App() {
                 <div className="row">
                   <div className="field">
                     <label>{algo === 'period' ? 'Integer N (find period)' : 'Integer to factor (N)'}</label>
-                    <input type="number" min={2} value={nShor} onChange={e => {
-                      const n = Math.max(2, Math.floor(+e.target.value) || 2)
+                    <input type="number" min={2} max={15} value={nShor} onChange={e => {
+                      // cap at 15: N=15 -> 13 qubits is the largest that factors at
+                      // 300 K NV and finishes <1 s (N=21 -> 16 qubits takes >120 s
+                      // and decoheres to no factors; N=35 hangs Aer).
+                      const n = Math.min(15, Math.max(2, Math.floor(+e.target.value) || 2))
                       setNShor(n); setNumQubits(derivedQubits(algo, n))
                     }} />
                   </div>
                   <div className="field">
                     <label>Circuit qubits n</label>
-                    <input type="number" min={2} value={numQubits} onChange={e => {
-                      const q = Math.max(2, Math.floor(+e.target.value) || 2)
-                      setNumQubits(q); setNShor(qubitsToN(algo, q))
-                    }} />
+                    <input type="number" min={2} value={numQubits} readOnly
+                           style={{ color: 'var(--muted)' }}
+                           title="Derived from N — edit N above to change the circuit width" />
                   </div>
                   <div className="field"><label>&nbsp;</label>
                     <div className="muted" style={{ paddingTop: 9 }}>
@@ -1363,9 +1387,11 @@ export default function App() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
               <div className="card histcard">
                 <h2><span className="dot" />Measurement histogram</h2>
-                <div className="hint">Top bitstrings from the most recent run (most-probable first).</div>
-                {runCounts
-                  ? <BarCounts counts={runCounts} />
+                <div className="hint">{runMarginal
+                  ? 'Phase-register marginal (ancilla collapsed): bar counts sum to shots, the recovered signal peak is concentrated.'
+                  : 'Top bitstrings from the most recent run (most-probable first).'}</div>
+                {displayCounts
+                  ? <BarCounts counts={displayCounts} recovered={runRecovered} />
                   : runErr
                     ? <div className="muted">Last run failed — see the error above.</div>
                     : <div className="muted">No run yet — execute a circuit on the left.</div>}
@@ -1377,8 +1403,9 @@ export default function App() {
                 {cal.data && cal.data.sites && (
                   <QubitGrid
                     sites={cal.data.sites}
-                    counts={runCounts}
+                    counts={displayCounts}
                     numClbits={runBits}
+                    recovered={runRecovered}
                   />
                 )}
                 {cal.loading && <div className="muted"><span className="spinner" /> calibrating…</div>}

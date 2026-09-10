@@ -63,6 +63,16 @@ def run_circuit(req: dict) -> dict:
     t0 = time.perf_counter()
     res = None
 
+    # Hard cap on the integer N for the period-finding / factoring algorithms.
+    # N=15 -> 13 qubits, runs in <1 s, and is the largest N that factors at
+    # 300 K NV (the spin-coherence physics guard: 2q depol over the decomposed
+    # mod-exp eats the signal for wider circuits). N=21 -> 16 qubits: a single
+    # Aer ideal run is ~22-50 s, 3 retry attempts blow the 120 s frontend poll
+    # timeout (the "shor hangs from the panel" symptom), and at 300 K it
+    # decoheres to factors=None anyway. Larger N (e.g. 35 -> 19 qubits) makes
+    # Aer's statevector sim hang outright. So cap at 15 -- the working demo.
+    MAX_FACTOR_N = 15
+
     if algo == "bell":
         from qiskit import QuantumCircuit
         n = max(2, int(req.get("num_qubits", 2)))
@@ -79,34 +89,63 @@ def run_circuit(req: dict) -> dict:
         n = int(req.get("n", 15))
         if n < 2 or is_prime(n):
             return {"error": "n must be a composite integer > 1"}
+        if n > MAX_FACTOR_N:
+            return {"error": f"N={n} is too large for the in-browser simulator "
+                             f"(> {MAX_FACTOR_N} -> >13 qubits; Aer hangs). "
+                             f"Use N <= {MAX_FACTOR_N}."}
         rng = np.random.default_rng(seed)
         chosen_a = req.get("a")
         a = r = factors = qc = counts = None
         attempt = 0
-        for attempt in range(8):
+        recovered = None
+        marginal_counts = None
+        # fewer retries for larger N: each attempt's Aer run grows ~exponentially
+        # with qubit count, so 8 attempts at N=21 would exceed the 120 s timeout.
+        max_attempts = 8 if n <= 15 else 3
+        for attempt in range(max_attempts):
             a = (chosen_a if (chosen_a is not None and attempt == 0)
                  else select_coprime(n, rng))
             qc = create_shor_circuit(n, a=a, rng=rng)[0]
             res = b.run(qc, shots=shots).result()
             counts = res.get_counts()
             _ret = float(res.assessment.get("signal_retention", 0.0) or 0.0)
-            r, factors = postprocess_period(counts, qc.num_clbits, a, n,
-                                            signal_retention=_ret)
+            _reveal = {}
+            r, factors = postprocess_period(counts,
+                                            qc.metadata["counting_bits"], a, n,
+                                            signal_retention=_ret, reveal=_reveal)
+            marginal_counts = _reveal.get("marginal_counts")
             if factors[0] and factors[0] * factors[1] == n:
+                recovered = _reveal
                 break
             chosen_a = None
         ok = bool(factors[0]) and factors[0] * factors[1] == n
         _retention = float(getattr(res, "assessment", {}).get(
             "signal_retention", 0.0) or 0.0)
+        _hom = float(getattr(res, "assessment", {}).get(
+            "hom_visibility", 1.0) or 1.0)
         result.update({"n": n, "a": a, "counts": counts,
+                       "marginal_counts": marginal_counts,
                        "period": r,
                        "factors": list(factors) if factors[0] else None,
                        "success": ok, "attempts": attempt + 1,
-                       "signal_retention": round(_retention, 4)})
+                       "signal_retention": round(_retention, 4),
+                       "hom_visibility": round(_hom, 6)})
+        if recovered:
+            result["recovered"] = {
+                "bitstring": recovered["bitstring"],
+                "phase": round(float(recovered["phase"]), 6),
+                "count": recovered["count"],
+                "period": recovered["period"],
+                "factors": list(recovered["factors"]) if recovered["factors"][0] else None,
+            }
         result.update(_circuit_meta(qc))
 
     elif algo == "period":
         n = int(req.get("n", 15))
+        if n > MAX_FACTOR_N:
+            return {"error": f"N={n} is too large for the in-browser simulator "
+                             f"(> {MAX_FACTOR_N} -> >13 qubits; Aer hangs). "
+                             f"Use N <= {MAX_FACTOR_N}."}
         rng = np.random.default_rng(seed)
         a = req.get("a") or select_coprime(n, rng)
         if gcd(a, n) != 1:
@@ -121,14 +160,24 @@ def run_circuit(req: dict) -> dict:
         # signal_retention gate rejects noise-dominated runs so a starved run
         # cannot report a noise-artifact period (audit issue #8).
         _ret = float(res.assessment.get("signal_retention", 0.0) or 0.0)
-        r, _ = postprocess_period(counts, qc.num_clbits, a, n,
-                                  signal_retention=_ret)
+        _cb = qc.metadata["counting_bits"]
+        _reveal = {}
+        r, _ = postprocess_period(counts, _cb, a, n,
+                                  signal_retention=_ret, reveal=_reveal)
         bs = max(counts, key=counts.get)
-        phase = int(bs.replace(" ", ""), 2) / 2 ** qc.num_clbits
+        phase = (int(bs.replace(" ", ""), 2) & ((1 << _cb) - 1)) / 2 ** _cb
         frac = Fraction(phase).limit_denominator(n - 1)
         result.update({"n": n, "a": a, "counts": counts,
+                       "marginal_counts": _reveal.get("marginal_counts"),
                        "top_state": bs, "phase": round(phase, 6),
                        "fraction": str(frac), "period": r})
+        if _reveal:
+            result["recovered"] = {
+                "bitstring": _reveal["bitstring"],
+                "phase": round(float(_reveal["phase"]), 6),
+                "count": _reveal["count"],
+                "period": _reveal["period"],
+            }
         result.update(_circuit_meta(qc))
 
     elif algo == "math":
@@ -143,11 +192,13 @@ def run_circuit(req: dict) -> dict:
         res = b.run(qc, shots=shots).result()
         counts = res.get_counts()
         bs = max(counts, key=counts.get)
-        out = int(bs, 2)
+        _rw = qc.metadata.get("result_width", qc.num_clbits)
+        out = int(bs.replace(" ", ""), 2) & ((1 << _rw) - 1)
         if op in ("sqrt", "log"):
-            out = (out / 2 ** qc.num_clbits) * num1
+            out = (out / 2 ** _rw) * num1
         result.update({"op": op, "a": num1, "b": num2,
-                       "counts": counts, "result": out})
+                       "counts": counts, "result": out,
+                       "result_width": _rw})
         result.update(_circuit_meta(qc))
 
     elif algo == "grover":
@@ -178,7 +229,7 @@ def run_circuit(req: dict) -> dict:
 
     elif algo == "qft":
         from qiskit import QuantumCircuit
-        n = max(2, min(20, int(req.get("num_qubits", 4))))
+        n = max(2, min(64, int(req.get("num_qubits", 4))))
         x = int(req.get("x", 1)) % (2 ** n)
         qc = QuantumCircuit(n, n)
         for i in range(n):
@@ -219,7 +270,7 @@ def run_circuit(req: dict) -> dict:
         # self-signed X.509 device certificate. Cooling the chip -> less
         # bias -> higher extraction rate.
         from qiskit import QuantumCircuit
-        n = max(2, min(20, int(req.get("num_qubits", 8))))
+        n = max(2, min(64, int(req.get("num_qubits", 8))))
         num_bytes = max(16, min(64, int(req.get("num_bytes", 32))))
         cn = str(req.get("common_name") or "QSSC-quantum-device")
         need_bits = num_bytes * 8
@@ -297,20 +348,33 @@ def run_circuit(req: dict) -> dict:
         n = int(req.get("n", 15))
         if n < 2 or is_prime(n):
             return {"error": "n must be a composite integer > 1"}
+        if n > MAX_FACTOR_N:
+            return {"error": f"N={n} is too large for the in-browser simulator "
+                             f"(> {MAX_FACTOR_N} -> >13 qubits; Aer hangs). "
+                             f"Use N <= {MAX_FACTOR_N}."}
         rng = np.random.default_rng(seed)
         chosen_a = req.get("a")
         a = r = factors = qc = counts = None
         attempt = 0
-        for attempt in range(8):
+        recovered = None
+        marginal_counts = None
+        max_attempts = 8 if n <= 15 else 3
+        for attempt in range(max_attempts):
             a = (chosen_a if (chosen_a is not None and attempt == 0)
                  else select_coprime(n, rng))
             qc, a = create_qft_nos_circuit(n, a=a, rng=rng)
             res = b.run(qc, shots=shots).result()
             counts = res.get_counts()
             _ret = float(res.assessment.get("signal_retention", 0.0) or 0.0)
-            r, factors = postprocess_period_swapless(counts, qc.num_clbits, a, n,
-                                                    signal_retention=_ret)
+            _reveal = {}
+            r, factors = postprocess_period_swapless(counts,
+                                                     qc.metadata["counting_bits"],
+                                                     a, n,
+                                                     signal_retention=_ret,
+                                                     reveal=_reveal)
+            marginal_counts = _reveal.get("marginal_counts")
             if factors[0] and factors[0] * factors[1] == n:
+                recovered = _reveal
                 break
             chosen_a = None
         ok = bool(factors[0]) and factors[0] * factors[1] == n
@@ -325,12 +389,24 @@ def run_circuit(req: dict) -> dict:
             comparison = None
         _retention = float(getattr(res, "assessment", {}).get(
             "signal_retention", 0.0) or 0.0)
-        result.update({"n": n, "a": a, "counts": counts, "period": r,
+        _hom = float(getattr(res, "assessment", {}).get(
+            "hom_visibility", 1.0) or 1.0)
+        result.update({"n": n, "a": a, "counts": counts,
+                       "marginal_counts": marginal_counts, "period": r,
                        "factors": list(factors) if factors[0] else None,
                        "success": ok, "attempts": attempt + 1,
-                       "counting_qubits": qc.num_clbits,
+                       "counting_qubits": qc.metadata["counting_bits"],
                        "shor_comparison": comparison,
-                       "signal_retention": round(_retention, 4)})
+                       "signal_retention": round(_retention, 4),
+                       "hom_visibility": round(_hom, 6)})
+        if recovered:
+            result["recovered"] = {
+                "bitstring": recovered["bitstring"],
+                "phase": round(float(recovered["phase"]), 6),
+                "count": recovered["count"],
+                "period": recovered["period"],
+                "factors": list(recovered["factors"]) if recovered["factors"][0] else None,
+            }
         result.update(_circuit_meta(qc))
 
     elif algo == "bb84":

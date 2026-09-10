@@ -93,7 +93,14 @@ def create_period_finding_circuit(n: int, a: int) -> QuantumCircuit:
     t = 2 * l + 1  # precision / counting qubits
     qr_c = QuantumRegister(t, "count")
     qr_a = QuantumRegister(l, "anc")
-    cr = ClassicalRegister(t, "out")
+    # Measure ALL qubits (counting register + ancilla) so the readout width
+    # equals the qubit count: the dashboard histogram and 8x8 grid then show
+    # one bit per chosen qubit (the user's "13 qubits but only 9 bits shown"
+    # complaint -- the 4 ancilla were never measured). The phase lives in the
+    # counting register; the ancilla holds |a^x mod n> and is read out for
+    # display only. Counting -> LOW classical bits so the phase peaks light the
+    # low grid cells (same layout as before); ancilla -> high bits.
+    cr = ClassicalRegister(t + l, "out")
     qc = QuantumCircuit(qr_c, qr_a, cr, name=f"period_{a}_mod_{n}")
     qc.h(qr_c)
     qc.x(qr_a[0])
@@ -104,12 +111,15 @@ def create_period_finding_circuit(n: int, a: int) -> QuantumCircuit:
         c_u = mod_mult_gate(b, n).control(1)
         qc.append(c_u, [qr_c[q]] + qr_a[:])
     qc.append(QFT(t, inverse=True), qr_c)
-    qc.measure(qr_c, cr)
+    qc.measure(qr_c, cr[:t])      # counting register -> low classical bits
+    qc.measure(qr_a, cr[t:])      # ancilla -> high classical bits (display)
+    qc.metadata = dict(qc.metadata, counting_bits=t)
     return qc
 
 
 def postprocess_period(counts: dict, num_control: int, a: int, n: int,
-                       k: int = 2, signal_retention: Optional[float] = None) -> tuple:
+                       k: int = 2, signal_retention: Optional[float] = None,
+                       reveal: Optional[dict] = None) -> tuple:
     """Recover the period and, for Shor, the factors of ``n``.
 
     Returns (period, (factor1, factor2)).  A trivial result yields
@@ -139,13 +149,28 @@ def postprocess_period(counts: dict, num_control: int, a: int, n: int,
     if (signal_retention is not None
             and signal_retention < NOISE_RETENTION_FLOOR):
         return None, (None, None)
-    total = sum(counts.values())
+    mask = (1 << num_control) - 1
+    # Marginalize out the ancilla high bits: the phase lives in the LOW
+    # num_control classical bits (the counting register), and measuring the
+    # ancilla for display splits each phase peak across the ancilla states.
+    # Summing the counts per counting value recovers the not-measured-ancilla
+    # marginal, so the k-fold-above-uniform-floor acceptance compares against
+    # the 2**num_control counting-register floor exactly as it did before the
+    # ancilla was measured (the NV-300 K / NV-cold Shor verdict is preserved).
+    marginal = {}
+    for state, count in counts.items():
+        cval = int(state.replace(" ", ""), 2) & mask
+        marginal[cval] = marginal.get(cval, 0) + count
+    total = sum(marginal.values())
+    if reveal is not None:
+        reveal["marginal_counts"] = _marginal_counts_by_representative(
+            counts, marginal, mask)
     floor = total / (2 ** num_control) if num_control > 0 else total
-    for state, count in sorted(counts.items(), key=lambda x: x[1], reverse=True)[:12]:
-        if count <= k * floor:
+    for cval, mcount in sorted(marginal.items(), key=lambda x: x[1],
+                              reverse=True)[:12]:
+        if mcount <= k * floor:
             continue
-        dec = int(state.replace(" ", ""), 2)
-        phase = dec / (2 ** num_control)
+        phase = cval / (2 ** num_control)
         frac = Fraction(phase).limit_denominator(n)
         r = frac.denominator
         if r % 2 == 0 and pow(a, r, n) == 1:
@@ -153,9 +178,60 @@ def postprocess_period(counts: dict, num_control: int, a: int, n: int,
                 p = gcd(pow(a, r // 2, n) - 1, n)
                 q_ = gcd(pow(a, r // 2, n) + 1, n)
                 if p * q_ == n and p > 1 and q_ > 1:
+                    if reveal is not None:
+                        reveal.update(bitstring=_top_full_for(counts, cval, mask),
+                                      phase=phase, count=int(mcount), period=r,
+                                      factors=(p, q_))
                     return r, (p, q_)
+            if reveal is not None:
+                reveal.update(bitstring=_top_full_for(counts, cval, mask),
+                              phase=phase, count=int(mcount), period=r,
+                              factors=(None, None))
             return r, (None, None)
     return None, (None, None)
+
+
+def _top_full_for(counts: dict, cval: int, mask: int) -> str:
+    """Most-likely full measured bitstring whose counting-register (masked)
+    value equals ``cval`` -- the representative 13-bit bar for a recovered phase
+    peak, so the dashboard can highlight one concrete measurement outcome."""
+    best, best_n = None, -1
+    for state, count in counts.items():
+        if (int(state.replace(" ", ""), 2) & mask) == cval and count > best_n:
+            best, best_n = state.replace(" ", ""), count
+    return best
+
+
+def _marginal_counts_by_representative(counts: dict, marginal: dict,
+                                       mask: int) -> dict:
+    """Collapse the full measured-bitstring distribution onto the counting
+    register for display.
+
+    For each counting value, sum the counts of every full bitstring that shares
+    it (the marginal, already computed by the caller) and key the entry by that
+    counting value's *representative* full bitstring (the most-likely one, via
+    :func:`_top_full_for`). The returned histogram has three properties the
+    dashboard relies on:
+
+    * its bars **sum to ``shots``** -- the marginal is a partition of the full
+      counts, so the bar counts correspond to the shot count exactly (a full
+      13-bit distribution spreads each phase peak across the 2**ancilla
+      measured-ancilla states, making every bar noise-level and disconnected
+      from the shot count);
+    * each phase peak is **concentrated into one bar** instead of smeared across
+      the measured-ancilla states, so the signal rises above the noise floor and
+      the recovered-peak bar count equals ``reveal['count']`` (the marginal),
+      not the diluted single-bitstring count;
+    * every key is a **full-width bitstring**, so the qubit grid still lights
+      every measured qubit (the ancilla bits are the representative's ancilla
+      state -- arbitrary, because the ancilla carries no phase information).
+    """
+    out = {}
+    for cval, mcount in marginal.items():
+        rep = _top_full_for(counts, cval, mask)
+        if rep is not None:
+            out[rep] = int(mcount)
+    return out
 
 
 def create_shor_circuit(n: int, a: Optional[int] = None, rng=None):
@@ -200,7 +276,9 @@ def create_qft_nos_circuit(n: int, a: Optional[int] = None, rng=None):
     t = l + 1                      # reduced precision (textbook Shor uses 2l+1)
     qr_c = QuantumRegister(t, "count")
     qr_a = QuantumRegister(l, "anc")
-    cr = ClassicalRegister(t, "out")
+    # Measure all qubits (counting + ancilla) so the readout width == qubit
+    # count; counting -> low classical bits (phase), ancilla -> high (display).
+    cr = ClassicalRegister(t + l, "out")
     qc = QuantumCircuit(qr_c, qr_a, cr, name=f"qftnos_{a}_mod_{n}")
     qc.h(qr_c)
     qc.x(qr_a[0])
@@ -213,13 +291,16 @@ def create_qft_nos_circuit(n: int, a: Optional[int] = None, rng=None):
     # swapless inverse QFT (drop the final bit-reversal swaps -> fewer gates);
     # the bit-reversal is undone classically when interpreting the readout.
     qc.append(QFT(t, inverse=True, do_swaps=False), qr_c)
-    qc.measure(qr_c, cr)
+    qc.measure(qr_c, cr[:t])      # counting register -> low classical bits
+    qc.measure(qr_a, cr[t:])      # ancilla -> high classical bits (display)
+    qc.metadata = dict(qc.metadata, counting_bits=t)
     return qc, a
 
 
 def postprocess_period_swapless(counts: dict, num_control: int,
                                 a: int, n: int, k: int = 2,
-                                signal_retention: Optional[float] = None) -> tuple:
+                                signal_retention: Optional[float] = None,
+                                reveal: Optional[dict] = None) -> tuple:
     """Period + factors for the swapless QFT-NOS readout.
 
     Identical maths to :func:`postprocess_period` but reverses the bit order
@@ -234,15 +315,26 @@ def postprocess_period_swapless(counts: dict, num_control: int,
     if (signal_retention is not None
             and signal_retention < NOISE_RETENTION_FLOOR):
         return None, (None, None)
-    total = sum(counts.values())
+    mask = (1 << num_control) - 1
+    # Marginalize out the ancilla high bits (same reason as
+    # postprocess_period: measuring the ancilla splits each phase peak across
+    # its states). The counting register is the LOW num_control classical bits
+    # and the swapless QFT left it in reversed bit order, so reverse those
+    # num_control bits to recover the phase.
+    marginal = {}
+    for state, count in counts.items():
+        cval = int(state.replace(" ", ""), 2) & mask
+        marginal[cval] = marginal.get(cval, 0) + count
+    total = sum(marginal.values())
+    if reveal is not None:
+        reveal["marginal_counts"] = _marginal_counts_by_representative(
+            counts, marginal, mask)
     floor = total / (2 ** num_control) if num_control > 0 else total
-    for state, count in sorted(counts.items(), key=lambda x: x[1],
-                               reverse=True)[:12]:
-        if count <= k * floor:
+    for cval, mcount in sorted(marginal.items(), key=lambda x: x[1],
+                             reverse=True)[:12]:
+        if mcount <= k * floor:
             continue
-        raw = state.replace(" ", "")
-        # swapless QFT: measured MSB..LSB is reversed -> reverse to recover phase
-        dec = int(raw[::-1], 2)
+        dec = int(format(cval, "0{}b".format(num_control))[::-1], 2)
         phase = dec / (2 ** num_control)
         frac = Fraction(phase).limit_denominator(n)
         r = frac.denominator
@@ -251,7 +343,15 @@ def postprocess_period_swapless(counts: dict, num_control: int,
                 p = gcd(pow(a, r // 2, n) - 1, n)
                 q_ = gcd(pow(a, r // 2, n) + 1, n)
                 if p * q_ == n and p > 1 and q_ > 1:
+                    if reveal is not None:
+                        reveal.update(bitstring=_top_full_for(counts, cval, mask),
+                                      phase=phase, count=int(mcount), period=r,
+                                      factors=(p, q_))
                     return r, (p, q_)
+            if reveal is not None:
+                reveal.update(bitstring=_top_full_for(counts, cval, mask),
+                              phase=phase, count=int(mcount), period=r,
+                              factors=(None, None))
             return r, (None, None)
     return None, (None, None)
 
@@ -280,7 +380,7 @@ def create_math_circuit(op: str, num1: float, num2: Optional[float] = None,
         enc_a = a1 % mod
         enc_b = (operand_b if operand_b >= 0 else operand_b + mod) % mod
         qr_a = QuantumRegister(bits, "a"); qr_b = QuantumRegister(bits, "b")
-        cr = ClassicalRegister(bits, "out")
+        cr = ClassicalRegister(2 * bits, "out")
         qc = QuantumCircuit(qr_a, qr_b, cr)
         for i in range(bits):
             if (enc_a >> i) & 1:
@@ -288,12 +388,16 @@ def create_math_circuit(op: str, num1: float, num2: Optional[float] = None,
             if (enc_b >> i) & 1:
                 qc.x(qr_b[i])
         qc.append(DraperQFTAdder(bits), qr_a[:] + qr_b[:])
-        qc.measure(qr_b, cr)
+        # measure all qubits: the sum (qr_b) -> low classical bits so it lights
+        # the low grid cells; the restored operand (qr_a) -> high bits.
+        qc.measure(qr_b, cr[:bits])
+        qc.measure(qr_a, cr[bits:])
+        qc.metadata = dict(qc.metadata, result_width=bits)
         return qc
     if op == "mul":
         qr_a = QuantumRegister(bits, "a"); qr_b = QuantumRegister(bits, "b")
         qr_r = QuantumRegister(2 * bits, "res")
-        cr = ClassicalRegister(2 * bits, "out")
+        cr = ClassicalRegister(4 * bits, "out")
         qc = QuantumCircuit(qr_a, qr_b, qr_r, cr)
         for i in range(bits):
             if (a1 >> i) & 1:
@@ -301,26 +405,36 @@ def create_math_circuit(op: str, num1: float, num2: Optional[float] = None,
             if (a2 >> i) & 1:
                 qc.x(qr_b[i])
         qc.append(RGQFTMultiplier(bits), qr_a[:] + qr_b[:] + qr_r[:])
-        qc.measure(qr_r, cr)
+        # measure all qubits: the product (qr_r) -> low classical bits so it
+        # lights the low grid cells; operands (qr_a, qr_b) -> high bits.
+        qc.measure(qr_r, cr[:2 * bits])
+        qc.measure(qr_a, cr[2 * bits:3 * bits])
+        qc.measure(qr_b, cr[3 * bits:])
+        qc.metadata = dict(qc.metadata, result_width=2 * bits)
         return qc
     if op == "sqrt":
         qr = QuantumRegister(bits); qr_a = QuantumRegister(1)
-        cr = ClassicalRegister(bits, "out")
+        cr = ClassicalRegister(bits + 1, "out")
         qc = QuantumCircuit(qr, qr_a, cr)
         qc.ry(math.pi / 4, qr_a)
         unitary = RYGate(math.pi / 2)  # 1-qubit unitary
         qc.append(PhaseEstimation(bits, unitary), qr[:] + qr_a[:])
-        qc.measure(qr, cr)
+        # measure all qubits: phase register (qr) -> low bits; ancilla -> high.
+        qc.measure(qr, cr[:bits])
+        qc.measure(qr_a, cr[bits:bits + 1])
+        qc.metadata = dict(qc.metadata, result_width=bits)
         return qc
     if op == "log":
         qr = QuantumRegister(bits); qr_a = QuantumRegister(1)
-        cr = ClassicalRegister(bits, "out")
+        cr = ClassicalRegister(bits + 1, "out")
         qc = QuantumCircuit(qr, qr_a, cr)
         angle = math.asin(math.sqrt(a1 / (2 ** bits))) if 0 < a1 < 2 ** bits else 0
         qc.ry(2 * angle, qr_a)
         unitary = RYGate(2 * math.pi / bits)  # 1-qubit unitary
         qc.append(PhaseEstimation(bits, unitary), qr[:] + qr_a[:])
-        qc.measure(qr, cr)
+        qc.measure(qr, cr[:bits])
+        qc.measure(qr_a, cr[bits:bits + 1])
+        qc.metadata = dict(qc.metadata, result_width=bits)
         return qc
     raise ValueError(f"unknown op '{op}'; use add/sub/mul/sqrt/log")
 

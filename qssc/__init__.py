@@ -14,7 +14,7 @@ through an FPGA lock-in — no camera, no analog MUX, no serial scan.
 """
 from .defects import (
     DefectProfile, HBN_VB, NV_DIAMOND, SIC_VS, PROFILES, get_profile,
-    coherence_at_temperature,
+    coherence_at_temperature, optical_coherence_at_temperature,
 )
 from .simulator import (
     SimulatedFPGA, QubitSite, auto_align, simulate_odmr, simulate_cqd_pulse,
@@ -39,7 +39,7 @@ from .sensors import (
 __version__ = "2.0.0"
 __all__ = [
     "DefectProfile", "HBN_VB", "NV_DIAMOND", "SIC_VS", "PROFILES", "get_profile",
-    "coherence_at_temperature",
+    "coherence_at_temperature", "optical_coherence_at_temperature",
     "SimulatedFPGA", "QubitSite", "auto_align", "simulate_odmr",
     "simulate_cqd_pulse", "make_detector_response", "xy8_decoupling",
     "estimate_coherence_xy8",

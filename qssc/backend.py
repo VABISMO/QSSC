@@ -30,6 +30,7 @@ from qiskit import QuantumCircuit, transpile
 from qiskit.circuit import Measure
 from qiskit.circuit.library.standard_gates import (
     HGate, XGate, YGate, SGate, TGate, RZGate, RYGate, CXGate, CZGate, CPhaseGate,
+    SwapGate,
 )
 from qiskit.providers import BackendV2, Options, QubitProperties
 from qiskit.providers import JobStatus
@@ -39,7 +40,8 @@ from qiskit_aer.noise import (
     NoiseModel, thermal_relaxation_error, depolarizing_error, ReadoutError,
 )
 
-from .defects import DefectProfile, get_profile, coherence_at_temperature
+from .defects import (DefectProfile, get_profile, coherence_at_temperature,
+                      optical_coherence_at_temperature)
 from .simulator import (
     QubitSite, SimulatedFPGA, auto_align,
     ASE_GAIN, BRIGHT_CODE, BG_CODE, READOUT_NOISE,
@@ -49,16 +51,25 @@ from .simulator import (
 
 logger = logging.getLogger(__name__)
 
-# Classical simulation ceiling. The chip has 64 physical detector sites (the
-# 8x8 grid), but a quantum circuit is simulated classically by Aer as a
-# statevector / density matrix, which is O(2^n) in memory. AerSimulator's
-# default target tops out at 28 qubits (a 2^28 statevector ~4 GB); on the free
-# Render worker the practical safe width is lower (see API cap). Circuits
-# wider than this cannot be exactly simulated on any classical machine and
-# are rejected with a clear error instead of silently returning fake
-# all-zero counts. The grid still shows all 64 sites; only the *simulated*
-# subset that was measured lights up.
-SIM_MAX_QUBITS = 28
+# Classical simulation ceiling = the full 64-site chip. Circuits up to 28
+# qubits use Aer's statevector method (exact, O(2^n) memory -- 2^28 ~ 4 GB).
+# Wider circuits (29..64) use the matrix_product_state (MPS) method, which is
+# O(n * chi^2) instead of O(2^n): a 2^64 statevector is exabytes (impossible),
+# but low-entanglement circuits (H/product states, GHZ, QFT) keep a small MPS
+# bond dimension chi and simulate 64 qubits in under a second. High-entanglement
+# circuits (Shor mod-exp, multipliers) blow chi up and are capped separately by
+# the runner's N / register caps (they also decohere at 300 K). Circuits wider
+# than 64 (more than the physical chip) are rejected with a clear error.
+SIM_MAX_QUBITS = 64
+# statevector width ceiling (above this Aer's statevector method runs out of
+# memory; switch to MPS).
+SV_MAX_QUBITS = 28
+# basis gates for MPS transpilation. We transpile against an explicit basis
+# (not the AerSimulator Target) because the MPS Target's coupling map caps at
+# 63 qubits -- transpiling basis-only with no coupling map is all-to-all and
+# reaches the full 64.
+_MPS_BASIS = ["u", "u1", "u2", "u3", "cx", "x", "h", "s", "t",
+              "rz", "ry", "rx", "measure", "reset"]
 
 
 # ---------------------------------------------------------------------------
@@ -394,15 +405,41 @@ class QSSCBackend(BackendV2):
         self._n_qubits = len(self.sites)
         t1, t2 = coherence_at_temperature(prof, temperature_k)
         self._t1, self._t2 = t1, t2
+        # Optical-coherence material property (photon indistinguishability):
+        # T2,opt + HOM visibility V at this temperature, reported descriptively by
+        # assess_circuit. V=1.0 (no optical model) when optical_t1_ns<=0. At 300 K
+        # NV V~2e-7; at cryo V->1 (transform-limited ideal). NOTE: this does NOT
+        # gate the on-chip 2q gate, which is a ~200 ns spin (microwave/dipole)
+        # gate governed by spin T2 -- room-temp spin entanglement works (Dolde
+        # 2013, Neumann 2008). The HOM budget only matters for remote
+        # photon-mediated entanglement between separate chips.
+        self._t2_opt, self._hom_v = optical_coherence_at_temperature(
+            prof, temperature_k)
         # real control/readout timings from the defect profile
         self._g1q = prof.gate_1q_ns * 1e-9
         self._g2q = prof.gate_2q_ns * 1e-9
         self._readout_t = prof.readout_ns * 1e-9
         self._init_t = prof.init_ns * 1e-9
-        qprops = [QubitProperties(t1=s.t1, t2=s.t2, frequency=prof.zero_field_splitting)
+        # Per-qubit transition frequency: each site carries its own detuned
+        # frequency (strain + local B + 14N hyperfine shift around the zero-
+        # field splitting), so the QubitProperties report the REAL per-qubit
+        # frequency -- the individual microwave-addressing fingerprint -- not a
+        # single uniform 2.87 GHz for every qubit.
+        qprops = [QubitProperties(t1=s.t1, t2=s.t2, frequency=s.frequency)
                   for s in self.sites]
-        coupling = CouplingMap([(i, j) for i in range(self._n_qubits)
-                                for j in range(self._n_qubits) if i != j])
+        # Nearest-neighbour dipole coupling: real NV magnetic dipole-dipole
+        # falls as 1/r**3, so only grid-adjacent (Manhattan-distance-1) sites
+        # couple -- not all-to-all. This coupling map is the physical topology
+        # (truthful Target metadata). Execution transpilation still targets
+        # AerSimulator (all-to-all) so NO SWAP routing overhead is inserted:
+        # the defect-spin compute route uses directly-coupled qubit sets, not
+        # a SWAP-routed surface code, and adding ~3-5x SWAP 2q-gate overhead
+        # would push NV's depolarization budget below the postprocess cutoff
+        # (wrong physics -- NV computes Shor-15 at 300 K; see
+        # qssc-spin-gate-not-photon). The 2q noise model below still noised
+        # every executed 2q gate (all active pairs) so a logical cx on non-
+        # neighbour qubits is never silently noiseless.
+        coupling = CouplingMap(self._neighbor_pairs())
         self._target = Target(dt=1e-9, qubit_properties=qprops,
                               num_qubits=self._n_qubits, coupling_map=coupling)
         self._build_target()
@@ -416,6 +453,23 @@ class QSSCBackend(BackendV2):
         self._dm_qubit_limit = 10
 
     # -- target / noise ----------------------------------------------------
+    def _neighbor_pairs(self) -> list:
+        """Directed (i, j) coupling edges for the grid: Manhattan-distance-1
+        neighbours over all sites (the 8x8 grid is always complete, so dead /
+        unusable sites remain topology nodes -- a real dead NV site is still a
+        physical grid location, just non-participating). Real NV magnetic
+        dipole-dipole falls as 1/r**3, so only nearest neighbours couple."""
+        pairs = []
+        n = len(self.sites)
+        for i in range(n):
+            si = self.sites[i]
+            for j in range(i + 1, n):
+                sj = self.sites[j]
+                if abs(si.row - sj.row) + abs(si.col - sj.col) == 1:
+                    pairs.append((i, j))
+                    pairs.append((j, i))
+        return pairs
+
     def _build_target(self):
         sq = {(i,): InstructionProperties(duration=self._g1q,
                                           error=self.profile.depol_1q)
@@ -424,10 +478,17 @@ class QSSCBackend(BackendV2):
                   RZGate(__import__("qiskit").circuit.Parameter("theta")),
                   RYGate(__import__("qiskit").circuit.Parameter("theta"))):
             self._target.add_instruction(g, sq)
+        # 2q gates exist only on grid-neighbour pairs (the physical dipole
+        # coupling topology from _neighbor_pairs), so the Target truthfully
+        # declares where a native 2q gate lives. SwapGate is added so a real
+        # transpiler routing against this Target can insert SWAPs on neighbour
+        # edges (execution here still routes via AerSimulator, so no SWAP
+        # overhead is paid -- see the __init__ coupling comment).
+        nbr = set(self._neighbor_pairs())
         tq = {(i, j): InstructionProperties(duration=self._g2q,
                                             error=self.profile.depol_2q)
-              for i in range(self._n_qubits) for j in range(self._n_qubits) if i != j}
-        for g in (CXGate(), CZGate(),
+              for (i, j) in nbr}
+        for g in (CXGate(), CZGate(), SwapGate(),
                   CPhaseGate(__import__("qiskit").circuit.Parameter("theta"))):
             self._target.add_instruction(g, tq)
         self._target.add_instruction(
@@ -481,11 +542,35 @@ class QSSCBackend(BackendV2):
                                                   s2.t2 or self._t2, g2q)
                     two_q_therm = therm_q.tensor(ej)
                     dep2err = depolarizing_error(dep2, 2)
-                    nm.add_quantum_error(two_q_therm.compose(dep2err),
+                    # On-chip 2q gate is a SPIN gate (microwave / magnetic
+                    # dipole, ~200 ns) -- entanglement mediated by the spin
+                    # interaction, not by emitted photons, so its fidelity is
+                    # governed by the spin T1/T2 thermal channel + the drive
+                    # depolarization (dep2) alone. Room-temperature spin
+                    # entanglement is documented for NV (Neumann 2008, Dolde
+                    # 2013). The optical HOM-visibility budget is a separate
+                    # *descriptive* property (see assess_circuit /
+                    # optical_coherence_at_temperature) relevant to remote
+                    # photon-mediated entanglement, NOT to this on-chip gate.
+                    two_q_err = two_q_therm.compose(dep2err)
+                    nm.add_quantum_error(two_q_err,
                                          ["cx", "cz", "cp", "swap"], [q, j])
             except Exception as exc:  # pragma: no cover
                 logger.debug("real noise build skipped pair %s,%s: %s", q, j, exc)
-            nm.add_readout_error(ReadoutError([[1 - ro, ro], [ro, 1 - ro]]), [q])
+            # Asymmetric readout: NV spin readout distinguishes the BRIGHT
+            # state (ms=0, high fluorescence) from the DARK states (ms=+-1,
+            # the ODMR dip), and the two misassignment rates differ -- the
+            # bright state is easier to identify than the dark. readout_asymmetry
+            # splits the symmetric per-site readout error ro into
+            #   p_bright_to_dark = ro*(1-asym)  (true ms=0 read as ms=+-1)
+            #   p_dark_to_bright = ro*(1+asym)  (true ms=+-1 read as ms=0)
+            # ReadoutError matrix row i = true state i, col j = recorded j:
+            #   [[P(0|0), P(1|0)], [P(0|1), P(1|1)]]  with state 0 = bright.
+            asym = float(self.profile.readout_asymmetry)
+            p_b2d = float(np.clip(ro * (1.0 - asym), 0.0, 1.0))
+            p_d2b = float(np.clip(ro * (1.0 + asym), 0.0, 1.0))
+            nm.add_readout_error(
+                ReadoutError([[1.0 - p_b2d, p_b2d], [p_d2b, 1.0 - p_d2b]]), [q])
         return nm
 
     # -- BackendV2 API -----------------------------------------------------
@@ -519,11 +604,9 @@ class QSSCBackend(BackendV2):
         mode = options.get("noise_mode", self.noise_mode)
         if circuit.num_qubits > SIM_MAX_QUBITS:
             raise ValueError(
-                f"circuit uses {circuit.num_qubits} qubits, but the classical "
-                f"simulator is bounded at {SIM_MAX_QUBITS} (a 2^{circuit.num_qubits} "
-                f"statevector cannot be held in memory). The chip has 64 physical "
-                f"sites; the simulator runs circuits on a classical subset. Use a "
-                f"smaller register or a lower N.")
+                f"circuit uses {circuit.num_qubits} qubits, but the chip has "
+                f"{SIM_MAX_QUBITS} physical sites -- the circuit is wider than "
+                f"the detector grid. Use a smaller register or a lower N.")
         ideal_counts = self._run_ideal(circuit, shots)
         assessment = self.assess_circuit(circuit)
         approximate = False
@@ -543,18 +626,36 @@ class QSSCBackend(BackendV2):
                           noise_mode=mode, approximate=approximate)
 
     def _run_ideal(self, circuit: QuantumCircuit, shots: int) -> dict:
-        """Fast ideal statevector simulation via Aer (no noise model).
+        """Ideal simulation via Aer (no noise model).
+
+        Circuits up to ``SV_MAX_QUBITS`` (28) use the statevector method --
+        exact and fastest. Wider circuits (29..64) use the matrix_product_state
+        (MPS) method, which is O(n * chi^2) instead of O(2^n): a 2^64
+        statevector is exabytes (impossible), but a low-entanglement circuit
+        (H/product states, GHZ, QFT) keeps a small MPS bond dimension and
+        simulates 64 qubits in under a second. MPS is transpiled against an
+        explicit basis-gate set (not the AerSimulator Target, whose MPS coupling
+        map caps at 63 qubits) so the full 64-site chip width is reachable.
 
         Raises on failure rather than silently returning fake all-zero
         counts -- a circuit that Aer cannot simulate (too wide, unsupported
-        op...) must surface as a real error, not a fabricated |0...0>
-        result that would mislead the dashboard into showing "everything
-        measured zero". The width guard in :meth:`_execute` rejects
-        over-wide circuits first; this catch-all only fires for unexpected
-        Aer failures.
+        op, bond dimension blew up on a high-entanglement circuit...) must
+        surface as a real error, not a fabricated |0...0> result that would
+        mislead the dashboard into showing "everything measured zero". The
+        width guard in :meth:`_execute` rejects over-wide circuits first;
+        this catch-all only fires for unexpected Aer failures.
         """
-        aer = AerSimulator(seed_simulator=self._seed)
-        t_circ = transpile(circuit, aer, optimization_level=1)
+        n = circuit.num_qubits
+        if n <= SV_MAX_QUBITS:
+            aer = AerSimulator(seed_simulator=self._seed)
+            t_circ = transpile(circuit, aer, optimization_level=1)
+            return aer.run(t_circ, shots=shots).result().get_counts()
+        # wide circuit -> matrix_product_state, transpiled basis-only (no
+        # Target coupling-map cap) so 64 qubits is reachable.
+        aer = AerSimulator(method="matrix_product_state",
+                           seed_simulator=self._seed)
+        t_circ = transpile(circuit, basis_gates=_MPS_BASIS,
+                           optimization_level=1, layout_method="trivial")
         return aer.run(t_circ, shots=shots).result().get_counts()
 
     def _run_real(self, circuit: QuantumCircuit, shots: int,
@@ -659,17 +760,28 @@ class QSSCBackend(BackendV2):
         the phenomenological blend so the two paths cannot disagree.
 
         ``signal_retention = coherence_survival * depolarization_survival``
-        where ``coherence_survival = exp(-t_circuit / T2)`` (T2 dephasing over
-        the decomposed quantum-evolution time) and
+        where ``coherence_survival = exp(-t_circuit/T2)`` (spin T2 dephasing
+        over the decomposed quantum-evolution time) and
         ``depolarization_survival = (1-depol_1q)**est_1q * (1-depol_2q)**est_2q``
-        (cumulative per-gate depolarization, temperature-independent). ``est_1q``
-        and ``est_2q`` are the *decomposed* gate counts from
-        :meth:`_decomposed_cost` (compiled blocks expanded to their 2q-gate
-        cost), so a Shor run whose modular-exponentiation block hides ~10^3
+        (cumulative per-gate drive depolarization, temperature-independent).
+        This is the on-chip *spin*-gate budget: the QSSC 2-qubit gate is a
+        ~200 ns microwave / magnetic-dipole spin gate, so its fidelity is set
+        by the spin T2 + depolarization, NOT by optical photon
+        indistinguishability. Room-temperature spin entanglement is documented
+        for NV (Neumann 2008, Dolde 2013); NV (T2 ~ 1.8 ms) computes at 300 K,
+        hBN/SiC (T2 ~ us) do not. ``est_1q``/``est_2q`` are the *decomposed*
+        gate counts from :meth:`_decomposed_cost` (compiled blocks expanded to
+        their 2q-gate cost), so a Shor run whose mod-exp block hides ~10^3
         entangling gates is damped by all of them, not just its logical depth.
 
-        Returns ``(coherence_survival, depolarization_survival,
-        signal_retention, t_circuit_s, est_1q, est_2q)``.
+        The optical HOM-visibility budget (``optical_survival = V_HOM**est_2q``,
+        ``hom_visibility``) is returned too, but ONLY as a descriptive material
+        property for the remote photon-mediated-entanglement channel -- it is
+        NOT multiplied into ``signal_retention`` because it does not govern the
+        on-chip spin gate.
+
+        Returns ``(coherence_survival, depolarization_survival, optical_survival,
+        hom_visibility, signal_retention, t_circuit_s, est_1q, est_2q)``.
         """
         _, _, _, t_circuit, est_2q, est_1q = self._decomposed_cost(circuit)
         t2 = max(self._t2, 1e-15)
@@ -679,8 +791,13 @@ class QSSCBackend(BackendV2):
         depol_survival = ((1.0 - d1) ** max(est_1q, 0)
                          * (1.0 - d2) ** max(est_2q, 0))
         signal_retention = coherence_survival * depol_survival
-        return (coherence_survival, depol_survival, signal_retention,
-                t_circuit, est_1q, est_2q)
+        # Optical HOM-visibility budget for the REMOTE photon-entanglement
+        # channel -- descriptive only, NOT part of the on-chip spin-gate
+        # signal_retention. V=1 (no photon channel) when the profile has no
+        # optical model or at cryo (transform-limited ideal); V~2e-7 at 300 K NV.
+        optical_survival = self._hom_v ** max(est_2q, 0)
+        return (coherence_survival, depol_survival, optical_survival,
+                self._hom_v, signal_retention, t_circuit, est_1q, est_2q)
 
     def assess_circuit(self, circuit: QuantumCircuit) -> dict:
         """Physical-feasibility assessment of a circuit on this chip.
@@ -698,15 +815,24 @@ class QSSCBackend(BackendV2):
         budget_gates = int(t2 / self._g1q) if self._g1q > 0 else 0
         damping = 1.0 - math.exp(-duration_s / max(t2, 1e-15))
         within = duration_s <= t2
-        # Shared retention estimate (coherence + cumulative per-gate
-        # depolarization) -- the phenomenological blend uses the same helper, so
-        # assessment and run cannot disagree by construction.
-        coherence_survival, depol_survival, signal_retention, _, _, _ = (
-            self._signal_survival(circuit))
+        # Shared retention estimate (spin coherence + cumulative per-gate
+        # depolarization) -- the phenomenological blend uses the same helper,
+        # so assessment and run cannot disagree by construction. The on-chip
+        # 2q gate is a ~200 ns spin (microwave / dipole) gate, so
+        # signal_retention is the SPIN budget only; the optical HOM budget is
+        # reported separately as a descriptive material property.
+        (coherence_survival, depol_survival, optical_survival, hom_v,
+         signal_retention, _, _, _) = self._signal_survival(circuit)
+        # Optical HOM-visibility budget for the REMOTE photon-entanglement
+        # channel -- descriptive only, reported as a material property. It does
+        # NOT gate the on-chip spin 2q gate, so it never drives the verdict.
+        # 1q-only circuits (QRNG/BB84/sensing) have no 2q gate either way.
+        needs_2q = est_2q > 0
+        within_optical = (not needs_2q) or (hom_v >= 0.5)
         if n_compiled > 0 and not within:
             verdict = ("contains compiled blocks (modular exponentiation / QFT / "
                        "arithmetic) whose decomposed depth (~%g 2q gates, ~%g us) "
-                       "far exceeds the room/coherence budget — NOT physically "
+                       "far exceeds the spin-T2 coherence budget — NOT physically "
                        "executable at this temperature without cooling or QEC "
                        "(signal retention %.2f%%: coherence %.2f%% x depolarization "
                        "%.2f%% over ~%g decomposed 2q gates)"
@@ -740,8 +866,12 @@ class QSSCBackend(BackendV2):
             "decoherence_fraction": round(damping, 4),
             "coherence_survival": round(coherence_survival, 4),
             "depolarization_survival": round(depol_survival, 4),
+            "optical_survival": float(optical_survival),
+            "hom_visibility": float(hom_v),
+            "optical_t2_us": round(self._t2_opt * 1e6, 6),
             "signal_retention": round(signal_retention, 4),
             "within_coherence": within,
+            "within_optical_coherence": within_optical,
             "verdict": verdict,
         }
 
@@ -783,30 +913,95 @@ class QSSCBackend(BackendV2):
                 cl = circuit.find_bit(instr.clbits[0]).index
                 pq = circuit.find_bit(instr.qubits[0]).index
                 meas_map[cl] = min(pq, len(self.sites) - 1)
+        # Readout error. Symmetric readout (readout_asymmetry == 0, the ensemble
+        # sensor case) uses a single flip probability per clbit -- bit-identical
+        # to the original single-draw path (same rng consumption -> same noise
+        # realization, so symmetric profiles are unaffected). Asymmetric readout
+        # (the single-shot NV case: ms=0 bright vs ms=+-1 dark) flips a 0->1
+        # and a 1->0 at DIFFERENT rates, applied state-conditionally with two
+        # draws per bit -- matching the ReadoutError in _build_real_noise_model
+        # so this analytic path cannot disagree with the qiskit noise-model path.
+        asym = float(self.profile.readout_asymmetry)
         err_per_cl = np.zeros(nbits)
         for cl, pq in meas_map.items():
             err_per_cl[cl] = float(self.sites[pq].readout_err) if pq < len(self.sites) else self.profile.readout_error
-        # bit i (from LSB) corresponds to classical bit cl = nbits-1-i
-        flip = rng.random((shots, nbits)) < err_per_cl[::-1][None, :]
-        noisy_int = np.copy(drawn)
+        # Two execution paths. The int-packed path (nbits < 64) preserves the
+        # exact rng stream every existing test anchors against (e.g. SiC
+        # symmetric mul==12). The bit-matrix path (nbits >= 64) is width-
+        # agnostic: a 64-bit bitstring overflows int64 (2^64-1 > int64 max) so
+        # numpy's >>/xor ufuncs and rng.integers(0, 2**nbits) fail -- operate on
+        # a (shots, nbits) uint8 bit matrix instead.
+        if nbits < 64:
+            noisy_int = np.copy(drawn)
+            if asym == 0.0:
+                # Symmetric: one flip prob per clbit (back-compat rng stream).
+                flip = rng.random((shots, nbits)) < err_per_cl[::-1][None, :]
+                for i in range(nbits):
+                    noisy_int = np.where(flip[:, i], np.bitwise_xor(noisy_int, 1 << i), noisy_int)
+            else:
+                # Asymmetric: p_bright_to_dark = ro*(1-asym), p_dark_to_bright =
+                # ro*(1+asym), applied per the current (true) bit value.
+                p0to1 = np.zeros(nbits)   # true 0 (bright) -> read 1 (dark)
+                p1to0 = np.zeros(nbits)   # true 1 (dark)   -> read 0 (bright)
+                for cl, pq in meas_map.items():
+                    ro = float(self.sites[pq].readout_err) if pq < len(self.sites) else self.profile.readout_error
+                    p0to1[cl] = float(np.clip(ro * (1.0 - asym), 0.0, 1.0))
+                    p1to0[cl] = float(np.clip(ro * (1.0 + asym), 0.0, 1.0))
+                p0to1_ord = p0to1[::-1]   # bit i (LSB) <-> cl = nbits-1-i
+                p1to0_ord = p1to0[::-1]
+                for i in range(nbits):
+                    bit_i = (noisy_int >> i) & 1
+                    flip = np.where(bit_i == 0,
+                                    rng.random(shots) < p0to1_ord[i],
+                                    rng.random(shots) < p1to0_ord[i])
+                    noisy_int = np.where(flip, np.bitwise_xor(noisy_int, 1 << i), noisy_int)
+            # --- signal-retention damping: blend with uniform ----------------
+            # Use the SAME _signal_survival estimate as assess_circuit (coherence
+            # * cumulative per-gate depolarization over the decomposed gate
+            # counts), so the analytic limit agrees with the physical-feasibility
+            # verdict: a Shor run whose assessment reports a near-destroyed
+            # signal must decohere to a near-uniform distribution here, not
+            # recover its factors.
+            _, _, _, _, signal_retention, _, _, _ = self._signal_survival(circuit)
+            damping = 1.0 - signal_retention
+            uniform = rng.integers(0, 2 ** nbits, size=shots)
+            final_int = np.where(rng.random(shots) < damping, uniform, noisy_int)
+            unique, cnts = np.unique(final_int, return_counts=True)
+            counts = {format(int(v), f"0{nbits}b"): int(c) for v, c in zip(unique, cnts)}
+            return counts
+        # --- wide path (nbits >= 64): bit-matrix ----------------------------
+        drawn_list = [int(v) for v in drawn]
+        bits = np.zeros((shots, nbits), dtype=np.uint8)
         for i in range(nbits):
-            noisy_int = np.where(flip[:, i], np.bitwise_xor(noisy_int, 1 << i), noisy_int)
-        # --- signal-retention damping: blend with uniform --------------------
-        # Use the SAME _signal_survival estimate as assess_circuit (coherence *
-        # cumulative per-gate depolarization over the decomposed gate counts), so
-        # the analytic limit agrees with the physical-feasibility verdict: a
-        # Shor run whose assessment reports a near-destroyed signal must decohere
-        # to a near-uniform distribution here, not recover its factors. Before
-        # this used only the T2 term and omitted the (temperature-independent)
-        # cumulative depolarization, understating decoherence for compiled-block
-        # circuits that hide ~10^3 entangling gates.
-        _, _, signal_retention, _, _, _ = self._signal_survival(circuit)
+            bits[:, i] = [(d >> i) & 1 for d in drawn_list]   # bit i (clbit i)
+        if asym == 0.0:
+            flip = rng.random((shots, nbits)) < err_per_cl[::-1][None, :]
+            bits = np.where(flip, 1 - bits, bits).astype(np.uint8)
+        else:
+            p0to1 = np.zeros(nbits)
+            p1to0 = np.zeros(nbits)
+            for cl, pq in meas_map.items():
+                ro = float(self.sites[pq].readout_err) if pq < len(self.sites) else self.profile.readout_error
+                p0to1[cl] = float(np.clip(ro * (1.0 - asym), 0.0, 1.0))
+                p1to0[cl] = float(np.clip(ro * (1.0 + asym), 0.0, 1.0))
+            p0to1_ord = p0to1[::-1]
+            p1to0_ord = p1to0[::-1]
+            for i in range(nbits):
+                is_zero = bits[:, i] == 0
+                fz = rng.random(shots) < p0to1_ord[i]
+                fo = rng.random(shots) < p1to0_ord[i]
+                flip = np.where(is_zero, fz, fo)
+                bits[flip, i] = 1 - bits[flip, i]
+        _, _, _, _, signal_retention, _, _, _ = self._signal_survival(circuit)
         damping = 1.0 - signal_retention
-        uniform = rng.integers(0, 2 ** nbits, size=shots)
-        final_int = np.where(rng.random(shots) < damping, uniform, noisy_int)
-        # --- back to counts --------------------------------------------------
-        unique, cnts = np.unique(final_int, return_counts=True)
-        counts = {format(int(v), f"0{nbits}b"): int(c) for v, c in zip(unique, cnts)}
+        uniform_bits = rng.integers(0, 2, size=(shots, nbits), dtype=np.uint8)
+        damped = rng.random(shots) < damping
+        bits = np.where(damped[:, None], uniform_bits, bits)
+        # repack to qiskit MSB-first bitstrings (clbit i -> string index nbits-1-i)
+        counts = {}
+        for row in bits:
+            bs = ''.join(str(int(b)) for b in row[::-1])
+            counts[bs] = counts.get(bs, 0) + 1
         return counts
 
     def _drive_optical_readout(self, circuit: QuantumCircuit, counts: dict, shots: int) -> dict:
@@ -883,9 +1078,12 @@ class QSSCBackend(BackendV2):
             "Deep algorithms (Shor, large multipliers) with depth >> T2/gate "
             "are NOT physically executable at room temperature — they need "
             "cryogenic cooling or quantum error correction.",
-            "All-to-all microwave coupling is modelled; real hardware routes "
-            "via the ADF4351 PLL with per-site pulses (no native 2-qubit gate "
-            "between arbitrary distant sites without mediating modes).",
+            "Nearest-neighbour dipole coupling (grid Manhattan-distance-1) is "
+            "modelled -- real NV magnetic dipole-dipole falls as 1/r**3, so "
+            "only adjacent sites couple; real hardware routes via the ADF4351 "
+            "PLL with per-site microwave pulses, each addressed by the qubit's "
+            "detuned transition frequency (no native 2-qubit gate between "
+            "arbitrary distant sites without mediating modes).",
             f"Optical readout fidelity ~{self.profile.readout_error*100:.0f}% "
             "error; on-chip CQD pump + graphene/MoS2 detector + lock-in readout "
             "(no camera).",
