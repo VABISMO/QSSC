@@ -248,26 +248,43 @@ def test_qft_is_uniform_regardless_of_x():
     """QFT of any computational-basis |x> is an equal-amplitude superposition,
     so the measurement histogram is ~uniform regardless of x. This is correct
     physics, NOT a bug -- asserted here so a future regression that makes x
-    matter is caught."""
+    matter is caught.
+
+    Two independent claims are checked, both Poisson-robust (NOT a tight chi2
+    that flakes ~2.5% on a genuinely uniform draw -- the old ``uniform`` flag
+    threshold chi2_norm<2.0 sits at the chi2_7 97.5% point):
+      1. x does not move the distribution -- the total-variation distance
+         between the x=1 and x=5 histograms is tiny (only phases differ, which
+         measurement discards).
+      2. the distribution is approximately uniform -- chi2_norm well under the
+         99.9%-level bound (a real signal peak would push it far above 3)."""
     a = run_circuit({"algorithm": "qft", "num_qubits": 3, "x": 1,
                      "profile": "NV", "temperature_k": ROOM, "seed": SEED,
                      "shots": SHOTS, "noise_mode": "real"})
     b = run_circuit({"algorithm": "qft", "num_qubits": 3, "x": 5,
                      "profile": "NV", "temperature_k": ROOM, "seed": SEED,
                      "shots": SHOTS, "noise_mode": "real"})
-    assert a["uniform"] is True and b["uniform"] is True
+    assert a["basis_states"] == 8 and b["basis_states"] == 8
+    # (1) x-independence: the QFT magnitude distribution does not depend on x.
+    tv = sum(abs(a["counts"].get(s, 0) - b["counts"].get(s, 0))
+             for s in a["counts"]) / (2 * SHOTS)
+    assert tv < 0.05, f"x moves the distribution: TV={tv:.3f}"
+    # (2) approximate uniformity (Poisson-robust 99.9%-level bound).
+    assert a["uniformity_chi2"] < 3.0 and b["uniformity_chi2"] < 3.0
 
 
 # -- bug 3: runaway N hangs the panel (N / qubit cap) --------------------------
 
-@pytest.mark.parametrize("algo", ["shor", "period", "qftnos"])
-@pytest.mark.parametrize("n", [21, 35])
+@pytest.mark.parametrize("algo,n", [("shor", 35), ("period", 35), ("qftnos", 135)])
 def test_factor_n_cap_rejects_too_large(algo, n):
-    """N > 15 (>13 qubits) must be rejected up front so the Aer statevector sim
-    cannot hang the in-process fallback worker past the 120 s frontend timeout
-    (the "shor hangs from the panel" symptom). N=21 -> 16 qubits takes >120 s
-    and decoheres to no factors at 300 K; N=35 -> 19 qubits hangs Aer outright.
-    N=15 is the largest that factors at 300 K NV and runs in <1 s."""
+    """N producing >16 qubits (shor/period = 3*bitlen(N)+1, qftnos = 2*bitlen(N)+1)
+    must be rejected up front so the Aer statevector sim cannot hang the worker
+    past the frontend poll window -- each run grows ~exponentially with qubit
+    count (19q takes minutes / hangs). The cap is TIME-based on the qubit count,
+    not an N value and not memory: Shor's compiled mod-exp takes the statevector
+    path (16q statevector = 1 MB), so N up to 31 (shor/period, 16q) or 127
+    (qftnos, 15q) runs in ~22-50 s. At 300 K real mode N>15 decoheres to no
+    factors (the real T2 physics); cool the chip or use ideal mode to factor it."""
     r = run_circuit({"algorithm": algo, "n": n, "profile": "NV",
                      "temperature_k": ROOM, "seed": SEED, "shots": SHOTS,
                      "noise_mode": "real"})
