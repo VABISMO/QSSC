@@ -1,4 +1,5 @@
-import React from 'react'
+import React, { useState } from 'react'
+import { deriveMeasurement } from './derive.js'
 
 // ---------------------------------------------------------------------------
 // QubitGrid — 8x8 on-chip graphene/MoS₂ photodetector / CQD-emitter site grid;
@@ -127,7 +128,7 @@ export function OdmrChart({ data, error }) {
 // ---------------------------------------------------------------------------
 // BarCounts — horizontal bar chart of measurement counts.
 // ---------------------------------------------------------------------------
-export function BarCounts({ counts, max = 8, recovered, shots }) {
+export function BarCounts({ counts, max = 8, recovered, shots, signal }) {
   if (!counts) return null
   // `counts` is the FULL counts dict (the backend never truncates), so its
   // values sum to the shot count. The bars below show only the top `max` --
@@ -140,8 +141,19 @@ export function BarCounts({ counts, max = 8, recovered, shots }) {
   const unique = allVals.length
   const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, max)
   const top = Math.max(...entries.map(e => e[1]), 1)
-  const recBs = recovered && recovered.bitstring
-    ? String(recovered.bitstring).replace(/ /g, '') : null
+  const clean = (s) => String(s).replace(/ /g, '')
+  // Which bars are "the correct result" + the marker label. The `signal`
+  // prop (from deriveMeasurement) generalises the Shor-only `recovered` marker
+  // to every algorithm: it lists the qiskit bitstring(s) to highlight and the
+  // short label to print on them (→ 3×5, → r=4, → found 5, ≈ uniform, …).
+  // Fall back to the legacy `recovered` object (shor/period/qftnos) so callers
+  // that only pass `recovered` still mark the phase peak.
+  const markSet = signal && signal.bars && signal.bars.length
+    ? new Set(signal.bars.map(clean)) : null
+  const markLabel = signal && signal.label != null ? signal.label
+    : (recovered && recovered.factors ? `→ ${recovered.factors[0]}×${recovered.factors[1]}`
+       : (recovered && recovered.period != null ? `→ r=${recovered.period}` : null))
+  const recBs = !markSet && recovered && recovered.bitstring ? clean(recovered.bitstring) : null
   const shotTotal = shots != null ? +shots : null
   const sumMatches = shotTotal != null && total === shotTotal
   return (
@@ -161,15 +173,13 @@ export function BarCounts({ counts, max = 8, recovered, shots }) {
       </div>
       {entries.map(([state, n]) => {
         const disp = String(state).replace(/ /g, '').split('').reverse().join('')
-        const isRec = !!recBs && String(state).replace(/ /g, '') === recBs
+        const isRec = markSet ? markSet.has(clean(state)) : (!!recBs && clean(state) === recBs)
         return (
           <div className={`bar-row${isRec ? ' signal' : ''}`} key={state}>
-            <span className="mono" title={`qiskit MSB-first: ${state}${isRec ? ' · recovered signal' : ''}`}>{disp}</span>
+            <span className="mono" title={`qiskit MSB-first: ${state}${isRec ? ' · the correct result' : ''}`}>{disp}</span>
             <div className="bar-track"><div className="bar-fill" style={{ width: `${(n / top) * 100}%` }} /></div>
             <span className="mono" style={{ textAlign: 'right', color: 'var(--muted)' }}>{n}</span>
-            {isRec ? <span className="bar-sig mono">← signal→{
-              recovered.factors ? `${recovered.factors[0]}×${recovered.factors[1]}` : `r=${recovered.period}`
-            }</span> : null}
+            {isRec && markLabel ? <span className="bar-sig mono">← {markLabel}</span> : null}
           </div>
         )
       })}
@@ -928,5 +938,52 @@ export function SensorField({ data, error, loading, promptText }) {
       </div>
       <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>{data.note}</div>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// MeasurementHelp — "?" button + modal that shows, for the algorithm that just
+// ran, exactly how the measured binary becomes the result (the per-algorithm
+// derivation chain with the CONCRETE numbers from this run). Pure client-side
+// via deriveMeasurement(algo, result, counts). Marked bar(s) in BarCounts share
+// the same derivation, so the modal is the "show your work" for the marker.
+// ---------------------------------------------------------------------------
+const ALGO_NAMES = {
+  shor: 'Shor (factoring)', period: 'Period finding', bell: 'Bell / GHZ',
+  math: 'Quantum arithmetic', grover: 'Grover search', qft: 'QFT',
+  qftnos: 'QFT-NOS (factoring)', qrand: 'Quantum RNG', bb84: 'BB84 QKD',
+  custom: 'Custom circuit',
+}
+export function MeasurementHelp({ algo, result, counts, numClbits, meas }) {
+  const [open, setOpen] = useState(false)
+  const m = meas || deriveMeasurement(algo, result, counts, numClbits)
+  if (!m) return null
+  return (
+    <>
+      <button className="meas-help-btn" type="button"
+        onClick={() => setOpen(true)}
+        title="How is the result calculated from this measurement?">
+        ?<span className="meas-help-txt"> how the binary → result</span>
+      </button>
+      {open && (
+        <div className="meas-help-overlay" onClick={() => setOpen(false)}>
+          <div className="meas-help-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="meas-help-close" type="button"
+              onClick={() => setOpen(false)} aria-label="Close">×</button>
+            <h2><span className="dot" />{ALGO_NAMES[algo] || algo} — derivation</h2>
+            <div className="hint" style={{ marginBottom: 10 }}>{m.title}</div>
+            <ol className="derive-steps">
+              {m.steps.map((s, i) => (
+                <li key={i}>
+                  <span className="derive-k">{s.k}</span>
+                  <span className="derive-v mono">{s.v}</span>
+                </li>
+              ))}
+            </ol>
+            <p className="derive-summary">{m.summary}</p>
+          </div>
+        </div>
+      )}
+    </>
   )
 }

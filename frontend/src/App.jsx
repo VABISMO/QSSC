@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { api } from './api.js'
+import { deriveMeasurement } from './derive.js'
 import {
-  QubitGrid, OdmrChart, BarCounts,
+  QubitGrid, OdmrChart, BarCounts, MeasurementHelp,
   SignalChart, CalibrationPanel, Verdict,
   OpticalChainDiagram, RunPhysics,
   CompassRose, GyroPanel, MagnetoImage, SensorField,
@@ -383,6 +384,11 @@ export default function App() {
   const [algo, setAlgo] = useState('custom')
   const [shots, setShots] = useState(1024)
   const [nShor, setNShor] = useState(15)
+  // nShorDraft is the raw text of the N input so the user can clear & retype
+  // freely (a controlled number snaps empty -> 0 -> 2 and fights typing). The
+  // effect below parses+clamps it to the backend's N ceiling and derives the
+  // circuit width; nShor (the clamped number) is what buildBody sends.
+  const [nShorDraft, setNShorDraft] = useState('15')
   const [numQubits, setNumQubits] = useState(4)   // universal qubit count (all algos)
   const [bbEve, setBbEve] = useState(false)
   const [mathOp, setMathOp] = useState('mul')
@@ -438,6 +444,20 @@ export default function App() {
     api.scripts().then(setScripts).catch(() => {}).finally(() => setScriptsLoading(false))
   }, [])
   useEffect(refreshScripts, [refreshScripts])
+
+  // Parse the free-text N input (nShorDraft) into the clamped integer the
+  // backend accepts, and derive the circuit width. Guarded to shor/period/
+  // qftnos so a non-factoring algo's qubit count (from QUBIT_CFG) is not
+  // clobbered. Empty / non-numeric draft -> keep the last valid nShor (lets
+  // the user clear the field and retype without a snap-back).
+  useEffect(() => {
+    if (algo !== 'shor' && algo !== 'period' && algo !== 'qftnos') return
+    const v = parseInt(nShorDraft, 10)
+    if (Number.isNaN(v)) return
+    const clamped = Math.min(31, Math.max(2, v))
+    setNShor(clamped)
+    setNumQubits(derivedQubits(algo, clamped))
+  }, [nShorDraft, algo])
 
   const saveScript = async () => {
     setScriptMsg(null)
@@ -556,6 +576,12 @@ export default function App() {
   const runAssessment = result && result.assessment
   const runBits = result && result.num_clbits
   const runRecovered = result && (result.recovered || (result.result && result.result.recovered))
+  // per-algorithm "which bar is the correct result + how the binary -> result"
+  // derivation. Computed once, shared by the histogram marker (BarCounts signal)
+  // and the help modal (MeasurementHelp), so the marked bar and the shown work
+  // always agree. Pure client-side from the run result + displayed counts.
+  const meas = result && algo && algo !== 'custom'
+    ? deriveMeasurement(algo, result, displayCounts, runBits) : null
 
   return (
     <div className="app">
@@ -1188,13 +1214,16 @@ export default function App() {
                 <div className="row">
                   <div className="field">
                     <label>{algo === 'period' ? 'Integer N (find period)' : 'Integer to factor (N)'}</label>
-                    <input type="number" min={2} max={15} value={nShor} onChange={e => {
-                      // cap at 15: N=15 -> 13 qubits is the largest that factors at
-                      // 300 K NV and finishes <1 s (N=21 -> 16 qubits takes >120 s
-                      // and decoheres to no factors; N=35 hangs Aer).
-                      const n = Math.min(15, Math.max(2, Math.floor(+e.target.value) || 2))
-                      setNShor(n); setNumQubits(derivedQubits(algo, n))
-                    }} />
+                    <input type="number" min={2} max={31} value={nShorDraft}
+                           onChange={e => setNShorDraft(e.target.value)} />
+                    {nShor > 15 && (
+                      <div className="warn" style={{ fontSize: '11px', marginTop: 4, color: 'var(--warn)' }}>
+                        N&gt;15 (16 qubits) runs in ~22-50 s in any mode. At 300 K
+                        real mode it decoheres to no factors (the real T2 physics);
+                        lower the Temperature or use ideal mode to factor it.
+                        N&gt;31 (19q) takes minutes and is capped.
+                      </div>
+                    )}
                   </div>
                   <div className="field">
                     <label>Circuit qubits n</label>
@@ -1386,12 +1415,16 @@ export default function App() {
             {/* measurement column (right): histogram + qubit grid */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
               <div className="card histcard">
-                <h2><span className="dot" />Measurement histogram</h2>
+                <h2><span className="dot" />Measurement histogram
+                  {result && algo && algo !== 'custom' && (
+                    <MeasurementHelp algo={algo} meas={meas} />
+                  )}
+                </h2>
                 <div className="hint">{runMarginal
                   ? 'Phase-register marginal (ancilla collapsed): bar counts sum to shots, the recovered signal peak is concentrated.'
                   : 'Top bitstrings from the most recent run (most-probable first).'}</div>
                 {displayCounts
-                  ? <BarCounts counts={displayCounts} recovered={runRecovered} shots={shots} />
+                  ? <BarCounts counts={displayCounts} recovered={runRecovered} shots={shots} signal={meas} />
                   : runErr
                     ? <div className="muted">Last run failed — see the error above.</div>
                     : <div className="muted">No run yet — execute a circuit on the left.</div>}
