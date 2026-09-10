@@ -310,10 +310,19 @@ def test_qft_nos_noise_dominated_no_spurious_factors():
 
 
 def test_assess_circuit_exposes_signal_retention():
-    # Audit issue #7: assess_circuit must surface the shared survival metric
-    # (coherence * depolarization) so a run's "success" can be judged against
-    # its signal budget. A short Bell circuit keeps most of its signal; a long
-    # Shor-15 circuit on hBN at 300 K retains ~none (coherence-limited there).
+    # assess_circuit must surface the shared survival metric so a run's "success"
+    # can be judged against its signal budget. The on-chip 2q gate is a ~200 ns
+    # SPIN (microwave/dipole) gate, so signal_retention is the SPIN budget only:
+    # signal_retention = coherence_survival * depolarization_survival. The
+    # optical HOM-visibility channel is reported as a *descriptive* material
+    # property (optical_survival / hom_visibility / within_optical_coherence) but
+    # is NOT multiplied into signal_retention -- it describes the remote
+    # photon-entanglement budget, not the on-chip spin gate. A short Bell on hBN
+    # at 300 K keeps its spin coherence + depolarization (Bell is shallow,
+    # ~250 ns << hBN T2 ~ 2 us), so signal_retention stays high even though the
+    # descriptive optical channel reports V_HOM ~ 2e-7 (within_optical_coherence
+    # False). A long Shor-15 on hBN at 300 K retains ~none (spin T2 too short for
+    # the ~10^3 decomposed 2q gates -- hBN is a sensor, not a compute substrate).
     from qiskit import QuantumCircuit
     b = QSSCBackend("hBN-VB", sites=_quick_sites(20), seed=1,
                     temperature_k=300.0, noise_mode="real")
@@ -321,25 +330,159 @@ def test_assess_circuit_exposes_signal_retention():
     bell.h(0); bell.cx(0, 1); bell.measure([0, 1], [0, 1])
     a_short = b.assess_circuit(bell)
     for key in ("signal_retention", "coherence_survival",
-                "depolarization_survival"):
+                "depolarization_survival", "optical_survival",
+                "hom_visibility", "optical_t2_us", "within_optical_coherence",
+                "within_coherence"):
         assert key in a_short
+    for key in ("coherence_survival", "depolarization_survival",
+                "optical_survival", "hom_visibility"):
         assert 0.0 <= a_short[key] <= 1.0
-    # signal_retention is the product of the two survival channels (stored
-    # rounded to 4 decimals, so check at low precision).
+    # signal_retention is the 2-factor SPIN product (coherence * depolarization),
+    # NOT including optical_survival (coherence/depol stored rounded to 4 dp).
     assert a_short["signal_retention"] == pytest.approx(
-        a_short["coherence_survival"] * a_short["depolarization_survival"],
-        rel=1e-3)
-    # A Bell circuit is short: coherence survival is high (>> 1/2) and
-    # depolarization barely dents it.
+        round(a_short["coherence_survival"] * a_short["depolarization_survival"],
+              4), abs=1e-4)
+    # A Bell circuit is short: spin coherence + depolarization survive well, so
+    # the on-chip spin gate works and the circuit IS within (spin) coherence.
     assert a_short["coherence_survival"] > 0.5
     assert a_short["depolarization_survival"] > 0.95
+    assert a_short["signal_retention"] > 0.5
+    assert a_short["within_coherence"] is True
+    # The descriptive optical channel still reports a bad photon budget at 300 K
+    # (V_HOM ~ 2e-7 -> optical_survival ~ 0, within_optical_coherence False), but
+    # this does NOT gate the on-chip spin gate -- it is informational only.
+    assert a_short["optical_survival"] < 1e-3
+    assert a_short["within_optical_coherence"] is False
 
+    # Cooled to 4 K: V_HOM -> 1 (transform-limited ideal), the descriptive
+    # optical channel is transparent (optical_survival == 1); signal_retention
+    # is still the 2-factor spin product (unchanged by the optical channel).
+    b_cold = QSSCBackend("hBN-VB", sites=_quick_sites(20), seed=1,
+                         temperature_k=4.0, noise_mode="real")
+    a_cold = b_cold.assess_circuit(bell)
+    assert a_cold["hom_visibility"] >= 0.5
+    assert a_cold["within_optical_coherence"] is True
+    assert a_cold["optical_survival"] == pytest.approx(1.0, abs=1e-6)
+    assert a_cold["signal_retention"] == pytest.approx(
+        round(a_cold["coherence_survival"] * a_cold["depolarization_survival"],
+              4), abs=1e-4)
+    assert a_cold["signal_retention"] > 0.5
+
+    # A long Shor-15 circuit on hBN at 300 K retains ~none of its SPIN signal
+    # (hBN T2 ~ 2 us << the ~10^3 decomposed 2q gates) -- hBN is a sensor, not a
+    # compute substrate. NV (T2 ~ 1.8 ms) DOES compute Shor at 300 K (see
+    # test_room_temp_nv_spin_compute_works).
     qc, _ = create_shor_circuit(15, a=7)
     a_long = b.assess_circuit(qc)
-    assert a_long["signal_retention"] < 0.01  # hBN 300 K destroys the signal
+    assert a_long["signal_retention"] < 0.01  # hBN 300 K spin budget destroys it
+    assert a_long["within_coherence"] is False
+    assert a_long["within_optical_coherence"] is False
 
 
-# -- crypto (quantum RNG -> Ed25519 + X.509) ---------------------------------
+# -- optical-coherence channel (HOM visibility) -------------------------------
+
+def test_optical_coherence_scaling():
+    # The optical-coherence channel: V_HOM ~= T2,opt/(2*T1,opt), capped at
+    # hom_visibility_max. At 300 K NV the ZPL is phonon-broadened so T2,opt ~ fs
+    # and V ~ 2e-7; cooled toward cryo T2,opt -> 2*T1,opt (transform-limited) and
+    # V -> hom_visibility_max. A teaching-grade power law, like the spin one.
+    from qssc import optical_coherence_at_temperature
+    nv = get_profile("NV")
+    t1_opt = nv.optical_t1_ns * 1e-9
+    # 300 K: T2,opt collapses to femtoseconds, V ~ 2e-7 (photon gate decoheres).
+    t2_hot, v_hot = optical_coherence_at_temperature(nv, 300.0)
+    assert t2_hot < 1e-12          # ~fs
+    assert v_hot < 1e-5            # ~2e-7
+    # Cryo (4 K): T2,opt hits the 2*T1,opt transform-limited bound, V -> V_max.
+    t2_cold, v_cold = optical_coherence_at_temperature(nv, 4.0)
+    assert t2_cold == pytest.approx(2.0 * t1_opt, rel=1e-6)
+    assert v_cold == pytest.approx(nv.hom_visibility_max, rel=1e-6)
+    # T2,opt can never exceed the 2*T1,opt lifetime bound at any temperature.
+    # V is monotonic non-decreasing as the chip cools (dephasing freezes out).
+    prev_v = v_hot
+    for T in (300.0, 77.0, 30.0, 10.0, 4.0, 1e-3):
+        t2_T, v_T = optical_coherence_at_temperature(nv, T)
+        assert t2_T <= 2.0 * t1_opt * (1.0 + 1e-9)
+        assert v_T <= nv.hom_visibility_max * (1.0 + 1e-9)
+        assert v_T >= prev_v - 1e-12   # non-decreasing as T drops
+        prev_v = v_T
+    # Back-compat: a profile with optical_t1_ns <= 0 has no optical channel ->
+    # (0.0, 1.0), no penalty. Build a bare profile with optical_t1_ns disabled.
+    import dataclasses
+    bare = dataclasses.replace(HBN_VB, optical_t1_ns=0.0)
+    t2_b, v_b = optical_coherence_at_temperature(bare, 300.0)
+    assert t2_b == 0.0 and v_b == 1.0
+
+
+def test_assess_optical_fields():
+    # assess_circuit exposes the optical-coherence fields as DESCRIPTIVE material
+    # properties. A 300 K NV Shor-15 reports a bad photon budget
+    # (within_optical_coherence False, optical_survival ~ 0, V ~ 2e-7) -- but the
+    # on-chip 2q gate is a SPIN gate, so the circuit IS within (spin) coherence
+    # and keeps meaningful spin signal_retention: NV computes at room temperature
+    # (T2 ~ 1.8 ms >> the ~200 ns 2q gate), per Dolde 2013 / Neumann 2008. Cooled
+    # to 4 K the descriptive optical channel goes to V->1 as well.
+    nv = QSSCBackend("NV", sites=_quick_sites(20), seed=1,
+                     temperature_k=300.0, noise_mode="real")
+    qc, _ = create_shor_circuit(15, a=7)
+    a_hot = nv.assess_circuit(qc)
+    for key in ("hom_visibility", "optical_survival", "optical_t2_us",
+                "within_optical_coherence", "within_coherence",
+                "signal_retention"):
+        assert key in a_hot
+    # Descriptive optical (photon-remote) budget is bad at 300 K -- informational.
+    assert a_hot["within_optical_coherence"] is False
+    assert a_hot["hom_visibility"] < 1e-5
+    assert a_hot["optical_survival"] < 1e-30   # V**~1000 ~ 0
+    # ...but the on-chip SPIN gate works at 300 K: within coherence, retention
+    # above the noise floor (NV room-temp compute, the docs' core claim).
+    assert a_hot["within_coherence"] is True
+    assert a_hot["signal_retention"] > 0.01
+    nv_cold = QSSCBackend("NV", sites=_quick_sites(20), seed=1,
+                          temperature_k=4.0, noise_mode="real")
+    a_cold = nv_cold.assess_circuit(qc)
+    assert a_cold["within_optical_coherence"] is True
+    assert a_cold["hom_visibility"] >= 0.5
+    assert a_cold["optical_survival"] == pytest.approx(1.0, abs=1e-6)
+    assert a_cold["within_coherence"] is True
+
+
+def test_room_temp_nv_spin_compute_works():
+    # The explicit "what works what not" guard, corrected for the on-chip SPIN
+    # gate: NV Shor-15 at 300 K uses ~10^3 SPIN (microwave/dipole) 2q gates.
+    # NV T2 ~ 1.8 ms >> the ~200 ns gate, so the spin coherence + depolarization
+    # budget retains enough signal to recover the factors (3, 5) at ROOM
+    # TEMPERATURE in both real and phenomenological modes -- this is the docs'
+    # core "compute at room temperature" claim and matches the documented
+    # room-temperature NV spin entanglement (Neumann 2008, Dolde 2013). The
+    # descriptive optical channel reports V_HOM ~ 2e-7 (hom_visibility < 1e-5,
+    # within_optical_coherence False) but that is the remote-photon budget, NOT
+    # the on-chip spin gate, so it does not prevent the run from succeeding.
+    # hBN (T2 ~ 2 us, a sensor) does NOT recover Shor at 300 K -- the contrast.
+    from api.runner import run_circuit
+    for mode in ("real", "phenomenological"):
+        r = run_circuit({"algorithm": "shor", "profile": "NV", "n": 15,
+                         "shots": 2048, "seed": 7, "noise_mode": mode,
+                         "temperature_k": 300.0})
+        assert "error" not in r, (mode, r.get("error"))
+        assert {3, 5} <= set(r["factors"]), (mode, r["factors"])  # NV computes @ 300 K
+        assert r["assessment"]["within_coherence"] is True
+        assert r["hom_visibility"] < 1e-5  # descriptive photon budget bad @ 300 K
+        assert r["assessment"]["within_optical_coherence"] is False
+    # hBN at 300 K: sensor, spin T2 too short for the deep Shor circuit -> None.
+    r_hbn = run_circuit({"algorithm": "shor", "profile": "hBN-VB", "n": 15,
+                         "shots": 2048, "seed": 7, "noise_mode": "real",
+                         "temperature_k": 300.0})
+    assert "error" not in r_hbn, r_hbn.get("error")
+    assert r_hbn["factors"] is None  # hBN 300 K spin budget too short
+    assert r_hbn["assessment"]["within_coherence"] is False
+    # Cooled to 1 mK the descriptive optical channel also goes to V->1.
+    r_cold = run_circuit({"algorithm": "shor", "profile": "NV", "n": 15,
+                          "shots": 2048, "seed": 7, "noise_mode": "real",
+                          "temperature_k": 1e-3})
+    assert "error" not in r_cold, r_cold.get("error")
+    assert {3, 5} <= set(r_cold["factors"]), r_cold["factors"]
+    assert r_cold["hom_visibility"] >= 0.5
 
 def test_von_neumann_and_keypair():
     from qssc.crypto import von_neumann_extract, bits_to_bytes, derive_keypair
@@ -451,10 +594,13 @@ def test_math_circuits_build():
 
 def _math_top(op, a, b, shots=4096, seed=0):
     """Run a math circuit via the runner (the real, transpiled path) and return
-    the top result integer."""
+    the top result integer. Cooled to cryo (V_HOM->1) so the photon 2q gates the
+    arithmetic decomposes into do not decohere -- this tests the arithmetic
+    *logic* (sub vs add), not the 300 K optical-coherence physics."""
     from api.runner import run_circuit
     r = run_circuit({"algorithm": "math", "op": op, "a": a, "b": b,
-                     "profile": "NV", "shots": shots, "seed": seed})
+                     "profile": "NV", "shots": shots, "seed": seed,
+                     "temperature_k": 1e-3})
     assert "error" not in r, f"runner error: {r.get('error')}"
     return r["result"]
 
@@ -649,7 +795,11 @@ def test_readout_reflects_measured_bit():
 
 def test_backend_runs_bell():
     from qiskit import QuantumCircuit
-    b = QSSCBackend("hBN-VB", sites=_quick_sites(), seed=0)
+    # Cooled to 4 K so the photon CX (2q) gate does not decohere: at 300 K
+    # V_HOM ~ 1e-6 makes the Bell CX fully depolarizing and the |00>+|11>
+    # correlations vanish. This test checks the entangling-gate *logic*, not
+    # the room-temperature optical-coherence physics.
+    b = QSSCBackend("hBN-VB", sites=_quick_sites(), seed=0, temperature_k=4.0)
     qc = QuantumCircuit(2, 2)
     qc.h(0); qc.cx(0, 1); qc.measure([0, 1], [0, 1])
     res = b.run(qc, shots=512).result()

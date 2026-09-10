@@ -98,11 +98,14 @@ def run_circuit(req: dict) -> dict:
         ok = bool(factors[0]) and factors[0] * factors[1] == n
         _retention = float(getattr(res, "assessment", {}).get(
             "signal_retention", 0.0) or 0.0)
+        _hom = float(getattr(res, "assessment", {}).get(
+            "hom_visibility", 1.0) or 1.0)
         result.update({"n": n, "a": a, "counts": counts,
                        "period": r,
                        "factors": list(factors) if factors[0] else None,
                        "success": ok, "attempts": attempt + 1,
-                       "signal_retention": round(_retention, 4)})
+                       "signal_retention": round(_retention, 4),
+                       "hom_visibility": round(_hom, 6)})
         result.update(_circuit_meta(qc))
 
     elif algo == "period":
@@ -325,12 +328,15 @@ def run_circuit(req: dict) -> dict:
             comparison = None
         _retention = float(getattr(res, "assessment", {}).get(
             "signal_retention", 0.0) or 0.0)
+        _hom = float(getattr(res, "assessment", {}).get(
+            "hom_visibility", 1.0) or 1.0)
         result.update({"n": n, "a": a, "counts": counts, "period": r,
                        "factors": list(factors) if factors[0] else None,
                        "success": ok, "attempts": attempt + 1,
                        "counting_qubits": qc.num_clbits,
                        "shor_comparison": comparison,
-                       "signal_retention": round(_retention, 4)})
+                       "signal_retention": round(_retention, 4),
+                       "hom_visibility": round(_hom, 6)})
         result.update(_circuit_meta(qc))
 
     elif algo == "bb84":

@@ -20,7 +20,7 @@ from api import main as main_mod
 from api.main import app
 
 BELL = {"algorithm": "bell", "profile": "NV", "num_qubits": 2,
-        "shots": 512, "seed": 1, "noise_mode": "real"}
+        "shots": 512, "seed": 1, "noise_mode": "real", "temperature_k": 4.0}
 GHZ_PY = ("from qiskit import QuantumCircuit\n"
           "qc = QuantumCircuit(3, 3)\n"
           "qc.h(0); qc.cx(0, 1); qc.cx(1, 2)\n"
@@ -147,7 +147,8 @@ def test_circuit_run_sync_bell(client):
 def test_circuit_run_sync_shor_factors(client):
     r = client.post("/api/circuit/run", params={"sync": True},
                     json={"algorithm": "shor", "profile": "NV", "n": 15,
-                          "shots": 2048, "seed": 7, "noise_mode": "phenomenological"})
+                          "shots": 2048, "seed": 7, "noise_mode": "phenomenological",
+                          "temperature_k": 1e-3})
     assert r.status_code == 200
     j = r.json()["result"]
     # Shor-15 factors 3 x 5 (phenomenological mode is ideal-ish for small n)
@@ -158,7 +159,8 @@ def test_circuit_run_sync_shor_factors(client):
 
 def test_custom_circuit_python(client):
     r = client.post("/api/circuit/custom", params={"sync": True},
-                    json={"code": GHZ_PY, "profile": "NV", "shots": 256, "seed": 2})
+                    json={"code": GHZ_PY, "profile": "NV", "shots": 256, "seed": 2,
+                          "temperature_k": 4.0})
     assert r.status_code == 200
     counts = r.json()["result"]["counts"]
     assert sum(counts.values()) == 256

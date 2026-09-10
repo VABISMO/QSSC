@@ -39,7 +39,8 @@ from qiskit_aer.noise import (
     NoiseModel, thermal_relaxation_error, depolarizing_error, ReadoutError,
 )
 
-from .defects import DefectProfile, get_profile, coherence_at_temperature
+from .defects import (DefectProfile, get_profile, coherence_at_temperature,
+                      optical_coherence_at_temperature)
 from .simulator import (
     QubitSite, SimulatedFPGA, auto_align,
     ASE_GAIN, BRIGHT_CODE, BG_CODE, READOUT_NOISE,
@@ -394,6 +395,16 @@ class QSSCBackend(BackendV2):
         self._n_qubits = len(self.sites)
         t1, t2 = coherence_at_temperature(prof, temperature_k)
         self._t1, self._t2 = t1, t2
+        # Optical-coherence material property (photon indistinguishability):
+        # T2,opt + HOM visibility V at this temperature, reported descriptively by
+        # assess_circuit. V=1.0 (no optical model) when optical_t1_ns<=0. At 300 K
+        # NV V~2e-7; at cryo V->1 (transform-limited ideal). NOTE: this does NOT
+        # gate the on-chip 2q gate, which is a ~200 ns spin (microwave/dipole)
+        # gate governed by spin T2 -- room-temp spin entanglement works (Dolde
+        # 2013, Neumann 2008). The HOM budget only matters for remote
+        # photon-mediated entanglement between separate chips.
+        self._t2_opt, self._hom_v = optical_coherence_at_temperature(
+            prof, temperature_k)
         # real control/readout timings from the defect profile
         self._g1q = prof.gate_1q_ns * 1e-9
         self._g2q = prof.gate_2q_ns * 1e-9
@@ -481,7 +492,18 @@ class QSSCBackend(BackendV2):
                                                   s2.t2 or self._t2, g2q)
                     two_q_therm = therm_q.tensor(ej)
                     dep2err = depolarizing_error(dep2, 2)
-                    nm.add_quantum_error(two_q_therm.compose(dep2err),
+                    # On-chip 2q gate is a SPIN gate (microwave / magnetic
+                    # dipole, ~200 ns) -- entanglement mediated by the spin
+                    # interaction, not by emitted photons, so its fidelity is
+                    # governed by the spin T1/T2 thermal channel + the drive
+                    # depolarization (dep2) alone. Room-temperature spin
+                    # entanglement is documented for NV (Neumann 2008, Dolde
+                    # 2013). The optical HOM-visibility budget is a separate
+                    # *descriptive* property (see assess_circuit /
+                    # optical_coherence_at_temperature) relevant to remote
+                    # photon-mediated entanglement, NOT to this on-chip gate.
+                    two_q_err = two_q_therm.compose(dep2err)
+                    nm.add_quantum_error(two_q_err,
                                          ["cx", "cz", "cp", "swap"], [q, j])
             except Exception as exc:  # pragma: no cover
                 logger.debug("real noise build skipped pair %s,%s: %s", q, j, exc)
@@ -659,17 +681,28 @@ class QSSCBackend(BackendV2):
         the phenomenological blend so the two paths cannot disagree.
 
         ``signal_retention = coherence_survival * depolarization_survival``
-        where ``coherence_survival = exp(-t_circuit / T2)`` (T2 dephasing over
-        the decomposed quantum-evolution time) and
+        where ``coherence_survival = exp(-t_circuit/T2)`` (spin T2 dephasing
+        over the decomposed quantum-evolution time) and
         ``depolarization_survival = (1-depol_1q)**est_1q * (1-depol_2q)**est_2q``
-        (cumulative per-gate depolarization, temperature-independent). ``est_1q``
-        and ``est_2q`` are the *decomposed* gate counts from
-        :meth:`_decomposed_cost` (compiled blocks expanded to their 2q-gate
-        cost), so a Shor run whose modular-exponentiation block hides ~10^3
+        (cumulative per-gate drive depolarization, temperature-independent).
+        This is the on-chip *spin*-gate budget: the QSSC 2-qubit gate is a
+        ~200 ns microwave / magnetic-dipole spin gate, so its fidelity is set
+        by the spin T2 + depolarization, NOT by optical photon
+        indistinguishability. Room-temperature spin entanglement is documented
+        for NV (Neumann 2008, Dolde 2013); NV (T2 ~ 1.8 ms) computes at 300 K,
+        hBN/SiC (T2 ~ us) do not. ``est_1q``/``est_2q`` are the *decomposed*
+        gate counts from :meth:`_decomposed_cost` (compiled blocks expanded to
+        their 2q-gate cost), so a Shor run whose mod-exp block hides ~10^3
         entangling gates is damped by all of them, not just its logical depth.
 
-        Returns ``(coherence_survival, depolarization_survival,
-        signal_retention, t_circuit_s, est_1q, est_2q)``.
+        The optical HOM-visibility budget (``optical_survival = V_HOM**est_2q``,
+        ``hom_visibility``) is returned too, but ONLY as a descriptive material
+        property for the remote photon-mediated-entanglement channel -- it is
+        NOT multiplied into ``signal_retention`` because it does not govern the
+        on-chip spin gate.
+
+        Returns ``(coherence_survival, depolarization_survival, optical_survival,
+        hom_visibility, signal_retention, t_circuit_s, est_1q, est_2q)``.
         """
         _, _, _, t_circuit, est_2q, est_1q = self._decomposed_cost(circuit)
         t2 = max(self._t2, 1e-15)
@@ -679,8 +712,13 @@ class QSSCBackend(BackendV2):
         depol_survival = ((1.0 - d1) ** max(est_1q, 0)
                          * (1.0 - d2) ** max(est_2q, 0))
         signal_retention = coherence_survival * depol_survival
-        return (coherence_survival, depol_survival, signal_retention,
-                t_circuit, est_1q, est_2q)
+        # Optical HOM-visibility budget for the REMOTE photon-entanglement
+        # channel -- descriptive only, NOT part of the on-chip spin-gate
+        # signal_retention. V=1 (no photon channel) when the profile has no
+        # optical model or at cryo (transform-limited ideal); V~2e-7 at 300 K NV.
+        optical_survival = self._hom_v ** max(est_2q, 0)
+        return (coherence_survival, depol_survival, optical_survival,
+                self._hom_v, signal_retention, t_circuit, est_1q, est_2q)
 
     def assess_circuit(self, circuit: QuantumCircuit) -> dict:
         """Physical-feasibility assessment of a circuit on this chip.
@@ -698,15 +736,24 @@ class QSSCBackend(BackendV2):
         budget_gates = int(t2 / self._g1q) if self._g1q > 0 else 0
         damping = 1.0 - math.exp(-duration_s / max(t2, 1e-15))
         within = duration_s <= t2
-        # Shared retention estimate (coherence + cumulative per-gate
-        # depolarization) -- the phenomenological blend uses the same helper, so
-        # assessment and run cannot disagree by construction.
-        coherence_survival, depol_survival, signal_retention, _, _, _ = (
-            self._signal_survival(circuit))
+        # Shared retention estimate (spin coherence + cumulative per-gate
+        # depolarization) -- the phenomenological blend uses the same helper,
+        # so assessment and run cannot disagree by construction. The on-chip
+        # 2q gate is a ~200 ns spin (microwave / dipole) gate, so
+        # signal_retention is the SPIN budget only; the optical HOM budget is
+        # reported separately as a descriptive material property.
+        (coherence_survival, depol_survival, optical_survival, hom_v,
+         signal_retention, _, _, _) = self._signal_survival(circuit)
+        # Optical HOM-visibility budget for the REMOTE photon-entanglement
+        # channel -- descriptive only, reported as a material property. It does
+        # NOT gate the on-chip spin 2q gate, so it never drives the verdict.
+        # 1q-only circuits (QRNG/BB84/sensing) have no 2q gate either way.
+        needs_2q = est_2q > 0
+        within_optical = (not needs_2q) or (hom_v >= 0.5)
         if n_compiled > 0 and not within:
             verdict = ("contains compiled blocks (modular exponentiation / QFT / "
                        "arithmetic) whose decomposed depth (~%g 2q gates, ~%g us) "
-                       "far exceeds the room/coherence budget — NOT physically "
+                       "far exceeds the spin-T2 coherence budget — NOT physically "
                        "executable at this temperature without cooling or QEC "
                        "(signal retention %.2f%%: coherence %.2f%% x depolarization "
                        "%.2f%% over ~%g decomposed 2q gates)"
@@ -740,8 +787,12 @@ class QSSCBackend(BackendV2):
             "decoherence_fraction": round(damping, 4),
             "coherence_survival": round(coherence_survival, 4),
             "depolarization_survival": round(depol_survival, 4),
+            "optical_survival": float(optical_survival),
+            "hom_visibility": float(hom_v),
+            "optical_t2_us": round(self._t2_opt * 1e6, 6),
             "signal_retention": round(signal_retention, 4),
             "within_coherence": within,
+            "within_optical_coherence": within_optical,
             "verdict": verdict,
         }
 
@@ -800,7 +851,7 @@ class QSSCBackend(BackendV2):
         # this used only the T2 term and omitted the (temperature-independent)
         # cumulative depolarization, understating decoherence for compiled-block
         # circuits that hide ~10^3 entangling gates.
-        _, _, signal_retention, _, _, _ = self._signal_survival(circuit)
+        _, _, _, _, signal_retention, _, _, _ = self._signal_survival(circuit)
         damping = 1.0 - signal_retention
         uniform = rng.integers(0, 2 ** nbits, size=shots)
         final_int = np.where(rng.random(shots) < damping, uniform, noisy_int)

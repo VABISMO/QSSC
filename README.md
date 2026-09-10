@@ -152,11 +152,14 @@ Three noise modes (set via the backend `noise_mode` option):
   from the defect's real T₁/T₂ and gate times (O(4ⁿ)). Larger or compiled-block
   circuits fall back to the **analytic decoherence limit** computed from the
   *same* real T₂ and gate-time parameters plus **cumulative per-gate
-  depolarization**. A shared `signal_retention = exp(-t/T₂)·(1−d₁q)^n₁q·(1−d₂q)^n₂q`
+  depolarization**. A shared
+  `signal_retention = exp(−t/T₂)·(1−d₁q)^n₁q·(1−d₂q)^n₂q`
   metric drives both the assessment and the analytic blend, so a 13-qubit Shor
-  run on NV at 300 K retains ~4.7 % of the signal — marginal, governed by the
-  period-postprocessing cutoff (see #8); cooling to 1 mK lifts it only to
-  ~5.5 % because NV is depolarization-limited, not coherence-limited.
+  run on NV at 300 K retains ~4.7 % of the *spin* signal and still recovers the
+  factors (3, 5) — NV computes at room temperature (see *Optical-coherence
+  channel* below for why the on-chip 2q gate is a spin gate, not a photon gate);
+  cooling to 1 mK lifts retention only to ~5.5 % because NV is
+  depolarization-limited, not coherence-limited.
 - **`phenomenological`** (fast analytic approximation) — ideal Aer statevector +
   post-hoc per-site readout bit-flip + the same coherence×depolarization
   damping blended into the distribution. O(n) in qubits; runs in milliseconds.
@@ -165,6 +168,35 @@ Three noise modes (set via the backend `noise_mode` option):
 `aer` is accepted as an alias of `real`. The phenomenological and real modes
 share the *same* real T₂/gate-time parameters, so their coherence verdicts
 agree — only the granularity of the noise differs.
+
+**On-chip 2-qubit gate = spin gate (room-temperature entanglement).** The QSSC
+entangles qubits with a **~200 ns microwave / magnetic-dipole spin gate**, not a
+photon-mediated gate. Spin entanglement at room temperature is documented for NV
+(Neumann 2008 — electron↔nucleus; Dolde 2013 — two NV electron spins via
+dipole-dipole, *Nature Physics* 9:139). Because NV's spin T₂ ≈ 1.8 ms at 300 K
+≫ the 200 ns gate, the on-chip 2q gate works at room temperature and NV **computes
+at 300 K** (a 13-qubit Shor-15 recovers (3, 5); a Bell pair keeps its |00⟩+|11⟩
+correlations). hBN (T₂ ~ 2 µs) and SiC (~ 40 µs) are sensor variants — shallow
+circuits work at 300 K, deep ones (Shor) do not. The gate fidelity is governed
+by the spin T₁/T₂ + depolarization budget above (`signal_retention`), **not** by
+optical photon indistinguishability.
+
+**Optical-coherence channel (HOM visibility) — descriptive, remote-entanglement
+only.** A *photon-mediated* two-qubit gate (emit a photon from each defect,
+interfere them — the mechanism for entangling **remote** defects on separate
+chips) adds a second, separate budget: the two photons must be indistinguishable,
+quantified by the Hong-Ou-Mandel visibility `V_HOM ≈ T₂,opt/(2·T₁,opt)`. At 300 K
+phonons broaden the NV zero-phonon line (637 nm) to ~THz, so `T₂,opt ~ fs` and
+`V_HOM ~ 2×10⁻⁷`; at cryogenic T the ZPL narrows toward the transform limit and
+`V_HOM → 1`. The simulator **reports** `hom_visibility`, `optical_t2_us`,
+`optical_survival` and a `within_optical_coherence` flag as *descriptive material
+properties* of this remote-photon channel, but they are **not** multiplied into
+`signal_retention` and do **not** gate the on-chip spin 2q gate — the QSSC does
+not use photon-mediated gates for on-chip compute, so the 300 K photon budget is
+irrelevant to operation. (Lower `hom_visibility_max` below 1.0 to model a real
+tuned cryogenic device; the temperature scaling is a teaching-grade power law,
+like the spin one.) One-qubit circuits (QRNG, BB84, ODMR/sensing) have no 2q
+gate either way.
 
 Algorithms included: **Shor** (QPE period finding), **period finding**,
 **Grover search**, **Bell/GHZ**, and **quantum arithmetic** (add / sub / mul /

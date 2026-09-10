@@ -86,6 +86,28 @@ class DefectProfile:
     # of the cryogenic recovery, NOT a quantitative prediction. ---
     t1_exponent: float = 1.0
     t2_exponent: float = 0.5
+    # --- Optical-coherence channel (photon-mediated 2q gate indistinguishability) -
+    # NOTE: ASPIRATIONAL / TEACHING MODEL, not a measured device. The spin T1/T2
+    # above set the *spin* decoherence budget; these fields set the *optical*
+    # coherence budget that gates a photon-mediated two-qubit (entangling) gate.
+    # A photon gate needs two emitted photons to be indistinguishable, quantified
+    # by the Hong-Ou-Mandel visibility  V_HOM ~= T2,opt / (2*T1,opt)  where T1,opt
+    # is the optical excited-state lifetime and T2,opt the optical (ZPL)
+    # coherence time. At 300 K phonons broaden the ZPL to ~THz so T2,opt ~ fs and
+    # V ~ 1e-7 -> the gate decoheres; at cryogenic T the ZPL narrows toward the
+    # transform limit (T2,opt -> 2*T1,opt) and V -> 1. The power-law broadening
+    # below is a simplified illustration of that cryogenic recovery, NOT a
+    # quantitative prediction -- exactly like the spin power law above. Real
+    # cryogenic NV HOM visibilities with spectral tuning are ~0.4-0.7
+    # (Bernien 2013 / Hensen 2015); hom_visibility_max defaults to 1.0 (the
+    # transform-limited *ideal*) -- lower it to model a real device. If
+    # optical_t1_ns <= 0 the profile has no optical channel and V=1.0 (no
+    # optical penalty), preserving back-compat for un-modelled profiles.
+    zpl_wavelength_nm: float = 0.0      # zero-phonon-line wavelength (descriptive)
+    optical_t1_ns: float = 0.0         # optical excited-state lifetime (ns)
+    optical_t2_room_fs: float = 0.0    # optical T2 at 300 K (fs) -- phonon-broadened ZPL
+    t2_opt_exponent: float = 5.0       # optical T2 ~ t2_room_opt*(300/T)**exp (teaching)
+    hom_visibility_max: float = 1.0    # transform-limited ideal cap (aspirational)
     # Human readable notes + literature citations for every number above
     notes: str = ""
     references: tuple = ()
@@ -127,8 +149,17 @@ HBN_VB = DefectProfile(
     n_equivalent_nuclei=3,           # 3 equivalent 14N -> 7-line hyperfine (2nI+1)
     t1_exponent=2.5,                 # T1 ~ T^(-5/2) (Gottscholl 2021)
     t2_exponent=0.5,
+    # Optical channel -- TEACHING-MODEL PLACEHOLDER, not supplier/literature quoted
+    # for V_B-: ZPL ~850 nm (from fluorescence_range), optical T1 ~2 ns, room-T
+    # T2,opt ~ few fs (phonon-broadened), V_max=1.0 (transform-limited ideal).
+    zpl_wavelength_nm=850.0,
+    optical_t1_ns=2.0,
+    optical_t2_room_fs=5.0,
+    t2_opt_exponent=5.0,
+    hom_visibility_max=1.0,
     notes="Room-temperature optically addressable S=1 spin in 2D hBN; D~3.46 GHz, "
-          "characteristic 7-line 14N hyperfine fingerprint (A~47 MHz).",
+          "characteristic 7-line 14N hyperfine fingerprint (A~47 MHz). Optical channel "
+          "values are a teaching placeholder (V_B- photon-gate regime not quoted here).",
     references=(
         "Gottscholl et al., Nature Materials 19, 540-545 (2020), "
         "doi:10.1038/s41563-020-0619-6 — V_B- discovery, D=3.46 GHz, 7-line 14N "
@@ -162,13 +193,30 @@ NV_DIAMOND = DefectProfile(
     n_equivalent_nuclei=1,           # single 14N -> 3-line hyperfine
     t1_exponent=1.0,
     t2_exponent=0.5,
+    # Optical-coherence channel (photon-mediated 2q gate): NV- ZPL 637 nm,
+    # excited-state ^3E lifetime ~12 ns -> transform-limited linewidth ~13 MHz.
+    # At 300 K the ZPL is phonon-broadened to ~THz so T2,opt ~ fs (V ~ 2e-7);
+    # at cryo T2,opt -> 2*T1,opt (transform-limited) and V -> 1 (ideal).
+    zpl_wavelength_nm=637.0,
+    optical_t1_ns=12.0,
+    optical_t2_room_fs=5.0,
+    t2_opt_exponent=5.0,
+    hom_visibility_max=1.0,
     notes="Workhorse room-temperature defect; D~2.87 GHz. Best-in-class RT coherence "
-          "(1.8 ms) requires 12C purification; natural-abundance diamond is ~0.5-0.7 ms.",
+          "(1.8 ms) requires 12C purification; natural-abundance diamond is ~0.5-0.7 ms. "
+          "Optical channel: 300 K V_HOM ~ 2e-7 (photon 2q gate decoheres); cryo V -> 1 "
+          "(transform-limited ideal; real tuned cryo NV ~0.4-0.7).",
     references=(
         "Doherty et al., Physics Reports 528, 1 (2013) — NV centre review (D=2.87 GHz).",
         "Balasubramanian et al., Nature Materials 8, 383 (2009), doi:10.1038/nmat2420 — "
         "1.8 ms T2 at RT in 99.7% 12C-enriched diamond.",
         "Jarmola et al., Phys. Rev. Lett. 108, 197601 (2012) — NV T1 at room temperature.",
+        "Bernien et al., Nature 497, 86-90 (2013), doi:10.1038/nature12032 — cryogenic "
+        "NV spin-photon entanglement; two-photon interference (HOM) visibility with "
+        "spectral tuning.",
+        "Hensen et al., Nature 526, 682-686 (2015), doi:10.1038/nature15759 — cryogenic "
+        "NV-NV entanglement / loophole-free Bell test; optical-indistinguishability "
+        "regime relevant to photon-mediated gates.",
     ),
 )
 
@@ -193,8 +241,16 @@ SIC_VS = DefectProfile(
     n_equivalent_nuclei=1,            # no equivalent-nucleus fingerprint like V_B-
     t1_exponent=1.0,
     t2_exponent=0.5,
+    # Optical channel -- TEACHING-MODEL PLACEHOLDER, not supplier/literature quoted
+    # for V_Si: ZPL 916 nm, optical T1 ~4 ns, room-T T2,opt ~ few fs, V_max=1.0.
+    zpl_wavelength_nm=916.0,
+    optical_t1_ns=4.0,
+    optical_t2_room_fs=5.0,
+    t2_opt_exponent=5.0,
+    hom_visibility_max=1.0,
     notes="V_Si (V2) is S=3/2 in 4H-SiC; 2|D|=70 MHz, ZPL 916 nm. Room-T ensemble "
-          "T2 ~ tens of us (natural) up to ~100 us (isotopically purified).",
+          "T2 ~ tens of us (natural) up to ~100 us (isotopically purified). Optical "
+          "channel values are a teaching placeholder (V_Si photon-gate regime not quoted here).",
     references=(
         "Kraus et al., Nature Physics 10, 157-162 (2014), doi:10.1038/nphys2826 — "
         "V_Si (V2) in 4H-SiC, 2|D|=70 MHz, S=3/2, room-T spin control.",
@@ -258,3 +314,37 @@ def coherence_at_temperature(profile: DefectProfile, temperature_k: float) -> tu
     # T2 can never exceed 2*T1 (relaxation-limited bound)
     t2 = min(t2, 2.0 * t1)
     return t1, t2
+
+
+def optical_coherence_at_temperature(profile: DefectProfile,
+                                     temperature_k: float) -> tuple:
+    """Estimate the **optical** coherence (T2,opt, HOM visibility V) at a
+    temperature -- the budget that gates a photon-mediated two-qubit gate.
+
+    Returns ``(t2_opt_seconds, hom_visibility)`` where
+    ``T2,opt = optical_t2_room * (300/T)**t2_opt_exponent`` (capped at the
+    transform limit ``2*T1,opt``) and ``V = min(T2,opt/(2*T1,opt),
+    hom_visibility_max)``.
+
+    This is a **teaching-grade model, not a quantitative prediction**, mirroring
+    :func:`coherence_at_temperature`. The qualitative trend it captures is the
+    physically correct one and the point of the model: at 300 K phonon dephasing
+    broadens the ZPL so T2,opt collapses to ~fs and V ~ 1e-7 (a photon
+    entangling gate decoheres), while at cryogenic T T2,opt -> 2*T1,opt
+    (transform-limited) and V -> hom_visibility_max. Do not trust the absolute
+    numbers; sweep ``t2_opt_exponent`` and ``hom_visibility_max`` to test it.
+
+    If ``optical_t1_ns <= 0`` the profile does not model a photon gate and the
+    function returns ``(0.0, 1.0)`` -- no optical penalty -- so the simulator
+    falls back to the pure spin/depolarization budget for that profile.
+    """
+    t1_opt = profile.optical_t1_ns * 1e-9
+    if t1_opt <= 0.0:
+        return 0.0, 1.0
+    T = max(temperature_k, 1e-3)
+    t2_opt_room = profile.optical_t2_room_fs * 1e-15
+    t2_opt = t2_opt_room * (300.0 / T) ** profile.t2_opt_exponent
+    # T2,opt can never exceed 2*T1,opt (transform-limited / lifetime bound)
+    t2_opt = min(t2_opt, 2.0 * t1_opt)
+    v_hom = min(t2_opt / (2.0 * t1_opt), profile.hom_visibility_max)
+    return t2_opt, v_hom
