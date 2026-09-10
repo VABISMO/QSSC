@@ -83,7 +83,7 @@ export function QubitGrid({ sites, counts, numClbits, recovered }) {
 // Readout is per-site (no camera); T₂ is the coherence budget.
 // ---------------------------------------------------------------------------
 export function QubitFrequencyTable({ sites, dGhz, loading, error }) {
-  if (loading) return <div className="muted"><span className="spinner" /> sweeping per-pin ODMR…</div>
+  if (loading) return <div className="muted"><span className="spinner" /> sweeping per-pin ODMR + Ramsey/Hahn…</div>
   if (error) return <div className="error">{error}</div>
   if (!sites || !sites.length) return <div className="muted">no site data</div>
   const rows = sites
@@ -92,9 +92,10 @@ export function QubitFrequencyTable({ sites, dGhz, loading, error }) {
   return (
     <div>
       <div className="hint" style={{ marginBottom: 8 }}>
-        Per-pin ODMR sweep — each pin's dip is fit individually. Measured D{dGhz ? `≈${dGhz}` : ''} GHz
-        ± a per-site detuning; a narrow MW pulse at f<sub>i</sub> addresses only pin i. Measured
-        detuning spread: <b>{spread.toFixed(2)} MHz</b>.
+        Per-pin ODMR + coherence sweep — each pin's dip is fit individually (measured D{dGhz ? `≈${dGhz}` : ''} GHz
+        ± a per-site detuning; a narrow MW pulse at f<sub>i</sub> addresses only pin i). T₂ = Hahn-echo
+        coherence (µs), T₂* = Ramsey inhomogeneous dephasing (µs). Measured detuning spread:{' '}
+        <b>{spread.toFixed(2)} MHz</b>.
       </div>
       <div className="qfreq-scroll">
         <table className="qfreq">
@@ -104,6 +105,7 @@ export function QubitFrequencyTable({ sites, dGhz, loading, error }) {
               <th>Measured fᵢ (GHz)</th>
               <th>Detuning (MHz)</th>
               <th>T₂ (µs)</th>
+              <th>T₂* (µs)</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -119,6 +121,7 @@ export function QubitFrequencyTable({ sites, dGhz, loading, error }) {
                   <td className="mono">{(s.resonance_ghz != null ? s.resonance_ghz : s.frequency_ghz).toFixed(6)}</td>
                   <td className={`mono det ${pos ? 'pos' : 'neg'}`}>{det != null ? (det > 0 ? '+' : '') + det.toFixed(3) : '—'}</td>
                   <td className="mono">{(s.t2_us != null ? s.t2_us : 0).toFixed(1)}</td>
+                  <td className="mono">{(s.t2_star_us != null ? s.t2_star_us : 0).toFixed(1)}</td>
                   <td>{s.usable === false ? <span className="tag bad">dropout</span> : <span className="tag ok">ok</span>}</td>
                 </tr>
               )
@@ -638,8 +641,8 @@ export function CalibrationPanel({ profile, temperature, seed, run, running, res
       <div className="hint" style={{ marginBottom: 10 }}>
         Full calibration: (1) scan the on-chip detector array for defect photocurrent (lock-in),
         (2) auto-align the qubit grid, (3) sweep the microwave frequency and fit the zero-field
-        splitting D + linewidth, (4) sweep each pin's ODMR dip individually → the per-pin
-        resonance / addressing map.
+        splitting D + linewidth, (4) sweep each pin's ODMR dip individually + fit Ramsey T₂* and
+        Hahn-echo T₂ → the per-pin resonance / addressing map and the measured coherence budget.
       </div>
       <button onClick={run} disabled={running} className="ghost" type="button">
         {running ? <><span className="spinner" /> Calibrating…</> : 'Run calibration'}
@@ -679,6 +682,7 @@ export function CalibrationPanel({ profile, temperature, seed, run, running, res
                     <span className="mono" style={{ color: 'var(--ok)' }}>{st.pins_measured}</span>
                     {' · '}detuning spread {st.detuning_spread_mhz} MHz
                     {' · '}fit σ {st.meas_sigma_mhz} MHz
+                    {' · '}measured T₂ {st.t2_mean_us} µs / T₂* {st.t2_star_mean_us} µs
                   </div>
                 )}
               </div>
