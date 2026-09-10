@@ -52,10 +52,6 @@ def _severity(pro_path: Path, rule: str) -> str | None:
     return m.group(2) if m else None
 
 
-@pytest.mark.xfail(reason="PCB mid-refactor: the female-header chip-socket change "
-                          "(tasks #66/#68) regenerated the board and it is not yet "
-                          "re-routed to 0 DRC. Remove this xfail once the two-board "
-                          "sandwich is routed back to 0 violations.")
 def test_drc_zero_violations(tmp_path):
     # Copy board + project so DRC reads a stable snapshot (it loads the .pro
     # alongside the .kicad_pcb for design rules).

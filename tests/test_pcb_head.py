@@ -224,10 +224,6 @@ def test_head_det_pads_on_bcu():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.skipif(not _has_kicad_cli(), reason="kicad-cli not on PATH")
-@pytest.mark.xfail(reason="PCB mid-refactor: the female-header chip-socket change "
-                          "(tasks #66/#68) regenerated the board and it is not yet "
-                          "re-routed to 0 DRC. Remove this xfail once the two-board "
-                          "sandwich is routed back to 0 violations.")
 def test_head_drc_zero_violations(tmp_path):
     dst_pcb = tmp_path / "chip_module.kicad_pcb"
     dst_pro = tmp_path / "chip_module.kicad_pro"

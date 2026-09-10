@@ -2015,6 +2015,32 @@ def fp_net_pads(fp, netmap, net_index):
     return fp
 
 
+def fp_fresh_uuids(fp):
+    """Replace every ``(uuid ...)`` value inside this footprint instance with a
+    fresh uuid4.
+
+    A ``.kicad_mod`` template carries fixed uuids (one on the footprint itself,
+    one per pad, one per property). ``load_footprint_mod`` returns that same
+    parsed tree for every component, so placing a footprint N times without this
+    pass yields N pads -- across different footprints -- that share one uuid.
+    KiCad's DRC spatial index corrupts on those duplicates and starts reporting
+    PHANTOM clearance violations between unrelated nets (e.g. a DET_IN2 fanout
+    stub "clearing" a TIA output pad 32 mm away). Connectivity is by NET +
+    endpoint coincidence, NOT by uuid, so regenerating uuids cannot change the
+    netlist -- it only restores unique identity. See memory
+    kicad-cli-drc-stale-zone-pour / the 4032-dup chip_module audit.
+    """
+    def _walk(node):
+        for c in node:
+            if isinstance(c, list) and c:
+                if c[0] == ("atom", "uuid") and len(c) >= 2:
+                    c[1] = S(u())
+                else:
+                    _walk(c)
+    _walk(fp)
+    return fp
+
+
 def emit_pcb(cfg):
     nets = all_nets()
     net_index = {n: i + 1 for i, n in enumerate(nets)}  # 0 reserved for unconnected
@@ -2046,7 +2072,14 @@ def emit_pcb(cfg):
         fp = fp_set_at(fp, c["pcb_x"], c["pcb_y"], c.get("pcb_rot", 0))
         fp = fp_set_prop(fp, "Reference", c["ref"])
         fp = fp_set_prop(fp, "Value", c["value"])
-        # ensure a footprint uuid exists
+        # The .kicad_mod template carries fixed uuids (footprint + each pad +
+        # each property). Placing it N times without this pass yields N
+        # identical-uuid pads across different footprints, which corrupts
+        # KiCad's DRC spatial index (phantom cross-net clearance violations).
+        # Regenerate every uuid in this instance; connectivity is by NET +
+        # endpoint coincidence, not uuid. Falls back to adding a footprint
+        # uuid for templates that ship without one.
+        fp = fp_fresh_uuids(fp)
         if not any(isinstance(x, list) and x and x[0] == ("atom", "uuid") for x in fp[1:]):
             fp.insert(2, L(A("uuid"), S(u())))
         fp = fp_net_pads(fp, c["pins"], net_index)
@@ -2150,8 +2183,14 @@ except FileNotFoundError:
     PRO_TEMPLATE = None
 
 
-def emit_pro():
+def emit_pro(cfg=None):
     import json as _j
+    # Default/Analog/Power netclass clearance is per-board (cfg["analog_clearance"]):
+    # the head's dense 4x4 TIA feedback grid routes at 0.10 mm and needs the 0.10 mm
+    # board-min floor; the main board's sparser analog keeps the 0.15 mm design
+    # intent. Chip is always 0.10 mm; RF/USB are always 0.15 mm. See MAIN_CFG /
+    # HEAD_CFG and the per-class comments below.
+    analog_clearance = (cfg or {}).get("analog_clearance", 0.15)
     if PRO_TEMPLATE is not None:
         proj = _j.loads(PRO_TEMPLATE)
     else:
@@ -2250,18 +2289,21 @@ def emit_pro():
     ds["rules"]["min_copper_edge_clearance"] = 0.3
     nc = proj["net_settings"]["classes"]
     nc.clear()
-    # NOTE: netclass *clearance* is set equal to the board min_clearance (0.15 mm)
-    # for every class.  KiCad applies a netclass clearance override between ANY two
-    # pads of that net -- INCLUDING adjacent pads inside the same fine-pitch
-    # footprint (QFN-32 0.5 mm pitch, USB-C, SSOP-28).  A larger per-class
-    # clearance (e.g. 0.30 for Power) is therefore unsatisfiable: the QFN pad gap
-    # is ~0.25 mm, so every Power/RF pad next to a Default pad inside the ADF4351
-    # or GVA-84+ flags a clearance violation that no placement can fix.  The
-    # impedance intent for RF/USB/Power is instead carried by the per-class
-    # track_width (0.30/0.20/0.50 mm) and is enforced during copper routing (one
-    # GUI pcbnew session), not by a pad-clearance rule.  See HARDWARE_DESIGN.md
-    # §10/§15.
-    nc.append({"bus_width": 12, "clearance": 0.15, "diff_pair_gap": 0.25, "diff_pair_via_gap": 0.25,
+    # NOTE: netclass *clearance* for Default/Analog/Power is the per-board
+    # ``analog_clearance`` (0.15 mm main, 0.10 mm head -- see cfg); RF/USB are
+    # 0.15 mm and Chip is 0.10 mm on both.  KiCad applies a netclass clearance
+    # override between ANY two pads of that net -- INCLUDING adjacent pads inside
+    # the same fine-pitch footprint (QFN-32 0.5 mm pitch, USB-C, SSOP-28).  A
+    # larger per-class clearance (e.g. 0.30 for Power) is therefore unsatisfiable:
+    # the QFN pad gap is ~0.25 mm, so every Power/RF pad next to a Default pad
+    # inside the ADF4351 or GVA-84+ flags a clearance violation that no placement
+    # can fix.  The impedance intent for RF/USB/Power is instead carried by the
+    # per-class track_width (0.30/0.20/0.50 mm) and is enforced during copper
+    # routing (one GUI pcbnew session), not by a pad-clearance rule.  The head
+    # drops Default/Analog/Power to the 0.10 mm board-min floor because its 4x4
+    # TIA feedback grid routes at 0.10 mm; the main board's sparser analog clears
+    # 0.15 mm.  See HARDWARE_DESIGN.md §10/§15.
+    nc.append({"bus_width": 12, "clearance": analog_clearance, "diff_pair_gap": 0.25, "diff_pair_via_gap": 0.25,
                "diff_pair_width": 0.2, "line_style": 0, "microvia_diameter": 0.2, "microvia_drill": 0.1,
                "name": "Default", "pcb_color": "rgba(0, 0, 0, 0.000)", "schematic_color": "rgba(0, 0, 0, 0.000)",
                "track_width": 0.2, "via_diameter": 0.6, "via_drill": 0.3, "wire_width": 6})
@@ -2269,7 +2311,7 @@ def emit_pro():
                "diff_pair_width": 0.2, "line_style": 0, "microvia_diameter": 0.2, "microvia_drill": 0.1,
                "name": "RF", "pcb_color": "rgba(255, 0, 0, 0.000)", "schematic_color": "rgba(0, 0, 0, 0.000)",
                "track_width": 0.3, "via_diameter": 0.6, "via_drill": 0.3, "wire_width": 6})
-    nc.append({"bus_width": 12, "clearance": 0.15, "diff_pair_gap": 0.25, "diff_pair_via_gap": 0.25,
+    nc.append({"bus_width": 12, "clearance": analog_clearance, "diff_pair_gap": 0.25, "diff_pair_via_gap": 0.25,
                "diff_pair_width": 0.2, "line_style": 0, "microvia_diameter": 0.2, "microvia_drill": 0.1,
                "name": "Power", "pcb_color": "rgba(0, 0, 255, 0.000)", "schematic_color": "rgba(0, 0, 0, 0.000)",
                "track_width": 0.5, "via_diameter": 0.6, "via_drill": 0.3, "wire_width": 6})
@@ -2277,7 +2319,7 @@ def emit_pro():
                "diff_pair_width": 0.2, "line_style": 0, "microvia_diameter": 0.2, "microvia_drill": 0.1,
                "name": "USB", "pcb_color": "rgba(0, 255, 0, 0.000)", "schematic_color": "rgba(0, 0, 0, 0.000)",
                "track_width": 0.2, "via_diameter": 0.6, "via_drill": 0.3, "wire_width": 6})
-    nc.append({"bus_width": 12, "clearance": 0.15, "diff_pair_gap": 0.25, "diff_pair_via_gap": 0.25,
+    nc.append({"bus_width": 12, "clearance": analog_clearance, "diff_pair_gap": 0.25, "diff_pair_via_gap": 0.25,
                "diff_pair_width": 0.2, "line_style": 0, "microvia_diameter": 0.2, "microvia_drill": 0.1,
                "name": "Analog", "pcb_color": "rgba(255, 255, 0, 0.000)", "schematic_color": "rgba(0, 0, 0, 0.000)",
                "track_width": 0.2, "via_diameter": 0.6, "via_drill": 0.3, "wire_width": 6})
@@ -2396,14 +2438,26 @@ HEAD_STACK_UP = [
 
 # Per-board configuration consumed by emit_schematic / emit_pcb / main.
 MAIN_CFG = dict(out_stem="qssc", title="QSSC Main Control Board", project="qssc",
-                board_w=150, board_h=118, layer_stack=LAYER_STACK, stack_up=STACK_UP)
+                board_w=150, board_h=118, layer_stack=LAYER_STACK, stack_up=STACK_UP,
+                # Default/Analog/Power netclass clearance. The main board's
+                # analog routing (emitter cathode drivers, RF section) is sparse
+                # enough to clear the 0.15 mm board-default netclass, so it keeps
+                # the 0.15 mm design-intent value (netclass > 0.10 mm board min).
+                analog_clearance=0.15)
 # Head board trimmed 2026-09-09 to fit the user's compressed placement: the
 # outline is anchored at (37,12) so the user's manually-placed components keep
 # their exact saved coordinates and only the Edge.Cuts rectangle shrinks around
 # them (~3.5 mm margin past the furthest component courtyard on each side).
 HEAD_CFG = dict(out_stem="chip_module", title="QSSC Detector Head", project="chip_module",
                 board_x0=37, board_y0=12, board_w=110, board_h=102,
-                layer_stack=HEAD_LAYER_STACK, stack_up=HEAD_STACK_UP)
+                layer_stack=HEAD_LAYER_STACK, stack_up=HEAD_STACK_UP,
+                # The head carries the dense 4x4 TIA grid (16x TLV9004 + 64x Rf/Cf
+                # clustered at each TIA, ~5 mm feedback loops routed at 0.10 mm
+                # clearance). A 0.15 mm Analog netclass flags all 499 feedback
+                # traces; the head therefore drops Default/Analog/Power to the
+                # 0.10 mm board-min floor (Chip was already 0.10). RF/USB stay
+                # 0.15 mm (no dense RF routing on the head). Verified DRC 0/0/0.
+                analog_clearance=0.10)
 
 
 def assign_pcb_positions():
@@ -2734,7 +2788,7 @@ def _emit_board(cfg, place_fn):
     print(f"wrote {stem}.kicad_sch")
     (PCB_DIR / f"{stem}.kicad_pcb").write_text(emit_pcb(cfg) + "\n")
     print(f"wrote {stem}.kicad_pcb")
-    (PCB_DIR / f"{stem}.kicad_pro").write_text(emit_pro() + "\n")
+    (PCB_DIR / f"{stem}.kicad_pro").write_text(emit_pro(cfg) + "\n")
     print(f"wrote {stem}.kicad_pro")
 
 
