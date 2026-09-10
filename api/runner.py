@@ -66,14 +66,15 @@ def run_circuit(req: dict) -> dict:
     # Hard cap on the integer N for the period-finding / factoring algorithms.
     # This is a TIME cap on the QUBIT COUNT (not memory, not an N value): Shor's
     # controlled mod-exp is a compiled block, so _run_real takes the statevector
-    # phenomenological path (16q statevector = 1 MB, never a density matrix).
-    # Each Aer ideal run grows ~exponentially with qubit count -- 16q is
-    # ~22-50 s/attempt, 19q (N>=32 for shor) takes minutes and may hang -- so we
-    # reject anything wider than 16 qubits up front. shor/period = 3*bitlen(N)+1
-    # -> N <= 31; qftnos = 2*bitlen(N)+1 -> N <= 127. There is NO per-mode limit:
-    # in real mode at 300 K the deeper circuit decoheres to factors=None (the
-    # real T2 physics), and at low temperature (or in ideal/no-noise mode) it
-    # factors. Let the physics show, not an arbitrary rejection.
+    # phenomenological path (19q statevector = 4 MB, never a density matrix).
+    # Each Aer run grows ~exponentially with qubit count -- 16q is ~22-50 s,
+    # 19q (N>=32 for shor) is ~60-90 s for a single attempt -- so we cap at 19
+    # qubits and run only ONE attempt in the 17-19q band (max_attempts below).
+    # shor/period = 3*bitlen(N)+1 -> N <= 63; qftnos = 2*bitlen(N)+1 -> N <= 511.
+    # There is NO per-mode limit: in real mode at 300 K the deeper circuit
+    # decoheres to factors=None (the real T2 physics), and at low temperature (or
+    # in ideal/no-noise mode) it factors. Let the physics show, not an arbitrary
+    # rejection.
 
     if algo == "bell":
         from qiskit import QuantumCircuit
@@ -92,10 +93,10 @@ def run_circuit(req: dict) -> dict:
         if n < 2 or is_prime(n):
             return {"error": "n must be a composite integer > 1"}
         nq = (3 * n.bit_length() + 1) if algo in ("shor", "period") else (2 * n.bit_length() + 1)
-        if nq > 16:
+        if nq > 19:
             return {"error": f"N={n} -> {nq} qubits is too large for the in-browser "
-                             f"simulator (>16 qubits -> each Aer run takes minutes "
-                             f"and may hang). Use N <= 31 (shor/period) or <= 127 "
+                             f"simulator (>19 qubits -> each Aer run takes minutes "
+                             f"and may hang). Use N <= 63 (shor/period) or <= 511 "
                              f"(qftnos)."}
         # Shor classical preprocessing step 1: N = p^k (a prime power). For
         # every coprime base a, a^(r/2) = +/- 1 mod p^k, so the quantum gcd step
@@ -111,8 +112,9 @@ def run_circuit(req: dict) -> dict:
         recovered = None
         marginal_counts = None
         # fewer retries for larger N: each attempt's Aer run grows ~exponentially
-        # with qubit count, so 8 attempts at N=21 would exceed the 120 s timeout.
-        max_attempts = 8 if n <= 15 else 2
+        # with qubit count. N<=15 (<=13q) is fast -> 8; 16-31 (16q) -> 2; 32-63
+        # (19q) -> 1 (a single ~60-90 s run, well under the 120 s worker timeout).
+        max_attempts = 8 if n <= 15 else (2 if n <= 31 else 1)
         for attempt in range(max_attempts):
             a = (chosen_a if (chosen_a is not None and attempt == 0)
                  else select_coprime(n, rng))
@@ -180,10 +182,10 @@ def run_circuit(req: dict) -> dict:
     elif algo == "period":
         n = int(req.get("n", 15))
         nq = (3 * n.bit_length() + 1) if algo in ("shor", "period") else (2 * n.bit_length() + 1)
-        if nq > 16:
+        if nq > 19:
             return {"error": f"N={n} -> {nq} qubits is too large for the in-browser "
-                             f"simulator (>16 qubits -> each Aer run takes minutes "
-                             f"and may hang). Use N <= 31 (shor/period) or <= 127 "
+                             f"simulator (>19 qubits -> each Aer run takes minutes "
+                             f"and may hang). Use N <= 63 (shor/period) or <= 511 "
                              f"(qftnos)."}
         rng = np.random.default_rng(seed)
         a = req.get("a") or select_coprime(n, rng)
@@ -245,14 +247,19 @@ def run_circuit(req: dict) -> dict:
         _op = op.lower()
         _nq = {"add": 2 * _bits, "sub": 2 * _bits, "mul": 4 * _bits,
                "sqrt": _bits + 1, "log": _bits + 1}.get(_op, 2 * _bits)
-        _MATH_MAX_QUBITS = 20
+        # 36 qubits lets the demo mul run at Word=8 (4*8=32 qubits, a legitimate
+        # MPS run) while rejecting the 64-qubit mul (Word=16) that hangs Aer and
+        # stalls the in-process worker. RAISE (do not return {"error"}) so the
+        # sync /api/circuit/run?sync=true path reports status="failed" -- the
+        # sync wrapper only flips to "failed" on an exception, while the async
+        # worker treats both a raise and an {"error"} dict as failed.
+        _MATH_MAX_QUBITS = 36
         if _nq > _MATH_MAX_QUBITS:
-            return {"error": (
+            raise ValueError(
                 f"{op}({int(num1)}" + (f", {int(num2)}" if num2 is not None else "")
-                + f") needs a {_nq}-qubit circuit -- over the "
-                f"{_MATH_MAX_QUBITS}-qubit demo cap (Aer would hang and stall "
-                f"the API). Use smaller operands or a smaller Word. Limits: "
-                f"mul operands <= 8, add/sub operands <= 256.")}
+                + f") needs {_nq} qubits -- wider than the "
+                f"{_MATH_MAX_QUBITS}-qubit math demo cap (Aer would hang and "
+                f"stall the API). Use smaller operands or a smaller Word.")
         qc = create_math_circuit(op, num1, num2, bits=req.get("bits"))
         res = b.run(qc, shots=shots).result()
         counts = res.get_counts()
@@ -414,10 +421,10 @@ def run_circuit(req: dict) -> dict:
         if n < 2 or is_prime(n):
             return {"error": "n must be a composite integer > 1"}
         nq = (3 * n.bit_length() + 1) if algo in ("shor", "period") else (2 * n.bit_length() + 1)
-        if nq > 16:
+        if nq > 19:
             return {"error": f"N={n} -> {nq} qubits is too large for the in-browser "
-                             f"simulator (>16 qubits -> each Aer run takes minutes "
-                             f"and may hang). Use N <= 31 (shor/period) or <= 127 "
+                             f"simulator (>19 qubits -> each Aer run takes minutes "
+                             f"and may hang). Use N <= 63 (shor/period) or <= 511 "
                              f"(qftnos)."}
         # Prime power N = p^k: same trivial-gcd issue as full Shor (see the shor
         # branch). Factor classically; run one QFT-NOS attempt for the histogram.
@@ -428,7 +435,10 @@ def run_circuit(req: dict) -> dict:
         attempt = 0
         recovered = None
         marginal_counts = None
-        max_attempts = 8 if n <= 15 else 2
+        # fewer retries for larger N: each attempt's Aer run grows ~exponentially
+        # with qubit count. N<=15 (<=13q) is fast -> 8; 16-31 (16q) -> 2; 32-63
+        # (19q) -> 1 (a single ~60-90 s run, well under the 120 s worker timeout).
+        max_attempts = 8 if n <= 15 else (2 if n <= 31 else 1)
         for attempt in range(max_attempts):
             a = (chosen_a if (chosen_a is not None and attempt == 0)
                  else select_coprime(n, rng))

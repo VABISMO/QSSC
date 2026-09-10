@@ -455,7 +455,12 @@ export default function App() {
     if (algo !== 'shor' && algo !== 'period' && algo !== 'qftnos') return
     const v = parseInt(nShorDraft, 10)
     if (Number.isNaN(v)) return
-    const clamped = Math.min(31, Math.max(2, v))
+    // shor/period = 3*bitlen(N)+1 <= 19 -> N <= 63; qftnos = 2*bitlen(N)+1 <= 19
+    // -> N <= 511. Clamp to the algo's cap so a prime the clamp would otherwise
+    // land on (e.g. typing 39 used to clamp to 31, which is prime -> "n must be
+    // a composite integer > 1") is never the reason a composite is rejected.
+    const cap = algo === 'qftnos' ? 511 : 63
+    const clamped = Math.min(cap, Math.max(2, v))
     setNShor(clamped)
     setNumQubits(derivedQubits(algo, clamped))
   }, [nShorDraft, algo])
@@ -515,7 +520,10 @@ export default function App() {
       // error instead of spinning indefinitely. A transient fetch error
       // (e.g. a 404 while the job record is still being written) retries up to
       // the same cap rather than aborting the whole run on the first blip.
-      const MAX_POLLS = 200
+      // 300 polls = 180 s, matching the backend JOB_TIMEOUT_S so the 19-qubit
+      // Shor band (N=32..63, a single ~115 s attempt) finishes inside the window
+      // instead of the UI giving up first.
+      const MAX_POLLS = 300
       const poll = async (n = 0) => {
         try {
           const rec = await api.job(jobId)
@@ -1215,14 +1223,15 @@ export default function App() {
                 <div className="row">
                   <div className="field">
                     <label>{algo === 'period' ? 'Integer N (find period)' : 'Integer to factor (N)'}</label>
-                    <input type="number" min={2} max={31} value={nShorDraft}
+                    <input type="number" min={2} max={algo === 'qftnos' ? 511 : 63} value={nShorDraft}
                            onChange={e => setNShorDraft(e.target.value)} />
                     {nShor > 15 && (
                       <div className="warn" style={{ fontSize: '11px', marginTop: 4, color: 'var(--warn)' }}>
                         N&gt;15 (16 qubits) runs in ~22-50 s in any mode. At 300 K
                         real mode it decoheres to no factors (the real T2 physics);
                         lower the Temperature or use ideal mode to factor it.
-                        N&gt;31 (19q) takes minutes and is capped.
+                        N&gt;31 (19 qubits) runs in ~60-90 s (single attempt).
+                        N&gt;{algo === 'qftnos' ? 511 : 63} is capped (would hang the API).
                       </div>
                     )}
                   </div>

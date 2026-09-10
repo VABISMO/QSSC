@@ -275,15 +275,15 @@ def test_qft_is_uniform_regardless_of_x():
 
 # -- bug 3: runaway N hangs the panel (N / qubit cap) --------------------------
 
-@pytest.mark.parametrize("algo,n", [("shor", 35), ("period", 35), ("qftnos", 135)])
+@pytest.mark.parametrize("algo,n", [("shor", 65), ("period", 65), ("qftnos", 513)])
 def test_factor_n_cap_rejects_too_large(algo, n):
-    """N producing >16 qubits (shor/period = 3*bitlen(N)+1, qftnos = 2*bitlen(N)+1)
+    """N producing >19 qubits (shor/period = 3*bitlen(N)+1, qftnos = 2*bitlen(N)+1)
     must be rejected up front so the Aer statevector sim cannot hang the worker
     past the frontend poll window -- each run grows ~exponentially with qubit
-    count (19q takes minutes / hangs). The cap is TIME-based on the qubit count,
+    count (22q takes minutes / hangs). The cap is TIME-based on the qubit count,
     not an N value and not memory: Shor's compiled mod-exp takes the statevector
-    path (16q statevector = 1 MB), so N up to 31 (shor/period, 16q) or 127
-    (qftnos, 15q) runs in ~22-50 s. At 300 K real mode N>15 decoheres to no
+    path (19q statevector = 4 MB), so N up to 63 (shor/period, 19q) or 511
+    (qftnos, 19q) runs in ~22-90 s. At 300 K real mode N>15 decoheres to no
     factors (the real T2 physics); cool the chip or use ideal mode to factor it."""
     r = run_circuit({"algorithm": algo, "n": n, "profile": "NV",
                      "temperature_k": ROOM, "seed": SEED, "shots": SHOTS,

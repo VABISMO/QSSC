@@ -30,12 +30,16 @@ MONGO_DB = "qssc"
 MONGO_COLL = "jobs"
 
 # Hard cap on an in-process job (seconds). The frontend polls GET /api/jobs/{id}
-# for MAX_POLLS*600ms = 120 s, so a job still running past that is already a
-# timeout in the UI. Marking it failed here at 120 s frees the bookkeeping and
+# for MAX_POLLS*600ms = 180 s, so a job still running past that is already a
+# timeout in the UI. Marking it failed here at 180 s frees the bookkeeping and
 # surfaces a real error instead of an indefinite "queued". (Python cannot
 # hard-kill the worker thread, so the thread may keep running in the background
 # -- the larger worker pool below + the runner N/qubit cap keep that rare.)
-JOB_TIMEOUT_S = 120
+# 180 s (not 120) gives the 19-qubit Shor band (N=32..63, a single ~115 s
+# statevector attempt) headroom to finish under the cap instead of being
+# watchdog-killed mid-run -- a kill the thread cannot honour, which would wedge
+# the worker slot (the same stall a 64-qubit mul causes).
+JOB_TIMEOUT_S = 180
 
 _redis = None
 _queue = None
