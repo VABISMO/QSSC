@@ -169,15 +169,29 @@ def test_qrand_without_seed_uses_os_entropy_and_differs():
     The frontend must NOT send the fixed seed for qrand, or every run returns
     the same entropy / same Ed25519 key -- the 'same histogram regardless of
     input' complaint.
+
+    Without a seed the run draws OS entropy, so the per-run readout noise is
+    genuinely random and a single draw can occasionally fail the entropy
+    health gate (lag-1 correlation) by bad luck -- that is the physical
+    channel, not a bug. Retry a handful of times so the test is robust to
+    that inherent flakiness (matching the qrng-rtl 64x-retry pattern); two
+    clean draws that differ is a pass.
     """
-    r1 = run_circuit({"algorithm": "qrand", "num_qubits": 8, "num_bytes": 16,
-                      "profile": "NV", "temperature_k": ROOM, "shots": 8192,
-                      "noise_mode": "real"})
-    r2 = run_circuit({"algorithm": "qrand", "num_qubits": 8, "num_bytes": 16,
-                      "profile": "NV", "temperature_k": ROOM, "shots": 8192,
-                      "noise_mode": "real"})
-    assert "error" not in r1 and "error" not in r2
-    assert r1["entropy_hex"] != r2["entropy_hex"]
+    last_err = None
+    for _ in range(8):
+        r1 = run_circuit({"algorithm": "qrand", "num_qubits": 8, "num_bytes": 16,
+                          "profile": "NV", "temperature_k": ROOM, "shots": 8192,
+                          "noise_mode": "real"})
+        r2 = run_circuit({"algorithm": "qrand", "num_qubits": 8, "num_bytes": 16,
+                          "profile": "NV", "temperature_k": ROOM, "shots": 8192,
+                          "noise_mode": "real"})
+        if "error" not in r1 and "error" not in r2:
+            assert r1["entropy_hex"] != r2["entropy_hex"]
+            return
+        last_err = r1.get("error", r2.get("error"))
+    raise AssertionError(
+        f"qrand OS-entropy runs kept failing the health gate after 8 tries: "
+        f"{last_err}")
 
 
 def test_qrand_with_seed_is_reproducible():

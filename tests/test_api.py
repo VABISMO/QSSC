@@ -348,16 +348,19 @@ def test_circuit_run_qft_20_qubits(client):
 
 def test_too_wide_circuit_errors_not_faked(client):
     """Regression: a circuit wider than the classical simulation ceiling
-    (math mul bits=8 -> 32 qubits > SIM_MAX_QUBITS=28) used to silently fall
-    back to fake all-zero counts. It must now return an error."""
+    (math mul bits=17 -> 68 qubits > SIM_MAX_QUBITS=64) used to silently fall
+    back to fake all-zero counts. It must now return an error. (The cap was
+    28 statevector qubits; raising to 64 via the Aer MPS path moved the ceiling,
+    so the over-width probe must move past 64 too -- bits=8 -> 32q is now a
+    legitimate MPS run, not an error.)"""
     r = client.post("/api/circuit/run", params={"sync": True},
                     json={"algorithm": "math", "profile": "NV", "op": "mul",
-                          "a": 3, "b": 5, "bits": 8, "shots": 256, "seed": 3,
+                          "a": 3, "b": 5, "bits": 17, "shots": 256, "seed": 3,
                           "noise_mode": "real"})
     assert r.status_code == 200
     j = r.json()
     assert j["status"] == "failed"
-    assert "32 qubits" in j["result"]["error"] or "bounded" in j["result"]["error"]
+    assert "68 qubits" in j["result"]["error"] or "wider than" in j["result"]["error"]
 
 
 # --- async job lifecycle ----------------------------------------------------
