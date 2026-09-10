@@ -130,6 +130,16 @@ button:disabled { opacity: .5; cursor: progress; }
 }
 .qcell.measured { border-color: #3b82f6; }      /* a qubit that was measured this run (even if |0⟩) */
 .qcell.usable { border-color: #263056; }
+/* a recovered signal peak (the measurement that yielded the period / factors,
+   not the noise-dominated top outcome) lights green to tell it from noise */
+.qcell.on.signal {
+  background: linear-gradient(135deg, rgba(63,185,80, var(--lit,1)), rgba(46,160,67, var(--lit,1)));
+  border-color: transparent;
+  box-shadow: 0 0 calc(6px + 8px * var(--lit,1)) rgba(63,185,80, calc(.4 * var(--lit,1)));
+}
+.signal-sw { background: #3fb950; }
+.qgrid-recovered { margin-top: 10px; font-size: 11.5px; color: #3fb950;
+  background: rgba(63,185,80,.10); border: 1px solid rgba(63,185,80,.3); border-radius: 6px; padding: 6px 10px; }
 .qgrid-legend { display: flex; gap: 14px; margin-top: 10px; font-size: 11.5px; color: var(--muted); }
 .sw { width: 11px; height: 11px; border-radius: 3px; display: inline-block; margin-right: 5px; vertical-align: -1px; }
 
@@ -146,9 +156,14 @@ svg.chart { width: 100%; height: 100%; overflow: visible; }
 .histcard .hint { margin-bottom: 10px; }
 .counts { font-family: var(--font-mono); font-size: 12.5px; flex: 1 1 auto; min-height: 260px;
   overflow: auto; background: #0a1128; border: 1px solid var(--border); border-radius: 9px; padding: 14px; }
-.bar-row { display: grid; grid-template-columns: 120px 1fr 64px; gap: 8px; align-items: center; margin-bottom: 7px; }
+.bar-row { display: grid; grid-template-columns: 120px 1fr 64px auto; gap: 8px; align-items: center; margin-bottom: 7px; }
 .bar-track { background: #161f42; border-radius: 4px; height: 10px; overflow: hidden; }
 .bar-fill { height: 100%; background: linear-gradient(90deg, #22d3ee, #6366f1); }
+/* the recovered signal bar: green fill + a "← signal → factors" marker, so the
+   user can tell the measurement that yielded the result from the noise bars */
+.bar-row.signal .bar-fill { background: linear-gradient(90deg, #3fb950, #2ea043); }
+.bar-row.signal .mono:first-child { color: #3fb950; }
+.bar-sig { font-size: 10.5px; color: #3fb950; white-space: nowrap; }
 .counts-axis { font-size: 10.5px; color: var(--muted); margin-bottom: 9px;
   letter-spacing: .02em; border-bottom: 1px solid var(--border); padding-bottom: 5px; }
 
@@ -247,7 +262,7 @@ textarea.code-editor:focus { outline: 1px solid var(--brand); border-color: var(
   .badge { margin-left: 0; width: 100%; }
   .stats { grid-template-columns: repeat(2, 1fr); }
   .stat .v { font-size: 16px; }
-  .bar-row { grid-template-columns: 84px 1fr 52px; }
+  .bar-row { grid-template-columns: 84px 1fr 52px auto; }
   .kv { grid-template-columns: 108px 1fr; }
   .maintab { padding: 9px 12px; font-size: 13px; }
   .qgrid { max-width: 100%; }

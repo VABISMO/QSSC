@@ -146,19 +146,26 @@ def test_math_mul_grid_matches_result_and_histogram():
     "1111000000" (q0-leftmost reversed of "0000001111"), but the grid showed
     every cell lit. After the fix the grid lights cells 0-3 (the four 1-bits of
     15), matching both the histogram's top bar and the numeric result=15.
+
+    All qubits are now measured (result register + both operands) so the
+    readout width equals the qubit count -- the user's "bits must match the
+    chosen qubits" requirement. The product lands in the LOW result-width
+    classical bits (so its 1-bits light the low grid cells); the operands
+    occupy the high bits.
     """
     r = run_circuit({"algorithm": "math", "op": "mul", "a": 3, "b": 5,
                      "bits": 4, "profile": "NV", "temperature_k": ROOM,
                      "seed": SEED, "shots": SHOTS, "noise_mode": "real"})
     assert r["result"] == 15
+    rw = r["result_width"]
     top = max(r["counts"], key=r["counts"].get)
     grid = grid_top_bitstring(r["counts"], r["num_clbits"])
     disp = histogram_display(top)
     # the grid's lit cells == the histogram's left-to-right 1-bits
     assert grid == [int(ch) for ch in disp]
-    # the lit cells are exactly the 1-bits of the numeric result (15 = 0b1111)
+    # the product's 1-bits light the LOW result-width grid cells (15 = 0b1111)
     assert grid[:4] == [1, 1, 1, 1]
-    assert sum(grid) == bin(r["result"]).count("1")
+    assert sum(grid[:rw]) == bin(r["result"]).count("1")
 
 
 # -- bug 2: input sensitivity -------------------------------------------------

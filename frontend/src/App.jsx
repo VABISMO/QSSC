@@ -545,6 +545,7 @@ export default function App() {
   const runCounts = result && (result.counts || (result.result && result.result.counts))
   const runAssessment = result && result.assessment
   const runBits = result && result.num_clbits
+  const runRecovered = result && (result.recovered || (result.result && result.result.recovered))
 
   return (
     <div className="app">
@@ -1378,7 +1379,7 @@ export default function App() {
                 <h2><span className="dot" />Measurement histogram</h2>
                 <div className="hint">Top bitstrings from the most recent run (most-probable first).</div>
                 {runCounts
-                  ? <BarCounts counts={runCounts} />
+                  ? <BarCounts counts={runCounts} recovered={runRecovered} />
                   : runErr
                     ? <div className="muted">Last run failed — see the error above.</div>
                     : <div className="muted">No run yet — execute a circuit on the left.</div>}
@@ -1392,6 +1393,7 @@ export default function App() {
                     sites={cal.data.sites}
                     counts={runCounts}
                     numClbits={runBits}
+                    recovered={runRecovered}
                   />
                 )}
                 {cal.loading && <div className="muted"><span className="spinner" /> calibrating…</div>}

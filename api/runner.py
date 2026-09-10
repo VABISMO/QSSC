@@ -97,6 +97,7 @@ def run_circuit(req: dict) -> dict:
         chosen_a = req.get("a")
         a = r = factors = qc = counts = None
         attempt = 0
+        recovered = None
         # fewer retries for larger N: each attempt's Aer run grows ~exponentially
         # with qubit count, so 8 attempts at N=21 would exceed the 120 s timeout.
         max_attempts = 8 if n <= 15 else 3
@@ -107,9 +108,12 @@ def run_circuit(req: dict) -> dict:
             res = b.run(qc, shots=shots).result()
             counts = res.get_counts()
             _ret = float(res.assessment.get("signal_retention", 0.0) or 0.0)
-            r, factors = postprocess_period(counts, qc.num_clbits, a, n,
-                                            signal_retention=_ret)
+            _reveal = {}
+            r, factors = postprocess_period(counts,
+                                            qc.metadata["counting_bits"], a, n,
+                                            signal_retention=_ret, reveal=_reveal)
             if factors[0] and factors[0] * factors[1] == n:
+                recovered = _reveal
                 break
             chosen_a = None
         ok = bool(factors[0]) and factors[0] * factors[1] == n
@@ -123,6 +127,14 @@ def run_circuit(req: dict) -> dict:
                        "success": ok, "attempts": attempt + 1,
                        "signal_retention": round(_retention, 4),
                        "hom_visibility": round(_hom, 6)})
+        if recovered:
+            result["recovered"] = {
+                "bitstring": recovered["bitstring"],
+                "phase": round(float(recovered["phase"]), 6),
+                "count": recovered["count"],
+                "period": recovered["period"],
+                "factors": list(recovered["factors"]) if recovered["factors"][0] else None,
+            }
         result.update(_circuit_meta(qc))
 
     elif algo == "period":
@@ -145,14 +157,23 @@ def run_circuit(req: dict) -> dict:
         # signal_retention gate rejects noise-dominated runs so a starved run
         # cannot report a noise-artifact period (audit issue #8).
         _ret = float(res.assessment.get("signal_retention", 0.0) or 0.0)
-        r, _ = postprocess_period(counts, qc.num_clbits, a, n,
-                                  signal_retention=_ret)
+        _cb = qc.metadata["counting_bits"]
+        _reveal = {}
+        r, _ = postprocess_period(counts, _cb, a, n,
+                                  signal_retention=_ret, reveal=_reveal)
         bs = max(counts, key=counts.get)
-        phase = int(bs.replace(" ", ""), 2) / 2 ** qc.num_clbits
+        phase = (int(bs.replace(" ", ""), 2) & ((1 << _cb) - 1)) / 2 ** _cb
         frac = Fraction(phase).limit_denominator(n - 1)
         result.update({"n": n, "a": a, "counts": counts,
                        "top_state": bs, "phase": round(phase, 6),
                        "fraction": str(frac), "period": r})
+        if _reveal:
+            result["recovered"] = {
+                "bitstring": _reveal["bitstring"],
+                "phase": round(float(_reveal["phase"]), 6),
+                "count": _reveal["count"],
+                "period": _reveal["period"],
+            }
         result.update(_circuit_meta(qc))
 
     elif algo == "math":
@@ -167,11 +188,13 @@ def run_circuit(req: dict) -> dict:
         res = b.run(qc, shots=shots).result()
         counts = res.get_counts()
         bs = max(counts, key=counts.get)
-        out = int(bs, 2)
+        _rw = qc.metadata.get("result_width", qc.num_clbits)
+        out = int(bs.replace(" ", ""), 2) & ((1 << _rw) - 1)
         if op in ("sqrt", "log"):
-            out = (out / 2 ** qc.num_clbits) * num1
+            out = (out / 2 ** _rw) * num1
         result.update({"op": op, "a": num1, "b": num2,
-                       "counts": counts, "result": out})
+                       "counts": counts, "result": out,
+                       "result_width": _rw})
         result.update(_circuit_meta(qc))
 
     elif algo == "grover":
@@ -329,6 +352,7 @@ def run_circuit(req: dict) -> dict:
         chosen_a = req.get("a")
         a = r = factors = qc = counts = None
         attempt = 0
+        recovered = None
         max_attempts = 8 if n <= 15 else 3
         for attempt in range(max_attempts):
             a = (chosen_a if (chosen_a is not None and attempt == 0)
@@ -337,9 +361,14 @@ def run_circuit(req: dict) -> dict:
             res = b.run(qc, shots=shots).result()
             counts = res.get_counts()
             _ret = float(res.assessment.get("signal_retention", 0.0) or 0.0)
-            r, factors = postprocess_period_swapless(counts, qc.num_clbits, a, n,
-                                                    signal_retention=_ret)
+            _reveal = {}
+            r, factors = postprocess_period_swapless(counts,
+                                                     qc.metadata["counting_bits"],
+                                                     a, n,
+                                                     signal_retention=_ret,
+                                                     reveal=_reveal)
             if factors[0] and factors[0] * factors[1] == n:
+                recovered = _reveal
                 break
             chosen_a = None
         ok = bool(factors[0]) and factors[0] * factors[1] == n
@@ -359,10 +388,18 @@ def run_circuit(req: dict) -> dict:
         result.update({"n": n, "a": a, "counts": counts, "period": r,
                        "factors": list(factors) if factors[0] else None,
                        "success": ok, "attempts": attempt + 1,
-                       "counting_qubits": qc.num_clbits,
+                       "counting_qubits": qc.metadata["counting_bits"],
                        "shor_comparison": comparison,
                        "signal_retention": round(_retention, 4),
                        "hom_visibility": round(_hom, 6)})
+        if recovered:
+            result["recovered"] = {
+                "bitstring": recovered["bitstring"],
+                "phase": round(float(recovered["phase"]), 6),
+                "count": recovered["count"],
+                "period": recovered["period"],
+                "factors": list(recovered["factors"]) if recovered["factors"][0] else None,
+            }
         result.update(_circuit_meta(qc))
 
     elif algo == "bb84":

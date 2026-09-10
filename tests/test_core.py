@@ -266,13 +266,13 @@ def test_qft_nos_fewer_qubits_than_shor():
     # "11000"; the swapless hardware emits the reversed strings, which we feed
     # here to confirm the function recovers r=4 and factors 3,5.
     counts = {"00010": 256, "00001": 256, "00011": 256}
-    r, factors = postprocess_period_swapless(counts, nos_qc.num_clbits, 7, 15)
+    r, factors = postprocess_period_swapless(counts, nos_qc.metadata["counting_bits"], 7, 15)
     assert r == 4
     assert factors == (3, 5)
 
 
 def test_qft_nos_factors_15_cold():
-    # QFT-NOS measures only 5 classical bits (32 outcomes), so its uniform
+    # QFT-NOS has a 5-bit counting register (32 outcomes), so its uniform
     # floor is high and a run needs real signal retention to clear the
     # register-aware cutoff (audit issue #8). On the NV (diamond) profile
     # cooled to 1 mK, coprime a=11 has period 2 -- the cheapest decomposition
@@ -288,8 +288,8 @@ def test_qft_nos_factors_15_cold():
                          temperature_k=1e-3, noise_mode="real")
     qc, a = create_qft_nos_circuit(15, a=11)
     res = b_cold.run(qc, shots=4096).result()
-    r, factors = postprocess_period_swapless(res.get_counts(), qc.num_clbits,
-                                             a, 15)
+    r, factors = postprocess_period_swapless(res.get_counts(),
+                                             qc.metadata["counting_bits"], a, 15)
     assert factors[0] is not None
     assert factors[0] * factors[1] == 15  # (5, 3); order-agnostic
 
@@ -304,8 +304,8 @@ def test_qft_nos_noise_dominated_no_spurious_factors():
                     temperature_k=1e-3, noise_mode="real")
     qc, a = create_qft_nos_circuit(15, a=7)
     res = b.run(qc, shots=4096).result()
-    r, factors = postprocess_period_swapless(res.get_counts(), qc.num_clbits,
-                                            a, 15)
+    r, factors = postprocess_period_swapless(res.get_counts(),
+                                            qc.metadata["counting_bits"], a, 15)
     assert factors[0] is None  # no spurious factor pair from a starved register
 
 
@@ -911,7 +911,7 @@ def test_backend_shor_15():
                     temperature_k=300.0, noise_mode="real")
     qc, a = create_shor_circuit(15, a=7)
     res = b.run(qc, shots=2048).result()
-    r, factors = postprocess_period(res.get_counts(), qc.num_clbits, a, 15)
+    r, factors = postprocess_period(res.get_counts(), qc.metadata["counting_bits"], a, 15)
     assert res.assessment["within_coherence"] is False
     assert factors[0] is None  # decohered at room temperature -> no factors
 
@@ -922,8 +922,8 @@ def test_backend_shor_15():
     b_cold = QSSCBackend("hBN-VB", sites=_quick_sites(20), seed=1,
                          temperature_k=1e-3, noise_mode="real")
     res_cold = b_cold.run(qc, shots=2048).result()
-    _, factors_cold = postprocess_period(res_cold.get_counts(), qc.num_clbits,
-                                         a, 15)
+    _, factors_cold = postprocess_period(res_cold.get_counts(),
+                                         qc.metadata["counting_bits"], a, 15)
     assert res_cold.assessment["within_coherence"] is True
     assert factors_cold[0] is None  # depolarization-limited, not coherence-limited
 
@@ -933,7 +933,8 @@ def test_backend_shor_15():
     b_nv = QSSCBackend("NV", sites=_quick_sites(20), seed=1,
                        temperature_k=1e-3, noise_mode="real")
     res_nv = b_nv.run(qc, shots=2048).result()
-    _, factors_nv = postprocess_period(res_nv.get_counts(), qc.num_clbits, a, 15)
+    _, factors_nv = postprocess_period(res_nv.get_counts(),
+                                       qc.metadata["counting_bits"], a, 15)
     assert res_nv.assessment["within_coherence"] is True
     assert factors_nv == (3, 5)
 
