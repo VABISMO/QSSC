@@ -247,6 +247,43 @@ def _loosen_clearance(dsn_path, minclr):
     return n
 
 
+def _loosen_width(dsn_path, minwidth):
+    """Align FreeRouting's width floor to the board's actual min_track_width.
+
+    Symmetric to :func:`_loosen_clearance`. KiCad's ExportSpecctraDSN writes the
+    netclass/default track width (often 200 um = 0.20 mm) which can be STRICTER
+    than the board's min_track_width (e.g. 0.10 mm). FreeRouting then flags every
+    pre-routed (or freshly routed) track narrower than the netclass width as a
+    "violation" -- on a board with hundreds of 0.10/0.12/0.15 mm die-fanout
+    escapes that is ~1000 constant width violations the optimizer can never
+    clean (you can't widen a fixed pre-routed escape without risking a short),
+    and unresolved violations can block the SES write.
+
+    Setting MINWIDTH=<um> (e.g. MINWIDTH=100 for a 0.10 mm min_track_width
+    board) rewrites every (width X) with X > MINWIDTH down to MINWIDTH, so the
+    autorouter uses the board's REAL width floor. Imported routes still pass
+    KiCad DRC because MINWIDTH equals (never undercuts) min_track_width. Leave
+    MINWIDTH unset to keep the DSN widths as exported. Returns the number of
+    width values lowered.
+    """
+    import re as _re
+
+    txt = dsn_path.read_text()
+    n = 0
+
+    def _sub(m):
+        nonlocal n
+        x = float(m.group(1))
+        if x > minwidth:
+            n += 1
+            return f"(width {minwidth:g}"
+        return m.group(0)
+
+    txt = _re.sub(r"\(width\s+([\d.]+)", _sub, txt)
+    dsn_path.write_text(txt)
+    return n
+
+
 dropped = _truncate_plane_net_pins(dsn, PLANE_NETS)
 print(f"  truncated {dropped} plane-net pin refs ({', '.join(sorted(PLANE_NETS))}) "
       f"to 1 each in DSN -> autorouter routes signals only")
@@ -261,6 +298,14 @@ if _minclr_env:
     print(f"  loosened {_lowered} DSN clearance rules > {_minclr:g}um -> {_minclr:g}um "
           f"(MINCLR env; aligns autorouter to board min_clearance so KiCad-legal "
           f"placements stop registering as FreeRouting violations)")
+
+_minw_env = os.environ.get("MINWIDTH")
+if _minw_env:
+    _minw = float(_minw_env)
+    _wlowered = _loosen_width(dsn, _minw)
+    print(f"  loosened {_wlowered} DSN width rules > {_minw:g}um -> {_minw:g}um "
+          f"(MINWIDTH env; aligns autorouter to board min_track_width so "
+          f"KiCad-legal narrow tracks stop registering as FreeRouting violations)")
 
 # FreeRouting 2.4.1 CLI: -de <dsn> -do <ses> -mp <passes> -mt <threads>.
 # -mp makes it autoroute (without -mp it loads + exits). -mt 1 = single-thread
