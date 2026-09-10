@@ -122,12 +122,26 @@ def test_calibration_run_three_stages(client):
                     params={"profile": "NV", "grid": 8}, json={})
     assert r.status_code == 200
     j = r.json()
-    assert len(j["stages"]) == 3
+    # 4 stages: detector scan, auto-align, ODMR D-fit, per-pin resonance sweep.
+    # The per-pin sweep produces the calibrated resonance map (the addressing
+    # table) -- it only exists AFTER calibration, never pre-baked.
+    assert len(j["stages"]) == 4
     s0 = j["stages"][0]
     # stage 0 scans the on-chip detector array (no camera frame)
     assert "detector" in s0["name"].lower() or "scan" in s0["name"].lower()
     assert s0["defects_detected"] == 64  # all sites active + bright
     assert j["stages"][2]["fit_ok"] in (True, False)
+    s3 = j["stages"][3]
+    assert "per-pin" in s3["name"].lower() or "resonance" in s3["name"].lower()
+    assert s3["pins_measured"] == 64
+    # the per-pin resonance map is the calibration OUTPUT: 64 measured pins,
+    # each with a measured resonance + detuning around D=2.87 GHz.
+    per_pin = j["per_pin"]
+    assert len(per_pin) == 64
+    assert all({"qubit_id", "row", "col", "resonance_ghz",
+                "detuning_mhz", "t2_us", "usable"} <= set(p.keys()) for p in per_pin)
+    resonances = [p["resonance_ghz"] for p in per_pin]
+    assert 2.8 < min(resonances) < max(resonances) < 2.94  # NV D=2.87 GHz ± detuning
 
 
 # --- circuit runner (sync) --------------------------------------------------

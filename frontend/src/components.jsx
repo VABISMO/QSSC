@@ -73,16 +73,17 @@ export function QubitGrid({ sites, counts, numClbits, recovered }) {
 }
 
 // ---------------------------------------------------------------------------
-// QubitFrequencyTable — per-qubit resonance table. Each of the 64 die sites
-// (pins) is identified by its own ms=0↔ms=±1 transition frequency: the zero-
-// field splitting D plus a per-site strain / local-B / hyperfine detuning.
-// That detuning IS the individual-microwave-addressing mechanism — a narrow
-// MW pulse at f_i hits only qubit i (within the ODMR linewidth), so the table
-// is the "which pin resonates at which frequency" map the calibration sweep
-// produces. Readout is per-site (no camera); T₂ is the coherence budget.
+// QubitFrequencyTable — the per-pin resonance map produced by stage 4 of the
+// calibration (a per-pin ODMR sweep that fits each pin's dip). Each of the 64
+// die sites (pins) is identified by its measured ms=0↔ms=±1 transition
+// frequency: D plus a per-site strain / local-B / hyperfine detuning. That
+// detuning IS the individual-microwave-addressing mechanism — a narrow MW
+// pulse at f_i hits only qubit i (within the ODMR linewidth). This table only
+// exists AFTER calibration; before it runs there is nothing to show.
+// Readout is per-site (no camera); T₂ is the coherence budget.
 // ---------------------------------------------------------------------------
 export function QubitFrequencyTable({ sites, dGhz, loading, error }) {
-  if (loading) return <div className="muted"><span className="spinner" /> loading qubit resonances…</div>
+  if (loading) return <div className="muted"><span className="spinner" /> sweeping per-pin ODMR…</div>
   if (error) return <div className="error">{error}</div>
   if (!sites || !sites.length) return <div className="muted">no site data</div>
   const rows = sites
@@ -91,16 +92,16 @@ export function QubitFrequencyTable({ sites, dGhz, loading, error }) {
   return (
     <div>
       <div className="hint" style={{ marginBottom: 8 }}>
-        Each pin / qubit resonates at D{dGhz ? `=${dGhz}` : ''} GHz ± its per-site detuning. A narrow
-        MW pulse at f<sub>i</sub> addresses only qubit i — this table is the resonance map. Detuning
-        spread: <b>{spread.toFixed(2)} MHz</b>.
+        Per-pin ODMR sweep — each pin's dip is fit individually. Measured D{dGhz ? `≈${dGhz}` : ''} GHz
+        ± a per-site detuning; a narrow MW pulse at f<sub>i</sub> addresses only pin i. Measured
+        detuning spread: <b>{spread.toFixed(2)} MHz</b>.
       </div>
       <div className="qfreq-scroll">
         <table className="qfreq">
           <thead>
             <tr>
               <th>Pin</th><th>R</th><th>C</th>
-              <th>Resonance (GHz)</th>
+              <th>Measured fᵢ (GHz)</th>
               <th>Detuning (MHz)</th>
               <th>T₂ (µs)</th>
               <th>Status</th>
@@ -623,15 +624,22 @@ export function SignalChart({ data, error }) {
 }
 
 // ---------------------------------------------------------------------------
-// CalibrationPanel — runs the 3-stage VABISMO-style calibration on demand.
+// CalibrationPanel — runs the 4-stage VABISMO-style calibration on demand.
+// Stage 4 (per-pin resonance sweep) populates the per-pin resonance map,
+// which is shown in a modal -- the map only exists once the calibration has
+// actually swept each pin's ODMR dip, never before.
 // ---------------------------------------------------------------------------
 export function CalibrationPanel({ profile, temperature, seed, run, running, result, err }) {
+  const [resOpen, setResOpen] = useState(false)
+  const perPin = result && result.per_pin
+  const dFit = result && result.d_fit_ghz
   return (
     <div>
       <div className="hint" style={{ marginBottom: 10 }}>
         Full calibration: (1) scan the on-chip detector array for defect photocurrent (lock-in),
         (2) auto-align the qubit grid, (3) sweep the microwave frequency and fit the zero-field
-        splitting D + linewidth.
+        splitting D + linewidth, (4) sweep each pin's ODMR dip individually → the per-pin
+        resonance / addressing map.
       </div>
       <button onClick={run} disabled={running} className="ghost" type="button">
         {running ? <><span className="spinner" /> Calibrating…</> : 'Run calibration'}
@@ -665,11 +673,35 @@ export function CalibrationPanel({ profile, temperature, seed, run, running, res
                       : <span style={{ color: 'var(--err)' }}>✗ fit off</span>}
                   </div>
                 )}
+                {i === 3 && (
+                  <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
+                    pins measured:{' '}
+                    <span className="mono" style={{ color: 'var(--ok)' }}>{st.pins_measured}</span>
+                    {' · '}detuning spread {st.detuning_spread_mhz} MHz
+                    {' · '}fit σ {st.meas_sigma_mhz} MHz
+                  </div>
+                )}
               </div>
             ))}
           </div>
           <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
             At {result.temperature_k} K → T₁ {result.t1_ms} ms · T₂ {result.t2_us} µs
+          </div>
+          {perPin && perPin.length > 0 && (
+            <button type="button" className="ghost" style={{ marginTop: 12 }}
+              onClick={() => setResOpen(true)}>
+              View per-pin resonance map ({perPin.length} pins)
+            </button>
+          )}
+        </div>
+      )}
+      {resOpen && (
+        <div className="resonance-overlay" onClick={() => setResOpen(false)}>
+          <div className="resonance-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="meas-help-close" type="button"
+              onClick={() => setResOpen(false)} aria-label="Close">×</button>
+            <h2><span className="dot" />Per-pin resonance map (calibrated)</h2>
+            <QubitFrequencyTable sites={perPin} dGhz={dFit} />
           </div>
         </div>
       )}

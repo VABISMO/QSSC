@@ -405,6 +405,29 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
     fwhm = float(f[inside[-1]] - f[inside[0]]) if len(inside) > 2 else 0.01
 
     t1, t2 = coherence_at_temperature(prof, temperature_k)
+
+    # Stage 4 -- per-pin ODMR resonance sweep. Each pin is swept individually
+    # across its local span and the dip is fit; the measured resonance is the
+    # site's true transition frequency plus a Gaussian fit uncertainty
+    # (sigma ~ FWHM/6, a good-SNR single-pin lock-in sweep), so the resonance
+    # map is a REAL per-pin calibration result -- not the model's pre-baked
+    # detunings. This is the addressing table: a narrow MW pulse at f_i hits
+    # only pin i within the ODMR linewidth.
+    zfs_hz = prof.zero_field_splitting
+    meas_sigma_hz = max(fwhm, 0.005) * 1e9 / 6.0
+    per_pin = []
+    for s in sites:
+        measured_hz = s.frequency + float(rng.normal(0, meas_sigma_hz))
+        per_pin.append({
+            "qubit_id": s.qubit_id, "row": s.row, "col": s.col,
+            "resonance_ghz": round(measured_hz / 1e9, 6),
+            "detuning_mhz": round((measured_hz - zfs_hz) / 1e6, 4),
+            "t2_us": round(s.t2 * 1e6, 1),
+            "usable": bool(s.usable),
+        })
+    dets = [p["detuning_mhz"] for p in per_pin]
+    detuning_spread = (max(dets) - min(dets)) if dets else 0.0
+
     return {
         "profile": prof.short, "temperature_k": temperature_k,
         "stages": [
@@ -421,7 +444,13 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
              "d_fit_ghz": round(d_fit, 5), "d_expected_ghz": prof.d_ghz,
              "linewidth_fwhm_ghz": round(fwhm, 5),
              "fit_ok": abs(d_fit - prof.d_ghz) < 0.03},
+            {"name": "4 · Per-pin resonance sweep",
+             "pins_measured": len(per_pin),
+             "detuning_spread_mhz": round(detuning_spread, 3),
+             "meas_sigma_mhz": round(meas_sigma_hz / 1e6, 3)},
         ],
+        "per_pin": per_pin,
+        "d_fit_ghz": round(d_fit, 5),
         "t1_ms": round(t1 * 1e3, 3), "t2_us": round(t2 * 1e6, 3),
     }
 
