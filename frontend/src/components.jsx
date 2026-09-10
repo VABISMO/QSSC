@@ -127,12 +127,23 @@ export function OdmrChart({ data, error }) {
 // ---------------------------------------------------------------------------
 // BarCounts — horizontal bar chart of measurement counts.
 // ---------------------------------------------------------------------------
-export function BarCounts({ counts, max = 8, recovered }) {
+export function BarCounts({ counts, max = 8, recovered, shots }) {
   if (!counts) return null
+  // `counts` is the FULL counts dict (the backend never truncates), so its
+  // values sum to the shot count. The bars below show only the top `max` --
+  // for a uniform distribution (e.g. QFT of a basis state) every outcome is
+  // counted once, so each top bar is 1 even though Σ across ALL outcomes
+  // equals the shots. Surface that total + the unique-outcome count so the
+  // displayed counts visibly correspond to the chosen shots.
+  const allVals = Object.values(counts).map(v => +v)
+  const total = allVals.reduce((s, c) => s + c, 0)
+  const unique = allVals.length
   const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, max)
   const top = Math.max(...entries.map(e => e[1]), 1)
   const recBs = recovered && recovered.bitstring
     ? String(recovered.bitstring).replace(/ /g, '') : null
+  const shotTotal = shots != null ? +shots : null
+  const sumMatches = shotTotal != null && total === shotTotal
   return (
     <div className="counts">
       {/* qiskit bitstrings are MSB-first (leftmost char = q_{n-1}); reverse so
@@ -142,6 +153,12 @@ export function BarCounts({ counts, max = 8, recovered }) {
           qiskit "001" (q0=1) shows as "100" and its leftmost bar bit lines up
           with grid cell 0 instead of looking like cell 2. */}
       <div className="counts-axis mono">q0 ← state → qₙ₋₁  (matches grid cell order)</div>
+      <div className="counts-summary mono">
+        Σ {total.toLocaleString()}{shotTotal != null ? ` / ${shotTotal.toLocaleString()} shots` : ''}
+        {shotTotal != null ? (sumMatches ? ' ✓' : ' ✗ mismatch') : ''}
+        {' · '}{unique.toLocaleString()} unique outcome{unique === 1 ? '' : 's'}
+        {' · top '}{entries.length} shown
+      </div>
       {entries.map(([state, n]) => {
         const disp = String(state).replace(/ /g, '').split('').reverse().join('')
         const isRec = !!recBs && String(state).replace(/ /g, '') === recBs
