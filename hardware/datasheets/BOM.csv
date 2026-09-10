@@ -1,12 +1,10 @@
 Board,Designators,Qty,Value,Footprint,Manufacturer,MPN,DatasheetURL
-main,"C36, C37",2,100n,Capacitor_SMD:C_0603_1608Metric,,,
+main,"C36, C37, C41",3,100n,Capacitor_SMD:C_0603_1608Metric,,,
 main,"C1, C2, C3, C4, C5, C6, C7, C8, C9, C10, C11, C12, C13, C14, C15, C16, C17, C18, C19, C20, C40, C44, C46, C48, C55, C56, C58, C59, C60, C61, C62, C63, C64, C65, C68, C86, Cem0, Cem1, Cem2",39,100nF,Capacitor_SMD:C_0603_1608Metric,,,
 main,L2,1,100nH,Inductor_SMD:L_0603_1608Metric,,,
 main,"C34, C35",2,100p,Capacitor_SMD:C_0603_1608Metric,,,
 main,R83,1,10k,Resistor_SMD:R_0603_1608Metric,,,
 main,C32,1,10n,Capacitor_SMD:C_0603_1608Metric,,,
-main,C41,1,10nF,Capacitor_SMD:C_0603_1608Metric,,,
-main,"C21, C22, C23, C24, C25, C26, C27, C28, C29, C30, C42, C43, C45, C47, C51",15,10uF,Capacitor_SMD:C_0805_2012Metric,,,
 main,R67,1,1k,Resistor_SMD:R_0603_1608Metric,,,
 main,R68,1,2.2k,Resistor_SMD:R_0603_1608Metric,,,
 main,"C31, C33",2,220p,Capacitor_SMD:C_0603_1608Metric,,,
@@ -17,10 +15,11 @@ main,"R73, R75, R76, R77, R80, R81, R82",7,4.7k,Resistor_SMD:R_0603_1608Metric,,
 main,"C52, C53, C54, C57, C84",5,4.7uF,Capacitor_SMD:C_0805_2012Metric,,,
 main,"R71, R72",2,5.1k,Resistor_SMD:R_0603_1608Metric,,,
 main,"D1, D2, D3, D4, D5, D6, D7, D8, D9, D10",10,ESD5V0,Diode_SMD:D_SOD-923,ON Semi,ESD5V0S3B-U,https://www.onsemi.com/pub/Collateral/ESD5V0S3B-U-D.PDF
-main,Y1,1,100MHz TCXO,Oscillator:Oscillator_SMD_Abracon_ASE-4Pin_3.2x2.5mm,,,
+main,Y1,1,100MHz XO,Oscillator:Oscillator_SMD_Abracon_ASE-4Pin_3.2x2.5mm,,,
 head,"C_ahf, Cref, Crio0, Crio1, Crio2, Crio3, Cua0, Cua1, Cua2, Cua3, Cud0, Cud1, Cud2, Cud3, Cur0, Cur1, Cur2, Cur3, Cut0, Cut1, Cut2, Cut3, Cut4, Cut5, Cut6, Cut7, Cut8, Cut9, Cut10, Cut11, Cut12, Cut13, Cut14, Cut15",34,100nF,Capacitor_SMD:C_0603_1608Metric,,,
 head,"Rref1, Rref2",2,10k,Resistor_SMD:R_0603_1608Metric,,,
-head,"C_Abulk, CuaB0, CuaB1, CuaB2, CuaB3",5,10uF,Capacitor_SMD:C_0805_2012Metric,,,
+main,"C_in, C21, C22, C23, C24, C25, C26, C27, C28, C29, C30, C42, C43, C45, C47, C51",16,10uF,Capacitor_SMD:C_0805_2012Metric,,,
+head,"C_5V, C_Abulk, CuaB0, CuaB1, CuaB2, CuaB3",6,10uF,Capacitor_SMD:C_0805_2012Metric,,,
 main,J4,1,12V LED,Connector_BarrelJack:BarrelJack_CUI_PJ-102AH_Horizontal,,,
 main,F2,1,1A PTC,Fuse:Fuse_1206_3216Metric,,,
 head,"Rf0, Rf1, Rf2, Rf3, Rf4, Rf5, Rf6, Rf7, Rf8, Rf9, Rf10, Rf11, Rf12, Rf13, Rf14, Rf15, Rf16, Rf17, Rf18, Rf19, Rf20, Rf21, Rf22, Rf23, Rf24, Rf25, Rf26, Rf27, Rf28, Rf29, Rf30, Rf31, Rf32, Rf33, Rf34, Rf35, Rf36, Rf37, Rf38, Rf39, Rf40, Rf41, Rf42, Rf43, Rf44, Rf45, Rf46, Rf47, Rf48, Rf49, Rf50, Rf51, Rf52, Rf53, Rf54, Rf55, Rf56, Rf57, Rf58, Rf59, Rf60, Rf61, Rf62, Rf63",64,1M,Resistor_SMD:R_0603_1608Metric,,,
@@ -38,15 +37,15 @@ main,REG1,1,AMS1117-3.3,Package_TO_SOT_SMD:SOT-223-3_TabPin2,AMS,AMS1117-3.3,htt
 main,REG3,1,AP2127K-1.0,Package_TO_SOT_SMD:SOT-23-5,Diodes Inc,AP2127K-1.0,https://www.diodes.com/assets/Datasheets/AP2127K.pdf
 head,J12,1,BTB_DAUGHTER,qssc:Conn_02x10_BTB,Würth Elektronik,61002021121,https://www.we-online.com/en/components/products/WR-PHD_2_54_MM_THT_FEMALE_HEADER_VERTICAL_61002021121
 main,J12,1,BTB_HOST,qssc:Conn_02x10_BTB,Würth Elektronik,61302011121,https://www.we-online.com/en/components/products/WR-PHD_2_54_MM_SMT_PIN_HEADER_61302011121
+head,Uchip,1,ChipSocket_2.54_DET,qssc:ChipSocket_2.54_DET,,,
+main,Uchip,1,ChipSocket_2.54_EM,qssc:ChipSocket_2.54_EM,,,
 main,J1,1,FT232RL,Package_SO:SSOP-28_5.3x10.2mm_P0.65mm,FTDI,FT232RL,https://www.ftdichip.com/Support/Documents/DataSheets/ICs/DS_FT232R.pdf
 main,U5,1,GVA-84+,Package_TO_SOT_SMD:SOT-89-3,Mini-Circuits,GVA-84+,https://www.minicircuits.com/WebStore/dashboard.html?model=GVA-84%2B
 main,LED1,1,Green,LED_SMD:LED_0603_1608Metric,,,
-main,Uchip,1,Ironwood_SBT,qssc:Ironwood_SBT,Ironwood Electronics,SBT custom (quote against die drawing),https://www.ironwood.com/pqfp-spring-pin-test-sockets/
 main,J9,1,JTAG,Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical,Würth,61300411121,
 main,J8,1,MW_GATE,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,Würth,61300211121,
 main,"#FLG1, #FLG2, #FLG3, #FLG4, #FLG5, #FLG6, #FLG7, #FLG8",8,PWR_FLAG,,,,
-head,"#FLG10, #FLG11, #FLG9",3,PWR_FLAG,,,,
-head,Uchip,1,QSSC_Chip_DET,qssc:QSSC_Chip_DET,project die,QSSC-128pad-CQD (detector face),
+head,"#FLG10, #FLG11, #FLG12, #FLG9",4,PWR_FLAG,,,,
 main,J7,1,RESET,Button_Switch_THT:SW_PUSH_6mm_H5mm,Würth,430182050816,
 main,J3,1,SMA,Connector_Coaxial:SMA_Amphenol_132289_EdgeMount,Amphenol,132289,https://www.amphenolrf.com/132289.html
 main,D_USB,1,SS14 Schottky,Diode_SMD:D_SMA,,,
