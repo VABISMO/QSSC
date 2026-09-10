@@ -543,6 +543,16 @@ export default function App() {
   const running = job && job.status !== 'finished' && job.status !== 'failed'
 
   const runCounts = result && (result.counts || (result.result && result.result.counts))
+  // For period-finding (shor/period/qftnos) the backend also returns
+  // marginal_counts: the full measured-bitstring distribution collapsed onto
+  // the counting register, keyed by each counting value's *representative*
+  // full bitstring. Its bars sum to shots, concentrate each phase peak into one
+  // bar (instead of smearing it across the measured-ancilla states), and the
+  // recovered-signal bar count then equals recovered.count. Prefer it for the
+  // histogram + grid when present; fall back to the raw full-bitstring counts
+  // for math / ideal / anything that does not marginalize.
+  const runMarginal = result && (result.marginal_counts || (result.result && result.result.marginal_counts))
+  const displayCounts = runMarginal || runCounts
   const runAssessment = result && result.assessment
   const runBits = result && result.num_clbits
   const runRecovered = result && (result.recovered || (result.result && result.result.recovered))
@@ -1377,9 +1387,11 @@ export default function App() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
               <div className="card histcard">
                 <h2><span className="dot" />Measurement histogram</h2>
-                <div className="hint">Top bitstrings from the most recent run (most-probable first).</div>
-                {runCounts
-                  ? <BarCounts counts={runCounts} recovered={runRecovered} />
+                <div className="hint">{runMarginal
+                  ? 'Phase-register marginal (ancilla collapsed): bar counts sum to shots, the recovered signal peak is concentrated.'
+                  : 'Top bitstrings from the most recent run (most-probable first).'}</div>
+                {displayCounts
+                  ? <BarCounts counts={displayCounts} recovered={runRecovered} />
                   : runErr
                     ? <div className="muted">Last run failed — see the error above.</div>
                     : <div className="muted">No run yet — execute a circuit on the left.</div>}
@@ -1391,7 +1403,7 @@ export default function App() {
                 {cal.data && cal.data.sites && (
                   <QubitGrid
                     sites={cal.data.sites}
-                    counts={runCounts}
+                    counts={displayCounts}
                     numClbits={runBits}
                     recovered={runRecovered}
                   />

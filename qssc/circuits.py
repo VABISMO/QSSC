@@ -162,6 +162,9 @@ def postprocess_period(counts: dict, num_control: int, a: int, n: int,
         cval = int(state.replace(" ", ""), 2) & mask
         marginal[cval] = marginal.get(cval, 0) + count
     total = sum(marginal.values())
+    if reveal is not None:
+        reveal["marginal_counts"] = _marginal_counts_by_representative(
+            counts, marginal, mask)
     floor = total / (2 ** num_control) if num_control > 0 else total
     for cval, mcount in sorted(marginal.items(), key=lambda x: x[1],
                               reverse=True)[:12]:
@@ -197,6 +200,38 @@ def _top_full_for(counts: dict, cval: int, mask: int) -> str:
         if (int(state.replace(" ", ""), 2) & mask) == cval and count > best_n:
             best, best_n = state.replace(" ", ""), count
     return best
+
+
+def _marginal_counts_by_representative(counts: dict, marginal: dict,
+                                       mask: int) -> dict:
+    """Collapse the full measured-bitstring distribution onto the counting
+    register for display.
+
+    For each counting value, sum the counts of every full bitstring that shares
+    it (the marginal, already computed by the caller) and key the entry by that
+    counting value's *representative* full bitstring (the most-likely one, via
+    :func:`_top_full_for`). The returned histogram has three properties the
+    dashboard relies on:
+
+    * its bars **sum to ``shots``** -- the marginal is a partition of the full
+      counts, so the bar counts correspond to the shot count exactly (a full
+      13-bit distribution spreads each phase peak across the 2**ancilla
+      measured-ancilla states, making every bar noise-level and disconnected
+      from the shot count);
+    * each phase peak is **concentrated into one bar** instead of smeared across
+      the measured-ancilla states, so the signal rises above the noise floor and
+      the recovered-peak bar count equals ``reveal['count']`` (the marginal),
+      not the diluted single-bitstring count;
+    * every key is a **full-width bitstring**, so the qubit grid still lights
+      every measured qubit (the ancilla bits are the representative's ancilla
+      state -- arbitrary, because the ancilla carries no phase information).
+    """
+    out = {}
+    for cval, mcount in marginal.items():
+        rep = _top_full_for(counts, cval, mask)
+        if rep is not None:
+            out[rep] = int(mcount)
+    return out
 
 
 def create_shor_circuit(n: int, a: Optional[int] = None, rng=None):
@@ -291,6 +326,9 @@ def postprocess_period_swapless(counts: dict, num_control: int,
         cval = int(state.replace(" ", ""), 2) & mask
         marginal[cval] = marginal.get(cval, 0) + count
     total = sum(marginal.values())
+    if reveal is not None:
+        reveal["marginal_counts"] = _marginal_counts_by_representative(
+            counts, marginal, mask)
     floor = total / (2 ** num_control) if num_control > 0 else total
     for cval, mcount in sorted(marginal.items(), key=lambda x: x[1],
                              reverse=True)[:12]:

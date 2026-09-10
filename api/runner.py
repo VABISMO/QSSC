@@ -98,6 +98,7 @@ def run_circuit(req: dict) -> dict:
         a = r = factors = qc = counts = None
         attempt = 0
         recovered = None
+        marginal_counts = None
         # fewer retries for larger N: each attempt's Aer run grows ~exponentially
         # with qubit count, so 8 attempts at N=21 would exceed the 120 s timeout.
         max_attempts = 8 if n <= 15 else 3
@@ -112,6 +113,7 @@ def run_circuit(req: dict) -> dict:
             r, factors = postprocess_period(counts,
                                             qc.metadata["counting_bits"], a, n,
                                             signal_retention=_ret, reveal=_reveal)
+            marginal_counts = _reveal.get("marginal_counts")
             if factors[0] and factors[0] * factors[1] == n:
                 recovered = _reveal
                 break
@@ -122,6 +124,7 @@ def run_circuit(req: dict) -> dict:
         _hom = float(getattr(res, "assessment", {}).get(
             "hom_visibility", 1.0) or 1.0)
         result.update({"n": n, "a": a, "counts": counts,
+                       "marginal_counts": marginal_counts,
                        "period": r,
                        "factors": list(factors) if factors[0] else None,
                        "success": ok, "attempts": attempt + 1,
@@ -165,6 +168,7 @@ def run_circuit(req: dict) -> dict:
         phase = (int(bs.replace(" ", ""), 2) & ((1 << _cb) - 1)) / 2 ** _cb
         frac = Fraction(phase).limit_denominator(n - 1)
         result.update({"n": n, "a": a, "counts": counts,
+                       "marginal_counts": _reveal.get("marginal_counts"),
                        "top_state": bs, "phase": round(phase, 6),
                        "fraction": str(frac), "period": r})
         if _reveal:
@@ -353,6 +357,7 @@ def run_circuit(req: dict) -> dict:
         a = r = factors = qc = counts = None
         attempt = 0
         recovered = None
+        marginal_counts = None
         max_attempts = 8 if n <= 15 else 3
         for attempt in range(max_attempts):
             a = (chosen_a if (chosen_a is not None and attempt == 0)
@@ -367,6 +372,7 @@ def run_circuit(req: dict) -> dict:
                                                      a, n,
                                                      signal_retention=_ret,
                                                      reveal=_reveal)
+            marginal_counts = _reveal.get("marginal_counts")
             if factors[0] and factors[0] * factors[1] == n:
                 recovered = _reveal
                 break
@@ -385,7 +391,8 @@ def run_circuit(req: dict) -> dict:
             "signal_retention", 0.0) or 0.0)
         _hom = float(getattr(res, "assessment", {}).get(
             "hom_visibility", 1.0) or 1.0)
-        result.update({"n": n, "a": a, "counts": counts, "period": r,
+        result.update({"n": n, "a": a, "counts": counts,
+                       "marginal_counts": marginal_counts, "period": r,
                        "factors": list(factors) if factors[0] else None,
                        "success": ok, "attempts": attempt + 1,
                        "counting_qubits": qc.metadata["counting_bits"],
