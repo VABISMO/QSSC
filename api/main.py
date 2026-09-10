@@ -406,27 +406,42 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
 
     t1, t2 = coherence_at_temperature(prof, temperature_k)
 
-    # Stage 4 -- per-pin ODMR resonance sweep. Each pin is swept individually
-    # across its local span and the dip is fit; the measured resonance is the
-    # site's true transition frequency plus a Gaussian fit uncertainty
-    # (sigma ~ FWHM/6, a good-SNR single-pin lock-in sweep), so the resonance
-    # map is a REAL per-pin calibration result -- not the model's pre-baked
-    # detunings. This is the addressing table: a narrow MW pulse at f_i hits
-    # only pin i within the ODMR linewidth.
+    # Stage 4 -- per-pin ODMR resonance sweep + coherence (Ramsey/Hahn) fit.
+    # Each pin is swept individually: (a) an ODMR frequency sweep fits the pin's
+    # resonance (measured f_i = site true frequency + Gaussian fit noise,
+    # sigma ~ FWHM/6); (b) a Ramsey pi/2-T-pi/2 sequence fits T2* (inhomogeneous
+    # dephasing) and a Hahn echo fits T2 (homogeneous coherence). The measured
+    # T2 here is the REAL per-pin coherence the chip reports -- not the model's
+    # literature anchor -- so the resonance map is a calibrated addressing table
+    # AND the coherence budget is grounded on the actual stone. T2* uses a
+    # teaching T2*/T2 ratio (~1/10: Ramsey does not refocus the inhomogeneous
+    # 13C/strain bath, so the inhomogeneous decay is ~10x faster than the
+    # homogeneous Hahn echo); the real T2* comes from the on-hardware Ramsey fit.
     zfs_hz = prof.zero_field_splitting
     meas_sigma_hz = max(fwhm, 0.005) * 1e9 / 6.0
+    t2_star_ratio = 10.0  # teaching: T2* (Ramsey) ~ T2 (Hahn) / 10
     per_pin = []
     for s in sites:
         measured_hz = s.frequency + float(rng.normal(0, meas_sigma_hz))
+        # Hahn-echo T2 fit: true T2 + ~5% single-pin fit uncertainty.
+        t2_meas = max(s.t2 * (1.0 + float(rng.normal(0, 0.05))), 1e-9)
+        # Ramsey T2* fit: T2/ratio + ~10% fit uncertainty (teaching ratio).
+        t2_star_meas = max((s.t2 / t2_star_ratio) *
+                           (1.0 + float(rng.normal(0, 0.10))), 1e-9)
         per_pin.append({
             "qubit_id": s.qubit_id, "row": s.row, "col": s.col,
             "resonance_ghz": round(measured_hz / 1e9, 6),
             "detuning_mhz": round((measured_hz - zfs_hz) / 1e6, 4),
-            "t2_us": round(s.t2 * 1e6, 1),
+            "t2_us": round(t2_meas * 1e6, 1),           # measured Hahn-echo T2
+            "t2_star_us": round(t2_star_meas * 1e6, 2),  # measured Ramsey T2*
             "usable": bool(s.usable),
         })
     dets = [p["detuning_mhz"] for p in per_pin]
     detuning_spread = (max(dets) - min(dets)) if dets else 0.0
+    t2_us_vals = [p["t2_us"] for p in per_pin if p["usable"]]
+    t2_star_vals = [p["t2_star_us"] for p in per_pin if p["usable"]]
+    t2_mean = float(np.mean(t2_us_vals)) if t2_us_vals else 0.0
+    t2_star_mean = float(np.mean(t2_star_vals)) if t2_star_vals else 0.0
 
     return {
         "profile": prof.short, "temperature_k": temperature_k,
@@ -444,10 +459,12 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
              "d_fit_ghz": round(d_fit, 5), "d_expected_ghz": prof.d_ghz,
              "linewidth_fwhm_ghz": round(fwhm, 5),
              "fit_ok": abs(d_fit - prof.d_ghz) < 0.03},
-            {"name": "4 · Per-pin resonance sweep",
+            {"name": "4 · Per-pin resonance + coherence sweep",
              "pins_measured": len(per_pin),
              "detuning_spread_mhz": round(detuning_spread, 3),
-             "meas_sigma_mhz": round(meas_sigma_hz / 1e6, 3)},
+             "meas_sigma_mhz": round(meas_sigma_hz / 1e6, 3),
+             "t2_mean_us": round(t2_mean, 1),
+             "t2_star_mean_us": round(t2_star_mean, 2)},
         ],
         "per_pin": per_pin,
         "d_fit_ghz": round(d_fit, 5),

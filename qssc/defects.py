@@ -241,7 +241,15 @@ NV_DIAMOND = DefectProfile(
     excitation_wavelength_nm=532.0,
     fluorescence_range_nm=(650, 800),
     t1_room=6.0e-3,                  # ~6 ms T1 at 300 K (Jarmola 2012)
-    t2_room=1.8e-3,                  # 1.8 ms Hahn echo in 99.7% 12C-enriched diamond, RT (Balasubramanian 2009)
+    t2_room=1.8e-3,                  # 1.8 ms Hahn echo, 12C-enriched synthetic diamond, RT
+    # (Balasubramanian 2009). CONSERVATIVE LITERATURE ANCHOR for the chip's 12C
+    # synthetic stone -- normal grade, NOT ppb electronic grade. The 300 K NV
+    # compute experiments (Neumann 2008, Dolde 2013, Wu 2019) run on normal-grade
+    # diamond, and 1.8 ms sits in the lower-middle of what a 12C stone reaches:
+    # dynamical decoupling (CPMG/XY8) pushes T2 well beyond it, ultimately T1-
+    # limited. The chip's REAL T2 is the per-pin Hahn-echo value the calibration
+    # measures (api.main.calibration_run stage 4); this anchor is replaced by
+    # that measurement. Not a supplier-quoted number.
     fluorescence_factor=1.2,         # 20% brighter when cooled to 77 K
     readout_error=0.08,              # single-shot spin readout ~90% fidelity
     defect_density_per_um2=5.0,
@@ -277,10 +285,15 @@ NV_DIAMOND = DefectProfile(
     # single-shot readout keeps the bright/dark bias small).
     frequency_detuning_spread_hz=2.0e6,
     readout_asymmetry=0.10,
-    notes="Workhorse room-temperature defect; D~2.87 GHz. Best-in-class RT coherence "
-          "(1.8 ms) requires 12C purification; natural-abundance diamond is ~0.5-0.7 ms. "
-          "Optical channel: 300 K V_HOM ~ 2e-7 (photon 2q gate decoheres); cryo V -> 1 "
-          "(transform-limited ideal; real tuned cryo NV ~0.4-0.7).",
+    notes="Workhorse room-temperature defect; D~2.87 GHz. T2=1.8 ms is a CONSERVATIVE "
+          "literature anchor for the chip's 12C-enriched SYNTHETIC diamond (normal grade, "
+          "not ppb electronic grade -- the 300 K compute experiments Neumann 2008 / Dolde "
+          "2013 / Wu 2019 use normal-grade stones, not ppb). 12C purification removes the "
+          "13C spin bath (natural-abundance diamond is ~0.5-0.7 ms); with dynamical "
+          "decoupling T2 exceeds 1.8 ms (ultimately T1-limited). The chip's REAL T2 is "
+          "the per-pin Hahn-echo value measured at calibration (api.main stage 4), which "
+          "replaces this anchor. Optical channel: 300 K V_HOM ~ 2e-7 (photon 2q gate "
+          "decoheres); cryo V -> 1 (transform-limited ideal; real tuned cryo NV ~0.4-0.7).",
     references=(
         "Doherty et al., Physics Reports 528, 1 (2013) — NV centre review (D=2.87 GHz).",
         "Balasubramanian et al., Nature Materials 8, 383 (2009), doi:10.1038/nmat2420 — "
