@@ -19,7 +19,7 @@ from qssc import (
     auto_align, QSSCBackend, SimulatedFPGA,
     create_period_finding_circuit, create_shor_circuit, create_qft_nos_circuit,
     create_math_circuit, grover_search, postprocess_period,
-    postprocess_period_swapless, select_coprime, is_prime,
+    postprocess_period_swapless, select_coprime, is_prime, perfect_power,
     build_user_circuit, UserCircuitError,
 )
 from qssc.crypto import (
@@ -97,6 +97,13 @@ def run_circuit(req: dict) -> dict:
                              f"simulator (>16 qubits -> each Aer run takes minutes "
                              f"and may hang). Use N <= 31 (shor/period) or <= 127 "
                              f"(qftnos)."}
+        # Shor classical preprocessing step 1: N = p^k (a prime power). For
+        # every coprime base a, a^(r/2) = +/- 1 mod p^k, so the quantum gcd step
+        # yields only trivial factors (1, N) -- the quantum circuit "runs but
+        # returns no factors" (9=3^2, 25=5^2, 27=3^3 ...). Factor it classically
+        # and still run ONE quantum attempt so the histogram + phase peak are
+        # shown (the derivation explains why the quantum gcd is trivial here).
+        pp = perfect_power(n)
         rng = np.random.default_rng(seed)
         chosen_a = req.get("a")
         a = r = factors = qc = counts = None
@@ -127,8 +134,24 @@ def run_circuit(req: dict) -> dict:
             if factors[0] and factors[0] * factors[1] == n:
                 recovered = _reveal
                 break
+            # prime power: one attempt is enough -- the quantum gcd is trivial
+            # (factors come from the classical preprocessing below), so keep the
+            # measured phase peak for the histogram (only if one was recovered)
+            # and stop retrying.
+            if pp is not None:
+                recovered = _reveal if (_reveal and _reveal.get("bitstring")) else None
+                break
             chosen_a = None
         ok = bool(factors[0]) and factors[0] * factors[1] == n
+        # Prime power N = p^k: the quantum gcd step is trivial here, so take
+        # the factor from the classical preprocessing. Keep the measured counts
+        # + recovered phase peak (if any) for the histogram / derivation, and
+        # flag prime_power so the derivation can explain the classical step.
+        if pp is not None:
+            pbase, pexp = pp
+            factors = (pbase, n // pbase)
+            ok = True
+            result["prime_power"] = {"base": pbase, "exp": pexp}
         _retention = float(getattr(res, "assessment", {}).get(
             "signal_retention", 0.0) or 0.0)
         _hom = float(getattr(res, "assessment", {}).get(
@@ -148,6 +171,10 @@ def run_circuit(req: dict) -> dict:
                 "period": recovered["period"],
                 "factors": list(recovered["factors"]) if recovered["factors"][0] else None,
             }
+        if pp is not None and recovered:
+            # carry the classically-recovered factors into the derivation peak
+            result["recovered"]["factors"] = list(factors)
+            result["recovered"]["prime_power"] = {"base": pp[0], "exp": pp[1]}
         result.update(_circuit_meta(qc))
 
     elif algo == "period":
@@ -203,6 +230,29 @@ def run_circuit(req: dict) -> dict:
         # sqrt/log only take one operand; a missing second arg must not crash
         # with float(None). create_math_circuit accepts num2=None (defaults 0).
         num2 = float(raw_b) if raw_b is not None else None
+        # Cap the word so the circuit cannot outgrow the Aer simulator and wedge
+        # the in-process worker. mul builds an RGQFTMultiplier on 4*bits qubits
+        # (a + b + 2*bits result), so two 4-digit operands -> bits ~ 16 -> a
+        # 64-qubit circuit -> Aer hangs; the 120s watchdog cannot kill the
+        # thread, so one such job permanently occupies a worker slot and the
+        # whole API stalls ("se deja todo colgado con una multiplicacion").
+        # Reject up front with a clear limit instead of letting it hang.
+        _n1 = abs(int(num1))
+        _n2 = abs(int(num2)) if num2 is not None else 0
+        _req_bits = req.get("bits")
+        _min_bits = max(1, math.ceil(math.log2(max(_n1, _n2, 1)))) + 2
+        _bits = max(_min_bits, int(_req_bits)) if _req_bits else _min_bits
+        _op = op.lower()
+        _nq = {"add": 2 * _bits, "sub": 2 * _bits, "mul": 4 * _bits,
+               "sqrt": _bits + 1, "log": _bits + 1}.get(_op, 2 * _bits)
+        _MATH_MAX_QUBITS = 20
+        if _nq > _MATH_MAX_QUBITS:
+            return {"error": (
+                f"{op}({int(num1)}" + (f", {int(num2)}" if num2 is not None else "")
+                + f") needs a {_nq}-qubit circuit -- over the "
+                f"{_MATH_MAX_QUBITS}-qubit demo cap (Aer would hang and stall "
+                f"the API). Use smaller operands or a smaller Word. Limits: "
+                f"mul operands <= 8, add/sub operands <= 256.")}
         qc = create_math_circuit(op, num1, num2, bits=req.get("bits"))
         res = b.run(qc, shots=shots).result()
         counts = res.get_counts()
@@ -369,6 +419,9 @@ def run_circuit(req: dict) -> dict:
                              f"simulator (>16 qubits -> each Aer run takes minutes "
                              f"and may hang). Use N <= 31 (shor/period) or <= 127 "
                              f"(qftnos)."}
+        # Prime power N = p^k: same trivial-gcd issue as full Shor (see the shor
+        # branch). Factor classically; run one QFT-NOS attempt for the histogram.
+        pp = perfect_power(n)
         rng = np.random.default_rng(seed)
         chosen_a = req.get("a")
         a = r = factors = qc = counts = None
@@ -396,8 +449,22 @@ def run_circuit(req: dict) -> dict:
             if factors[0] and factors[0] * factors[1] == n:
                 recovered = _reveal
                 break
+            # prime power: one attempt is enough -- the quantum gcd is trivial
+            # (factors come from the classical preprocessing below), so keep the
+            # measured phase peak for the histogram (only if one was recovered)
+            # and stop retrying.
+            if pp is not None:
+                recovered = _reveal if (_reveal and _reveal.get("bitstring")) else None
+                break
             chosen_a = None
         ok = bool(factors[0]) and factors[0] * factors[1] == n
+        # Prime power N = p^k: take the factor from the classical preprocessing
+        # (the quantum gcd step is trivial here). See the shor branch.
+        if pp is not None:
+            pbase, pexp = pp
+            factors = (pbase, n // pbase)
+            ok = True
+            result["prime_power"] = {"base": pbase, "exp": pexp}
         comparison = None
         try:
             full_qc, _ = create_shor_circuit(n, a=a)
@@ -427,6 +494,9 @@ def run_circuit(req: dict) -> dict:
                 "period": recovered["period"],
                 "factors": list(recovered["factors"]) if recovered["factors"][0] else None,
             }
+        if pp is not None and recovered:
+            result["recovered"]["factors"] = list(factors)
+            result["recovered"]["prime_power"] = {"base": pp[0], "exp": pp[1]}
         result.update(_circuit_meta(qc))
 
     elif algo == "bb84":

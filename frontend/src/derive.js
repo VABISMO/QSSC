@@ -85,6 +85,36 @@ function deriveShorFamily(algo, result) {
     ? `Shor-style factoring — how the phase measurement gives the factors of ${n}`
     : `Period finding — how the phase measurement gives the order of ${a} mod ${n}`
 
+  // Prime power N = p^k: Shor's classical preprocessing step 1. The quantum gcd
+  // step is trivial for prime powers (a^(r/2) = +/-1 mod p^k -> gcd is 1 or N),
+  // so the factor is recovered classically. We still mark the measured phase
+  // peak (if one was recovered) and walk BOTH chains: the (trivial) quantum
+  // gcd, then the classical prime-power detection that actually gives the factor.
+  const pp = result && result.prime_power
+  if (pp && isFactoring) {
+    const p = pp.base, k = pp.exp, other = n / p
+    const bs = rec && rec.bitstring ? clean(rec.bitstring) : null
+    const t = phaseT(algo, result)
+    const steps = [
+      { k: 'Circuit', v: `${algo} on N=${n}, base a=${a}` },
+      { k: 'Classical preprocessing (Shor step 1)', v: `is ${n} a prime power?  ${n} = ${p}^${k}` },
+      { k: 'Why the quantum step is skipped', v: `for N=p^k, a^(r/2) ≡ ±1 mod p^k for every coprime a, so gcd(a^(r/2)±1, N) = 1 or N — trivial` },
+    ]
+    if (bs) {
+      const cval = parseInt(bs, 2) & ((1 << t) - 1)
+      const swapless = algo === 'qftnos'
+      const dec = swapless ? bitRev(cval, t) : cval
+      steps.push({ k: `Measured phase peak (display, q0…qₙ₋₁)`, v: disp(bs) })
+      steps.push({ k: `Phase φ = ${dec} / 2^${t}`, v: (+ (dec / (1 << t))).toFixed(6) })
+    }
+    steps.push({ k: 'Classical factor', v: `${n} = ${p} × ${other} ✓  (one factor is the prime base ${p}, the other is ${p}^${k - 1} = ${other})` })
+    return {
+      bars: bs ? [bs] : [], label: `→ ${p}×${other}`, hasResult: true, title,
+      steps,
+      summary: `${n} is a prime power (${p}^${k}). Shor's algorithm detects prime powers classically as step 1, BEFORE the quantum period-finding: for N=p^k the quantum gcd step a^(r/2)±1 always gives a trivial factor (1 or N), so the factor p is recovered by classical integer-root extraction instead. The marked bar (if shown) is the measured phase peak — included for display, but the factor did NOT come from it; it came from the classical prime-power test.`,
+    }
+  }
+
   if (!rec || rec.bitstring == null) {
     return {
       bars: [], label: '→ no signal', hasResult: false,

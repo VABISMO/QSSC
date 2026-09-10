@@ -500,3 +500,18 @@ textarea.code-editor:focus { outline: 1px solid var(--brand); border-color: var(
 .derive-summary { font-size: 12.5px; line-height: 1.6; color: var(--text);
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
   padding: 10px 12px; margin: 0; }
+
+/* ---- per-qubit resonance table ---- */
+.qfreq-scroll { max-height: 360px; overflow-y: auto; border: 1px solid var(--border);
+  border-radius: 6px; }
+.qfreq { width: 100%; border-collapse: collapse; font-size: 12px; }
+.qfreq thead th { position: sticky; top: 0; background: var(--panel-2); color: var(--dim);
+  font-weight: 600; text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border);
+  z-index: 1; white-space: nowrap; }
+.qfreq tbody td { padding: 5px 10px; border-bottom: 1px solid var(--border); }
+.qfreq tbody tr:hover { background: var(--panel-2); }
+.qfreq tbody tr.drop { opacity: 0.5; }
+.qfreq td.det.pos { color: #ff8a8a; }
+.qfreq td.det.neg { color: #8ac8ff; }
+.tag.ok { color: #7bd88f; font-size: 11px; }
+.tag.bad { color: #ff8a8a; font-size: 11px; }

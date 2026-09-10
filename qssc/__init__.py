@@ -29,7 +29,7 @@ from .circuits import (
     is_prime, select_coprime, mod_mult_gate, create_period_finding_circuit,
     postprocess_period, create_shor_circuit, create_qft_nos_circuit,
     postprocess_period_swapless, create_math_circuit, grover_search,
-    build_user_circuit, UserCircuitError,
+    build_user_circuit, UserCircuitError, perfect_power,
 )
 from .sensors import (
     lockin_integrated_readout, compass_measure, gyro_measure,
@@ -49,7 +49,7 @@ __all__ = [
     "is_prime", "select_coprime", "mod_mult_gate", "create_period_finding_circuit",
     "postprocess_period", "create_shor_circuit", "create_qft_nos_circuit",
     "postprocess_period_swapless", "create_math_circuit",
-    "grover_search", "build_user_circuit", "UserCircuitError",
+    "grover_search", "build_user_circuit", "UserCircuitError", "perfect_power",
     "lockin_integrated_readout", "compass_measure", "gyro_measure",
     "CompassResult", "GyroResult", "__version__",
 ]
