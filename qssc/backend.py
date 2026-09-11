@@ -184,9 +184,32 @@ class FPGAConnection:
         if not (0 <= int(site) < N_SITES) or not (1 <= int(n_cycles) <= 100000):
             raise ValueError("site/n_cycles out of range")
         reply = self.send_command(f"READ_LOCKIN {int(site)} {int(n_cycles)}")
+        return self._parse_lockin_reply(reply)
+
+    def read_lockinp(self, site: int, n_cycles: int, half_ns: int) -> dict:
+        """``READ_LOCKINP <site> <n> <half_ns>`` -> prime-period lock-in result.
+
+        Same accumulator + reply shape as :meth:`read_lockin`, but the on/off
+        half-period is the host-supplied ``half_ns`` (= ``p * tau / 2`` for the
+        prime ``p`` that :mod:`qssc.prime_readout` assigned to this NV channel),
+        instead of the fixed 200 us default. The prime-coprime orthogonality
+        (zero cross-talk over the LCM) lives in the Python readout model; the
+        RTL just demodulates at the requested half-period. Returns the same
+        dict shape as :meth:`read_lockin`.
+        """
+        if not (0 <= int(site) < N_SITES) or not (1 <= int(n_cycles) <= 100000):
+            raise ValueError("site/n_cycles out of range")
+        if int(half_ns) < 2000:
+            raise ValueError("half_ns must be >= 2000 (>= 20 clk cycles)")
+        reply = self.send_command(
+            f"READ_LOCKINP {int(site)} {int(n_cycles)} {int(half_ns)}")
+        return self._parse_lockin_reply(reply)
+
+    def _parse_lockin_reply(self, reply: str) -> dict:
+        """Parse the four-int lock-in reply (shared by READ_LOCKIN/READ_LOCKINP)."""
         toks = reply.split()
         if len(toks) != 4:
-            raise IOError(f"READ_LOCKIN reply mismatch: {reply!r}")
+            raise IOError(f"READ_LOCKIN(P) reply mismatch: {reply!r}")
         sum_on, sum_off, n_on, n_off = (int(t) for t in toks)
         n_on = max(1, n_on)
         n_off = max(1, n_off)

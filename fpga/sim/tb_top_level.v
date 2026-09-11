@@ -910,6 +910,69 @@ module tb_top_level;
             $display("TB: FAIL READ_LOCKIN (got %0d bytes)", rx_log_cnt);
         end
 
+        // ---- 17b) READ_LOCKINP 0 4 10000 -> same 4936 4936 4 4 (prime-period
+        // lock-in with a non-default half_ns; constant ADC 1234 -> sums 4*1234).
+        // Proves the host-supplied half-period drives the on/off timing.
+        entropy_mode = 1'b0;
+        rx_log_cnt = 0;
+        cmd_bytes[0]="R";  cmd_bytes[1]="E";  cmd_bytes[2]="A";  cmd_bytes[3]="D";
+        cmd_bytes[4]="_";  cmd_bytes[5]="L";  cmd_bytes[6]="O";  cmd_bytes[7]="C";
+        cmd_bytes[8]="K";  cmd_bytes[9]="I";  cmd_bytes[10]="N"; cmd_bytes[11]="P";
+        cmd_bytes[12]=" "; cmd_bytes[13]="0"; cmd_bytes[14]=" "; cmd_bytes[15]="4";
+        cmd_bytes[16]=" "; cmd_bytes[17]="1"; cmd_bytes[18]="0"; cmd_bytes[19]="0";
+        cmd_bytes[20]="0"; cmd_bytes[21]="0"; cmd_bytes[22]=8'h0A;
+        $display("TB: sending READ_LOCKINP 0 4 10000 (expect 4936 4936 4 4 + LF)");
+        for (c=0;c<23;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(44, W_SAFE);
+        li_ok = 1;
+        if (rx_log_cnt != 44) li_ok = 0;
+        for (li_k=0;li_k<4;li_k=li_k+1) begin
+            if (li_k < 2) begin
+                if (!(rx_log[li_k*11+0]==="0" && rx_log[li_k*11+1]==="0" &&
+                      rx_log[li_k*11+2]==="0" && rx_log[li_k*11+3]==="0" &&
+                      rx_log[li_k*11+4]==="0" && rx_log[li_k*11+5]==="0" &&
+                      rx_log[li_k*11+6]==="4" && rx_log[li_k*11+7]==="9" &&
+                      rx_log[li_k*11+8]==="3" && rx_log[li_k*11+9]==="6")) li_ok = 0;
+            end else begin
+                if (!(rx_log[li_k*11+0]==="0" && rx_log[li_k*11+1]==="0" &&
+                      rx_log[li_k*11+2]==="0" && rx_log[li_k*11+3]==="0" &&
+                      rx_log[li_k*11+4]==="0" && rx_log[li_k*11+5]==="0" &&
+                      rx_log[li_k*11+6]==="0" && rx_log[li_k*11+7]==="0" &&
+                      rx_log[li_k*11+8]==="0" && rx_log[li_k*11+9]==="4")) li_ok = 0;
+            end
+            if (li_k<3 && rx_log[li_k*11+10] !== " ") li_ok = 0;
+            if (li_k==3 && rx_log[li_k*11+10] !== 8'h0A) li_ok = 0;
+        end
+        if (li_ok) begin
+            ok_count = ok_count + 1;
+            $display("TB: READ_LOCKINP = 4936 4936 4 4 + LF  (PASS)");
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL READ_LOCKINP (got %0d bytes)", rx_log_cnt);
+        end
+
+        // ---- 17c) READ_LOCKINP 0 4 1000 -> ERR (half_ns below the 2000 min)
+        entropy_mode = 1'b0;
+        rx_log_cnt = 0;
+        cmd_bytes[0]="R";  cmd_bytes[1]="E";  cmd_bytes[2]="A";  cmd_bytes[3]="D";
+        cmd_bytes[4]="_";  cmd_bytes[5]="L";  cmd_bytes[6]="O";  cmd_bytes[7]="C";
+        cmd_bytes[8]="K";  cmd_bytes[9]="I";  cmd_bytes[10]="N"; cmd_bytes[11]="P";
+        cmd_bytes[12]=" "; cmd_bytes[13]="0"; cmd_bytes[14]=" "; cmd_bytes[15]="4";
+        cmd_bytes[16]=" "; cmd_bytes[17]="1"; cmd_bytes[18]="0"; cmd_bytes[19]="0";
+        cmd_bytes[20]="0"; cmd_bytes[21]=8'h0A;
+        $display("TB: sending READ_LOCKINP 0 4 1000 (expect ERR, half_ns < 2000)");
+        for (c=0;c<22;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(4, W_SAFE);
+        li_ok = (rx_log_cnt==4 && rx_log[0]==="E" && rx_log[1]==="R" &&
+                 rx_log[2]==="R" && rx_log[3]===8'h0A);
+        if (li_ok) begin
+            ok_count = ok_count + 1;
+            $display("TB: READ_LOCKINP 1000 -> ERR (bounds)  (PASS)");
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL READ_LOCKINP bounds (got %0d bytes)", rx_log_cnt);
+        end
+
         // ---- 18) RUN_SEQUENCE 0 0 4 500 -> "00004 01234 01234 01234 01234\n"
         // Ramsey (kind=0), 4 windows, t_step=500 ns. Same reply shape as Hahn
         // (constant ADC -> 01234 every window), but the readout pi/2 of each
