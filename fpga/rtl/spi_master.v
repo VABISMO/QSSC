@@ -6,7 +6,8 @@
 // Protocol: on `start`, drive LE low, shift 32 bits MSB-first on the rising
 // edge of SCLK (data set up on falling edge), then pulse LE high to latch.
 // One transaction per start. `done` pulses for one clock when complete.
-// CLK_DIV sets SCLK period (default 4 -> 25 MHz SCLK from 100 MHz).
+// CLK_DIV sets the SCLK half-period (default 4 -> 40 ns high / 40 ns low =
+// 12.5 MHz SCLK from 100 MHz; both halves >= the ADF4351 25 ns min).
 //============================================================================
 module spi_master #(
     parameter CLK_DIV = 4
