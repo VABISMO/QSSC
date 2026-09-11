@@ -946,7 +946,7 @@ def fpga_status(request: Request = None):
         raise HTTPException(503, f"FPGA status failed: {exc}")
     if reply == "ERR":
         raise HTTPException(502, "FPGA STATUS returned ERR")
-    # reply: "PLL_LOCKED 1 ADC_BUSY 0 VCC3V3_mv 3300 VCC5V_mv 4980 VCC12V_mv 12050 TEMP_C 42"
+    # reply: "PLL_LOCKED 1 ADC_BUSY 0 VCC3V3_mv 3300 VCC5V_mv 4980 VCC12V_mv 12050 TEMP_C 25"
     out: dict = {}
     toks = reply.split()
     for k, v in zip(toks[0::2], toks[1::2]):

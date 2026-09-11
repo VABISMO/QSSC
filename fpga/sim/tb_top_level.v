@@ -77,10 +77,18 @@ module tb_top_level;
     reg [7:0]   rx_byte_cap;
     integer     ok_count = 0;
     integer     err_count = 0;
+    integer     adc_rst_pulses = 0;     // negedge adc_resetn count (RESET verb)
+    integer     rst_pulses_before;
 
     // ---- MW RF-switch gate pulse seen flag --------------------------------
     reg mw_gate_seen = 1'b0;
     always @(posedge clk_100mhz) if (mw_gate) mw_gate_seen <= 1'b1;
+
+    // ---- adc_resetn negedge counter (RESET verb re-strokes the ADC reset) --
+    // adc_resetn is held low at boot (no negedge there), then released. A host
+    // RESET verb drives peri_rst -> adc_reader reset -> adc_resetn falls again,
+    // so this counter ticks once per RESET.
+    always @(negedge adc_resetn) adc_rst_pulses = adc_rst_pulses + 1;
 
     // ---- MW pulse-WIDTH timer: count cycles mw_gate is high, capture the
     // width of the last completed pulse. At 100 MHz the RTL gate timer ticks
@@ -661,6 +669,139 @@ module tb_top_level;
         end else begin
             err_count = err_count + 1;
             $display("TB: FAIL READ_RNG 4 (got %0d bytes, b0=0x%02h)",
+                     rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
+        end
+
+        // ---- 12) ID -> "QSSC v1\n" (8-byte probe token) ---------------------
+        rx_log_cnt = 0;
+        cmd_bytes[0]="I";  cmd_bytes[1]="D";  cmd_bytes[2]=8'h0A;
+        $display("TB: sending ID (expect QSSC v1\\n)");
+        for (c=0;c<3;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(8, W_GENERIC);
+        if (rx_log_cnt >= 8 &&
+            rx_log[0]==="Q" && rx_log[1]==="S" && rx_log[2]==="S" &&
+            rx_log[3]==="C" && rx_log[4]===" " && rx_log[5]==="v" &&
+            rx_log[6]==="1" && rx_log[7]===8'h0A) begin
+            ok_count = ok_count + 1;  $display("TB: ID = \"QSSC v1\\n\"  (PASS)");
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL ID reply (got %0d bytes, first=0x%02h)",
+                     rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
+        end
+
+        // ---- 13) STATUS -> 79-byte self-status line ------------------------
+        // "PLL_LOCKED <1> ADC_BUSY <0> VCC3V3_mv 3300 VCC5V_mv 4980
+        //  VCC12V_mv 12050 TEMP_C 25\n". PLL_LOCKED=!pll_busy=1 (idle),
+        //  ADC_BUSY=det_busy=0 (idle). Check the frame, the two live digits
+        //  at template indices 11 and 22, and the 79-byte length + LF.
+        rx_log_cnt = 0;
+        cmd_bytes[0]="S";  cmd_bytes[1]="T";  cmd_bytes[2]="A";  cmd_bytes[3]="T";
+        cmd_bytes[4]="U";  cmd_bytes[5]="S";  cmd_bytes[6]=8'h0A;
+        $display("TB: sending STATUS (expect 79-byte self-status line)");
+        for (c=0;c<7;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(79, W_GENERIC);
+        if (rx_log_cnt == 79 &&
+            rx_log[0]==="P" && rx_log[1]==="L" && rx_log[2]==="L" &&
+            rx_log[3]==="_" && rx_log[4]==="L" && rx_log[5]==="O" &&
+            rx_log[6]==="C" && rx_log[7]==="K" && rx_log[8]==="E" &&
+            rx_log[9]==="D" && rx_log[10]===" " && rx_log[11]==="1" &&
+            rx_log[12]===" " && rx_log[13]==="A" && rx_log[14]==="D" &&
+            rx_log[15]==="C" && rx_log[16]==="_" && rx_log[17]==="B" &&
+            rx_log[18]==="U" && rx_log[19]==="S" && rx_log[20]==="Y" &&
+            rx_log[21]===" " && rx_log[22]==="0" && rx_log[78]===8'h0A) begin
+            ok_count = ok_count + 1;
+            $display("TB: STATUS = 79-byte line, PLL_LOCKED=1 ADC_BUSY=0  (PASS)");
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL STATUS (got %0d bytes, [11]=0x%02h [22]=0x%02h [78]=0x%02h)",
+                     rx_log_cnt, (rx_log_cnt>11?rx_log[11]:8'h00),
+                     (rx_log_cnt>22?rx_log[22]:8'h00),
+                     (rx_log_cnt>78?rx_log[78]:8'h00));
+        end
+
+        // ---- 14) RESET -> OK + adc_resetn re-strobed + emitter cleared ------
+        // Load gs[0]=4095 first so the soft reset has something to clear, then
+        // send RESET: it must reply OK, pulse adc_resetn low (re-init ADC), and
+        // clear the TLC5947 grayscale register (emitter on peri_rst).
+        rx_log_cnt = 0;
+        cmd_bytes[0]="S";  cmd_bytes[1]="E";  cmd_bytes[2]="T";  cmd_bytes[3]="_";
+        cmd_bytes[4]="E";  cmd_bytes[5]="M";  cmd_bytes[6]="I";  cmd_bytes[7]="T";
+        cmd_bytes[8]="T";  cmd_bytes[9]="E";  cmd_bytes[10]="R"; cmd_bytes[11]=" ";
+        cmd_bytes[12]="0"; cmd_bytes[13]=" "; cmd_bytes[14]="4"; cmd_bytes[15]="0";
+        cmd_bytes[16]="9"; cmd_bytes[17]="5"; cmd_bytes[18]=8'h0A;
+        $display("TB: sending SET_EMITTER 0 4095 (pre-RESET load)");
+        for (c=0;c<19;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(3, W_GENERIC);               // OK\n
+        repeat(W_EM_DONE) @(posedge clk_100mhz);     // let the TLC load complete
+        rst_pulses_before = adc_rst_pulses;
+        rx_log_cnt = 0;
+        cmd_bytes[0]="R";  cmd_bytes[1]="E";  cmd_bytes[2]="S";  cmd_bytes[3]="E";
+        cmd_bytes[4]="T";  cmd_bytes[5]=8'h0A;
+        $display("TB: sending RESET (expect OK + adc_resetn pulse + gs[0]=0)");
+        for (c=0;c<6;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(3, W_GENERIC);               // OK\n
+        repeat(400) @(posedge clk_100mhz);           // past the ~200-cyc adc_resetn hold
+        if (rx_log_cnt >= 3 &&
+            rx_log[0]===8'h4F && rx_log[1]===8'h4B && rx_log[2]===8'h0A &&
+            adc_rst_pulses > rst_pulses_before &&
+            dut.em_inst.tlc_inst.gs[0] === 12'd0) begin
+            ok_count = ok_count + 1;
+            $display("TB: RESET = OK + adc_resetn re-strobed + gs[0]=0  (PASS)");
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL RESET (reply0=0x%02h rst %0d->%0d gs0=%0d)",
+                     (rx_log_cnt>0?rx_log[0]:8'h00), rst_pulses_before,
+                     adc_rst_pulses, dut.em_inst.tlc_inst.gs[0]);
+        end
+
+        // ---- 15) ODMR_SWEEP 0 2870000 2880000 4 -> 4 lines + OK ------------
+        // Each point: reprogram ADF4351, gate RF, read detector site 0, stream
+        // "fffffff ccccc\n" (7-digit kHz + ' ' + 5-digit code + LF = 14 bytes).
+        // code = ADC_VAL = 1234 -> "01234"; step=(2880000-2870000)/3=3333 ->
+        // 2870000, 2873333, 2876666, 2879999. 4*14 + "OK\n" = 59 bytes.
+        // Disable the QRNG entropy toggle so channel 0 reads a constant 1234.
+        entropy_mode = 1'b0;
+        rx_log_cnt = 0;
+        cmd_bytes[0]="O";  cmd_bytes[1]="D";  cmd_bytes[2]="M";  cmd_bytes[3]="R";
+        cmd_bytes[4]="_";  cmd_bytes[5]="S";  cmd_bytes[6]="W";  cmd_bytes[7]="E";
+        cmd_bytes[8]="E";  cmd_bytes[9]="P";  cmd_bytes[10]=" "; cmd_bytes[11]="0";
+        cmd_bytes[12]=" "; cmd_bytes[13]="2"; cmd_bytes[14]="8"; cmd_bytes[15]="7";
+        cmd_bytes[16]="0"; cmd_bytes[17]="0"; cmd_bytes[18]="0"; cmd_bytes[19]="0";
+        cmd_bytes[20]=" "; cmd_bytes[21]="2"; cmd_bytes[22]="8"; cmd_bytes[23]="8";
+        cmd_bytes[24]="0"; cmd_bytes[25]="0"; cmd_bytes[26]="0"; cmd_bytes[27]="0";
+        cmd_bytes[28]=" "; cmd_bytes[29]="4"; cmd_bytes[30]=8'h0A;
+        $display("TB: sending ODMR_SWEEP 0 2870000 2880000 4 (expect 4 lines + OK)");
+        for (c=0;c<31;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(59, W_SAFE);
+        // Line layout: 0..13 "2870000 01234\n", 14..27 "2870333 01234\n",
+        // 28..41 "2870666 01234\n", 42..55 "2870999 01234\n", 56..58 "OK\n".
+        if (rx_log_cnt == 59 &&
+            rx_log[0]==="2" && rx_log[1]==="8" && rx_log[2]==="7" &&
+            rx_log[3]==="0" && rx_log[4]==="0" && rx_log[5]==="0" &&
+            rx_log[6]==="0" && rx_log[7]===" " && rx_log[8]==="0" &&
+            rx_log[9]==="1" && rx_log[10]==="2" && rx_log[11]==="3" &&
+            rx_log[12]==="4" && rx_log[13]===8'h0A &&
+            rx_log[14]==="2" && rx_log[15]==="8" && rx_log[16]==="7" &&
+            rx_log[17]==="3" && rx_log[18]==="3" && rx_log[19]==="3" &&
+            rx_log[20]==="3" && rx_log[21]===" " && rx_log[22]==="0" &&
+            rx_log[23]==="1" && rx_log[24]==="2" && rx_log[25]==="3" &&
+            rx_log[26]==="4" && rx_log[27]===8'h0A &&
+            rx_log[28]==="2" && rx_log[29]==="8" && rx_log[30]==="7" &&
+            rx_log[31]==="6" && rx_log[32]==="6" && rx_log[33]==="6" &&
+            rx_log[34]==="6" && rx_log[35]===" " && rx_log[36]==="0" &&
+            rx_log[37]==="1" && rx_log[38]==="2" && rx_log[39]==="3" &&
+            rx_log[40]==="4" && rx_log[41]===8'h0A &&
+            rx_log[42]==="2" && rx_log[43]==="8" && rx_log[44]==="7" &&
+            rx_log[45]==="9" && rx_log[46]==="9" && rx_log[47]==="9" &&
+            rx_log[48]==="9" && rx_log[49]===" " && rx_log[50]==="0" &&
+            rx_log[51]==="1" && rx_log[52]==="2" && rx_log[53]==="3" &&
+            rx_log[54]==="4" && rx_log[55]===8'h0A &&
+            rx_log[56]===8'h4F && rx_log[57]===8'h4B && rx_log[58]===8'h0A) begin
+            ok_count = ok_count + 1;
+            $display("TB: ODMR_SWEEP = 4 lines (2870000..2879999) + OK  (PASS)");
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL ODMR_SWEEP (got %0d bytes, first=0x%02h)",
                      rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
         end
 

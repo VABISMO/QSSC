@@ -75,6 +75,14 @@ module top_level (
     end
     wire reset_sync = rst_sync[1];
 
+    // A host RESET verb pulses parser_soft_rst (driven by command_parser).
+    // peri_rst = power-on reset OR that soft reset, applied to the peripherals
+    // (emitter/SPI/PLL/ADC/QRNG/gate timer). The parser, UART, reset
+    // synchroniser and refclk divider stay on reset_sync so a RESET verb never
+    // resets the command path itself.
+    wire parser_soft_rst;
+    wire peri_rst = reset_sync | parser_soft_rst;
+
     // ---- UART --------------------------------------------------------------
     wire [7:0] rx_byte;
     wire       rx_valid;
@@ -111,7 +119,7 @@ module top_level (
 
     emitter_array em_inst (
         .clk          (clk_100mhz),
-        .reset        (reset_sync),
+        .reset        (peri_rst),
         .cmd_drive    (em_cmd_drive),
         .cmd_set      (em_cmd_set),
         .cmd_pattern  (em_cmd_pattern),
@@ -144,7 +152,7 @@ module top_level (
 
     spi_master #(.CLK_DIV(4)) spi_inst (
         .clk     (clk_100mhz),
-        .reset   (reset_sync),
+        .reset   (peri_rst),
         .start   (spi_start_w),
         .data_in (spi_data_w),
         .busy    (spi_busy_w),
@@ -160,7 +168,7 @@ module top_level (
 
     adf4351_ctrl pll_inst (
         .clk             (clk_100mhz),
-        .reset           (reset_sync),
+        .reset           (peri_rst),
         .start           (pll_start),
         .target_freq_khz (pll_freq_khz),
         .phase           (pll_phase),
@@ -202,7 +210,7 @@ module top_level (
 
     adc_reader #(.N_DET(64), .CLK_HZ(100_000_000), .ENTROPY_CH(6'd0)) det_inst (
         .clk         (clk_100mhz),
-        .reset       (reset_sync),
+        .reset       (peri_rst),
         .read_one    (det_read_one),
         .read_all    (det_read_all),
         .site        (det_site),
@@ -235,7 +243,7 @@ module top_level (
     // actually consumed.
     qrng_entropy #(.W(32)) rng_inst (
         .clk            (clk_100mhz),
-        .rst            (reset_sync),
+        .rst            (peri_rst),
         .adc_data       (entropy_data),
         .adc_valid      (entropy_valid),
         .harvest_en     (rng_harvest_en),
@@ -257,6 +265,7 @@ module top_level (
     wire        mw_gate_load;
 
     // ---- Command parser (ties everything together) -------------------------
+    // parser_soft_rst is declared with reset_sync above; it ORs into peri_rst.
     command_parser #(.N_DET(64)) parser_inst (
         .clk              (clk_100mhz),
         .reset            (reset_sync),
@@ -296,7 +305,8 @@ module top_level (
         .rng_flush        (rng_flush),
         .rng_word         (rng_word),
         .rng_valid        (rng_valid),
-        .rng_samples_seen (rng_samples_seen)
+        .rng_samples_seen (rng_samples_seen),
+        .soft_rst         (parser_soft_rst)
     );
 
     assign pll_phase  = pll_phase_w;
@@ -308,7 +318,7 @@ module top_level (
     reg [31:0] gate_cnt;
     initial begin mw_gate_r = 1'b0; mw_gate_active = 1'b0; gate_cnt = 32'd0; end
     always @(posedge clk_100mhz) begin
-        if (reset_sync) begin
+        if (peri_rst) begin
             mw_gate_r      <= 1'b0;
             mw_gate_active <= 1'b0;
             gate_cnt       <= 32'd0;
