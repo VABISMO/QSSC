@@ -644,7 +644,9 @@ class QSSCBackend(BackendV2):
                  temperature_k: float = 300.0,
                  noise_mode: str = "real",
                  n_nv_per_pixel: int = N_NV_PER_PIXEL,
-                 register_nv_spacing_nm: float = 2.75):
+                 register_nv_spacing_nm: float = 2.75,
+                 gradient_mhz_per_um: float = 0.0,
+                 pixel_size_um: float = 200.0):
         """noise_mode: 'real' (default, full Aer thermal+depolarizing+readout
         noise from the defect physics) | 'phenomenological' (fast analytic
         approximation) | 'none' (ideal). 'aer' is accepted as an alias of 'real'.
@@ -669,15 +671,25 @@ class QSSCBackend(BackendV2):
         self.seed = seed
         self.n_nv_per_pixel = int(n_nv_per_pixel)
         self.register_nv_spacing_nm = float(register_nv_spacing_nm)
+        self.gradient_mhz_per_um = float(gradient_mhz_per_um)
+        self.pixel_size_um = float(pixel_size_um)
         if sites is None:
             # Register mode (the production / API path): self.sites is ONE
             # pixel's n_nv_per_pixel-NV register (the circuit qubits, all-to-all
             # dipole coupled); the 64-pixel hardware die is a SEPARATE chip-view
             # site list (self._chip_sites) used by describe() / optical readout.
+            # A field gradient (Invention 5) caps the register width at the
+            # resolvable line count (Case D: separation > linewidth), making the
+            # width a MEASURED quantity from the ODMR spectrum, not a fixed knob.
             sites = auto_align(prof, n_nv_per_pixel=n_nv_per_pixel,
                                register=True, temperature_k=temperature_k,
-                               rng=np.random.default_rng(seed))
+                               rng=np.random.default_rng(seed),
+                               gradient_mhz_per_um=gradient_mhz_per_um,
+                               pixel_size_um=pixel_size_um)
             self._register_mode = True
+            # the gradient may have capped the register below n_nv_per_pixel;
+            # re-read the actual width so describe()/Target stay truthful.
+            self.n_nv_per_pixel = len(sites)
             self._chip_sites = auto_align(
                 prof, grid=8, register=False, temperature_k=temperature_k,
                 rng=np.random.default_rng(seed))
@@ -794,7 +806,9 @@ class QSSCBackend(BackendV2):
         prof = self.profile
         self.sites = auto_align(prof, n_nv_per_pixel=n, register=True,
                                 temperature_k=self.temperature_k,
-                                rng=np.random.default_rng(self._seed))
+                                rng=np.random.default_rng(self._seed),
+                                gradient_mhz_per_um=self.gradient_mhz_per_um,
+                                pixel_size_um=self.pixel_size_um)
         self._n_qubits = len(self.sites)
         self.n_nv_per_pixel = self._n_qubits
         self._build_target_topology()
@@ -1472,6 +1486,14 @@ class QSSCBackend(BackendV2):
             "(readout is optical, µs-scale) — error-correcting codes needing "
             "fast feedback are not supported by this control stack.",
         ]
+        if self.gradient_mhz_per_um > 0.0:
+            lim.append(
+                f"Field gradient {self.gradient_mhz_per_um:g} MHz/um across the "
+                f"{self.pixel_size_um:g} um pixel sets the register width to "
+                f"{self.n_nv_per_pixel} resolvable NVs (Case D: line spacing > "
+                f"linewidth {self.profile.odmr_linewidth_hz*1e-6:g} MHz). The "
+                f"width is a MEASURED quantity from the ODMR spectrum, not a "
+                f"fixed count; a stronger gradient resolves more ensemble qubits.")
         if self.temperature_k >= 250:
             lim.append("Operating at ~300 K: convenient but coherence-limited. "
                        "Cool to 77 K / 4 K to extend T2 by ~2x / ~8x and unlock "
@@ -1656,6 +1678,8 @@ class QSSCBackend(BackendV2):
             "num_qubits": self._n_qubits,
             "pixels": len(self._chip_sites),
             "n_nv_per_pixel": self.n_nv_per_pixel,
+            "gradient_mhz_per_um": self.gradient_mhz_per_um,
+            "pixel_size_um": self.pixel_size_um,
             "t1_ms": round(self._t1 * 1e3, 3),
             "t2_us": round(self._t2 * 1e6, 3),
             "readout_error": self.profile.readout_error,

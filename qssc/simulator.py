@@ -631,6 +631,24 @@ class QubitSite:
         return d
 
 
+def resolvable_register_width(gradient_mhz_per_um: float,
+                              pixel_um: float,
+                              linewidth_mhz: float) -> int:
+    """How many ensemble qubits a field gradient makes resolvable in one pixel.
+
+    A field gradient shifts adjacent microdiamonds' ensemble ODMR lines apart
+    by ``gradient * spacing``. The lines are resolvable only while their
+    separation exceeds the inhomogeneous linewidth (Case D in the ODMR sim:
+    separation > linewidth, else they collapse to one). The total frequency
+    spread across the pixel is ``gradient_mhz_per_um * pixel_um``; the number of
+    lines that fit side-by-side at one linewidth each is that spread over the
+    linewidth. Returns at least 1 (a flat ensemble still yields one qubit).
+    """
+    if gradient_mhz_per_um <= 0.0 or linewidth_mhz <= 0.0:
+        return 1
+    return max(1, int(math.floor(gradient_mhz_per_um * pixel_um / linewidth_mhz)))
+
+
 def auto_align(profile: DefectProfile | str = "NV",
                 grid: int = 8, site_pitch_um: float = 2.5,
                 temperature_k: float = 300.0, max_retries: int = 5,
@@ -639,6 +657,8 @@ def auto_align(profile: DefectProfile | str = "NV",
                 register: bool = False,
                 n_nv_per_pixel: int = N_NV_PER_PIXEL,
                 register_line_spacing_hz: float = 6.0e6,
+                gradient_mhz_per_um: float = 0.0,
+                pixel_size_um: float = 200.0,
                 ) -> List[QubitSite]:
     """Calibrate the chip and build the qubit-site list.
 
@@ -681,21 +701,43 @@ def auto_align(profile: DefectProfile | str = "NV",
     rng = rng or np.random.default_rng()
     t1, t2 = coherence_at_temperature(prof, temperature_k)
     # ---- per-pixel NV register view (the circuit backend's qubits) ----------
-    # ONE microdiamond's n_nv_per_pixel NVs: all pixel_id=0, distinct nv_index,
-    # on a resolvable ODMR frequency grid so the global MW antenna addresses
-    # each by frequency (Omega << detuning -> see qssc.dipole.addressing_leakage).
+    # ONE microdiamond's n NVs: all pixel_id=0, distinct nv_index, on a
+    # resolvable ODMR frequency grid so the global MW antenna addresses each by
+    # frequency (Omega << detuning -> see qssc.dipole.addressing_leakage).
     # Within-pixel all-to-all dipole coupling is applied by the backend's
     # _neighbor_pairs (complete graph); these NVs are ~3 nm apart.
+    #
+    # A field gradient (Invention 5) makes the register width a MEASURED
+    # quantity: several microdiamonds share a pixel volume, the gradient shifts
+    # their ensemble ODMR lines apart, and the resolvable count is set by the
+    # Case D rule (separation > linewidth). With gradient_mhz_per_um > 0 the line
+    # spacing is derived from the gradient (so neighbouring particles sit one
+    # resolvable linewidth apart) and n is capped at that resolvable width.
     if register:
         sites: List[QubitSite] = []
         n = max(1, int(n_nv_per_pixel))
+        line_spacing_hz = register_line_spacing_hz
+        if gradient_mhz_per_um > 0.0:
+            linewidth_mhz = prof.odmr_linewidth_hz * 1e-6
+            # the gradient shifts the ensemble ODMR line by gradient*d MHz per um
+            # of spatial offset; across the pixel the spread is gradient*pixel.
+            # One resolvable linewidth per line -> spacing_hz = gradient*spacing,
+            # i.e. one linewidth per particle. Use the per-particle pitch that
+            # tiles the pixel with resolvable lines:
+            resolvable = resolvable_register_width(
+                gradient_mhz_per_um, pixel_size_um, linewidth_mhz)
+            n = min(n, resolvable)
+            # spacing between adjacent lines = one linewidth (Case D threshold),
+            # expressed in Hz. This is the gradient-induced separation at the
+            # per-particle pitch (gradient * pitch == linewidth).
+            line_spacing_hz = prof.odmr_linewidth_hz
         x_um = 0.5 * site_pitch_um
         y_um = 0.5 * site_pitch_um
         for k in range(n):
             spread = prof.frequency_detuning_spread_hz
             jitter = (float(rng.normal(0.0, spread))
                       if spread > 0 else 0.0)
-            detune = (k - (n - 1) / 2.0) * register_line_spacing_hz + jitter
+            detune = (k - (n - 1) / 2.0) * line_spacing_hz + jitter
             freq = prof.zero_field_splitting + detune
             sites.append(QubitSite(
                 qubit_id=k, row=0, col=0,
