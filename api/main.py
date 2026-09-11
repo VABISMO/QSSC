@@ -29,6 +29,7 @@ from qssc import (
     DetectorInterface, MicrowaveController, EmitterController,
 )
 from qssc.simulator import DETECT_THRESHOLD
+from qssc.odmr_decompose import decompose_odmr
 from qssc.backend import _fit_t2_from_codes
 from qssc.protocol import (
     protocol_as_dict, protocol_summary, protocol_platforms,
@@ -568,6 +569,16 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
     inside = np.where(c < half)[0]
     fwhm = float(f[inside[-1]] - f[inside[0]]) if len(inside) > 2 else 0.01
 
+    # Register width = the resolvable ODMR line count (the MEASURED truth from
+    # decompose_odmr, not a hardcoded N). A bulk ensemble collapses to ONE line
+    # -> 1 ensemble qubit/pixel; a controlled-few-NV particle resolves a
+    # handful -> that many register qubits. This drives the pixel_mode
+    # recommendation: register_width <= 1 -> ensemble; > 1 -> register.
+    components = decompose_odmr(f, c)
+    register_width = max(1, len(components))
+    line_freqs_hz = [round(cmp.freq_ghz * 1e9) for cmp in components]
+    pixel_mode_recommendation = "ensemble" if register_width <= 1 else "register"
+
     t1, t2 = coherence_at_temperature(prof, temperature_k)
 
     # Stage 4 -- per-pin ODMR resonance sweep + coherence (Ramsey/Hahn) fit.
@@ -647,7 +658,10 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
              "contrast": [round(float(x), 5) for x in c],
              "d_fit_ghz": round(d_fit, 5), "d_expected_ghz": prof.d_ghz,
              "linewidth_fwhm_ghz": round(fwhm, 5),
-             "fit_ok": abs(d_fit - prof.d_ghz) < 0.03},
+             "fit_ok": abs(d_fit - prof.d_ghz) < 0.03,
+             "register_width": register_width,
+             "register_line_freqs_hz": line_freqs_hz,
+             "pixel_mode_recommendation": pixel_mode_recommendation},
             {"name": "4 · Per-pin resonance + coherence sweep",
              "pins_measured": len(per_pin),
              "detuning_spread_mhz": round(detuning_spread, 3),
@@ -659,6 +673,10 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
         "per_pin": per_pin,
         "d_fit_ghz": round(d_fit, 5),
         "t1_ms": round(t1 * 1e3, 3), "t2_us": round(t2 * 1e6, 3),
+        "register_width": register_width,
+        "register_line_freqs_hz": line_freqs_hz,
+        "pixel_mode_recommendation": pixel_mode_recommendation,
+        "n_nv_per_pixel": register_width,
         "source": "hardware" if hardware else "simulator",
         "io": io_label,
         "stage4_source": stage4_source,
