@@ -60,20 +60,27 @@ jobs:
       - name: Install KiCad (kicad-cli + pcbnew python binding)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends software-properties-common
-          # The committed boards carry (generator_version "8.0") + (version
-          # 20240108), written by KiCad 8.0.5 (built Sep 2024). The kicad in
-          # Ubuntu 24.04 universe is an earlier 8.0.x build that does NOT know
-          # the `generator_version` token and errors "Unknown token
-          # 'generator_version' ... upgrade to a version dated 01/08/24 or
-          # later" -- so every pcbnew.LoadBoard / kicad-cli drc fails. The KiCad
-          # 8 stable PPA carries a recent 8.0.x (8.0.8+) that parses the token.
-          # The `kicad` package provides BOTH /usr/bin/kicad-cli AND the pcbnew
-          # python binding (/usr/lib/python3/dist-packages/pcbnew.py) -- there
-          # is no separate kicad-cli package on Ubuntu.
-          sudo add-apt-repository --yes ppa:kicad/kicad-8-releases
-          sudo apt-get update
+          # The `kicad` package (Ubuntu 24.04 universe, 8.0.x) provides BOTH
+          # /usr/bin/kicad-cli AND the pcbnew python binding
+          # (/usr/lib/python3/dist-packages/pcbnew.py) -- there is no separate
+          # kicad-cli package on Ubuntu (apt fails "Unable to locate package
+          # kicad-cli" if you ask for one). Install `kicad` alone.
           sudo apt-get install -y --no-install-recommends kicad
+
+      - name: Strip generator_version token (incompatible with runner KiCad)
+        # The committed boards carry (generator_version "8.0"), a metadata
+        # token written by KiCad 8.0.5+. The runner's Ubuntu 24.04 universe
+        # kicad is an earlier 8.0.x build that does NOT know the token and
+        # errors "Unknown token 'generator_version' ... upgrade to a version
+        # dated 01/08/24 or later" on every pcbnew.LoadBoard / kicad-cli drc.
+        # The token is non-functional file-format metadata, so strip it from
+        # the CI checkout only (the committed boards keep theirs). The older
+        # kicad then parses (version 20240108) cleanly. Verified: DRC results
+        # are identical with/without the token.
+        run: |
+          sed -i '/(generator_version/d' \
+            hardware/pcb/qssc.kicad_pcb \
+            hardware/pcb/chip_module.kicad_pcb
 
       - name: Sanity-check the KiCad python binding + cli
         run: |
