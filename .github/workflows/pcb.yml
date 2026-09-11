@@ -60,10 +60,13 @@ jobs:
       - name: Install KiCad (kicad-cli + pcbnew python binding)
         run: |
           sudo apt-get update
-          # kicad pulls kicad-cli + the python3 pcbnew binding; kicad-cli alone
-          # is not enough (we also need `import pcbnew` for the connectivity
-          # and pin-audit tests).
-          sudo apt-get install -y --no-install-recommends kicad kicad-cli
+          # On Ubuntu 24.04 the `kicad` package (universe, 8.0.x) provides BOTH
+          # /usr/bin/kicad-cli AND /usr/lib/python3/dist-packages/pcbnew.py --
+          # there is NO separate `kicad-cli` package, so do not ask for one
+          # (apt fails with "Unable to locate package kicad-cli"). We need both
+          # the cli (DRC gate) and the python binding (connectivity / pin-audit
+          # / routing-structure tests import pcbnew).
+          sudo apt-get install -y --no-install-recommends kicad
 
       - name: Sanity-check the KiCad python binding + cli
         run: |
