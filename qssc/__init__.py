@@ -38,6 +38,15 @@ from .sensors import (
 from .magnetometry import (
     magnetometer_sweep, synthetic_field_map, MagnetometerResult,
 )
+from .nuclear import (
+    nuclear_swap_time_s, nuclear_gate_fidelity, memory_survival,
+    nuclear_memory_advantage,
+)
+from .prime_readout import (
+    PRIME_SYMBOLS, PrimeChannel, usable_primes, n_resolvable_prime_channels,
+    best_prime_for_nv, assign_prime_channels, prime_orthogonality,
+    prime_decompose, prime_denoise, prime_noise_rejection, cross_talk_residual,
+)
 
 __version__ = "2.0.0"
 __all__ = [
@@ -56,5 +65,11 @@ __all__ = [
     "lockin_integrated_readout", "compass_measure", "gyro_measure",
     "CompassResult", "GyroResult",
     "magnetometer_sweep", "synthetic_field_map", "MagnetometerResult",
+    "nuclear_swap_time_s", "nuclear_gate_fidelity", "memory_survival",
+    "nuclear_memory_advantage",
+    "PRIME_SYMBOLS", "PrimeChannel", "usable_primes",
+    "n_resolvable_prime_channels", "best_prime_for_nv",
+    "assign_prime_channels", "prime_orthogonality", "prime_decompose",
+    "prime_denoise", "prime_noise_rejection", "cross_talk_residual",
     "__version__",
 ]
