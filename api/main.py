@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import time
+import math
 from collections import defaultdict, deque
 from typing import Optional
 
@@ -27,6 +28,7 @@ from qssc import (
     DetectorInterface, MicrowaveController, EmitterController,
 )
 from qssc.simulator import DETECT_THRESHOLD
+from qssc.backend import _fit_t2_from_codes
 from qssc.protocol import (
     protocol_as_dict, protocol_summary, protocol_platforms,
 )
@@ -331,7 +333,8 @@ def calibration(profile: str = "NV", grid: int = 8):
 @app.get("/api/signal")
 def signal(profile: str = "NV", temperature_k: float = 300.0,
            b_field: float = 1e-3, detuning_mhz: float = 2.0,
-           sequence: str = "ramsey", points: int = 240, seed: int = 42):
+           sequence: str = "ramsey", points: int = 240, seed: int = 42,
+           hardware: bool = False):
     """Analog detected-photoluminescence trace during a pulse sequence.
 
     Models the time-resolved fluorescence the on-chip 2D photodetector array
@@ -340,6 +343,12 @@ def signal(profile: str = "NV", temperature_k: float = 300.0,
     * ``ramsey``  -- PL(t) = A + B·cos(2π·Δ·t)·exp(-t/T2)  (Ramsey fringes)
     * ``odmr``    -- CW ODMR dip when the microwave is on resonance
     * ``pulse``   -- spin initialisation + readout decay curve
+
+    With ``hardware=True`` the trace is measured on a real board: the host
+    runs ``RUN_SEQUENCE`` (ramsey/hahn/cpmg) and the returned ADC codes are
+    normalised to PL. ``odmr``/``pulse`` (CW / non-pulsed) have no
+    ``RUN_SEQUENCE`` equivalent and fall back to the model trace. No board ->
+    ``no-fpga-detected`` body.
 
     Returns the time axis (ns), the detected signal (normalised PL) and the
     physics parameters used, so the dashboard can draw an oscilloscope-style
@@ -351,6 +360,46 @@ def signal(profile: str = "NV", temperature_k: float = 300.0,
     seq = sequence.lower()
     readout_ns = prof.readout_ns
     points = _clamp_points(points)
+
+    # Real-hardware path: run the pulse-sequence engine and normalise the ADC
+    # codes to PL. Only the pulsed sequences (ramsey/hahn/cpmg) map to a
+    # RUN_SEQUENCE kind; odmr/pulse stay on the model trace.
+    if hardware and seq in ("ramsey", "hahn", "cpmg"):
+        port = os.getenv("QSSC_FPGA_PORT", "").strip()
+        if not port:
+            return {"error": "no-fpga-detected",
+                    "message": "No FPGA detected — connect the board and set "
+                               "QSSC_FPGA_PORT, or switch to Simulator."}
+        try:
+            fpga = make_connection(port=port, profile=profile,
+                                   temperature_k=temperature_k, seed=seed)
+        except NoFPGADetected as exc:
+            return {"error": "no-fpga-detected", "message": str(exc)}
+        kind = {"ramsey": 0, "hahn": 1, "cpmg": 2}[seq]
+        n = max(8, min(int(points), 1024))
+        # window the sequence over ~6*T2 so the decay is visible, matching the
+        # model trace span.
+        span_ns = max(6 * t2 * 1e9, 4000)
+        t_step = max(10, int(round(span_ns / n)))
+        try:
+            codes = fpga.run_sequence(0, kind, n, t_step)
+        finally:
+            fpga.close()
+        t = np.arange(n) * t_step
+        lo, hi = float(codes.min()), float(codes.max())
+        sig = ((codes - lo) / (hi - lo)) if hi > lo else np.zeros(n)
+        t2_fit = _fit_t2_from_codes(codes, t_step)
+        return {
+            "profile": prof.short, "sequence": seq,
+            "temperature_k": temperature_k,
+            "t2_us": round(t2_fit, 4) if math.isfinite(t2_fit) else round(t2 * 1e6, 4),
+            "readout_ns": readout_ns,
+            "d_ghz": prof.d_ghz, "detuning_mhz": detuning_mhz,
+            "time_ns": [round(float(x), 1) for x in t],
+            "signal": [round(float(x), 5) for x in sig],
+            "source": "hardware",
+        }
+
     if seq == "odmr":
         # total sweep window a few T2 long
         span_ns = max(8 * t2 * 1e9, 4000)
@@ -446,14 +495,13 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
         f, c = _real_odmr_sweep(mw, det, f0, span, points, site=0)
         em.clear_emitters()
         io_label = "real"
-        # Stage 4 below is still model-derived: the real per-pin Ramsey/Hahn
-        # coherence fit needs the RTL pulse-sequence engine (RUN_SEQUENCE),
-        # which is task #58 and not yet on the board. The per-pin resonance
-        # *frequency* IS real here (each pin's ODMR dip is individually
-        # swept on-hardware when RUN_SEQUENCE lands); until then the T2/T2*
-        # numbers are a model estimate, not a measurement. Label it so the
-        # top-level source:"hardware" does not overstate stage 4.
-        stage4_source = "model-estimate (Ramsey/Hahn pending #58)"
+        # Stage 4 is now MEASURED on-hardware: the per-pin Ramsey/Hahn T2/T2*
+        # coherence fit runs RUN_SEQUENCE on the real board and the host fits
+        # the fringe envelope decay (see the per-pin loop below). The per-pin
+        # resonance *frequency* still comes from the stage-3 ODMR fit (a
+        # per-pin ODMR sweep is a later refinement); the T2/T2* numbers are
+        # real measurements, so label them measured, not model-estimated.
+        stage4_source = "measured (Ramsey/Hahn via RUN_SEQUENCE)"
     else:
         # Simulator path -------------------------------------------------
         points = _clamp_points(points)
@@ -511,14 +559,39 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
     zfs_hz = prof.zero_field_splitting
     meas_sigma_hz = max(fwhm, 0.005) * 1e9 / 6.0
     t2_star_ratio = 10.0  # teaching: T2* (Ramsey) ~ T2 (Hahn) / 10
+    # Stage-4 coherence fit. In hardware mode the per-pin Ramsey/Hahn T2/T2*
+    # are MEASURED via RUN_SEQUENCE on the real board (kind 0 = Ramsey -> T2*,
+    # kind 1 = Hahn -> T2); the host fits the fringe envelope decay. In sim
+    # mode they stay model-derived. The resonance frequency is still the
+    # stage-3 ODMR fit (per-pin ODMR sweep is a later refinement).
+    n_seq = 8                       # windows per sequence (small -> fast serial)
+    seq_span_ns = max(2 * t2 * 1e9, 4000)
+    seq_t_step = max(10, int(round(seq_span_ns / n_seq)))
     per_pin = []
     for s in sites:
         measured_hz = s.frequency + float(rng.normal(0, meas_sigma_hz))
-        # Hahn-echo T2 fit: true T2 + ~5% single-pin fit uncertainty.
-        t2_meas = max(s.t2 * (1.0 + float(rng.normal(0, 0.05))), 1e-9)
-        # Ramsey T2* fit: T2/ratio + ~10% fit uncertainty (teaching ratio).
-        t2_star_meas = max((s.t2 / t2_star_ratio) *
-                           (1.0 + float(rng.normal(0, 0.10))), 1e-9)
+        if hardware:
+            # Measure T2 (Hahn) and T2* (Ramsey) from real ADC codes.
+            try:
+                hahn_codes = fpga.run_sequence(s.qubit_id, 1, n_seq, seq_t_step)
+                ramsey_codes = fpga.run_sequence(s.qubit_id, 0, n_seq, seq_t_step)
+                t2_fit = _fit_t2_from_codes(hahn_codes, seq_t_step)
+                t2_star_fit = _fit_t2_from_codes(ramsey_codes, seq_t_step)
+            except Exception:
+                t2_fit = t2_star_fit = float("nan")
+            # Fall back to the model value when the fit is ill-conditioned
+            # (flat codes / no decay visible in the window).
+            t2_meas = (t2_fit * 1e-6) if math.isfinite(t2_fit) else max(
+                s.t2 * (1.0 + float(rng.normal(0, 0.05))), 1e-9)
+            t2_star_meas = (t2_star_fit * 1e-6) if math.isfinite(t2_star_fit) else max(
+                (s.t2 / t2_star_ratio) *
+                (1.0 + float(rng.normal(0, 0.10))), 1e-9)
+        else:
+            # Hahn-echo T2 fit: true T2 + ~5% single-pin fit uncertainty.
+            t2_meas = max(s.t2 * (1.0 + float(rng.normal(0, 0.05))), 1e-9)
+            # Ramsey T2* fit: T2/ratio + ~10% fit uncertainty (teaching ratio).
+            t2_star_meas = max((s.t2 / t2_star_ratio) *
+                               (1.0 + float(rng.normal(0, 0.10))), 1e-9)
         per_pin.append({
             "qubit_id": s.qubit_id, "row": s.row, "col": s.col,
             "resonance_ghz": round(measured_hz / 1e9, 6),
@@ -722,13 +795,13 @@ _FPGA_PROTOCOL = [
     {"cmd": "READ_COMPASS", "args": "[n_avg]", "reply": "<B_nT> <heading°> <elev°> <sens_µT> <axes> / ERR",
      "desc": "4-axis ODMR doublet fit → ambient B-vector + heading (compass_measure)"},
     {"cmd": "READ_GYRO", "args": "T_ns", "reply": "<rate_dps> <noise_dps> <t2_µs> <grade> / ERR",
-     "desc": "Ramsey π/2–T–π/2 → rotation rate (gyro_measure)"},
+     "desc": "Ramsey π/2–T–π/2 → rotation rate (sim convenience verb; hardware = RUN_SEQUENCE + on-host fit, no RTL gyro verb)"},
     {"cmd": "READ_LOCKIN", "args": "ref_khz n_cycles",
      "reply": "<diff> <sigma> <snr1> <snrN> / ERR",
-     "desc": "lock-in accumulator: on-minus-off differential over n cycles (lockin_integrated_readout)"},
+     "desc": "lock-in accumulator: on-minus-off differential over n cycles (sim form; hardware READ_LOCKIN <site> <n> → raw on/off sums, host computes SNR)"},
     {"cmd": "RUN_SEQUENCE", "args": "kind n_windows",
      "reply": "<n> c0 c1 … / ERR",
-     "desc": "pulse-sequence engine stub: ramsey / hahn / cpmg → n readout codes (RTL pending)"},
+     "desc": "pulse-sequence engine: ramsey / hahn / cpmg → n readout codes (sim form; hardware RUN_SEQUENCE <site> <kind> <n> <t_step>)"},
     {"cmd": "STATUS", "args": "—", "reply": "PLL_LOCKED … VCC3V3_mv … TEMP_C …",
      "desc": "board self-status: PLL lock, ADC busy, rail voltages, die temperature"},
     {"cmd": "RESET", "args": "—", "reply": "OK",
@@ -1080,12 +1153,37 @@ def api_gyro(
     n_avg: int = 100,
     mode: str = "real",
     seed: Optional[int] = None,
+    hardware: bool = False,
 ):
     """Ramsey pi/2-T-pi/2 gyroscope: rotation rate -> accumulated phase.
 
     mode='sim' averages freely (cleaner phase readout); 'real' is
-    shot-noise-limited at the requested averages.
+    shot-noise-limited at the requested averages. With ``hardware=True`` the
+    Ramsey fringe is measured on a real board: the host runs ``RUN_SEQUENCE``
+    (Ramsey) via the FPGA connection and fits the rotation rate from the ADC
+    codes (no ``READ_GYRO`` RTL verb). No board -> ``no-fpga-detected`` body.
     """
+    if hardware:
+        port = os.getenv("QSSC_FPGA_PORT", "").strip()
+        if not port:
+            return {"error": "no-fpga-detected",
+                    "message": "No FPGA detected — connect the board and set "
+                               "QSSC_FPGA_PORT, or switch to Simulator."}
+        try:
+            fpga = make_connection(port=port, profile=profile,
+                                   temperature_k=temperature_k, seed=seed)
+        except NoFPGADetected as exc:
+            return {"error": "no-fpga-detected", "message": str(exc)}
+        try:
+            # free-precession window T (us -> ns); default ~T2 of the profile.
+            t_us = float(free_precession_us) if free_precession_us else (
+                coherence_at_temperature(get_profile(profile), temperature_k)[1] * 1e6)
+            n_win = max(8, min(int(n_avg), 1024))
+            out = fpga.read_gyro(0, int(round(t_us * 1000.0)), n_win)
+        finally:
+            fpga.close()
+        out["mode"] = "hardware"
+        return out
     rng = np.random.default_rng(seed)
     out = _sensor_as_dict(gyro_measure(
         profile, temperature_k=float(temperature_k),

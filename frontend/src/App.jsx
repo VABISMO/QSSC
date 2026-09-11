@@ -25,9 +25,9 @@ const FALLBACK_PROTOCOL = [
   { cmd: 'READ_RNG', args: 'n_bytes', reply: '<hex> <raw> <kept> <rate> / ERR', desc: 'harvest n_bytes of von-Neumann-debiased AD7616 LSB-noise entropy (qrng_entropy.v)' },
   { cmd: 'ODMR_SWEEP', args: 'qubit f_start_khz f_stop_khz n_points', reply: '<n> f0 c0 f1 c1 … / ERR', desc: 'sweep the ADF4351 across the NV resonance, one AD7616 sample per point' },
   { cmd: 'READ_COMPASS', args: '[n_avg]', reply: '<B_nT> <heading°> <elev°> <sens_µT> <axes> / ERR', desc: '4-axis ODMR doublet fit → ambient B-vector + heading (compass_measure)' },
-  { cmd: 'READ_GYRO', args: 'T_ns', reply: '<rate_dps> <noise_dps> <t2_µs> <grade> / ERR', desc: 'Ramsey π/2–T–π/2 → rotation rate (gyro_measure)' },
-  { cmd: 'READ_LOCKIN', args: 'ref_khz n_cycles', reply: '<diff> <sigma> <snr1> <snrN> / ERR', desc: 'lock-in accumulator: on-minus-off differential over n cycles (lockin_integrated_readout)' },
-  { cmd: 'RUN_SEQUENCE', args: 'kind n_windows', reply: '<n> c0 c1 … / ERR', desc: 'pulse-sequence engine stub: ramsey / hahn / cpmg → n readout codes (RTL pending)' },
+  { cmd: 'READ_GYRO', args: 'T_ns', reply: '<rate_dps> <noise_dps> <t2_µs> <grade> / ERR', desc: 'Ramsey π/2–T–π/2 → rotation rate (sim convenience verb; hardware runs RUN_SEQUENCE + on-host fit)' },
+  { cmd: 'READ_LOCKIN', args: 'ref_khz n_cycles', reply: '<diff> <sigma> <snr1> <snrN> / ERR', desc: 'lock-in accumulator: on-minus-off differential over n cycles (sim; hardware READ_LOCKIN <site> <n> → raw on/off sums, host computes SNR)' },
+  { cmd: 'RUN_SEQUENCE', args: 'kind n_windows', reply: '<n> c0 c1 … / ERR', desc: 'pulse-sequence engine: ramsey / hahn / cpmg → n readout codes (sim form; hardware RUN_SEQUENCE <site> <kind> <n> <t_step>)' },
   { cmd: 'STATUS', args: '—', reply: 'PLL_LOCKED … VCC3V3_mv … TEMP_C …', desc: 'board self-status: PLL lock, ADC busy, rail voltages, die temperature' },
   { cmd: 'RESET', args: '—', reply: 'OK', desc: 'soft reset of the TLC5947 / ADF4351 / ADC peripheral state' },
 ]
@@ -334,10 +334,10 @@ export default function App() {
   }, [profile, fpgaMode, compassBx, compassBy, compassBz, compassAvg, seed])
   const runGyro = useCallback(() => {
     setGyroLoading(true); setGyroErr(null)
-    api.gyro({ profile, mode: fpgaMode, rate_dps: gyroRate, temperature_k: temperature, n_avg: gyroAvg, seed })
+    api.gyro({ profile, mode: fpgaMode, rate_dps: gyroRate, temperature_k: temperature, n_avg: gyroAvg, seed, hardware: hwMode === 'hardware' })
       .then(setGyro).catch(e => setGyroErr(e.message))
       .finally(() => setGyroLoading(false))
-  }, [profile, fpgaMode, gyroRate, temperature, gyroAvg, seed])
+  }, [profile, fpgaMode, gyroRate, temperature, gyroAvg, seed, hwMode])
   const runMag = useCallback(() => {
     setMagLoading(true); setMagErr(null)
     api.magneto({ profile, mode: fpgaMode, n_avg: magAvg, gradient_ut_mm: magGrad, seed })
@@ -450,7 +450,7 @@ export default function App() {
   const info = useAsync(() => api.backendInfo(profile, temperature, seed), [profile, temperature, seed])
   const odmr = useAsync(() => api.odmr(profile, 1e-3, 160), [profile])
   const cal = useAsync(() => api.calibration(profile), [profile])
-  const signal = useAsync(() => api.signal({ profile, temperature_k: temperature, sequence: seq, detuning_mhz: detuning, points: 220 }), [profile, temperature, seq, detuning])
+  const signal = useAsync(() => api.signal({ profile, temperature_k: temperature, sequence: seq, detuning_mhz: detuning, points: 220, hardware: hwMode === 'hardware' }), [profile, temperature, seq, detuning, hwMode])
 
   const refreshHistory = useCallback(() => {
     setHistoryLoading(true)
@@ -949,7 +949,7 @@ export default function App() {
             <span className="seg-note">
               {hwMode === 'simulator'
                 ? 'Aer + SimulatedFPGA — averages freely, cleaner readout (no shot-noise floor)'
-                : 'real ADF4351 + 64-ch AD7616 chain — compass from live ODMR; gyro / lock-in / sequence simulated (pulse-engine pending #58)'}
+                : 'real ADF4351 + 64-ch AD7616 chain — compass from live ODMR; gyro / lock-in / sequence measured (RUN_SEQUENCE + on-host fit)'}
             </span>
           </div>
 
@@ -978,7 +978,7 @@ export default function App() {
             </div>
 
             <div className="card">
-              <h2><span className="dot" />Ramsey gyroscope{hwMode === 'hardware' && <span className="pill" style={{ marginLeft: 8, fontSize: 10.5, color: 'var(--dim)' }}>simulated · pulse-engine pending #58</span>}</h2>
+              <h2><span className="dot" />Ramsey gyroscope{hwMode === 'hardware' && <span className="pill" style={{ marginLeft: 8, fontSize: 10.5, color: 'var(--good)' }}>measured · RUN_SEQUENCE + on-host fit</span>}</h2>
               <div className="hint">π/2–T–π/2; the accumulated phase Ω·T is the rotation rate.</div>
               <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
                 <div className="field"><label>Rate (°/s)</label><input type="number" step="any" value={gyroRate} onChange={e => setGyroRate(+e.target.value)} /></div>

@@ -489,6 +489,42 @@ class SimulatedFPGA:
         codes = np.clip(codes, 0, ADC_MAX).astype(int)
         return " ".join([str(n_windows)] + [str(int(c)) for c in codes])
 
+    # ---- PR3b structured host methods (mirror FPGAConnection) ------------
+    # Same signatures + return shapes as qssc.backend.FPGAConnection so the
+    # /api endpoints call one method regardless of mode. The simulator path
+    # uses the qssc.sensors physics directly (the wire-format round trip is
+    # pinned separately in test_core.py); the real path fits raw ADC codes.
+
+    def run_sequence(self, site: int, kind, n_windows: int,
+                     t_step_ns: int = 0):
+        """Ramsey/Hahn/CPMG -> n readout codes (int array).
+
+        Mirrors ``FPGAConnection.run_sequence``; the simulator models the
+        fringe from its own T2 (``site`` / ``t_step_ns`` are accepted for
+        signature parity but the sim window grid is fixed by ``n_windows``).
+        """
+        from .backend import _seq_kind_num
+        kind_num = _seq_kind_num(kind)
+        names = {0: "ramsey", 1: "hahn", 2: "cpmg"}
+        reply = self._run_sequence(names[kind_num], int(n_windows))
+        toks = reply.split()
+        return np.array([int(t) for t in toks[1:1 + int(toks[0])]], dtype=np.int32)
+
+    def read_lockin(self, site: int, n_cycles: int, ref_khz: int = 1000) -> dict:
+        """Lock-in accumulator -> differential + SNR (lockin_integrated_readout shape)."""
+        from .sensors import lockin_integrated_readout
+        return lockin_integrated_readout(BRIGHT_CODE, ODMR_CONTRAST,
+                                         int(n_cycles), READOUT_NOISE, rng=self.rng)
+
+    def read_gyro(self, site: int, t_ns: int, n_windows: int = 64) -> dict:
+        """Ramsey pi/2-T-pi/2 -> rotation rate (gyro_measure dict shape)."""
+        from dataclasses import asdict
+        from .sensors import gyro_measure
+        res = gyro_measure(self.profile, self.temperature_k,
+                           rotation_rate_dps=self.rotation_rate_dps,
+                           free_precession_us=t_ns / 1000.0, rng=self.rng)
+        return asdict(res)
+
     def _status(self) -> str:
         """Board self-status: PLL lock, ADC busy, rails, board temperature.
 

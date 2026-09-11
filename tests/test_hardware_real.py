@@ -11,6 +11,8 @@ These tests pin the contract the user asked for:
 """
 import pytest
 
+import numpy as np
+
 from qssc import (
     NoFPGADetected, FPGAConnection, SimulatedFPGA, make_connection,
     QSSCBackend, DetectorInterface, MicrowaveController,
@@ -230,3 +232,198 @@ def test_real_odmr_sweep_helper(monkeypatch):
     assert contrast.min() == contrast[2]            # middle point is the dip
     assert contrast.max() == pytest.approx(1.0)     # normalised to the peak
     assert 2.87 - 0.1 <= f[0] <= 2.87 and f[-1] >= 2.87
+
+
+# --- PR3b: pulse-sequence engine + lock-in + gyro host wiring --------------
+
+class _CmdFakeSerial:
+    """Command-aware pyserial stand-in: replies by command head, not order.
+
+    Used for the PR3b endpoint + calibration tests where many verbs are exchanged
+    in a non-trivial sequence. ``ID`` -> ``QSSC v1``; SET/DRIVE/CLEAR/APPLY ->
+    ``OK``; ``READ_DETECTORS`` -> 64 integer codes; ``READ_DETECTOR`` -> one
+    code; ``RUN_SEQUENCE`` -> ``"<n> c0..cN-1"`` (constant codes); ``READ_LOCKIN``
+    -> four accumulations.
+    """
+
+    def __init__(self, *, seq_codes=None, li=(4936, 4936, 4, 4)):
+        self.written = []
+        self.timeout = 1.0
+        self._seq = seq_codes
+        self._li = li
+
+    def write(self, data):
+        self.written.append(bytes(data))
+        return len(data)
+
+    def readline(self):
+        cmd = self.written[-1].decode().strip() if self.written else ""
+        head = cmd.split()[0] if cmd else ""
+        if head == "ID":
+            return b"QSSC v1\n"
+        if head in ("SET_EMITTER", "DRIVE_EMITTER", "DRIVE_PATTERN",
+                    "CLEAR_EMITTERS", "APPLY_PULSE", "CLEAR_DETECTORS",
+                    "CALIBRATE", "RESET"):
+            return b"OK\n"
+        if head == "READ_DETECTORS":
+            return (" ".join(["30000"] * 64) + "\n").encode()
+        if head == "READ_DETECTOR":
+            return b"30000\n"
+        if head == "RUN_SEQUENCE":
+            n = int(cmd.split()[3]) if len(cmd.split()) > 3 else 8
+            codes = self._seq if self._seq is not None else [30000] * n
+            codes = list(codes)[:n] + [30000] * max(0, n - len(codes))
+            return (" ".join([str(n)] + [str(int(c)) for c in codes]) + "\n").encode()
+        if head == "READ_LOCKIN":
+            s = self._li
+            return (f"{s[0]:010d} {s[1]:010d} {s[2]:010d} {s[3]:010d}\n").encode()
+        return b"OK\n"
+
+    def close(self):
+        pass
+
+    def reset_input_buffer(self):
+        pass
+
+
+def _patch_cmd_serial(monkeypatch, **fake_kw):
+    """Monkeypatch pyserial so make_connection() builds a real FPGAConnection
+    backed by a :class:`_CmdFakeSerial`."""
+    import serial
+    import qssc.backend as backend
+    fake = _CmdFakeSerial(**fake_kw)
+    monkeypatch.setattr(serial, "Serial", lambda *a, **k: fake)
+    monkeypatch.setattr(backend.time, "sleep", lambda *_a, **_k: None)
+    return fake
+
+
+@requires_serial
+def test_run_sequence_parses_real_wire_format(monkeypatch):
+    """FPGAConnection.run_sequence parses '<n> c0..cN-1' into an int array."""
+    fpga = _make_fpga_with_replies(monkeypatch, ["QSSC v1"])
+    fpga.ser._replies.extend(["8 30000 28000 26000 24000 22000 20000 18000 16000"])
+    codes = fpga.run_sequence(0, 1, 8, 500)          # Hahn, 8 windows
+    assert codes.shape == (8,)
+    assert codes.dtype == np.int32
+    assert int(codes[0]) == 30000 and int(codes[-1]) == 16000
+
+
+@requires_serial
+def test_read_lockin_parses_real_wire_format(monkeypatch):
+    """FPGAConnection.read_lockin parses the 4 accumulations + computes SNR."""
+    fpga = _make_fpga_with_replies(monkeypatch, ["QSSC v1"])
+    # sum_on=4936 (MW on, dark), sum_off=4936 (MW off, bright), n_on=n_off=4.
+    fpga.ser._replies.append("0000004936 0000004936 0000000004 0000000004")
+    li = fpga.read_lockin(0, 4)
+    assert li["n_frames"] == 8
+    assert li["differential_code"] == 0.0           # equal sums -> no contrast
+    assert "integrated_snr" in li and "single_frame_snr" in li
+
+
+@requires_serial
+def test_read_lockin_differential_sign(monkeypatch):
+    """sum_off (bright) > sum_on (dark) -> positive bright-minus-dark diff."""
+    fpga = _make_fpga_with_replies(monkeypatch, ["QSSC v1"])
+    # MW off (bright) accumulates more than MW on (dark): off=20000, on=12000.
+    fpga.ser._replies.append("0000012000 0000020000 0000000004 0000000004")
+    li = fpga.read_lockin(0, 4)
+    assert li["differential_code"] > 0.0            # bright - dark > 0
+    assert li["bright_code"] > li["dark_code"]
+
+
+@requires_serial
+def test_read_gyro_parses_real_wire_format(monkeypatch):
+    """FPGAConnection.read_gyro runs RUN_SEQUENCE(Ramsey) + fits a rate."""
+    import math
+    n, t_step = 16, 6250
+    t = np.arange(n) * t_step * 1e-9
+    omega = 2 * math.pi * 20e3                      # 20 kHz fringe
+    codes = (30000 + 8000 * np.cos(omega * t) * np.exp(-t / 50e-6)).round().astype(int)
+    seq_reply = " ".join([str(n)] + [str(int(c)) for c in codes])
+    fpga = _make_fpga_with_replies(monkeypatch, ["QSSC v1", seq_reply])
+    g = fpga.read_gyro(0, n * t_step, n)
+    assert "measured_rate_dps" in g and "rate_grade" in g and "t2_us" in g
+    assert g["measured_rate_dps"] > 0.0             # FFT picked up the fringe
+    assert isinstance(g["rate_grade"], bool)
+    assert isinstance(g["trace"].get("signal"), list) and len(g["trace"]["signal"]) == n
+
+
+def test_api_gyro_hardware_no_board(monkeypatch):
+    """/api/gyro?hardware=true with no board -> no-fpga-detected body."""
+    monkeypatch.delenv("QSSC_FPGA_PORT", raising=False)
+    import api.main as main
+    from fastapi.testclient import TestClient
+    client = TestClient(main.app)
+    r = client.get("/api/gyro?hardware=true&n_avg=8")
+    assert r.status_code == 200
+    assert r.json().get("error") == "no-fpga-detected"
+
+
+def test_api_signal_hardware_no_board(monkeypatch):
+    """/api/signal?hardware=true with no board -> no-fpga-detected body."""
+    monkeypatch.delenv("QSSC_FPGA_PORT", raising=False)
+    import api.main as main
+    from fastapi.testclient import TestClient
+    client = TestClient(main.app)
+    r = client.get("/api/signal?hardware=true&sequence=ramsey&points=16")
+    assert r.status_code == 200
+    assert r.json().get("error") == "no-fpga-detected"
+
+
+@requires_serial
+def test_api_gyro_hardware_with_board(monkeypatch):
+    """/api/gyro?hardware=true with a fake board -> measured-rate dict."""
+    import math
+    monkeypatch.setenv("QSSC_FPGA_PORT", "/dev/ttyFAKE0")
+    n, t_step = 16, 6250
+    t = np.arange(n) * t_step * 1e-9
+    omega = 2 * math.pi * 20e3
+    codes = (30000 + 8000 * np.cos(omega * t) * np.exp(-t / 50e-6)).round().astype(int)
+    _patch_cmd_serial(monkeypatch, seq_codes=list(codes))
+    import api.main as main
+    from fastapi.testclient import TestClient
+    client = TestClient(main.app)
+    r = client.get(f"/api/gyro?hardware=true&n_avg={n}&free_precession_us=100")
+    assert r.status_code == 200
+    body = r.json()
+    assert "error" not in body
+    assert body["mode"] == "hardware"
+    assert body["measured_rate_dps"] > 0.0
+
+
+@requires_serial
+def test_calibration_hardware_stage4_measured(monkeypatch):
+    """Hardware calibration: stage-4 T2/T2* are measured via RUN_SEQUENCE."""
+    monkeypatch.setenv("QSSC_FPGA_PORT", "/dev/ttyFAKE0")
+    _patch_cmd_serial(monkeypatch)          # constant codes -> fit falls back to model
+    import api.main as main
+    from fastapi.testclient import TestClient
+    client = TestClient(main.app)
+    r = client.post("/api/calibration/run?profile=NV&hardware=true&grid=2&points=4")
+    assert r.status_code == 200
+    body = r.json()
+    assert "error" not in body
+    assert body["source"] == "hardware"
+    assert body["io"] == "real"
+    assert body["stage4_source"] == "measured (Ramsey/Hahn via RUN_SEQUENCE)"
+    assert body["stages"][3]["source"] == "measured (Ramsey/Hahn via RUN_SEQUENCE)"
+    assert len(body["per_pin"]) == 4                   # grid=2 -> 4 pins
+    assert all("t2_us" in p and "t2_star_us" in p for p in body["per_pin"])
+
+
+@requires_serial
+def test_api_signal_hardware_with_board(monkeypatch):
+    """/api/signal?hardware=true with a fake board -> measured trace shape."""
+    monkeypatch.setenv("QSSC_FPGA_PORT", "/dev/ttyFAKE0")
+    _patch_cmd_serial(monkeypatch, seq_codes=[30000, 28000, 26000, 24000,
+                                               22000, 20000, 18000, 16000])
+    import api.main as main
+    from fastapi.testclient import TestClient
+    client = TestClient(main.app)
+    r = client.get("/api/signal?hardware=true&sequence=ramsey&points=8")
+    assert r.status_code == 200
+    body = r.json()
+    assert "error" not in body
+    assert body["source"] == "hardware"
+    assert len(body["time_ns"]) == 8 and len(body["signal"]) == 8
+    assert all(0.0 <= float(v) <= 1.05 for v in body["signal"])
