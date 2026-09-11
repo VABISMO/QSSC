@@ -132,6 +132,28 @@ class CustomCircuitRequest(BaseModel):
     max_qubits: int = Field(20, ge=1, le=20)
 
 
+class ParallelRunRequest(BaseModel):
+    """Invention 4 — 64-parallel distributed computing.
+
+    Run one circuit per pixel across the 64-pixel array (64 INDEPENDENT ~10-NV
+    processors at 300 K) and aggregate. The chip's throughput is 64x a single
+    pixel, not one 640-qubit circuit (64x10 > 63-qubit MPS cap)."""
+    mode: str = "sample"        # shor | sample | custom
+    profile: str = "NV"
+    temperature_k: float = Field(300.0, ge=0.001, le=600)
+    shots: int = Field(2048, ge=1, le=8192)
+    seed: int = Field(42, ge=0, le=2_147_483_647)
+    noise_mode: str = "real"
+    n_pixels: int = Field(64, ge=1, le=64)   # pixels to use (1..64)
+    # shor mode
+    n: int = Field(15, ge=2, le=63)
+    # sample mode
+    num_qubits: int = Field(4, ge=1, le=64)
+    qasm: Optional[str] = None  # sample: a QASM circuit (else uniform H+measure)
+    # custom mode
+    circuits: Optional[list] = None  # list of QASM strings, one per pixel
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -692,6 +714,34 @@ def run_custom_circuit(req: CustomCircuitRequest, sync: bool = False,
         return {"job_id": None, "status": "finished", "result": _run(payload)}
     job_id = jobs.enqueue("custom", payload)
     return {"job_id": job_id, "status": "queued"}
+
+
+@app.post("/api/circuit/run-parallel")
+def run_parallel_circuits(req: ParallelRunRequest, sync: bool = True,
+                          request: Request = None):
+    """64-parallel distributed computing (Invention 4).
+
+    Run one circuit per pixel across the 64-pixel array -- 64 INDEPENDENT
+    ~10-NV processors at 300 K (1/r**3 -> zero at the 2.5 mm pitch, so the
+    pixels do not couple) -- and aggregate. The chip's compute throughput is
+    64x a single pixel, not one 640-qubit machine. Modes:
+
+      * ``shor``   -- up to n_pixels coprime bases a factor N; first pixel to
+        find the period wins (the rest fail silently).
+      * ``sample`` -- the same circuit on all n_pixels pixels with independent
+        seeds = n_pixels x shots aggregated in one wall-clock step.
+      * ``custom`` -- a list of QASM circuits, one per pixel.
+
+    Runs synchronously in-process (the parallel path is a tight loop over the
+    backend's run_array; no async RQ job wrapper needed for the demo).
+    """
+    if request is not None and _rate_limited(request):
+        raise HTTPException(429, "Rate limit exceeded — too many circuit requests, slow down.")
+    from api.runner import run_parallel as _run
+    try:
+        return _run(_req_dict(req))
+    except Exception as exc:  # noqa: BLE001 - surface sim errors, not a 500
+        return {"error": str(exc)}
 
 
 # --- async job polling + history -------------------------------------------

@@ -1045,6 +1045,51 @@ class QSSCBackend(BackendV2):
         merged = {**self._options.__dict__, **options}
         return QSSCJob(self, job_id, circuits[0], merged)
 
+    def run_array(self, circuits, shots: int | None = None,
+                  max_pixels: int = N_SITES) -> dict:
+        """Run one circuit per pixel across the 64-pixel array IN PARALLEL and
+        aggregate (Invention 4 — distributed computing).
+
+        The 64 die pixels are INDEPENDENT ~10-NV processors at 300 K (1/r**3
+        -> zero at the 2.5 mm pitch, so there is no cross-pixel coupling): the
+        chip's compute throughput is 64x a single pixel, not one big 640-qubit
+        machine. ``run_array`` runs up to ``max_pixels`` (default 64) circuits
+        -- one per pixel -- each an independent noise realization (per-pixel
+        seed offset), and returns per-pixel counts plus the aggregate.
+
+        Use cases:
+          * parallel Shor: 64 coprime bases ``a`` (one per pixel) -- whichever
+            pixel finds the period wins; the rest fail silently.
+          * parallel VQE: 64 parameter points evaluated at once.
+          * parallel sampling: the same circuit on all 64 pixels with
+            independent seeds = 64x the shots in one wall-clock step.
+
+        Returns ``{"per_pixel": [result,...], "aggregate_counts": {...},
+        "n_pixels": n, "throughput_x": n}``.
+        """
+        circs = list(circuits)
+        if not circs:
+            return {"per_pixel": [], "aggregate_counts": {},
+                "n_pixels": 0, "throughput_x": 0}
+        n = min(len(circs), int(max_pixels))
+        circs = circs[:n]
+        base_seed = self._seed
+        per_pixel = []
+        for i, qc in enumerate(circs):
+            # independent noise realization per pixel (pixels are physically
+            # independent; the seed offset makes the rng draws independent).
+            self._seed = base_seed + i
+            self._job_counter += 1
+            opts = {"shots": shots} if shots is not None else {}
+            per_pixel.append(self._execute(qc, opts))
+        self._seed = base_seed  # restore
+        agg: dict = {}
+        for r in per_pixel:
+            for k, v in r.get_counts().items():
+                agg[k] = agg.get(k, 0) + int(v)
+        return {"per_pixel": per_pixel, "aggregate_counts": agg,
+            "n_pixels": n, "throughput_x": n}
+
     # -- execution ---------------------------------------------------------
     def _execute(self, circuit: QuantumCircuit, options: dict):
         shots = int(options.get("shots", self.shots))

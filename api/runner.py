@@ -630,6 +630,122 @@ def run_circuit(req: dict) -> dict:
     return result
 
 
+def run_parallel(req: dict) -> dict:
+    """Run one circuit per pixel across the 64-pixel array IN PARALLEL and
+    aggregate (Invention 4 — distributed computing).
+
+    The 64 die pixels are INDEPENDENT ~10-NV processors at 300 K (1/r**3 -> 0
+    at the 2.5 mm pitch): the chip's compute throughput is 64x a single pixel,
+    not one 640-qubit circuit. Three modes:
+
+      * ``shor``  -- up to ``n_pixels`` coprime bases ``a`` (one per pixel)
+        factor ``n``; whichever pixel finds the period wins, the rest fail.
+      * ``sample`` -- the same circuit (QASM) on all ``n_pixels`` pixels with
+        independent seeds = n_pixels x shots aggregated in one wall-clock step.
+      * ``custom`` -- a list of QASM circuits, one per pixel.
+
+    Returns ``{mode, n_pixels, throughput_x, per_pixel, aggregate_counts, ...}``.
+    """
+    t0 = time.perf_counter()
+    profile = req.get("profile", "NV")
+    temperature_k = float(req.get("temperature_k", 300.0))
+    seed = int(req.get("seed", 42))
+    shots = int(req.get("shots", 2048))
+    noise_mode = req.get("noise_mode", "real")
+    mode = str(req.get("mode", "sample")).lower()
+    n_pixels = max(1, min(64, int(req.get("n_pixels", 64))))
+    try:
+        b = _backend(profile, temperature_k, seed, noise_mode, hardware=False)
+    except NoFPGADetected as exc:
+        return _no_fpga_result(exc)
+
+    out = {"mode": mode, "profile": profile, "n_pixels": n_pixels,
+           "throughput_x": n_pixels, "noise_mode": noise_mode,
+           "temperature_k": temperature_k, "shots": shots}
+
+    if mode == "shor":
+        n = int(req.get("n", 15))
+        if n < 2 or is_prime(n):
+            return {"error": "n must be a composite integer > 1"}
+        nq = 3 * n.bit_length() + 1
+        if nq > 19:
+            return {"error": f"N={n} -> {nq} qubits too large (>19). Use N <= 63."}
+        rng = np.random.default_rng(seed)
+        circuits = []
+        bases = []
+        for _ in range(n_pixels):
+            a = select_coprime(n, rng)
+            qc, _ = create_shor_circuit(n, a=a, rng=rng)
+            circuits.append(qc)
+            bases.append(a)
+        res = b.run_array(circuits, shots=shots, max_pixels=n_pixels)
+        per_pixel = []
+        winner = None
+        for i, (r, a) in enumerate(zip(res["per_pixel"], bases)):
+            counts = r.get_counts()
+            _ret = (None if noise_mode == "none"
+                    else float(r.assessment.get("signal_retention", 0.0) or 0.0))
+            cb = circuits[i].metadata["counting_bits"]
+            r_period, factors = postprocess_period(
+                counts, cb, a, n, signal_retention=_ret)
+            ok = bool(factors[0]) and factors[0] * factors[1] == n
+            entry = {"pixel": i, "a": a, "period": r_period,
+                     "factors": list(factors) if factors[0] else None,
+                     "success": ok, "counts": counts}
+            per_pixel.append(entry)
+            if ok and winner is None:
+                winner = entry
+        out.update({"n": n, "per_pixel": per_pixel,
+                    "aggregate_counts": res["aggregate_counts"],
+                    "factors": (list(winner["factors"]) if winner else None),
+                    "success": winner is not None,
+                    "winner_pixel": (winner["pixel"] if winner else None),
+                    "winner_base": (winner["a"] if winner else None)})
+
+    elif mode == "sample":
+        from qiskit import QuantumCircuit
+        # build the same circuit on every pixel (independent seeds -> 64x shots)
+        qasm = req.get("qasm")
+        if qasm:
+            from qiskit import qasm2
+            qc0 = qasm2.loads(str(qasm)) if isinstance(qasm, str) else list(qasm)[0]
+        else:
+            nq = max(1, min(64, int(req.get("num_qubits", 4))))
+            qc0 = QuantumCircuit(nq, nq)
+            qc0.h(range(nq))
+            qc0.measure(range(nq), range(nq))
+        circuits = [qc0] * n_pixels
+        res = b.run_array(circuits, shots=shots, max_pixels=n_pixels)
+        per_pixel = [{"pixel": i, "counts": r.get_counts(),
+                      "approximate": r.approximate}
+                     for i, r in enumerate(res["per_pixel"])]
+        out.update({"num_qubits": qc0.num_qubits, "per_pixel": per_pixel,
+                    "aggregate_counts": res["aggregate_counts"],
+                    "total_shots": shots * n_pixels})
+
+    elif mode == "custom":
+        qasms = req.get("circuits", [])
+        if not qasms:
+            return {"error": "mode=custom requires a non-empty 'circuits' list"}
+        from qiskit import qasm2
+        circuits = []
+        for q in qasms[:n_pixels]:
+            circuits.append(qasm2.loads(str(q)))
+        res = b.run_array(circuits, shots=shots, max_pixels=len(circuits))
+        per_pixel = [{"pixel": i, "counts": r.get_counts(),
+                      "num_qubits": circuits[i].num_qubits,
+                      "approximate": r.approximate}
+                     for i, r in enumerate(res["per_pixel"])]
+        out.update({"n_pixels": len(circuits), "throughput_x": len(circuits),
+                    "per_pixel": per_pixel, "aggregate_counts": res["aggregate_counts"]})
+    else:
+        return {"error": f"unknown parallel mode '{mode}' "
+                        f"(use shor | sample | custom)"}
+
+    out["elapsed_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+    return out
+
+
 def run_custom(req: dict) -> dict:
     """Execute a user-supplied Qiskit circuit (QASM2 or Python snippet)."""
     t0 = time.perf_counter()
