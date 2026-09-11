@@ -112,22 +112,30 @@ def test_adf4351_nc_pads_have_no_rail():
             f"ADF4351 pin {n} is on rail {nets.get(n)} -- unused diff out, should be NC")
 
 
-def test_main_chip_is_ironwood_sbt_socket():
-    """Uchip must be the Ironwood SBT socket (not the ACF QSSC_Chip_EM), with
-    4 NPTH mount holes and F.Paste on the solder pads (the socket solders down,
-    unlike the ACF pressure-contact die footprint)."""
+def test_main_chip_is_female_header_socket():
+    """Uchip must be the 2.54 mm female-header chip socket (ChipSocket_2.54_EM)
+    the two-board pivot installed in place of the earlier Ironwood SBT / ACF
+    pressure-contact footprints. The socket is a through-hole pin header: 4
+    NPTH mount holes and 65 through-hole solder pads (no F.Paste -- the pins
+    solder through the board, unlike the paste-down Ironwood SBT)."""
     if not MAIN.exists():
         pytest.skip(f"{MAIN} not present")
     fp = _footprint(MAIN, "Uchip")
     assert fp is not None, "Uchip not found on main board"
-    assert fp.GetFPID().GetLibItemName() == "Ironwood_SBT", (
-        f"Uchip is {fp.GetFPID().GetLibItemName()}, expected Ironwood_SBT")
+    assert fp.GetFPID().GetLibItemName() == "ChipSocket_2.54_EM", (
+        f"Uchip is {fp.GetFPID().GetLibItemName()}, expected ChipSocket_2.54_EM")
     pads = list(fp.Pads())
     npth = [p for p in pads if p.GetAttribute() == pcbnew.PAD_ATTRIB_NPTH]
-    assert len(npth) >= 4, f"Ironwood SBT needs >=4 NPTH mount holes, has {len(npth)}"
+    assert len(npth) >= 4, f"chip socket needs >=4 NPTH mount holes, has {len(npth)}"
+    # Through-hole solder pads (PTH), not paste: the female-header pins solder
+    # through the board, so there is no F.Paste on this footprint.
+    pth = [p for p in pads
+           if p.GetAttribute() != pcbnew.PAD_ATTRIB_NPTH
+           and not p.IsOnLayer(pcbnew.F_Paste)]
+    assert len(pth) >= 65, f"chip socket needs >=65 through-hole pads, has {len(pth)}"
     fpaste = [p for p in pads if p.IsOnLayer(pcbnew.F_Paste)]
-    assert len(fpaste) >= 65, (
-        f"Ironwood SBT solder pads need F.Paste (>=65), has {len(fpaste)}")
+    assert fpaste == [], (
+        f"female-header socket is through-hole, expected no F.Paste, has {len(fpaste)}")
 
 
 # ---- head board --------------------------------------------------------------
