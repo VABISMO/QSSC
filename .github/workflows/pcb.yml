@@ -14,10 +14,10 @@
 # the kicad-cli binary). We use the runner's system python3 (NOT setup-python)
 # so the kicad binding is on sys.path.
 #
-# Head board: the detector head (chip_module) is currently regressed on main
-# (11 split DET_IN nets — a FreeRouting SES re-import undid the maze-bridge
-# closures). It is excluded here with `-k "not head"` until it is restored
-# (see task #100). Re-enable by dropping the `-k` filter.
+# Head board: the detector head (chip_module) is restored (DRC 0/0/0 + 0 split
+# / 0 dangling via 3D maze bridges) and is now gated alongside the main board
+# — the `-k "not head"` exclusion was dropped once the head board was clean
+# on this branch.
 name: PCB tests
 
 on:
@@ -91,18 +91,19 @@ jobs:
       - name: Install pytest
         run: python3 -m pip install --user pytest
 
-      - name: Run PCB tests (main board — real bars)
-        # `-k "not head"` excludes the regressed detector-head board (task
-        # #100) and the head parametrize variants. test_pcb_route_full is
-        # auto-skipped (needs QSSC_SLOW=1). The route/route_signals tests copy
-        # the board to a tmp dir before re-routing, so they never mutate the
-        # committed artefact.
+      - name: Run PCB tests (both boards — real bars)
+        # Both boards are now gated: main (qssc) + detector head (chip_module)
+        # are each DRC 0/0/0 + 0 split / 0 dangling. The head parametrize
+        # variants (test_pcb_head, test_*_head_*, [head-path1]) run alongside
+        # the main ones. test_pcb_route_full is auto-skipped (needs
+        # QSSC_SLOW=1). The route/route_signals tests copy the board to a tmp
+        # dir before re-routing, so they never mutate the committed artefact.
         env:
           # Keep the repo root importable so the tests can `import
           # test_pcb_connectivity` / `import route_signals as R`.
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          python3 -m pytest tests/test_pcb_*.py -k "not head" -v \
+          python3 -m pytest tests/test_pcb_*.py -v \
             --no-header -rA
 
       - name: Ruff on PCB tools/tests (CI lint set)
