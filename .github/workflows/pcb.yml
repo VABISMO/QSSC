@@ -60,12 +60,19 @@ jobs:
       - name: Install KiCad (kicad-cli + pcbnew python binding)
         run: |
           sudo apt-get update
-          # On Ubuntu 24.04 the `kicad` package (universe, 8.0.x) provides BOTH
-          # /usr/bin/kicad-cli AND /usr/lib/python3/dist-packages/pcbnew.py --
-          # there is NO separate `kicad-cli` package, so do not ask for one
-          # (apt fails with "Unable to locate package kicad-cli"). We need both
-          # the cli (DRC gate) and the python binding (connectivity / pin-audit
-          # / routing-structure tests import pcbnew).
+          sudo apt-get install -y --no-install-recommends software-properties-common
+          # The committed boards carry (generator_version "8.0") + (version
+          # 20240108), written by KiCad 8.0.5 (built Sep 2024). The kicad in
+          # Ubuntu 24.04 universe is an earlier 8.0.x build that does NOT know
+          # the `generator_version` token and errors "Unknown token
+          # 'generator_version' ... upgrade to a version dated 01/08/24 or
+          # later" -- so every pcbnew.LoadBoard / kicad-cli drc fails. The KiCad
+          # 8 stable PPA carries a recent 8.0.x (8.0.8+) that parses the token.
+          # The `kicad` package provides BOTH /usr/bin/kicad-cli AND the pcbnew
+          # python binding (/usr/lib/python3/dist-packages/pcbnew.py) -- there
+          # is no separate kicad-cli package on Ubuntu.
+          sudo add-apt-repository --yes ppa:kicad/kicad-8-releases
+          sudo apt-get update
           sudo apt-get install -y --no-install-recommends kicad
 
       - name: Sanity-check the KiCad python binding + cli
