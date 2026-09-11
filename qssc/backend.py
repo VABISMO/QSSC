@@ -43,6 +43,8 @@ from qiskit_aer.noise import (
 from .defects import (DefectProfile, get_profile, coherence_at_temperature,
                       optical_coherence_at_temperature)
 from .dipole import cz_gate_time_ns, dipole_gate_fidelity
+from .nuclear import (nuclear_swap_time_s, nuclear_gate_fidelity,
+                      nuclear_memory_advantage)
 from .simulator import (
     QubitSite, SimulatedFPGA, auto_align,
     ASE_GAIN, BRIGHT_CODE, BG_CODE, READOUT_NOISE,
@@ -646,7 +648,8 @@ class QSSCBackend(BackendV2):
                  n_nv_per_pixel: int = N_NV_PER_PIXEL,
                  register_nv_spacing_nm: float = 2.75,
                  gradient_mhz_per_um: float = 0.0,
-                 pixel_size_um: float = 200.0):
+                 pixel_size_um: float = 200.0,
+                 nuclear_memory: bool = False):
         """noise_mode: 'real' (default, full Aer thermal+depolarizing+readout
         noise from the defect physics) | 'phenomenological' (fast analytic
         approximation) | 'none' (ideal). 'aer' is accepted as an alias of 'real'.
@@ -702,6 +705,20 @@ class QSSCBackend(BackendV2):
             self.n_nv_per_pixel = len(sites)
         self.sites = list(sites)
         self._n_qubits = len(self.sites)
+        # Nuclear-spin memory (Invention 3): when enabled, append one 13C memory
+        # qubit per electron NV (paired by index). The 13C carries nuclear_t2
+        # (seconds, vs the electron's ~1.8 ms) so a circuit can STORE a state on
+        # its 13C (SWAP i -> i+n_electron) and RECALL it (SWAP back) ~500x past
+        # the electron coherence window. Default off keeps the register at the
+        # electron width (the audit invariant; nuclear memory is opt-in).
+        self._nuclear_memory = bool(nuclear_memory) and prof.nuclear_t2_s > 0.0
+        self._n_electron = self._n_qubits
+        self._nuclear_t2 = prof.nuclear_t2_s
+        self._nuclear_swap_t = nuclear_swap_time_s(prof.nuclear_hyperfine_hz)
+        if self._nuclear_memory and self._register_mode:
+            self.sites = self.sites + self._nuclear_sites(self.sites)
+            self._n_qubits = len(self.sites)
+            self.n_nv_per_pixel = self._n_electron  # electron width unchanged
         t1, t2 = coherence_at_temperature(prof, temperature_k)
         self._t1, self._t2 = t1, t2
         # Optical-coherence material property (photon indistinguishability):
@@ -746,6 +763,15 @@ class QSSCBackend(BackendV2):
                                     self._depol_2q)
         logger.debug("dipole CZ fidelity @%.2f nm, T2=%.3g s: %.4f",
                      self.register_nv_spacing_nm, self._t2, _fid)
+        if self._nuclear_memory:
+            # Cross-check the electron-13C SWAP fidelity (hyperfine-grounded, not
+            # asserted). Nuclear T2 ~1 s over the ~250 ns swap -> ~99.98%.
+            _nuc_fid = nuclear_gate_fidelity(self._nuclear_t2,
+                                             self._nuclear_swap_t, self._depol_2q)
+            logger.debug("nuclear SWAP fidelity @A=%.3g Hz, 13C T2=%.3g s: %.4f",
+                         prof.nuclear_hyperfine_hz, self._nuclear_t2, _nuc_fid)
+        # nuclear memory depol reuses the 2q depol (the electron-nuclear gate
+        # shares the drive-crosstalk budget of the electron-electron gate).
         self._depol_1q = prof.depol_1q
         self._readout_t = prof.readout_ns * 1e-9
         self._init_t = prof.init_ns * 1e-9
@@ -809,9 +835,39 @@ class QSSCBackend(BackendV2):
                                 rng=np.random.default_rng(self._seed),
                                 gradient_mhz_per_um=self.gradient_mhz_per_um,
                                 pixel_size_um=self.pixel_size_um)
+        self._n_electron = len(self.sites)
+        if self._nuclear_memory:
+            # keep one 13C memory qubit per (grown) electron NV, paired by index
+            self.sites = self.sites + self._nuclear_sites(self.sites)
         self._n_qubits = len(self.sites)
-        self.n_nv_per_pixel = self._n_qubits
+        self.n_nv_per_pixel = self._n_electron
         self._build_target_topology()
+
+    def _nuclear_sites(self, electron_sites: Sequence[QubitSite]) -> list:
+        """Build the paired 13C nuclear memory qubits (one per electron NV).
+
+        Each 13C is paired with electron NV ``i`` at index ``n_electron + i``.
+        It carries the nuclear T2 (seconds) -- the long coherence that lets a
+        STORED state survive ~500x past the electron window. Its frequency is
+        the NV-13C hyperfine line (the RF addressing channel); readout is via
+        the NV electron, so the readout error matches the electron's.
+        """
+        prof = self.profile
+        if prof.nuclear_t2_s <= 0.0:
+            return []
+        n_t2 = prof.nuclear_t2_s
+        n_t1 = 2.0 * n_t2  # relaxation-limited, as in qssc.nuclear
+        n_e = len(electron_sites)
+        out: list = []
+        for i, e in enumerate(electron_sites):
+            out.append(QubitSite(
+                qubit_id=n_e + i, row=e.row, col=e.col,
+                x_um=e.x_um, y_um=e.y_um, intensity=float(BRIGHT_CODE),
+                t1=n_t1, t2=n_t2, readout_err=e.readout_err,
+                frequency=prof.nuclear_hyperfine_hz, usable=True,
+                pixel_id=e.pixel_id, nv_index=e.nv_index,
+            ))
+        return out
 
     # -- target / noise ----------------------------------------------------
     def _neighbor_pairs(self) -> list:
@@ -824,13 +880,25 @@ class QSSCBackend(BackendV2):
         models a single pixel, and 1/r**3 -> zero at the 2.5 mm pixel pitch
         anyway, so the 64 pixels are independent at 300 K (cross-pixel 2q is
         the cryo optical bus, descriptive only).
-        """
+
+        With nuclear-spin memory enabled, each electron NV ``i`` is also paired
+        with its 13C memory qubit at ``n_electron + i`` (an electron-nuclear
+        SWAP edge). 13C-13C pairs are NOT coupled (nuclear-nuclear dipole is
+        negligible at this spacing)."""
         pairs = []
+        n_e = self._n_electron
         n = len(self.sites)
-        for i in range(n):
-            for j in range(i + 1, n):
+        # electron-electron all-to-all (within-pixel dipole register)
+        for i in range(n_e):
+            for j in range(i + 1, n_e):
                 pairs.append((i, j))
                 pairs.append((j, i))
+        # electron-13C memory pairs (one per NV, paired by index)
+        if self._nuclear_memory:
+            for i in range(n_e):
+                if n_e + i < n:
+                    pairs.append((i, n_e + i))
+                    pairs.append((n_e + i, i))
         return pairs
 
     def _build_target(self):
@@ -906,13 +974,20 @@ class QSSCBackend(BackendV2):
                         continue
                     s2 = self.sites[j]
                     # Both qubits sit idle for the full 2q gate duration, so the
-                    # 2q thermal channel must be built from g2q (not the 1q
-                    # therm1) for the control qubit too -- previously the control
-                    # was relaxed over g1q, under-relaxing it by gate_2q/gate_1q
-                    # (~8x on NV/hBN, ~7.5x on SiC).
-                    therm_q = thermal_relaxation_error(t1, t2, g2q)
+                    # 2q thermal channel must be built from the 2q gate time (not
+                    # the 1q therm1) for the control qubit too -- previously the
+                    # control was relaxed over g1q, under-relaxing it by
+                    # gate_2q/gate_1q (~8x on NV/hBN, ~7.5x on SiC).
+                    # An electron-13C SWAP uses the hyperfine-coupling time
+                    # (nuclear_swap, ~250 ns), not the electron dipole g2q; the
+                    # 13C site already carries nuclear T2 (seconds) so its
+                    # thermal channel is correspondingly slow.
+                    is_en = (self._nuclear_memory
+                             and ((q < self._n_electron) != (j < self._n_electron)))
+                    g2q_pair = self._nuclear_swap_t if is_en else g2q
+                    therm_q = thermal_relaxation_error(t1, t2, g2q_pair)
                     ej = thermal_relaxation_error(s2.t1 or self._t1,
-                                                  s2.t2 or self._t2, g2q)
+                                                  s2.t2 or self._t2, g2q_pair)
                     two_q_therm = therm_q.tensor(ej)
                     dep2err = depolarizing_error(dep2, 2)
                     # On-chip 2q gate is a SPIN gate (microwave / magnetic
@@ -1494,6 +1569,15 @@ class QSSCBackend(BackendV2):
                 f"linewidth {self.profile.odmr_linewidth_hz*1e-6:g} MHz). The "
                 f"width is a MEASURED quantity from the ODMR spectrum, not a "
                 f"fixed count; a stronger gradient resolves more ensemble qubits.")
+        if self._nuclear_memory:
+            adv = nuclear_memory_advantage(self._t2, self._nuclear_t2)
+            lim.append(
+                f"Nuclear-spin memory ENABLED: each NV is paired with a 13C "
+                f"memory qubit (T2 ~{self._nuclear_t2:g} s vs the electron's "
+                f"{self._t2*1e3:.3g} s, a ~{adv:.0f}x coherence stretch). "
+                f"STORE on the 13C (SWAP i -> i+{self._n_electron}), RECALL back; "
+                f"the 13C T2 is NOT quoted by the supplier -- a literature anchor "
+                f"for an engineered single-13C (Reimer 2016).")
         if self.temperature_k >= 250:
             lim.append("Operating at ~300 K: convenient but coherence-limited. "
                        "Cool to 77 K / 4 K to extend T2 by ~2x / ~8x and unlock "
@@ -1680,6 +1764,14 @@ class QSSCBackend(BackendV2):
             "n_nv_per_pixel": self.n_nv_per_pixel,
             "gradient_mhz_per_um": self.gradient_mhz_per_um,
             "pixel_size_um": self.pixel_size_um,
+            "nuclear_memory": self._nuclear_memory,
+            "n_electron_qubits": self._n_electron,
+            "nuclear_t2_s": self._nuclear_t2 if self._nuclear_memory else 0.0,
+            "nuclear_swap_ns": round(self._nuclear_swap_t * 1e9, 1)
+                              if self._nuclear_memory else 0.0,
+            "nuclear_memory_advantage": round(
+                nuclear_memory_advantage(self._t2, self._nuclear_t2), 1)
+                if self._nuclear_memory else 0.0,
             "t1_ms": round(self._t1 * 1e3, 3),
             "t2_us": round(self._t2 * 1e6, 3),
             "readout_error": self.profile.readout_error,
