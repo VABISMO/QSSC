@@ -30,13 +30,14 @@ F_Cu = pcbnew.F_Cu; B_Cu = pcbnew.B_Cu
 SIG_LAYERS = [B_Cu, pcbnew.In3_Cu, pcbnew.In4_Cu, F_Cu]
 LNAME = {B_Cu: "B.Cu", pcbnew.In3_Cu: "In3", pcbnew.In4_Cu: "In4", F_Cu: "F.Cu"}
 NL = len(SIG_LAYERS)
-VIA_DIA = int(0.40 * NM); VIA_DRILL = int(0.20 * NM)
-TRK_W = int(0.20 * NM)
+VIA_DIA = int(float(os.environ.get("MAZE_VIA_DIA", "0.40")) * NM)
+VIA_DRILL = int(float(os.environ.get("MAZE_VIA_DRILL", "0.20")) * NM)
+TRK_W = int(float(os.environ.get("MAZE_TRK_W", "0.20")) * NM)
 CLEAR = int(float(os.environ.get("MAZE_CLEAR", "0.16")) * NM)
 HALF_W = TRK_W // 2
 KEEP = CLEAR + HALF_W
-REAL_CLEAR = int(0.17 * NM)
-CELL = int(0.10 * NM)
+REAL_CLEAR = int(float(os.environ.get("MAZE_REAL_CLEAR", "0.17")) * NM)
+CELL = int(float(os.environ.get("MAZE_CELL", "0.10")) * NM)
 VIA_COST = 4.0   # penalty for one layer transition (a through-hole via)
 
 bb = b.GetBoardEdgesBoundingBox()
@@ -201,12 +202,20 @@ def _find_clear_via_spot(cluster, nc):
     pads = cluster["pads"]
     px = sum(p["x"] for p in pads) // len(pads)
     py = sum(p["y"] for p in pads) // len(pads)
-    padlay = min(pads[0]["layers"])
+    # through-hole / drilled pads report layers=None (= ALL layers); route the
+    # pad->via track on the bottom (valid for an all-layer pad), else the first
+    # SMD pad's lowest layer. min(None) crashed here on the first TH pad cluster.
+    padlay = next((min(p["layers"]) for p in pads if p["layers"] is not None), B_Cu)
     step = int(0.15 * NM)
     for ring in range(0, 22):
         for ang_deg in range(0, 360, 30):
             r = ring * step; a = math.radians(ang_deg)
             vx = int(px + r * math.cos(a)); vy = int(py + r * math.sin(a))
+            # the via spot MUST lie inside the routing grid (board edge - 0.5 mm
+            # margin) or to_cell() maps it out of the blocked_layers bytearray
+            # and the endpoint index access crashes (IndexError on edge pads).
+            vcx, vcy = to_cell(vx, vy)
+            if not (0 <= vcx < NCOL and 0 <= vcy < NROW): continue
             if not _via_clear(vx, vy, nc): continue
             cp = min(pads, key=lambda p: (p["x"] - vx) ** 2 + (p["y"] - vy) ** 2)
             if _trk_clear(cp["x"], cp["y"], vx, vy, padlay, nc):
@@ -402,12 +411,16 @@ def simplify3d(path):
     return out
 
 report = []
-for nc, items in by_net.items():
+n_nets = len(by_net)
+_maze_out = bp.with_suffix(".maze3d.kicad_pcb")
+for idx, (nc, items) in enumerate(by_net.items(), 1):
     nm = netnames.get(nc, "")
     if not nm or nm in tc.PLANE_NETS: continue
     if only and nm not in only: continue
     clusters, _ = cluster_pads_and_vias(items)
-    if len(clusters) < 2: continue
+    if len(clusters) < 2:
+        print(f"[{idx}/{n_nets}] {nm}: single-cluster (skip)", flush=True); continue
+    print(f"[{idx}/{n_nets}] {nm}: routing...", flush=True)
     best = None
     for a in clusters:
         for bb_ in clusters:
@@ -420,6 +433,7 @@ for nc, items in by_net.items():
     e1 = endpoint_plan(ca, nc)
     e2 = endpoint_plan(cb, nc)
     if e1 is None or e2 is None:
+        print(f"   SKIP no clear via spot", flush=True)
         report.append((nm, None, 0, 0, 0, 0, "no clear via spot")); continue
     eps = [(e1["x"], e1["y"]), (e2["x"], e2["y"])]
     # build per-layer blocked grids + via-clearable grid
@@ -427,6 +441,9 @@ for nc, items in by_net.items():
     via_clear = build_via_clearable(nc)
     # starts/goals: endpoint cells on EVERY layer (through-hole vias reach all)
     sc = to_cell(e1["x"], e1["y"]); gc_ = to_cell(e2["x"], e2["y"])
+    if not (0 <= sc[0] < NCOL and 0 <= sc[1] < NROW and 0 <= gc_[0] < NCOL and 0 <= gc_[1] < NROW):
+        print(f"   SKIP endpoint via spot outside grid", flush=True)
+        report.append((nm, None, e1["x"], e1["y"], e2["x"], e2["y"], "endpoint via spot outside grid")); continue
     starts = [(li, sc[0], sc[1]) for li in range(NL)]
     goals = [(li, gc_[0], gc_[1]) for li in range(NL)]
     # ensure endpoint cells are open on every layer
@@ -435,6 +452,7 @@ for nc, items in by_net.items():
         if blocked_layers[li][gc_[1] * NCOL + gc_[0]]: blocked_layers[li][gc_[1] * NCOL + gc_[0]] = 0
     path = astar3d(blocked_layers, via_clear, starts, goals)
     if not path:
+        print(f"   SKIP no 3D path", flush=True)
         report.append((nm, None, e1["x"], e1["y"], e2["x"], e2["y"], "no 3D path")); continue
     path = simplify3d(path)
     # VALIDATE every same-layer segment at REAL_CLEAR + every via-transition spot
@@ -454,6 +472,7 @@ for nc, items in by_net.items():
             vias_needed.append((vx, vy))
         prev = cell
     if bad:
+        print(f"   SKIP 3D fails: {fail_info}", flush=True)
         report.append((nm, None, e1["x"], e1["y"], e2["x"], e2["y"], f"3D fails: {fail_info}")); continue
     # COMMIT
     endpoint_commit(e1, nc)
@@ -469,8 +488,13 @@ for nc, items in by_net.items():
     layers_used = sorted({LNAME[SIG_LAYERS[c[0]]] for c in path})
     report.append((nm, plen, e1["x"], e1["y"], e2["x"], e2["y"],
                    f"ok layers={','.join(layers_used)} vias={len(placed_vias)}"))
+    print(f"   ok layers={','.join(layers_used)} vias={len(placed_vias)} len={plen:.1f}mm", flush=True)
+    # checkpoint every 16 routed nets: a crash/kill never loses more than 16
+    if idx % 16 == 0:
+        b.Save(str(_maze_out))
+        print(f"   [checkpoint {idx}/{n_nets} -> {_maze_out.name}]", flush=True)
 
-out = bp.with_suffix(".maze3d.kicad_pcb")
+out = _maze_out
 b.Save(str(out))
 print(f"== 3D maze-bridged -> {out.name} ==")
 ok = 0
