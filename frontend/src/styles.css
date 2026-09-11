@@ -515,3 +515,18 @@ textarea.code-editor:focus { outline: 1px solid var(--brand); border-color: var(
 .qfreq td.det.neg { color: #8ac8ff; }
 .tag.ok { color: #7bd88f; font-size: 11px; }
 .tag.bad { color: #ff8a8a; font-size: 11px; }
+
+/* ---- per-pin resonance map modal (opened from the calibration panel) ---- */
+.resonance-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(5, 9, 22, .72); backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+  animation: meas-help-fade .12s ease-out;
+}
+.resonance-modal {
+  position: relative; background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  max-width: 760px; width: 100%; max-height: 86vh; overflow: auto; padding: 22px 24px 26px;
+}
+.resonance-modal h2 { font-size: 15.5px; display: flex; align-items: center; gap: 9px; margin-right: 40px; }
+.resonance-modal .qfreq-scroll { max-height: 60vh; }

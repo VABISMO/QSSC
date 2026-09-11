@@ -6,7 +6,6 @@ import {
   SignalChart, CalibrationPanel, Verdict,
   OpticalChainDiagram, RunPhysics,
   CompassRose, GyroPanel, MagnetoImage, SensorField,
-  QubitFrequencyTable,
 } from './components.jsx'
 
 // Fallback firmware command list (all 17 verbs). Used in the "Reply & readout"
@@ -1504,18 +1503,6 @@ export default function App() {
                 run={runCalibration} running={calRunning} result={calRun} err={calErr}
               />
             </div>
-          </div>
-
-          {/* per-qubit resonance / frequency table — each pin identified by its
-              own transition frequency (D + per-site detuning = addressing map) */}
-          <div className="card" style={{ marginTop: 14 }}>
-            <h2><span className="dot" />Qubit resonance table (per-pin frequencies)</h2>
-            <QubitFrequencyTable
-              sites={info.data && info.data.sites}
-              dGhz={info.data && info.data.d_ghz}
-              loading={info.loading}
-              error={info.error}
-            />
           </div>
 
           {/* ============================= ANALOG SIGNAL ============================= */}
