@@ -683,6 +683,9 @@ export function CalibrationPanel({ profile, temperature, seed, run, running, res
                     {' · '}detuning spread {st.detuning_spread_mhz} MHz
                     {' · '}fit σ {st.meas_sigma_mhz} MHz
                     {' · '}measured T₂ {st.t2_mean_us} µs / T₂* {st.t2_star_mean_us} µs
+                    {st.source && st.source !== 'simulated' && <span style={{
+                      color: 'var(--warn, #b8860b)' }}>
+                      {' · '}T₂/T₂* {st.source}</span>}
                   </div>
                 )}
               </div>

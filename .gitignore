@@ -137,3 +137,15 @@ hardware/pcb/*.freeroute.drc.json
 
 # KiCad live-edit lock files
 hardware/pcb/~*.lck
+
+# Maze-router intermediate boards (tools/maze_bridge_3d.py / route_qssc_pcb.py
+# outputs -- derived from the committed qssc.kicad_pcb / chip_module.kicad_pcb;
+# the canonical boards have no .maze / .closed infix).
+hardware/pcb/*.maze*.kicad_pcb
+hardware/pcb/*.maze*.kicad_pro
+hardware/pcb/*.closed*.kicad_pcb
+hardware/pcb/*.closed*.kicad_pro
+
+# Parameter-sweep benchmark outputs (tools/run_benchmark.py -- regenerable)
+benchmark_circuits.json
+benchmark_report.html

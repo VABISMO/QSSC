@@ -446,6 +446,14 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
         f, c = _real_odmr_sweep(mw, det, f0, span, points, site=0)
         em.clear_emitters()
         io_label = "real"
+        # Stage 4 below is still model-derived: the real per-pin Ramsey/Hahn
+        # coherence fit needs the RTL pulse-sequence engine (RUN_SEQUENCE),
+        # which is task #58 and not yet on the board. The per-pin resonance
+        # *frequency* IS real here (each pin's ODMR dip is individually
+        # swept on-hardware when RUN_SEQUENCE lands); until then the T2/T2*
+        # numbers are a model estimate, not a measurement. Label it so the
+        # top-level source:"hardware" does not overstate stage 4.
+        stage4_source = "model-estimate (Ramsey/Hahn pending #58)"
     else:
         # Simulator path -------------------------------------------------
         points = _clamp_points(points)
@@ -465,6 +473,7 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
         freqs = np.linspace(f0 - span, f0 + span, int(points))
         f, c = simulate_odmr(prof, freqs, b_field_t=b_field, linewidth_mhz=5.0)
         io_label = "simulated"
+        stage4_source = "simulated"
 
     # Shared D / linewidth fit (real codes and sim contrast both have a
     # minimum at the resonance dip; with a non-zero B field the spectrum
@@ -546,13 +555,15 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
              "detuning_spread_mhz": round(detuning_spread, 3),
              "meas_sigma_mhz": round(meas_sigma_hz / 1e6, 3),
              "t2_mean_us": round(t2_mean, 1),
-             "t2_star_mean_us": round(t2_star_mean, 2)},
+             "t2_star_mean_us": round(t2_star_mean, 2),
+             "source": stage4_source},
         ],
         "per_pin": per_pin,
         "d_fit_ghz": round(d_fit, 5),
         "t1_ms": round(t1 * 1e3, 3), "t2_us": round(t2 * 1e6, 3),
         "source": "hardware" if hardware else "simulator",
         "io": io_label,
+        "stage4_source": stage4_source,
     }
 
 
@@ -956,10 +967,11 @@ def fpga_probe(request: Request = None):
     "No FPGA detected" before running anything. Localhost-only.
 
     With no ``QSSC_FPGA_PORT`` set -> ``connected=false, simulator=true`` (the
-    app is in Simulator mode). With a port set, opens (or reuses) the
-    connection and sends ``ID``; a flashed board replies ``QSSC v1``. A stale
-    sim cache left from before the port was set is invalidated so a just-plugged
-    board is detected without an API restart.
+    app is in Simulator mode). With a port set, opens a fresh connection, sends
+    ``ID``, and **closes it again** -- the probe must NOT hold the serial port,
+    or it collides with the RQ worker's cached ``FPGAConnection`` on
+    ``/dev/ttyUSB0`` (two handles on one port -> the second open fails). A
+    flashed board replies ``QSSC v1``.
     """
     if not _is_local(request):
         raise HTTPException(403, "FPGA probe endpoint is localhost-only.")
@@ -967,24 +979,21 @@ def fpga_probe(request: Request = None):
     if not port:
         return {"connected": False, "port": None, "id": None,
                 "simulator": True}
-    # Invalidate a stale sim cache if a port is now configured (board plugged
-    # after the API started). A real FPGAConnection is then built + ID-probed.
-    global _FPGA
-    if _FPGA is not None and not isinstance(_FPGA, FPGAConnection):
-        _FPGA = None
+    # Open-use-close: do NOT touch the module-global _FPGA cache (that is for
+    # the stateful console endpoints and would hold the port). A fresh
+    # FPGAConnection.__init__ runs the ID probe; we close it before returning.
     try:
-        f = _fpga()  # FPGAConnection.__init__ runs the ID probe
+        f = FPGAConnection(port)
     except NoFPGADetected as exc:
         return {"connected": False, "port": port, "id": None,
                 "simulator": False, "reason": str(exc)}
-    if not isinstance(f, FPGAConnection):  # pragma: no cover - port set but sim
-        return {"connected": False, "port": port, "id": None,
-                "simulator": True}
     try:
         reply = f.send_command("ID")
     except Exception as exc:  # link dropped after open
         return {"connected": False, "port": port, "id": None,
                 "simulator": False, "reason": f"ID query failed: {exc}"}
+    finally:
+        f.close()
     return {"connected": reply.startswith("QSSC"), "port": port,
             "id": reply, "simulator": False}
 
