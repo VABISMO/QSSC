@@ -57,30 +57,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install KiCad (kicad-cli + pcbnew python binding)
+      - name: Install KiCad 8.0 from PPA (kicad-cli + pcbnew python binding)
+        # The `kicad` package provides BOTH /usr/bin/kicad-cli AND the pcbnew
+        # python binding (/usr/lib/python3/dist-packages/pcbnew.py) -- there is
+        # no separate kicad-cli package on Ubuntu (apt fails "Unable to locate
+        # package kicad-cli" if you ask for one). We install from the official
+        # KiCad 8.0 releases PPA, NOT the Ubuntu 24.04 universe package: the
+        # universe build is an early 8.0.x (dated before 01/08/24) that cannot
+        # parse 8.0.5+ board tokens (errors "Unknown token 'generator_version'"
+        # and "Expecting 'true|false' ... allow_soldermask_bridges_in_footprints"
+        # on every pcbnew.LoadBoard / kicad-cli drc). The PPA ships 8.0.8, which
+        # natively reads the committed (generator_version "8.0") boards, so no
+        # token stripping is needed. software-properties-common provides
+        # add-apt-repository.
         run: |
           sudo apt-get update
-          # The `kicad` package (Ubuntu 24.04 universe, 8.0.x) provides BOTH
-          # /usr/bin/kicad-cli AND the pcbnew python binding
-          # (/usr/lib/python3/dist-packages/pcbnew.py) -- there is no separate
-          # kicad-cli package on Ubuntu (apt fails "Unable to locate package
-          # kicad-cli" if you ask for one). Install `kicad` alone.
+          sudo apt-get install -y --no-install-recommends software-properties-common
+          sudo add-apt-repository -y ppa:kicad/kicad-8.0-releases
+          sudo apt-get update
           sudo apt-get install -y --no-install-recommends kicad
-
-      - name: Strip generator_version token (incompatible with runner KiCad)
-        # The committed boards carry (generator_version "8.0"), a metadata
-        # token written by KiCad 8.0.5+. The runner's Ubuntu 24.04 universe
-        # kicad is an earlier 8.0.x build that does NOT know the token and
-        # errors "Unknown token 'generator_version' ... upgrade to a version
-        # dated 01/08/24 or later" on every pcbnew.LoadBoard / kicad-cli drc.
-        # The token is non-functional file-format metadata, so strip it from
-        # the CI checkout only (the committed boards keep theirs). The older
-        # kicad then parses (version 20240108) cleanly. Verified: DRC results
-        # are identical with/without the token.
-        run: |
-          sed -i '/(generator_version/d' \
-            hardware/pcb/qssc.kicad_pcb \
-            hardware/pcb/chip_module.kicad_pcb
 
       - name: Sanity-check the KiCad python binding + cli
         run: |
