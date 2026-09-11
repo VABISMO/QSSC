@@ -272,16 +272,17 @@ class SimulatedFPGA:
             if head == "READ_LOCKIN":
                 # READ_LOCKIN <ref_khz> <n_cycles>: lock-in accumulator result
                 # (on-minus-off differential over n_cycles modulation cycles).
-                # Mirrors lockin_integrated_readout + the pending RTL lock-in
-                # accumulator (RTL pending). Reply: "diff sigma snr_single snr_int".
+                # Mirrors lockin_integrated_readout + the RTL lock-in accumulator
+                # (READ_LOCKIN verb, PR3a). Reply: "diff sigma snr_single snr_int".
                 ref_khz = int(parts[1]); n_cycles = int(parts[2])
                 if n_cycles <= 0 or n_cycles > 100000:
                     return "ERR"
                 return self._read_lockin(ref_khz, n_cycles)
             if head == "RUN_SEQUENCE":
-                # RUN_SEQUENCE <kind> <n_windows>: pulse-sequence engine stub
-                # (RTL pending). kind in {ramsey, hahn, cpmg}; returns
-                # n_windows readout codes (one per optical read window).
+                # RUN_SEQUENCE <kind> <n_windows>: sim-side model of the RTL
+                # pulse-sequence engine (RUN_SEQUENCE verb, PR3a). kind in
+                # {ramsey, hahn, cpmg}; returns n_windows readout codes (one
+                # per optical read window).
                 kind = parts[1] if len(parts) > 1 else "ramsey"
                 n_windows = int(parts[2]) if len(parts) > 2 else 8
                 if kind not in ("ramsey", "hahn", "cpmg") or n_windows <= 0 or n_windows > 1024:
@@ -469,11 +470,11 @@ class SimulatedFPGA:
                 f"{res['single_frame_snr']:.2f} {res['integrated_snr']:.2f}")
 
     def _run_sequence(self, kind: str, n_windows: int) -> str:
-        """Pulse-sequence engine stub (RTL pending).
+        """Sim-side model of the RTL pulse-sequence engine (RUN_SEQUENCE, PR3a).
 
         Models the optical readout of ``n_windows`` windows for a Ramsey / Hahn
         echo / CPMG sequence as a decaying fringe of photocurrent codes, so the
-        host can exercise the sequence engine before the RTL lands. Reply:
+        host can exercise the on-host fit path without a physical board. Reply:
         ``"<n> c0 c1 ... cN-1"``.
         """
         t2_us = self.t2 * 1e6
