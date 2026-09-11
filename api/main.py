@@ -24,6 +24,7 @@ from qssc import (
     auto_align, simulate_odmr, QSSCBackend,
     make_detector_response, PROFILES,
     compass_measure, gyro_measure,
+    magnetometer_sweep, synthetic_field_map,
     FPGAConnection, NoFPGADetected, make_connection,
     DetectorInterface, MicrowaveController, EmitterController,
 )
@@ -1259,6 +1260,66 @@ def api_magneto(
                  f"gradient + dipole offset; linewidth {lw_mhz:g} MHz, {n_eff} "
                  f"averages ({mode} environment) -> sensitivity {sens_ut:.2f} uT. "
                  f"The FPGA returns all 64 AD7616 samples in one parallel frame."),
+    }
+
+
+@app.get("/api/sensor/magneto")
+def api_sensor_magneto(
+    profile: str = "NV",
+    gradient_ut_mm: float = 8.0,
+    base_bx_ut: float = 25.0,
+    base_by_ut: float = 0.0,
+    base_bz_ut: float = -40.0,
+    dipole_moment_am2: float = 0.02,
+    dipole_x_mm: float = 2.0,
+    dipole_y_mm: float = 5.0,
+    dipole_z_mm: float = 15.0,
+    n_avg: int = 500,
+    mode: str = "real",
+    differential: bool = False,
+    average: bool = True,
+    seed: Optional[int] = None,
+):
+    """64-pixel VECTOR magnetometer (Invention 1).
+
+    Unlike the simple /api/magneto |B.n| projection, each of the 64 pixels
+    recovers the full B-VECTOR from its 4 NV <111> doublets (4-axis
+    least-squares reconstruction, the compass physics run independently per
+    pixel). Returns an 8x8 |B| image + per-pin B-vectors + the array mean/std.
+
+    ``differential`` subtracts the linear-gradient baseline (base_bx/by/bz +
+    gradient) so a weak dipole source shows up against the strong DC background
+    that would otherwise swamp it. ``average`` reports the array mean +/- std
+    (the single-number field reading). ``mode='sim'`` averages freely;
+    ``mode='real'`` is shot-noise-limited at the linewidth floor.
+    """
+    rng = np.random.default_rng(seed)
+    fmap = synthetic_field_map(
+        gradient_ut_mm=gradient_ut_mm, base_bx_ut=base_bx_ut,
+        base_by_ut=base_by_ut, base_bz_ut=base_bz_ut,
+        dipole_moment_am2=dipole_moment_am2,
+        dipole_x_mm=dipole_x_mm, dipole_y_mm=dipole_y_mm,
+        dipole_z_mm=dipole_z_mm)
+    baseline = None
+    if differential:
+        # the baseline is the smooth gradient without the dipole perturbation
+        baseline = synthetic_field_map(
+            gradient_ut_mm=gradient_ut_mm, base_bx_ut=base_bx_ut,
+            base_by_ut=base_by_ut, base_bz_ut=base_bz_ut,
+            dipole_moment_am2=0.0)
+    res = magnetometer_sweep(
+        profile=profile, b_field_map_ut=fmap, baseline_map_ut=baseline,
+        n_avg=n_avg, mode=mode, differential=differential, average=average,
+        rng=rng)
+    return {
+        "profile": res.profile, "grid": res.grid, "n_pixels": res.n_pixels,
+        "mode": res.mode, "n_avg": res.n_avg, "linewidth_mhz": res.linewidth_mhz,
+        "sensitivity_ut": res.sensitivity_ut, "differential": res.differential,
+        "average": res.average,
+        "pixels": res.pixels, "image": res.image,
+        "image_min_ut": res.image_min_ut, "image_max_ut": res.image_max_ut,
+        "mean_b_mag_ut": res.mean_b_mag_ut, "mean_b_vector_ut": res.mean_b_vector_ut,
+        "std_b_mag_ut": res.std_b_mag_ut, "stats": res.stats, "note": res.note,
     }
 
 

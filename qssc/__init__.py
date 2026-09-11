@@ -35,6 +35,9 @@ from .sensors import (
     lockin_integrated_readout, compass_measure, gyro_measure,
     CompassResult, GyroResult,
 )
+from .magnetometry import (
+    magnetometer_sweep, synthetic_field_map, MagnetometerResult,
+)
 
 __version__ = "2.0.0"
 __all__ = [
@@ -51,5 +54,7 @@ __all__ = [
     "postprocess_period_swapless", "create_math_circuit",
     "grover_search", "build_user_circuit", "UserCircuitError", "perfect_power",
     "lockin_integrated_readout", "compass_measure", "gyro_measure",
-    "CompassResult", "GyroResult", "__version__",
+    "CompassResult", "GyroResult",
+    "magnetometer_sweep", "synthetic_field_map", "MagnetometerResult",
+    "__version__",
 ]
