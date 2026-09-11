@@ -36,7 +36,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, asdict
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -686,6 +686,7 @@ def auto_align(profile: DefectProfile | str = "NV",
                 register_line_spacing_hz: float = 6.0e6,
                 gradient_mhz_per_um: float = 0.0,
                 pixel_size_um: float = 200.0,
+                register_line_freqs_hz: Optional[Sequence[float]] = None,
                 ) -> List[QubitSite]:
     """Calibrate the chip and build the qubit-site list.
 
@@ -744,6 +745,14 @@ def auto_align(profile: DefectProfile | str = "NV",
         sites: List[QubitSite] = []
         n = max(1, int(n_nv_per_pixel))
         line_spacing_hz = register_line_spacing_hz
+        # MEASURED register width (the truth from decompose_odmr): when the
+        # resolved ODMR line centres are given, N = len(lines) and each NV sits
+        # at its measured frequency (not the synthetic 6 MHz grid). Priority:
+        # measured lines > gradient-derived spacing > uniform 6 MHz default.
+        measured_freqs = (list(register_line_freqs_hz)
+                          if register_line_freqs_hz is not None else None)
+        if measured_freqs is not None:
+            n = max(1, len(measured_freqs))
         if gradient_mhz_per_um > 0.0:
             linewidth_mhz = prof.odmr_linewidth_hz * 1e-6
             # the gradient shifts the ensemble ODMR line by gradient*d MHz per um
@@ -764,8 +773,14 @@ def auto_align(profile: DefectProfile | str = "NV",
             spread = prof.frequency_detuning_spread_hz
             jitter = (float(rng.normal(0.0, spread))
                       if spread > 0 else 0.0)
-            detune = (k - (n - 1) / 2.0) * line_spacing_hz + jitter
-            freq = prof.zero_field_splitting + detune
+            if measured_freqs is not None and k < len(measured_freqs):
+                # measured ODMR line centre (the truth from decompose_odmr) +
+                # small per-NV strain jitter. The register uses the MEASURED
+                # frequency grid, not a hardcoded 6 MHz spacing.
+                freq = float(measured_freqs[k]) + jitter
+            else:
+                detune = (k - (n - 1) / 2.0) * line_spacing_hz + jitter
+                freq = prof.zero_field_splitting + detune
             sites.append(QubitSite(
                 qubit_id=k, row=0, col=0,
                 x_um=x_um, y_um=y_um, intensity=float(BRIGHT_CODE),

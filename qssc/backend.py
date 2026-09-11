@@ -668,26 +668,46 @@ class QSSCBackend(BackendV2):
                  hardware=None, shots: int = 1024, seed: int = 42,
                  temperature_k: float = 300.0,
                  noise_mode: str = "real",
+                 pixel_mode: str = "register",
                  n_nv_per_pixel: int = N_NV_PER_PIXEL,
                  register_nv_spacing_nm: float = 2.75,
                  gradient_mhz_per_um: float = 0.0,
                  pixel_size_um: float = 200.0,
-                 nuclear_memory: bool = False):
+                 nuclear_memory: bool = False,
+                 register_line_freqs_hz: Optional[Sequence[float]] = None):
         """noise_mode: 'real' (default, full Aer thermal+depolarizing+readout
         noise from the defect physics) | 'phenomenological' (fast analytic
         approximation) | 'none' (ideal). 'aer' is accepted as an alias of 'real'.
 
-        ``n_nv_per_pixel`` is the within-pixel NV register width the backend
-        actually simulates (the circuit qubits). The 64-pixel *hardware* die
-        (``N_SITES``) is the physical readout layer and stays 64 -- those are
-        64 independent parallel processors at 300 K (64 x n_nv_per_pixel > 63-qubit
-        MPS cap, so the circuit models ONE pixel's register). Cross-pixel 2q
-        is optical-bus / cryo-only and is descriptive here (not simulated).
-        ``register_nv_spacing_nm`` is the design NV-NV separation inside one
-        microdiamond; the 2q gate time comes from the dipole-dipole CZ at that
-        spacing (qssc.dipole), ~200 ns at 2.75 nm -- matching the defect
-        profile's gate_2q_ns target.
+        ``pixel_mode`` selects the circuit-qubit model and only affects the
+        auto-build branch (``sites is None``); explicit ``sites`` always keep
+        the historical all-to-all coupling so existing tests are untouched:
+
+        * ``"register"`` (default): ``self.sites`` is ONE pixel's N-NV register
+          (all-to-all dipole coupled, the 300 K on-chip 2q gate). N is a
+          MEASURED quantity -- when ``register_line_freqs_hz`` (the resolved ODMR
+          line centres from :func:`qssc.odmr_decompose.decompose_odmr`) is given,
+          N = len(register_line_freqs_hz) and the NVs sit on that measured
+          frequency grid; otherwise N defaults to ``n_nv_per_pixel`` on the
+          synthetic 6 MHz grid (a sim-only fallback, not a physics assertion).
+          A field gradient (Invention 5, needs-HW) caps N at the resolvable
+          count.
+        * ``"ensemble"``: the 64 chip pixels ARE the circuit qubits (one
+          ensemble qubit per pixel -- the bulk-microdiamond collapse to a single
+          ODMR line). Cross-pixel 2q is zero at the 2.5 mm pitch, so the
+          coupling map is empty and 2q circuits are rejected (switch to
+          register mode for within-pixel 2q).
+
+        The 64-pixel *hardware* die (``N_SITES``) is the physical readout layer
+        and stays 64. Cross-pixel 2q is optical-bus / cryo-only and is
+        descriptive here (not simulated). ``register_nv_spacing_nm`` is the
+        design NV-NV separation inside one microdiamond; the 2q gate time comes
+        from the dipole-dipole CZ at that spacing (qssc.dipole), ~200 ns at
+        2.75 nm -- matching the defect profile's gate_2q_ns target.
         """
+        if pixel_mode not in ("register", "ensemble"):
+            raise ValueError(
+                f"pixel_mode must be 'register' or 'ensemble', got {pixel_mode!r}")
         super().__init__(name="qssc_simulator")
         prof = get_profile(profile) if isinstance(profile, str) else profile
         self.profile = prof
@@ -695,35 +715,66 @@ class QSSCBackend(BackendV2):
         self.hardware = hardware
         self.shots = shots
         self.seed = seed
+        self.pixel_mode = pixel_mode
         self.n_nv_per_pixel = int(n_nv_per_pixel)
         self.register_nv_spacing_nm = float(register_nv_spacing_nm)
         self.gradient_mhz_per_um = float(gradient_mhz_per_um)
         self.pixel_size_um = float(pixel_size_um)
+        # Measured-N override (the truth, from decompose_odmr): the resolved
+        # ODMR line count beats any requested n_nv_per_pixel. register mode
+        # then places the NVs on the measured frequency grid, not the
+        # synthetic 6 MHz grid. Stored as a list for describe()/auto_align.
+        self._register_line_freqs_hz: Optional[List[float]] = (
+            list(register_line_freqs_hz) if register_line_freqs_hz is not None
+            else None)
+        if self._register_line_freqs_hz is not None:
+            self.n_nv_per_pixel = len(self._register_line_freqs_hz)
         if sites is None:
-            # Register mode (the production / API path): self.sites is ONE
-            # pixel's n_nv_per_pixel-NV register (the circuit qubits, all-to-all
-            # dipole coupled); the 64-pixel hardware die is a SEPARATE chip-view
-            # site list (self._chip_sites) used by describe() / optical readout.
-            # A field gradient (Invention 5) caps the register width at the
-            # resolvable line count (Case D: separation > linewidth), making the
-            # width a MEASURED quantity from the ODMR spectrum, not a fixed knob.
-            sites = auto_align(prof, n_nv_per_pixel=n_nv_per_pixel,
-                               register=True, temperature_k=temperature_k,
-                               rng=np.random.default_rng(seed),
-                               gradient_mhz_per_um=gradient_mhz_per_um,
-                               pixel_size_um=pixel_size_um)
-            self._register_mode = True
-            # the gradient may have capped the register below n_nv_per_pixel;
-            # re-read the actual width so describe()/Target stay truthful.
-            self.n_nv_per_pixel = len(sites)
-            self._chip_sites = auto_align(
-                prof, grid=8, register=False, temperature_k=temperature_k,
-                rng=np.random.default_rng(seed))
+            if pixel_mode == "ensemble":
+                # Ensemble mode: the 64 chip pixels ARE the circuit qubits (one
+                # ensemble qubit per pixel -- the bulk-microdiamond ODMR
+                # collapse to a single line). No within-pixel 2q (cross-pixel
+                # 1/r**3 -> 0 at the 2.5 mm pitch); the coupling map is empty.
+                sites = auto_align(prof, grid=8, register=False,
+                                   temperature_k=temperature_k,
+                                   rng=np.random.default_rng(seed))
+                self._register_mode = False
+                self._ensemble_mode = True
+                self._chip_sites = list(sites)
+                self.n_nv_per_pixel = 1
+            else:
+                # Register mode (the production / API path): self.sites is ONE
+                # pixel's N-NV register (the circuit qubits, all-to-all dipole
+                # coupled); the 64-pixel hardware die is a SEPARATE chip-view
+                # site list (self._chip_sites) used by describe() / optical
+                # readout. N is the MEASURED resolvable ODMR line count when
+                # register_line_freqs_hz is given (the truth from
+                # decompose_odmr); otherwise the default/cap n_nv_per_pixel on
+                # the synthetic 6 MHz grid. A field gradient (Invention 5,
+                # needs-HW) caps the register width at the resolvable count.
+                sites = auto_align(prof, n_nv_per_pixel=self.n_nv_per_pixel,
+                                   register=True, temperature_k=temperature_k,
+                                   rng=np.random.default_rng(seed),
+                                   gradient_mhz_per_um=gradient_mhz_per_um,
+                                   pixel_size_um=pixel_size_um,
+                                   register_line_freqs_hz=self._register_line_freqs_hz)
+                self._register_mode = True
+                self._ensemble_mode = False
+                # the gradient / measured-N may have capped the register below
+                # n_nv_per_pixel; re-read the actual width so describe()/Target
+                # stay truthful.
+                self.n_nv_per_pixel = len(sites)
+                self._chip_sites = auto_align(
+                    prof, grid=8, register=False, temperature_k=temperature_k,
+                    rng=np.random.default_rng(seed))
         else:
             # Explicit sites (tests / custom configs): the given sites ARE both
             # the register and the chip view (back-compat -- a 16-site backend
-            # reports 16 qubits and a 16-pixel readout).
+            # reports 16 qubits and a 16-pixel readout). pixel_mode is ignored
+            # here so every existing test that builds with explicit sites keeps
+            # the historical all-to-all coupling untouched.
             self._register_mode = False
+            self._ensemble_mode = False
             self._chip_sites = list(sites)
             self.n_nv_per_pixel = len(sites)
         self.sites = list(sites)
@@ -735,6 +786,15 @@ class QSSCBackend(BackendV2):
         # the electron coherence window. Default off keeps the register at the
         # electron width (the audit invariant; nuclear memory is opt-in).
         self._nuclear_memory = bool(nuclear_memory) and prof.nuclear_t2_s > 0.0
+        # Nuclear-spin memory is a per-NV-register concept (each electron NV
+        # pairs with a 13C); ensemble mode has one ensemble qubit per pixel and
+        # no within-pixel register, so it is forced off (with a warning) --
+        # nuclear memory is a needs-HW invention tracked in GitHub issues.
+        if self._nuclear_memory and self._ensemble_mode:
+            logger.warning(
+                "nuclear_memory is a per-NV-register feature and is ignored in "
+                "ensemble mode (no within-pixel register); disabling.")
+            self._nuclear_memory = False
         self._n_electron = self._n_qubits
         self._nuclear_t2 = prof.nuclear_t2_s
         self._nuclear_swap_t = nuclear_swap_time_s(prof.nuclear_hyperfine_hz)
@@ -857,7 +917,8 @@ class QSSCBackend(BackendV2):
                                 temperature_k=self.temperature_k,
                                 rng=np.random.default_rng(self._seed),
                                 gradient_mhz_per_um=self.gradient_mhz_per_um,
-                                pixel_size_um=self.pixel_size_um)
+                                pixel_size_um=self.pixel_size_um,
+                                register_line_freqs_hz=self._register_line_freqs_hz)
         self._n_electron = len(self.sites)
         if self._nuclear_memory:
             # keep one 13C memory qubit per (grown) electron NV, paired by index
@@ -904,10 +965,21 @@ class QSSCBackend(BackendV2):
         anyway, so the 64 pixels are independent at 300 K (cross-pixel 2q is
         the cryo optical bus, descriptive only).
 
+        ``ensemble`` mode (auto-build, ``sites is None``) has no within-pixel
+        register -- the 64 chip pixels are the circuit qubits and cross-pixel
+        2q is zero at the 2.5 mm pitch -- so the coupling map is empty and 2q
+        circuits are rejected in :meth:`_execute` (switch to register mode for
+        within-pixel 2q). Explicit ``sites`` (tests / custom configs) keep the
+        historical all-to-all coupling regardless of ``pixel_mode`` so existing
+        tests are untouched.
+
         With nuclear-spin memory enabled, each electron NV ``i`` is also paired
         with its 13C memory qubit at ``n_electron + i`` (an electron-nuclear
         SWAP edge). 13C-13C pairs are NOT coupled (nuclear-nuclear dipole is
         negligible at this spacing)."""
+        if self._ensemble_mode:
+            # ensemble mode: one qubit per pixel, no within-pixel 2q at 300 K
+            return []
         pairs = []
         n_e = self._n_electron
         n = len(self.sites)
@@ -1080,12 +1152,22 @@ class QSSCBackend(BackendV2):
         -- one per pixel -- each an independent noise realization (per-pixel
         seed offset), and returns per-pixel counts plus the aggregate.
 
-        Use cases:
+        Use cases (register mode):
           * parallel Shor: 64 coprime bases ``a`` (one per pixel) -- whichever
             pixel finds the period wins; the rest fail silently.
           * parallel VQE: 64 parameter points evaluated at once.
           * parallel sampling: the same circuit on all 64 pixels with
             independent seeds = 64x the shots in one wall-clock step.
+
+        In ``ensemble`` mode this DEGENERATES to replica sampling: the 64 chip
+        pixels are the circuit qubits (one ensemble qubit per pixel), and a
+        single global MW antenna drives them all identically -- there is no
+        per-pixel MW to run *different* circuits on different pixels. So
+        ``run_array`` in ensemble mode is 64x-replica sampling of ONE circuit
+        (independent seeds = 64x the shots), NOT 64 independent processors.
+        True independent-per-pixel compute needs a per-pixel MW antenna (a PCB
+        addition tracked as a GitHub issue); the 64-channel *readout* is still
+        parallel (READ_DETECTORS reads all 64 at once).
 
         Returns ``{"per_pixel": [result,...], "aggregate_counts": {...},
         "n_pixels": n, "throughput_x": n}``.
@@ -1123,6 +1205,18 @@ class QSSCBackend(BackendV2):
                 f"circuit uses {circuit.num_qubits} qubits, but the chip has "
                 f"{SIM_MAX_QUBITS} physical sites -- the circuit is wider than "
                 f"the detector grid. Use a smaller register or a lower N.")
+        # Ensemble mode has no within-pixel 2q gate (cross-pixel 1/r**3 -> 0 at
+        # the 2.5 mm pitch). Aer ignores the backend Target coupling map, so a
+        # 2q circuit would otherwise execute as silent noiseless CXs -- reject
+        # it with a clear message instead. 1q-only circuits run fine (64 chip
+        # pixels). Register mode (the default) keeps the all-to-all dipole 2q.
+        if self._ensemble_mode:
+            _, n_2q, n_compiled, _, _, _ = self._decomposed_cost(circuit)
+            if n_2q > 0 or n_compiled > 0:
+                raise ValueError(
+                    "ensemble mode has no within-pixel 2q gate at 300 K (the 64 "
+                    "chip pixels are independent at the 2.5 mm pitch); switch "
+                    "to register mode for within-pixel dipole 2q gates.")
         # Grow the per-pixel NV register to cover this circuit so every qubit
         # is a real (coupled, noised) NV in the register, not a silently
         # noiseless index past the default register width.
@@ -1629,6 +1723,22 @@ class QSSCBackend(BackendV2):
             "(readout is optical, µs-scale) — error-correcting codes needing "
             "fast feedback are not supported by this control stack.",
         ]
+        if self._ensemble_mode:
+            lim.append(
+                "Ensemble mode: the 64 chip pixels are the circuit qubits (one "
+                "ensemble qubit per pixel -- the bulk-microdiamond ODMR line "
+                "collapse). There is NO within-pixel 2q gate at 300 K (cross-pixel "
+                "1/r**3 -> 0 at the 2.5 mm pitch); 2q circuits are rejected. "
+                "Switch to register mode for within-pixel dipole 2q. The "
+                "register width N is a MEASURED quantity (decompose_odmr on the "
+                "ODMR spectrum), not a hardcoded count.")
+        else:
+            lim.append(
+                "Register mode: the circuit qubits are one pixel's N-NV "
+                "register (within-pixel all-to-all dipole, the ~200 ns CZ at the "
+                "design spacing). N is the MEASURED resolvable ODMR line count "
+                "(decompose_odmr), capped at the sim width; the 64 pixels are "
+                "independent parallel processors at 300 K.")
         if self.gradient_mhz_per_um > 0.0:
             lim.append(
                 f"Field gradient {self.gradient_mhz_per_um:g} MHz/um across the "
@@ -1827,6 +1937,14 @@ class QSSCBackend(BackendV2):
             # 64-pixel hardware die: the circuit models one register, the 64
             # pixels are independent parallel processors at 300 K (cross-pixel
             # 2q = cryo optical bus, descriptive).
+            "pixel_mode": self.pixel_mode,
+            # within-pixel 2q status: register mode has the dipole CZ; ensemble
+            # mode has none at 300 K (cross-pixel 1/r**3 -> 0 at 2.5 mm pitch).
+            "within_pixel_2q": (
+                "dipole CZ @ %.2f nm" % self.register_nv_spacing_nm
+                if not self._ensemble_mode
+                else "none at 300 K (bulk ensemble, cross-pixel 1/r**3 -> 0)"),
+            "register_n_measured": self._register_line_freqs_hz is not None,
             "num_qubits": self._n_qubits,
             "pixels": len(self._chip_sites),
             "n_nv_per_pixel": self.n_nv_per_pixel,
