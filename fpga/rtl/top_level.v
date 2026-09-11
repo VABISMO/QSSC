@@ -301,6 +301,7 @@ module top_level (
         .pll_rf_pwr       (pll_rf_pwr_w),
         .mw_gate_ns       (mw_gate_ns_w),
         .mw_gate_load     (mw_gate_load),
+        .mw_gate          (mw_gate),
         .rng_harvest_en   (rng_harvest_en),
         .rng_flush        (rng_flush),
         .rng_word         (rng_word),

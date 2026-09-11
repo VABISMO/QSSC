@@ -97,11 +97,13 @@ module tb_top_level;
     // check that locks "the pulse lasts as long as qiskit asked for".
     integer mw_gate_high = 0;     // cycles high in the current pulse
     integer mw_gate_last = 0;     // width (cycles) of the last completed pulse
+    integer mw_gate_pulses = 0;   // total completed mw_gate pulses (rising->falling)
     always @(posedge clk_100mhz) begin
         if (mw_gate)        mw_gate_high <= mw_gate_high + 1;
         else if (mw_gate_high != 0) begin
-            mw_gate_last <= mw_gate_high;
-            mw_gate_high  <= 0;
+            mw_gate_last  <= mw_gate_high;
+            mw_gate_pulses <= mw_gate_pulses + 1;
+            mw_gate_high   <= 0;
         end
     end
 
@@ -248,6 +250,8 @@ module tb_top_level;
     // ---- Main stimulus -----------------------------------------------------
     integer r;
     integer c;
+    integer k16, ok16;       // RUN_SEQUENCE verify loop
+    integer li_k, li_ok;     // READ_LOCKIN verify loop
     reg [7:0] cmd_bytes [0:39];
     initial begin
         // Reset
@@ -803,6 +807,91 @@ module tb_top_level;
             err_count = err_count + 1;
             $display("TB: FAIL ODMR_SWEEP (got %0d bytes, first=0x%02h)",
                      rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
+        end
+
+        // ---- 16) RUN_SEQUENCE 0 1 4 500 -> "00004 01234 01234 01234 01234\n"
+        // Hahn (kind=1), 4 windows, t_step=500 ns. The behavioural ADC returns a
+        // constant 1234, so every readout code is "01234". Reply = 5-digit count
+        // prefix + ' ' + 4 codes (5-digit, ' '-sep, final '\n') = 30 bytes, NO
+        // OK (the '\n' terminates the single-line reply). A Hahn window fires
+        // pi/2 + pi + pi/2(readout) = 3 mw_gate pulses, so 4 windows => >= 4.
+        entropy_mode = 1'b0;
+        mw_gate_pulses = 0;
+        rx_log_cnt = 0;
+        cmd_bytes[0]="R";  cmd_bytes[1]="U";  cmd_bytes[2]="N";  cmd_bytes[3]="_";
+        cmd_bytes[4]="S";  cmd_bytes[5]="E";  cmd_bytes[6]="Q";  cmd_bytes[7]="U";
+        cmd_bytes[8]="E";  cmd_bytes[9]="N";  cmd_bytes[10]="C"; cmd_bytes[11]="E";
+        cmd_bytes[12]=" "; cmd_bytes[13]="0"; cmd_bytes[14]=" "; cmd_bytes[15]="1";
+        cmd_bytes[16]=" "; cmd_bytes[17]="4"; cmd_bytes[18]=" "; cmd_bytes[19]="5";
+        cmd_bytes[20]="0"; cmd_bytes[21]="0"; cmd_bytes[22]=8'h0A;
+        $display("TB: sending RUN_SEQUENCE 0 1 4 500 (expect 00004 + 4x 01234 + LF)");
+        for (c=0;c<23;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(30, W_SAFE);
+        // Verify: "00004 " + 4x("01234" + sep) where sep=' ' for the first 3,
+        // '\n' for the last.
+        ok16 = 1;
+        if (rx_log_cnt != 30) ok16 = 0;
+        if (!(rx_log[0]==="0" && rx_log[1]==="0" && rx_log[2]==="0" &&
+              rx_log[3]==="0" && rx_log[4]==="4" && rx_log[5]===" ")) ok16 = 0;
+        for (k16=0;k16<4;k16=k16+1) begin
+            if (!(rx_log[6+k16*6]==="0" && rx_log[7+k16*6]==="1" &&
+                  rx_log[8+k16*6]==="2" && rx_log[9+k16*6]==="3" &&
+                  rx_log[10+k16*6]==="4")) ok16 = 0;
+            if (k16<3 && rx_log[11+k16*6] !== " ") ok16 = 0;
+            if (k16==3 && rx_log[11+k16*6] !== 8'h0A) ok16 = 0;
+        end
+        if (ok16 && mw_gate_pulses >= 4) begin
+            ok_count = ok_count + 1;
+            $display("TB: RUN_SEQUENCE = 00004 + 4x01234 + LF, %0d mw_gate pulses  (PASS)",
+                     mw_gate_pulses);
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL RUN_SEQUENCE (got %0d bytes, ok=%0d, pulses=%0d)",
+                     rx_log_cnt, ok16, mw_gate_pulses);
+        end
+
+        // ---- 17) READ_LOCKIN 0 4 -> "0000004936 0000004936 0000000004 0000000004\n"
+        // 4 on/off cycles; the constant ADC code 1234 makes sum_on = sum_off =
+        // 4*1234 = 4936, n_on = n_off = 4. Reply = four 10-digit dec32 ints,
+        // ' '-sep, final '\n' = 44 bytes, NO OK.
+        entropy_mode = 1'b0;
+        rx_log_cnt = 0;
+        cmd_bytes[0]="R";  cmd_bytes[1]="E";  cmd_bytes[2]="A";  cmd_bytes[3]="D";
+        cmd_bytes[4]="_";  cmd_bytes[5]="L";  cmd_bytes[6]="O";  cmd_bytes[7]="C";
+        cmd_bytes[8]="K";  cmd_bytes[9]="I";  cmd_bytes[10]="N"; cmd_bytes[11]=" ";
+        cmd_bytes[12]="0"; cmd_bytes[13]=" "; cmd_bytes[14]="4"; cmd_bytes[15]=8'h0A;
+        $display("TB: sending READ_LOCKIN 0 4 (expect 4936 4936 4 4 + LF)");
+        for (c=0;c<16;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(44, W_SAFE);
+        // Verify: four 10-digit fields ("0000004936","0000004936","0000000004",
+        // "0000000004") separated by ' ' and terminated by '\n'.
+        li_ok = 1;
+        if (rx_log_cnt != 44) li_ok = 0;
+        for (li_k=0;li_k<4;li_k=li_k+1) begin
+            // field li_k base = li_k*11; 10 digits + sep at base+10.
+            // fields 0,1 = "0000004936" (6 zeros + 4936); 2,3 = "0000000004".
+            if (li_k < 2) begin
+                if (!(rx_log[li_k*11+0]==="0" && rx_log[li_k*11+1]==="0" &&
+                      rx_log[li_k*11+2]==="0" && rx_log[li_k*11+3]==="0" &&
+                      rx_log[li_k*11+4]==="0" && rx_log[li_k*11+5]==="0" &&
+                      rx_log[li_k*11+6]==="4" && rx_log[li_k*11+7]==="9" &&
+                      rx_log[li_k*11+8]==="3" && rx_log[li_k*11+9]==="6")) li_ok = 0;
+            end else begin
+                if (!(rx_log[li_k*11+0]==="0" && rx_log[li_k*11+1]==="0" &&
+                      rx_log[li_k*11+2]==="0" && rx_log[li_k*11+3]==="0" &&
+                      rx_log[li_k*11+4]==="0" && rx_log[li_k*11+5]==="0" &&
+                      rx_log[li_k*11+6]==="0" && rx_log[li_k*11+7]==="0" &&
+                      rx_log[li_k*11+8]==="0" && rx_log[li_k*11+9]==="4")) li_ok = 0;
+            end
+            if (li_k<3 && rx_log[li_k*11+10] !== " ") li_ok = 0;
+            if (li_k==3 && rx_log[li_k*11+10] !== 8'h0A) li_ok = 0;
+        end
+        if (li_ok) begin
+            ok_count = ok_count + 1;
+            $display("TB: READ_LOCKIN = 4936 4936 4 4 + LF  (PASS)");
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL READ_LOCKIN (got %0d bytes)", rx_log_cnt);
         end
 
         if (err_count == 0)
