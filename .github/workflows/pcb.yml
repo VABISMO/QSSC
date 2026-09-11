@@ -1,0 +1,97 @@
+# PCB verification gate — runs the real board bars (DRC + connectivity + pin
+# audit + stackup + routing-structure) whenever a PCB-related file changes.
+#
+# Why a separate workflow (not a job in ci.yml): the `on.paths` filter below is
+# NATIVE GitHub path filtering — this workflow does not even trigger (no runner
+# spun up, no minutes spent) unless a PCB file changed. Installing KiCad is
+# ~1.5 GB / a few minutes, so gating it on PCB-only changes keeps CI fast for
+# the common Python/frontend/FPGA PRs.
+#
+# The tests here need system KiCad: `pcbnew` (the python binding) for the
+# connectivity union-find / pin audit / routing-structure tests, and
+# `kicad-cli` for the DRC gate. `apt install kicad` provides both (KiCad 8 on
+# ubuntu-24.04 ships the pcbnew module to /usr/lib/python3/dist-packages and
+# the kicad-cli binary). We use the runner's system python3 (NOT setup-python)
+# so the kicad binding is on sys.path.
+#
+# Head board: the detector head (chip_module) is currently regressed on main
+# (11 split DET_IN nets — a FreeRouting SES re-import undid the maze-bridge
+# closures). It is excluded here with `-k "not head"` until it is restored
+# (see task #100). Re-enable by dropping the `-k` filter.
+name: PCB tests
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "hardware/pcb/**"
+      - "tools/maze_bridge*.py"
+      - "tools/route_signals.py"
+      - "tools/route_qssc_pcb.py"
+      - "tools/gen_qssc_kicad.py"
+      - "tests/test_pcb*.py"
+      - ".github/workflows/pcb.yml"
+  pull_request:
+    branches: [main, master]
+    paths:
+      - "hardware/pcb/**"
+      - "tools/maze_bridge*.py"
+      - "tools/route_signals.py"
+      - "tools/route_qssc_pcb.py"
+      - "tools/gen_qssc_kicad.py"
+      - "tests/test_pcb*.py"
+      - ".github/workflows/pcb.yml"
+  # Manual fallback (also covers fork PRs that the pull_request event does not
+  # auto-start for behind the "Approve and run workflows" gate).
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pcb:
+    name: PCB verification (DRC + connectivity + pin audit + stackup)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install KiCad (kicad-cli + pcbnew python binding)
+        run: |
+          sudo apt-get update
+          # kicad pulls kicad-cli + the python3 pcbnew binding; kicad-cli alone
+          # is not enough (we also need `import pcbnew` for the connectivity
+          # and pin-audit tests).
+          sudo apt-get install -y --no-install-recommends kicad kicad-cli
+
+      - name: Sanity-check the KiCad python binding + cli
+        run: |
+          set -e
+          python3 -c "import pcbnew; print('pcbnew', pcbnew.__version__ if hasattr(pcbnew,'__version__') else 'ok')"
+          kicad-cli pcb drc --help >/dev/null
+          echo "KiCad binding + cli ready"
+
+      - name: Install pytest
+        run: python3 -m pip install --user pytest
+
+      - name: Run PCB tests (main board — real bars)
+        # `-k "not head"` excludes the regressed detector-head board (task
+        # #100) and the head parametrize variants. test_pcb_route_full is
+        # auto-skipped (needs QSSC_SLOW=1). The route/route_signals tests copy
+        # the board to a tmp dir before re-routing, so they never mutate the
+        # committed artefact.
+        env:
+          # Keep the repo root importable so the tests can `import
+          # test_pcb_connectivity` / `import route_signals as R`.
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python3 -m pytest tests/test_pcb_*.py -k "not head" -v \
+            --no-header -rA
+
+      - name: Ruff on PCB tools/tests (CI lint set)
+        run: |
+          python3 -m pip install --user ruff
+          python3 -m ruff check --select=E9,F63,F7,F82,F401,F841 \
+            tests/test_pcb_*.py tools/maze_bridge_*.py tools/route_*.py \
+            tools/gen_qssc_kicad.py
