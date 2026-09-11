@@ -72,7 +72,11 @@ jobs:
         run: |
           set -e
           python3 -c "import pcbnew; print('pcbnew', pcbnew.__version__ if hasattr(pcbnew,'__version__') else 'ok')"
-          kicad-cli pcb drc --help >/dev/null
+          # NOTE: `kicad-cli pcb drc --help` exits 1 (the drc subcommand requires
+          # an INPUT_FILE argument, so --help alone errors "1 argument(s)
+          # expected"). Use `kicad-cli --version` (exit 0) to confirm the cli
+          # binary is present; the test suite exercises drc with a real board.
+          kicad-cli --version
           echo "KiCad binding + cli ready"
 
       - name: Install pytest
