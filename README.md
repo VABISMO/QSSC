@@ -289,6 +289,90 @@ ADC values (0–65535, AD7616). The Python [`EmitterController`](qssc/backend.py
 same control code drives the [`SimulatedFPGA`](qssc/simulator.py) and a real
 board.
 
+### Connecting the board + flashing the firmware
+
+**Hardware.** Target FPGA: **Artix-7 XC7A35T-1CSG324C** on the custom QSSC
+PCB (the same RTL also runs on a Digilent Arty A7-35T / Cmod A7-35T — only the
+`.xdc` pin map changes; see [`HARDWARE_DESIGN.md`](hardware/HARDWARE_DESIGN.md)
+§1A). Two cables:
+
+1. **JTAG** — to flash the bitstream. Use a **Digilent JTAG-HS3** or **Xilinx
+   Platform Cable USB II** into the board's 6-pin JTAG header
+   (`TCK=E10 TMS=E12 TDI=E11 TDO=E13`, see
+   [`fpga/constraints.xdc`](fpga/constraints.xdc)). On an Arty A7, the on-board
+   USB-JTAG does this — no separate cable.
+2. **UART** — the host command link. A **USB-A → USB-B (or micro-USB) cable**
+   to the board's USB-UART bridge (**FT232RL / FT2232H**), which enumerates as a
+   serial port: `/dev/ttyUSB0` on Linux, `/dev/cu.usbserial-*` on macOS,
+   `COM3` on Windows. Link is **115200 baud, 8-N-1, `\n`-terminated ASCII**.
+
+**Host install (with the serial extra).** The base install has no pyserial; the
+real-board path needs the optional `[hw]` extra:
+
+```bash
+pip install -e ".[hw]"      # pulls pyserial>=3.5
+export QSSC_FPGA_PORT=/dev/ttyUSB0   # the UART port above
+```
+
+**Build the bitstream** (on a machine with Xilinx Vivado — Vivado is not in CI).
+Synthesis is yosys; place-and-route + bitstream write need Vivado:
+
+```bash
+# 1. yosys synthesis -> fpga/synth/qssc_top.edif (runs headless, no Vivado)
+cd fpga/synth && ./run_synth.sh
+
+# 2. Vivado place-and-route + bitstream (batch Tcl)
+vivado -mode batch -source - <<'TCL'
+set part xc7a35tcsg324-1
+read_edif qssc_top.edif
+read_xdc ../constraints.xdc
+link_design -part $part -top qssc_top
+opt_design; place_design; route_design
+report_timing_summary
+write_bitstream -force qssc_top.bit
+TCL
+```
+
+> The repo ships the already-synthesised `fpga/synth/qssc_top.edif`, so you can
+> skip step 1 and go straight to Vivado with the EDIF + `fpga/constraints.xdc`.
+> A packaged `build_bitstream.tcl` + `Makefile bitstream` target is part of the
+> pending PR2 (`hw/rtl-verbs-bitstream`).
+
+**Flash.** Open Vivado **Hardware Manager**: *Open target → Auto-connect* (the
+JTAG-HS3 / Platform Cable appears), *Program device → select qssc_top.bit*.
+To boot from power-on without the cable, also write it to the on-board
+**W25Q128 QSPI flash** (Vivado *Add configuration flash device →
+write_bitstream* with the SPI config). Alternatively,
+`openFPGALoader -b artix_a7_35t qssc_top.bit` works for the Arty A7.
+
+**Verify the link.** With the board flashed and `QSSC_FPGA_PORT` set, start the
+stack and probe:
+
+```bash
+uvicorn api.main:app --port 8011 &        # API
+cd frontend && npm run dev &              # dashboard on :5173
+.venv/bin/rq worker qssc --url redis://localhost:6379/0 &   # async job queue
+curl localhost:8011/api/fpga/probe        # -> {"connected": true, "id": "QSSC v1", ...}
+```
+
+In the dashboard, switch the top-level toggle to **Hardware**: the indicator
+turns green (*FPGA connected — QSSC v1 on /dev/ttyUSB0*). Run a circuit → the
+result is labelled `source: hardware · I/O: real`. With **no board** (or
+`QSSC_FPGA_PORT` unset), the same switch shows a red *No FPGA detected* banner
+and never silently falls back to the simulator.
+
+> **Firmware status (truthful).** PR1 (`hw/real-mode`) wired the host for the
+> real board — the `ID` handshake, `NoFPGADetected`, the Hardware switch, real
+> ODMR calibration, truthful `source`/`io` labels. The core verbs
+> (`DRIVE_EMITTER`, `SET_EMITTER`, `DRIVE_PATTERN`, `CLEAR_EMITTERS`,
+> `READ_DETECTOR`, `READ_DETECTORS`, `APPLY_PULSE`, `READ_RNG`) are implemented
+> in the RTL today. The `ID` / `STATUS` / `RESET` / `ODMR_SWEEP` verbs + the
+> packaged bitstream Tcl are **PR2-pending** — so until PR2 flashes a board,
+> `/api/fpga/probe` correctly returns `connected: false` (no `ID` answer yet),
+> and the sensor verbs that need the lock-in accumulator / pulse engine
+> (`READ_GYRO`, `READ_LOCKIN`, `RUN_SEQUENCE`) are routed to the simulator with
+> a *simulated · pending #58* label in Hardware mode.
+
 ## Fabrication protocol
 
 `docs/FABRICATION_PROTOCOL.md` is a complete, parameterised lab build in five
