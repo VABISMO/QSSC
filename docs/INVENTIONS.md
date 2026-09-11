@@ -71,11 +71,15 @@ in-band noise inside a prime channel's linewidth still passes).
   `test_16_symbols_are_channels_not_qudit_states` pinning that 16 prime
   symbols = 16 ADDRESS CHANNELS = 16 NVs, NOT a 16-state qudit — a 10-NV
   pixel is `2^10`, not `16^10`).
-- **HW-fits** — a **prime-period lock-in mode** in the existing
-  `READ_LOCKIN` FPGA verb (pass the prime `p` as the modulation period;
-  the lock-in is self-timed already). One global MW antenna + the 64
-  parallel detectors is enough: the prime period is the modulation
-  timing, independent of the carrier. **RTL to do.**
+- **HW-fits — DONE** — the new `READ_LOCKINP <site> <n_cycles>
+  <half_ns>` FPGA verb (branch `fpga/run-all-prime-lockin`, commit
+  `375d394`) demodulates at a host-supplied on/off half-period
+  `half_ns = p*tau/2` for the prime `p` this NV's channel uses. The prime
+  selection + coprime orthogonality stays in Python (`qssc.prime_readout`);
+  the RTL just demodulates at the requested half. Backward compatible:
+  `READ_LOCKIN` keeps the 200 us default. One global MW antenna + the 64
+  parallel detectors is enough: the prime period is the modulation timing,
+  independent of the carrier.
 - **needs-HW** — none for the lock-in demod. (Per-NV frequency addressing
   at the carrier needs the per-NV ODMR detuning to exceed the linewidth —
   the existing `frequency_detuning_spread_hz = 2 MHz` model; physically
@@ -124,10 +128,11 @@ per pixel and aggregates.
   max_pixels=64)`; `api/runner.py` `run_parallel` (shor / sample / custom);
   `api/main.py` `POST /api/circuit/run-parallel`.
 - **Tests** — `tests/test_parallel_computing.py` (8 tests).
-- **HW-fits (partial)** — the 64 detectors + 4× AD7616 read all 64 pixels
-  in parallel; a **`RUN_ALL` verb** that sweeps all 64 sites' readout in
-  one command is genuine parallel READOUT and feasible on the current
-  hardware. **RTL to do.**
+- **HW-fits (readout DONE)** — the 64 detectors + 4× AD7616 read all 64
+  pixels in parallel. The **existing `READ_DETECTORS` verb**
+  (`CMD_READ_ALL`, already in the firmware) already sweeps all 64
+  detectors in one command — the parallel-64 READOUT was already there.
+  So the 64× throughput readout path needs no new RTL.
 - **needs-HW** ❗ — independent per-pixel **gate sequences** (a different
   circuit per pixel simultaneously) need per-pixel MW addressing. Today
   there is ONE global MW antenna, so all pixels see the same MW drive at
@@ -140,7 +145,7 @@ per pixel and aggregates.
   - **per-pixel MW coils** — 64 small loop antennas, one per pixel
     (a PCB revision; large).
   Until one of those lands, hardware "parallel" = the same circuit on
-  every pixel (the 64× throughput path, via `RUN_ALL`), not 64 different
+  every pixel (the 64× throughput path, via the existing `READ_DETECTORS`), not 64 different
   circuits at once.
 - **Commit** — `570d051`.
 
@@ -184,12 +189,12 @@ MEASURED quantity: `resolvable = floor(gradient · pixel_size / linewidth)`
 
 ## Summary table
 
-| # | Invention | SIM | HW-fits (RTL to do) | needs-HW (PCB add) |
+| # | Invention | SIM | HW-fits (RTL status) | needs-HW (PCB add) |
 |---|---|---|---|---|
 | 1 | 64-pixel vector magnetometer | ✅ | ODMR_SWEEP → B (existing verb) | — |
-| 2+ | Prime-coprime readout + denoiser | ✅ | prime-period `READ_LOCKIN` mode | — |
+| 2+ | Prime-coprime readout + denoiser | ✅ | `READ_LOCKINP` verb DONE (`375d394`) | — |
 | 3 | Nuclear-spin memory (NV+¹³C) | ✅ | — | RF DAC channel at ~2 MHz + RF coil + RTL kind 3 |
-| 4 | 64-parallel distributed computing | ✅ | `RUN_ALL` 64-detector sweep | per-pixel MW (freq-mux or 64 coils) for independent circuits |
+| 4 | 64-parallel distributed computing | ✅ | `READ_DETECTORS` 64-sweep DONE (existing verb) | per-pixel MW (freq-mux or 64 coils) for independent circuits |
 | 5 | Gradient register width | ✅ | — | gradient coil + DAC + RTL verb |
 
 ## What to touch on the PCB for the needs-HW inventions
