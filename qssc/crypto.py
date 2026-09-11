@@ -187,7 +187,17 @@ def entropy_health(bits: list[int]) -> dict:
     z_trans = abs(2 * trans - n_pairs) / math.sqrt(n_pairs)
     trans_p = math.erfc(z_trans / math.sqrt(2))
     min_entropy = (-math.log2(max(p1, 1.0 - p1)) if 0.0 < p1 < 1.0 else 0.0)
-    passed = (freq_p >= 0.001 and trans_p >= 0.001 and min_entropy >= 0.25)
+    # The p-value thresholds are deliberately loose (1e-4 ~ 3.9 sigma for a
+    # two-sided binomial) for a *sanity* gate: the job is to reject degenerate
+    # streams (constant, alternating, strongly biased/correlated), not to fail
+    # a legitimate fair draw that happens to land 3.5 sigma from 0.5 -- which a
+    # 1e-3 threshold did ~0.1% of the time per 128-bit block. The min_entropy
+    # floor (>= 0.25 bit) independently rejects constant/strongly-biased streams
+    # (p1 > 0.84 or < 0.16), and the lag-1 test rejects correlated streams
+    # (trans_p ~ 1e-29 for alternating input). Combined with the harvest retry
+    # in api.runner / SimulatedFPGA._harvest_entropy the false-reject rate is
+    # negligible; a degenerate stream still fails every retry and is rejected.
+    passed = (freq_p >= 1e-4 and trans_p >= 1e-4 and min_entropy >= 0.25)
     return {"n": n, "ones": ones, "p1": round(p1, 4),
             "freq_p": round(freq_p, 4),
             "transition_rate": round(trans / n_pairs, 4),
