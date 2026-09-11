@@ -256,6 +256,24 @@ module command_parser #(
         end
     endfunction
 
+    // Convert the APPLY_PULSE phase argument (milliradians, signed; 0 = +X,
+    // 3142 ~ pi, 6283 ~ 2*pi) into the ADF4351 R1 PHASE register value, which
+    // is 12 bits over a full 360-degree turn (1 LSB ~ 0.088 deg, 4095 = 360).
+    // The host sends physical milliradians on the wire; the FPGA must rescale
+    // to the chip's phase-step units and wrap mod 2*pi -- writing mrad directly
+    // (the old `arg_vals[4][11:0]`) mis-scaled every non-zero-phase pulse (a
+    // 180-degree / 3142-mrad request was read back as ~276 degrees) and wrapped
+    // values > 4095 to garbage. Negative angles fold into [0, 2*pi).
+    function [11:0] mrad_to_phase;
+        input signed [31:0] mrad;
+        integer m;
+        begin
+            m = mrad % 6283;          // signed remainder, -6282..6282
+            if (m < 0) m = m + 6283;  // -> 0..6282  (mod 2*pi in mrad)
+            mrad_to_phase = (m * 4096) / 6283;  // -> 0..4095 phase steps
+        end
+    endfunction
+
     // combinational decimal encoding of the latched detector sample (the live
     // det_code may change once we ack the ADC reader, so S_ENC must use
     // the snapshot taken in S_RONE_WAIT / S_RALL_WAIT).
@@ -723,11 +741,12 @@ module command_parser #(
                         CMD_PULSE : begin
                             // qubit 0..N_DET-1, freq_khz > 0, amp/duration >= 0.
                             // The ADF4351 takes the carrier frequency (arg 1),
-                            // the pulse phase (arg 4 -> R1 PHASE) and a coarse
-                            // output power (arg 2 -> R4 RF_PWR, 4 levels). The
-                            // pulse duration (arg 3, ns) gates an RF switch via
-                            // the mw_gate timer in top_level, armed once the PLL
-                            // has finished programming the carrier. Reject
+                            // the pulse phase (arg 4, milliradians -> R1 PHASE
+                            // via mrad_to_phase: 12 bits, 4095 = 360 deg) and a
+                            // coarse output power (arg 2 -> R4 RF_PWR, 4 levels).
+                            // The pulse duration (arg 3, ns) gates an RF switch
+                            // via the mw_gate timer in top_level, armed once the
+                            // PLL has finished programming the carrier. Reject
                             // negative / out-of-range args with ERR.
                             if ($signed(arg_vals[0]) < 0 || $signed(arg_vals[0]) >= N_DET ||
                                 $signed(arg_vals[1]) <= 0 ||
@@ -737,7 +756,7 @@ module command_parser #(
                                 fsm      <= S_REPLY_LOAD;
                             end else begin
                                 pll_freq_khz <= arg_vals[1];
-                                pll_phase    <= arg_vals[4][11:0];  // -> R1 PHASE
+                                pll_phase    <= mrad_to_phase($signed(arg_vals[4]));  // mrad -> R1 PHASE
                                 pll_rf_pwr   <= arg_vals[2][1:0];   // -> R4 RF_PWR
                                 mw_gate_ns   <= arg_vals[3];       // -> gate timer
                                 pll_start    <= 1'b1;

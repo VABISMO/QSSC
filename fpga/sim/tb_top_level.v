@@ -454,6 +454,39 @@ module tb_top_level;
             $display("TB: FAIL mw_gate pulse width = %0d cycles (expect 50 for 500 ns)", mw_gate_last);
         end
 
+        // ---- 7b) APPLY_PULSE non-zero phase: mrad -> ADF4351 R1 PHASE ----
+        // Host sends phase in milliradians; the RTL must rescale to the 12-bit
+        // R1 PHASE register (4095 = 360 deg). pi = 3142 mrad -> 180 deg ->
+        // (3142*4096)/6283 = 2048. The old raw-truncation path wrote 3142
+        // (-> ~276 deg); this locks the corrected mrad_to_phase scaling.
+        rx_log_cnt = 0;
+        cmd_bytes[0]="A";  cmd_bytes[1]="P";  cmd_bytes[2]="P";  cmd_bytes[3]="L";
+        cmd_bytes[4]="Y";  cmd_bytes[5]="_";  cmd_bytes[6]="P";  cmd_bytes[7]="U";
+        cmd_bytes[8]="L";  cmd_bytes[9]="S";  cmd_bytes[10]="E"; cmd_bytes[11]=" ";
+        cmd_bytes[12]="0"; cmd_bytes[13]=" "; cmd_bytes[14]="2"; cmd_bytes[15]="8";
+        cmd_bytes[16]="7"; cmd_bytes[17]="0"; cmd_bytes[18]="0"; cmd_bytes[19]="0";
+        cmd_bytes[20]="0"; cmd_bytes[21]=" "; cmd_bytes[22]="1"; cmd_bytes[23]="0";
+        cmd_bytes[24]="0"; cmd_bytes[25]=" "; cmd_bytes[26]="5"; cmd_bytes[27]="0";
+        cmd_bytes[28]="0"; cmd_bytes[29]=" "; cmd_bytes[30]="3"; cmd_bytes[31]="1";
+        cmd_bytes[32]="4"; cmd_bytes[33]="2"; cmd_bytes[34]=8'h0A;
+        $display("TB: sending APPLY_PULSE 0 2870000 100 500 3142 (pi mrad -> R1 PHASE=2048)");
+        for (c=0;c<35;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(3, W_GENERIC);         // OK\n
+        if (rx_log_cnt >= 3 &&
+            rx_log[0] === 8'h4F && rx_log[1] === 8'h4B && rx_log[2] === 8'h0A) begin
+            ok_count = ok_count + 1;  $display("TB: APPLY_Pulse pi-phase = OK\\n  (PASS)");
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL APPLY_PULSE pi-phase reply (got %0d bytes)", rx_log_cnt);
+        end
+        if (dut.parser_inst.pll_phase === 12'd2048) begin
+            ok_count = ok_count + 1;
+            $display("TB: pll_phase = %0d (3142 mrad -> 2048 = 180 deg)  (PASS)", dut.parser_inst.pll_phase);
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL pll_phase = %0d (expect 2048 for 3142 mrad / pi)", dut.parser_inst.pll_phase);
+        end
+
         // ---- 8) APPLY_PULSE invalid freq (0) -> ERR --------------------
         rx_log_cnt = 0;
         cmd_bytes[0]="A";  cmd_bytes[1]="P";  cmd_bytes[2]="P";  cmd_bytes[3]="L";
