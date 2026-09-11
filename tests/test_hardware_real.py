@@ -16,6 +16,18 @@ from qssc import (
     QSSCBackend, DetectorInterface, MicrowaveController,
 )
 
+# pyserial is an OPTIONAL runtime dep — only needed to talk to a real board
+# (FPGAConnection imports it lazily inside __init__). CI has no board and no
+# pyserial, so the four tests that exercise the real-connection path skip
+# there; the six NoFPGADetected / simulator / label tests still run.
+try:
+    import serial  # noqa: F401
+    _HAS_SERIAL = True
+except ImportError:
+    _HAS_SERIAL = False
+requires_serial = pytest.mark.skipif(
+    not _HAS_SERIAL, reason="pyserial not installed (no real-board path in CI)")
+
 
 # --- helpers ---------------------------------------------------------------
 
@@ -81,6 +93,7 @@ def test_simulator_mode_unchanged(monkeypatch):
     assert runner._source_label(fpga) == "simulator"
 
 
+@requires_serial
 def test_real_connection_id_probe(monkeypatch):
     """A real connection answers the ID handshake with the QSSC token."""
     # The first readline() is the ID reply ("QSSC v1"); later reads feed the
@@ -89,12 +102,14 @@ def test_real_connection_id_probe(monkeypatch):
     assert isinstance(fpga, FPGAConnection)
 
 
+@requires_serial
 def test_real_connection_bad_id_raises(monkeypatch):
     """A port that doesn't answer with the QSSC token is not our board."""
     with pytest.raises(NoFPGADetected):
         _make_fpga_with_replies(monkeypatch, ["NOTQSSC something"])
 
 
+@requires_serial
 def test_optical_readout_real_path(monkeypatch):
     """_drive_optical_readout must not touch sim_states on a real connection.
 
@@ -189,6 +204,7 @@ def test_calibration_simulator_path_unchanged(monkeypatch):
     assert len(body.get("per_pin", [])) >= 1
 
 
+@requires_serial
 def test_real_odmr_sweep_helper(monkeypatch):
     """The real ODMR sweep helper normalises ADC codes to contrast dips."""
     fpga = _make_fpga_with_replies(monkeypatch, ["QSSC v1"])
