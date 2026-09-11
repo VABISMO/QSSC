@@ -28,6 +28,20 @@
 //                                               (footer: ' ' + 5 zero-padded
 //                                               decimal raw-sample count + " 0 0"
 //                                               + LF; kept/rate host-derived)
+//   ID  / STATUS / RESET / ODMR_SWEEP ... -> PR2 bring-up verbs (see below)
+//   RUN_SEQUENCE <site> <kind 0..2> <n> <t_step_ns>
+//                                          -> drive a Ramsey(0)/Hahn(1)/CPMG(2)
+//                                               pulse sequence over n windows
+//                                               (T = i*t_step), reply
+//                                               "<n> <c0> ... <cN-1>\n" -- one
+//                                               raw ADC code per optical read
+//                                               window; the host fits T2/rate.
+//                                               NO OK (the LF terminates it).
+//   READ_LOCKIN <site> <n_cycles>          -> self-timed on/off lock-in, reply
+//                                               "<sum_on> <sum_off> <n_on>
+//                                               <n_off>\n" -- raw accumulations;
+//                                               the host computes diff/sigma/SNR.
+//                                               NO OK (the LF terminates it).
 //
 // The emitter commands drive a 3x TLC5947 constant-current LED driver over a
 // 4-wire SPI: SET_EMITTER arms per-channel 12-bit grayscale, DRIVE_PATTERN
@@ -101,6 +115,10 @@ module command_parser #(
     output reg [1:0]  pll_rf_pwr,       // -> ADF4351 R4 RF_PWR (4 levels)
     output reg [31:0] mw_gate_ns,       // -> RF-switch gate timer (duration, ns)
     output reg        mw_gate_load,     // 1-cycle pulse: arm the RF-switch gate
+    // MW gate status (echo of top_level mw_gate). The pulse-sequence engine
+    // watches this rise then fall to know each MW pulse has finished before
+    // starting the free-evolution delay / next pulse (no overlap at T=0).
+    input             mw_gate,
     // QRNG (qrng_entropy): READ_RNG <n_bytes> harvests von-Neumann-debiased
     // AD7616 LSB-noise entropy and streams it as hex + a " 00064 0 0\n" stats
     // footer (raw = samples_seen delta, the raw LSB samples this request fed
@@ -119,58 +137,101 @@ module command_parser #(
     output reg        soft_rst
 );
     // ---- Command IDs -------------------------------------------------------
-    localparam [3:0] CMD_DRIVE     = 4'd0;   // DRIVE_EMITTER (2 args)
-    localparam [3:0] CMD_PULSE     = 4'd1;   // APPLY_PULSE (5 args)
-    localparam [3:0] CMD_READ_ONE  = 4'd2;   // READ_DETECTOR (1 arg)
-    localparam [3:0] CMD_READ_ALL  = 4'd3;   // READ_DETECTORS (0 args)
-    localparam [3:0] CMD_CALIBRATE = 4'd4;   // CALIBRATE (0 args)
-    localparam [3:0] CMD_CLEAR     = 4'd5;   // CLEAR_DETECTORS (0 args, ADC no-op)
-    localparam [3:0] CMD_ERR       = 4'd7;
-    localparam [3:0] CMD_SET       = 4'd8;   // SET_EMITTER (2 args: index, level)
-    localparam [3:0] CMD_PATTERN   = 4'd9;   // DRIVE_PATTERN (1 arg: duration_ms)
-    localparam [3:0] CMD_CLEAR_EM  = 4'd10;  // CLEAR_EMITTERS (0 args)
-    localparam [3:0] CMD_RNG       = 4'd11;  // READ_RNG (1 arg: n_bytes 1..256)
-    // PR2 bring-up / calibration verbs (command_parser, not the #58 pulse-engine):
-    localparam [3:0] CMD_ID        = 4'd12;  // ID -> "QSSC v1\n" (probe token)
-    localparam [3:0] CMD_STATUS    = 4'd13;  // STATUS -> rails/PLL/ADC self-status
-    localparam [3:0] CMD_RESET     = 4'd14;  // RESET -> soft-reset peripherals, OK
-    localparam [3:0] CMD_SWEEP     = 4'd15;  // ODMR_SWEEP q f0 f1 n (4 args)
+    // 5-bit: CMD_SWEEP=15 filled the old 4-bit space, so the id reg is widened
+    // to [4:0] for the #58 pulse-engine verbs (CMD_SEQ/CMD_LOCKIN).
+    localparam [4:0] CMD_DRIVE     = 5'd0;   // DRIVE_EMITTER (2 args)
+    localparam [4:0] CMD_PULSE     = 5'd1;   // APPLY_PULSE (5 args)
+    localparam [4:0] CMD_READ_ONE  = 5'd2;   // READ_DETECTOR (1 arg)
+    localparam [4:0] CMD_READ_ALL  = 5'd3;   // READ_DETECTORS (0 args)
+    localparam [4:0] CMD_CALIBRATE = 5'd4;   // CALIBRATE (0 args)
+    localparam [4:0] CMD_CLEAR     = 5'd5;   // CLEAR_DETECTORS (0 args, ADC no-op)
+    localparam [4:0] CMD_ERR       = 5'd7;
+    localparam [4:0] CMD_SET       = 5'd8;   // SET_EMITTER (2 args: index, level)
+    localparam [4:0] CMD_PATTERN   = 5'd9;   // DRIVE_PATTERN (1 arg: duration_ms)
+    localparam [4:0] CMD_CLEAR_EM  = 5'd10;  // CLEAR_EMITTERS (0 args)
+    localparam [4:0] CMD_RNG       = 5'd11;  // READ_RNG (1 arg: n_bytes 1..256)
+    // PR2 bring-up / calibration verbs:
+    localparam [4:0] CMD_ID        = 5'd12;  // ID -> "QSSC v1\n" (probe token)
+    localparam [4:0] CMD_STATUS    = 5'd13;  // STATUS -> rails/PLL/ADC self-status
+    localparam [4:0] CMD_RESET     = 5'd14;  // RESET -> soft-reset peripherals, OK
+    localparam [4:0] CMD_SWEEP     = 5'd15;  // ODMR_SWEEP q f0 f1 n (4 args)
+    // #58 pulse-engine verbs. READ_GYRO is NOT an RTL verb -- in hardware mode
+    // the host runs RUN_SEQUENCE (Ramsey) and fits the rate, so no CMD_GYRO.
+    localparam [4:0] CMD_SEQ       = 5'd16;  // RUN_SEQUENCE site kind n t_step (4 args)
+    localparam [4:0] CMD_LOCKIN    = 5'd17;  // READ_LOCKIN site n_cycles (2 args)
 
     // ---- FSM states --------------------------------------------------------
-    localparam [3:0] S_IDLE          = 4'd0;
-    localparam [3:0] S_KW            = 4'd1;
-    localparam [3:0] S_ARGSP         = 4'd2;
-    localparam [3:0] S_ARGNUM        = 4'd3;
-    localparam [3:0] S_DISPATCH      = 4'd4;
-    localparam [3:0] S_REPLY_LOAD    = 4'd5;   // load OK/ERR string
-    localparam [3:0] S_REPLY_SEND    = 4'd6;   // stream reply_mem
-    localparam [3:0] S_RONE_WAIT     = 4'd7;   // wait det_code_valid (read_one)
-    localparam [3:0] S_ENC          = 4'd8;   // encode code -> decimal reply_mem
-    localparam [3:0] S_RALL_WAIT     = 4'd9;   // wait det_code_valid (read_all)
-    localparam [3:0] S_CAL_DRIVE     = 4'd10;  // calibrate: clear + drive emitter
-    localparam [3:0] S_CAL_WAIT_EM   = 4'd11;  // calibrate: wait emitter !busy
-    localparam [3:0] S_CAL_READ      = 4'd12;  // calibrate: capture max count
-    localparam [3:0] S_CAL_STORE     = 4'd13;  // calibrate: store LUT, next pixel
-    localparam [3:0] S_PULSE_WAIT    = 4'd14;  // APPLY_PULSE: wait PLL done, arm gate
+    // 7-bit: S_SWEEP_NEXT=29 plus the #58 pulse-engine states (30..51) exceed
+    // 5 bits, so the fsm reg is widened to [6:0]. Existing encodings unchanged.
+    localparam [6:0] S_IDLE          = 7'd0;
+    localparam [6:0] S_KW            = 7'd1;
+    localparam [6:0] S_ARGSP         = 7'd2;
+    localparam [6:0] S_ARGNUM        = 7'd3;
+    localparam [6:0] S_DISPATCH      = 7'd4;
+    localparam [6:0] S_REPLY_LOAD    = 7'd5;   // load OK/ERR string
+    localparam [6:0] S_REPLY_SEND    = 7'd6;   // stream reply_mem
+    localparam [6:0] S_RONE_WAIT     = 7'd7;   // wait det_code_valid (read_one)
+    localparam [6:0] S_ENC           = 7'd8;   // encode code -> decimal reply_mem
+    localparam [6:0] S_RALL_WAIT     = 7'd9;   // wait det_code_valid (read_all)
+    localparam [6:0] S_CAL_DRIVE     = 7'd10;  // calibrate: clear + drive emitter
+    localparam [6:0] S_CAL_WAIT_EM   = 7'd11;  // calibrate: wait emitter !busy
+    localparam [6:0] S_CAL_READ      = 7'd12;  // calibrate: capture max count
+    localparam [6:0] S_CAL_STORE     = 7'd13;  // calibrate: store LUT, next pixel
+    localparam [6:0] S_PULSE_WAIT    = 7'd14;  // APPLY_PULSE: wait PLL done, arm gate
     // SET/CLEAR_EMITTER: wait for the TLC5947 load to finish, then reply OK.
-    // (The 4-bit FSM was full at 0..15, so the state reg is widened to 5 bits
-    //  and this state lives above the original range.)
-    localparam [4:0] S_EM_WAIT       = 5'd16;
-    localparam [4:0] S_RNG_HARVEST   = 5'd17;  // READ_RNG: wait for a qrng word
-    localparam [4:0] S_RNG_EMIT      = 5'd18;  // READ_RNG: stream one hex nibble
-    localparam [4:0] S_RNG_STATS     = 5'd19;  // READ_RNG: build the stats footer
-    localparam [4:0] S_RNG_TAIL      = 5'd20;  // READ_RNG: stream the stats footer
+    localparam [6:0] S_EM_WAIT       = 7'd16;
+    localparam [6:0] S_RNG_HARVEST   = 7'd17;  // READ_RNG: wait for a qrng word
+    localparam [6:0] S_RNG_EMIT      = 7'd18;  // READ_RNG: stream one hex nibble
+    localparam [6:0] S_RNG_STATS     = 7'd19;  // READ_RNG: build the stats footer
+    localparam [6:0] S_RNG_TAIL      = 7'd20;  // READ_RNG: stream the stats footer
     // PR2 verbs (ID / STATUS / RESET / ODMR_SWEEP). All use the direct tx_load
     // streaming path (replies too long for the 8-byte reply_mem, like RNG_TAIL).
-    localparam [4:0] S_ID_SEND       = 5'd21;  // ID: stream "QSSC v1\n"
-    localparam [4:0] S_STATUS_SEND   = 5'd22;  // STATUS: stream the self-status line
-    localparam [4:0] S_RESET_WAIT    = 5'd23;  // RESET: hold soft_rst a few cycles
-    localparam [4:0] S_SWEEP_PROG    = 5'd24;  // ODMR_SWEEP: program PLL for point i
-    localparam [4:0] S_SWEEP_PLL     = 5'd25;  // ODMR_SWEEP: wait PLL done, arm gate
-    localparam [4:0] S_SWEEP_READ    = 5'd26;  // ODMR_SWEEP: read_one site q
-    localparam [4:0] S_SWEEP_ENC     = 5'd27;  // ODMR_SWEEP: encode "f c\n" line
-    localparam [4:0] S_SWEEP_SEND    = 5'd28;  // ODMR_SWEEP: stream the line
-    localparam [4:0] S_SWEEP_NEXT    = 5'd29;  // ODMR_SWEEP: f += step; loop or finish
+    localparam [6:0] S_ID_SEND       = 7'd21;  // ID: stream "QSSC v1\n"
+    localparam [6:0] S_STATUS_SEND   = 7'd22;  // STATUS: stream the self-status line
+    localparam [6:0] S_RESET_WAIT    = 7'd23;  // RESET: hold soft_rst a few cycles
+    localparam [6:0] S_SWEEP_PROG    = 7'd24;  // ODMR_SWEEP: program PLL for point i
+    localparam [6:0] S_SWEEP_PLL     = 7'd25;  // ODMR_SWEEP: wait PLL done, arm gate
+    localparam [6:0] S_SWEEP_READ    = 7'd26;  // ODMR_SWEEP: read_one site q
+    localparam [6:0] S_SWEEP_ENC     = 7'd27;  // ODMR_SWEEP: encode "f c\n" line
+    localparam [6:0] S_SWEEP_SEND    = 7'd28;  // ODMR_SWEEP: stream the line
+    localparam [6:0] S_SWEEP_NEXT    = 7'd29;  // ODMR_SWEEP: f += step; loop or finish
+    // #58 RUN_SEQUENCE pulse engine (kind: 0=Ramsey, 1=Hahn, 2=CPMG). Per
+    // window i: pi/2 gate -> free-precession delay T=i*t_step -> [pi gate ->
+    // delay T] (Hahn/CPMG) -> pi/2 readout gate -> read ADC site -> stream
+    // code. Reply: "<n> c0 c1 ... cN-1\n" then OK. The host fits T2/rate on the
+    // real codes; the RTL only sequences MW gates + snapshots the ADC. CPMG is
+    // one pi echo here (== Hahn in the RTL); the multi-echo decay model is
+    // host-side. mw_gate_ns is set the cycle BEFORE mw_gate_load (the gate
+    // timer latches gate_cnt=mw_gate_ns/10 on mw_gate_load), so each pulse
+    // sets mw_gate_ns at the tail of the preceding state and fires
+    // mw_gate_load on entry to the S_SEQ_PI* state -- no race.
+    localparam [6:0] S_SEQ_INIT      = 7'd30;  // latch site/kind/n/tstep
+    localparam [6:0] S_SEQ_COUNT_ENC = 7'd31;  // build "<n> " count prefix
+    localparam [6:0] S_SEQ_COUNT_SEND= 7'd32;  // stream the 6-byte count prefix
+    localparam [6:0] S_SEQ_PI2       = 7'd33;  // fire pi/2 gate (phase 0)
+    localparam [6:0] S_SEQ_DLY1      = 7'd34;  // free-precession delay T
+    localparam [6:0] S_SEQ_PI        = 7'd35;  // fire pi gate (Hahn/CPMG, phase 0)
+    localparam [6:0] S_SEQ_DLY2      = 7'd36;  // free-precession delay T
+    localparam [6:0] S_SEQ_PI2B      = 7'd37;  // fire pi/2 readout gate (phase 90 Ramsey)
+    localparam [6:0] S_SEQ_READ      = 7'd38;  // read_one site, latch code
+    localparam [6:0] S_SEQ_CODE_ENC  = 7'd39;  // build "<code><sep>" line
+    localparam [6:0] S_SEQ_CODE_SEND = 7'd40;  // stream the 6-byte code line
+    localparam [6:0] S_SEQ_NEXT      = 7'd41;  // i++, T += t_step; loop or OK
+    // #58 READ_LOCKIN lock-in accumulator (self-timed on/off, independent of
+    // the mod_sync period so it is sim-friendly). For n_cycles: MW on for a
+    // half-period (gate) + read ADC into sum_on; MW off for a half-period +
+    // read into sum_off. Reply: "<sum_on> <sum_off> <n_on> <n_off>\n" then OK
+    // -- raw accumulations; the host computes diff/sigma/SNR (no RTL divide).
+    localparam [6:0] S_LI_INIT       = 7'd42;  // latch site/n, zero accumulators
+    localparam [6:0] S_LI_ON         = 7'd43;  // fire MW gate for the on half
+    localparam [6:0] S_LI_ON_WAIT    = 7'd44;  // wait the on half-period
+    localparam [6:0] S_LI_ON_READ    = 7'd45;  // read_one, sum_on += code
+    localparam [6:0] S_LI_OFF        = 7'd46;  // start the off half (no gate)
+    localparam [6:0] S_LI_OFF_WAIT   = 7'd47;  // wait the off half-period
+    localparam [6:0] S_LI_OFF_READ   = 7'd48;  // read_one, sum_off += code
+    localparam [6:0] S_LI_NEXT       = 7'd49;  // i++; loop or encode
+    localparam [6:0] S_LI_ENC        = 7'd50;  // build the 44-byte accumulators line
+    localparam [6:0] S_LI_SEND       = 7'd51;  // stream the accumulators line
 
     // ---- Line buffer ------------------------------------------------------
     reg [7:0] cmd_buffer [0:63];
@@ -178,11 +239,11 @@ module command_parser #(
     reg       line_ready;
 
     // ---- Parser registers --------------------------------------------------
-    reg [4:0]  fsm;
+    reg [6:0]  fsm;
     reg [6:0]  parse_idx;
     reg [7:0]  cmd_str [0:15];
     reg [3:0]  cmd_len;
-    reg [3:0]  cmd_id;
+    reg [4:0]  cmd_id;
     reg [2:0]  arg_count;
     reg [2:0]  arg_idx;
     reg [31:0] current_num;
@@ -266,6 +327,46 @@ module command_parser #(
     reg [6:0]  str_idx;
     // RESET soft-rst hold counter (a few cycles so the peripherals catch it).
     reg [2:0]  rst_hold;
+
+    // ---- #58 RUN_SEQUENCE / READ_LOCKIN state -----------------------------
+    // MW pulse durations (ns). PI_NS = defects.py gate_1q_ns = a full pi pulse;
+    // PI2_NS is the pi/2 (half duration). The ADF4351 amplitude is fixed (R4
+    // RF_PWR), so pi/2 vs pi is a duration ratio, set here.
+    localparam [31:0] PI2_NS      = 32'd25;
+    localparam [31:0] PI_NS       = 32'd50;
+    // READ_LOCKIN self-timed on/off half-period (ns). Independent of the 1 kHz
+    // mod_sync period so the accumulator is sim-friendly; mod_sync stays the
+    // external lock-in reference for other uses.
+    localparam [31:0] LI_HALF_NS  = 32'd1000;
+    localparam [31:0] LI_HALF_CYC = LI_HALF_NS / 32'd10;   // 100 MHz clk cycles
+
+    // RUN_SEQUENCE loop state. kind: 0=Ramsey, 1=Hahn, 2=CPMG. Per window i the
+    // free-evolution time T = i*t_step_ns; seq_delay holds T in clk cycles and
+    // grows by seq_dly_inc each window (no per-window multiply). seq_dcnt is
+    // the countdown reload from seq_delay at each pulse.
+    reg [5:0]  seq_site;
+    reg [1:0]  seq_kind;
+    reg [10:0] seq_n;           // windows 1..1024
+    reg [10:0] seq_i;
+    reg [31:0] seq_tstep;       // t_step_ns (arg)
+    reg [31:0] seq_dly_inc;     // t_step_ns / 10 (clk cycles per window step)
+    reg [31:0] seq_delay;       // T = i*seq_dly_inc (clk cycles) for this window
+    reg [31:0] seq_dcnt;        // countdown for the current free-precession gap
+    reg [7:0]  seq_line [0:7];  // 6-byte stream buffer: 5-digit dec + sep
+    reg        seq_is_last;     // this code is the final window -> '\n' not ' '
+    reg        gate_seen;       // mw_gate rose this pulse (high->low = done)
+
+    // READ_LOCKIN accumulator state. Raw on/off sums + counts; the host derives
+    // diff/sigma/SNR (no RTL divide/sqrt). li_dcnt is the on/off half countdown.
+    reg [5:0]  li_site;
+    reg [31:0] li_n;            // n_cycles 1..100000
+    reg [31:0] li_i;
+    reg [31:0] li_sum_on;
+    reg [31:0] li_sum_off;
+    reg [31:0] li_n_on;
+    reg [31:0] li_n_off;
+    reg [31:0] li_dcnt;
+    reg [7:0]  li_line [0:43];  // 44-byte line: 4x dec32_pad + 3 ' ' + '\n'
 
     // ---- Calibration LUT (emitter pixel -> detector electrode) ------------
     reg [5:0] cal_lut [0:63];
@@ -402,6 +503,19 @@ module command_parser #(
     wire [79:0] sweep_f_pad = dec32_pad(sweep_f);
     wire [39:0] sweep_c_pad = dec5_pad(code_latch);
 
+    // RUN_SEQUENCE encode wires. The count prefix is dec5_pad(seq_n); each code
+    // is dec5_pad(code_latch); the separator is ' ' between codes, '\n' after
+    // the last, then an "OK\n" follows via S_REPLY_LOAD.
+    wire [39:0] seq_count_pad = dec5_pad({5'd0, seq_n});
+    wire [39:0] seq_code_pad  = dec5_pad(code_latch);
+    wire [7:0]  seq_sep       = seq_is_last ? 8'h0A : 8'h20;
+    // READ_LOCKIN encode wires: the 4 raw accumulations, each dec32_pad (10
+    // zero-padded digits), space-separated, newline-terminated.
+    wire [79:0] li_sum_on_pad  = dec32_pad(li_sum_on);
+    wire [79:0] li_sum_off_pad = dec32_pad(li_sum_off);
+    wire [79:0] li_n_on_pad    = dec32_pad(li_n_on);
+    wire [79:0] li_n_off_pad   = dec32_pad(li_n_off);
+
     // STATUS send byte: stream the template, patching the two dynamic digit
     // slots (PLL_LOCKED / ADC_BUSY) at their fixed indices.
     wire [7:0] status_byte = (str_idx == STATUS_PLL_IDX) ? status_pll_dig :
@@ -479,6 +593,25 @@ module command_parser #(
         sweep_i         = 32'd0;
         sweep_len       = 6'd0;
         sweep_pll_seen  = 1'b0;
+        // #58 pulse-engine / lock-in initial state
+        seq_site      = 6'd0;
+        seq_kind      = 2'd0;
+        seq_n         = 11'd0;
+        seq_i         = 11'd0;
+        seq_tstep     = 32'd0;
+        seq_dly_inc   = 32'd0;
+        seq_delay     = 32'd0;
+        seq_dcnt      = 32'd0;
+        seq_is_last   = 1'b0;
+        gate_seen     = 1'b0;
+        li_site       = 6'd0;
+        li_n          = 32'd0;
+        li_i          = 32'd0;
+        li_sum_on     = 32'd0;
+        li_sum_off    = 32'd0;
+        li_n_on       = 32'd0;
+        li_n_off      = 32'd0;
+        li_dcnt       = 32'd0;
         // ID reply string "QSSC v1\n"
         id_str[0]="Q"; id_str[1]="S"; id_str[2]="S"; id_str[3]="C"; id_str[4]=" "; id_str[5]="v"; id_str[6]="1"; id_str[7]=8'h0A;
         // STATUS template (79 bytes; digits at idx 11/22 patched at send time)
@@ -604,6 +737,25 @@ module command_parser #(
             sweep_i        <= 32'd0;
             sweep_pll_seen <= 1'b0;
             sweep_len      <= 6'd0;
+            // #58 pulse-engine / lock-in reset state
+            seq_site       <= 6'd0;
+            seq_kind       <= 2'd0;
+            seq_n          <= 11'd0;
+            seq_i          <= 11'd0;
+            seq_tstep      <= 32'd0;
+            seq_dly_inc    <= 32'd0;
+            seq_delay      <= 32'd0;
+            seq_dcnt       <= 32'd0;
+            seq_is_last    <= 1'b0;
+            gate_seen      <= 1'b0;
+            li_site        <= 6'd0;
+            li_n           <= 32'd0;
+            li_i           <= 32'd0;
+            li_sum_on      <= 32'd0;
+            li_sum_off     <= 32'd0;
+            li_n_on        <= 32'd0;
+            li_n_off       <= 32'd0;
+            li_dcnt        <= 32'd0;
         end else begin
             // Default one-cycle pulses
             tx_load        <= 1'b0;
@@ -727,6 +879,24 @@ module command_parser #(
                                 cmd_id <= CMD_ERR;
                                 fsm    <= S_DISPATCH;
                             end
+                        end else if (cmd_len == 4'd12) begin
+                            // RUN_SEQUENCE (12 chars): site kind n_windows t_step_ns
+                            if (cmd_str[0]=="R" && cmd_str[1]=="U" && cmd_str[2]=="N" &&
+                                cmd_str[3]=="_" && cmd_str[4]=="S" && cmd_str[5]=="E" &&
+                                cmd_str[6]=="Q" && cmd_str[7]=="U" && cmd_str[8]=="E" &&
+                                cmd_str[9]=="N" && cmd_str[10]=="C" && cmd_str[11]=="E") begin
+                                cmd_id <= CMD_SEQ; arg_count <= 3'd4;
+                                if (!is_eol && ch == 8'h20) begin
+                                    parse_idx <= parse_idx + 7'd1;
+                                    fsm       <= S_ARGSP;
+                                end else begin
+                                    cmd_id <= CMD_ERR;  // RUN_SEQUENCE needs args
+                                    fsm    <= S_DISPATCH;
+                                end
+                            end else begin
+                                cmd_id <= CMD_ERR;
+                                fsm    <= S_DISPATCH;
+                            end
                         end else if (cmd_len == 4'd11) begin
                             if (cmd_str[0]=="A" && cmd_str[1]=="P" && cmd_str[2]=="P" &&
                                 cmd_str[3]=="L" && cmd_str[4]=="Y" && cmd_str[5]=="_" &&
@@ -753,6 +923,21 @@ module command_parser #(
                                     fsm       <= S_ARGSP;
                                 end else begin
                                     cmd_id <= CMD_ERR;   // SET_EMITTER needs args
+                                    fsm    <= S_DISPATCH;
+                                end
+                            end else if (cmd_str[0]=="R" && cmd_str[1]=="E" &&
+                                         cmd_str[2]=="A" && cmd_str[3]=="D" &&
+                                         cmd_str[4]=="_" && cmd_str[5]=="L" &&
+                                         cmd_str[6]=="O" && cmd_str[7]=="C" &&
+                                         cmd_str[8]=="K" && cmd_str[9]=="I" &&
+                                         cmd_str[10]=="N") begin
+                                // READ_LOCKIN (11 chars): site n_cycles
+                                cmd_id <= CMD_LOCKIN; arg_count <= 3'd2;
+                                if (!is_eol && ch == 8'h20) begin
+                                    parse_idx <= parse_idx + 7'd1;
+                                    fsm       <= S_ARGSP;
+                                end else begin
+                                    cmd_id <= CMD_ERR;   // READ_LOCKIN needs args
                                     fsm    <= S_DISPATCH;
                                 end
                             end else begin
@@ -1062,6 +1247,60 @@ module command_parser #(
                                 sweep_pll_seen <= 1'b0;
                                 read_all_mode  <= 1'b0;
                                 fsm            <= S_SWEEP_PROG;
+                            end
+                        end
+                        CMD_SEQ : begin
+                            // RUN_SEQUENCE <site> <kind> <n> <t_step_ns>:
+                            // drive a Ramsey(0)/Hahn(1)/CPMG(2) sequence over n
+                            // windows with free-evolution time T = i*t_step, and
+                            // stream one ADC readout code per window. Bounds:
+                            // site 0..63, kind 0..2, n 1..1024, t_step >= 0.
+                            // The RTL returns raw codes; the host fits T2/rate.
+                            if ($signed(arg_vals[0]) < 0 || $signed(arg_vals[0]) >= N_DET ||
+                                $signed(arg_vals[1]) < 0 || $signed(arg_vals[1]) > 32'd2 ||
+                                $signed(arg_vals[2]) < 32'd1  || $signed(arg_vals[2]) > 32'd1024 ||
+                                $signed(arg_vals[3]) < 32'd0) begin
+                                reply_ok <= 1'b0;            // ERR
+                                fsm      <= S_REPLY_LOAD;
+                            end else begin
+                                seq_site    <= arg_vals[0][5:0];
+                                seq_kind    <= arg_vals[1][1:0];
+                                seq_n       <= arg_vals[2][10:0];
+                                seq_tstep   <= arg_vals[3];
+                                seq_dly_inc <= arg_vals[3] / 32'd10;  // cycles per ns (10 ns clk)
+                                seq_i       <= 11'd0;
+                                seq_delay   <= 32'd0;
+                                seq_dcnt    <= 32'd0;
+                                seq_is_last <= 1'b0;
+                                pll_phase   <= 12'd0;
+                                read_all_mode <= 1'b0;
+                                str_idx     <= 7'd0;
+                                fsm         <= S_SEQ_COUNT_ENC;
+                            end
+                        end
+                        CMD_LOCKIN : begin
+                            // READ_LOCKIN <site> <n_cycles>: self-timed on/off
+                            // lock-in accumulation. Returns four raw ints
+                            // (sum_on sum_off n_on n_off); the host computes
+                            // diff/sigma/SNR. Bounds: site 0..63, n 1..100000.
+                            if ($signed(arg_vals[0]) < 0 || $signed(arg_vals[0]) >= N_DET ||
+                                $signed(arg_vals[1]) < 32'd1 ||
+                                $signed(arg_vals[1]) > 32'd100000) begin
+                                reply_ok <= 1'b0;            // ERR
+                                fsm      <= S_REPLY_LOAD;
+                            end else begin
+                                li_site   <= arg_vals[0][5:0];
+                                li_n      <= arg_vals[1];
+                                li_i      <= 32'd0;
+                                li_sum_on <= 32'd0;
+                                li_sum_off<= 32'd0;
+                                li_n_on   <= 32'd0;
+                                li_n_off  <= 32'd0;
+                                li_dcnt   <= 32'd0;
+                                pll_phase <= 12'd0;
+                                read_all_mode <= 1'b0;
+                                str_idx   <= 7'd0;
+                                fsm       <= S_LI_INIT;
                             end
                         end
                         default : begin
@@ -1409,6 +1648,281 @@ module command_parser #(
                     end else begin
                         sweep_pll_seen <= 1'b0;
                         fsm            <= S_SWEEP_PROG;
+                    end
+                end
+
+                // ============================================================
+                // #58 RUN_SEQUENCE pulse-sequence engine.
+                // The carrier is pre-set by the host (APPLY_PULSE); the engine
+                // only gates the RF switch for each MW pulse and snapshots one
+                // ADC code per window. mw_gate is watched rise->fall so a pulse
+                // is complete before the free-evolution delay / next pulse
+                // starts (no overlap at T=0). NOTE: the ADF4351 R1 PHASE is
+                // latched only on pll_start, so the Ramsey 90-deg readout phase
+                // (set in S_SEQ_PI2B) takes effect on the next APPLY_PULSE, not
+                // mid-sequence -- a real-hardware refinement; in sim the ADC
+                // code is constant so it is invisible. CPMG = Hahn (one pi echo)
+                // here; the multi-echo decay is a host-side model.
+                // ============================================================
+
+                // Build the "<count> " prefix (5-digit dec5_pad + space).
+                S_SEQ_COUNT_ENC : begin
+                    seq_line[0] <= seq_count_pad[39:32];
+                    seq_line[1] <= seq_count_pad[31:24];
+                    seq_line[2] <= seq_count_pad[23:16];
+                    seq_line[3] <= seq_count_pad[15:8];
+                    seq_line[4] <= seq_count_pad[7:0];
+                    seq_line[5] <= 8'h20;            // ' '
+                    str_idx     <= 7'd0;
+                    fsm         <= S_SEQ_COUNT_SEND;
+                end
+
+                S_SEQ_COUNT_SEND : begin
+                    if (tx_ready) begin
+                        tx_load <= 1'b1;
+                        tx_din  <= seq_line[str_idx[2:0]];
+                        if (str_idx == 7'd5)
+                            fsm <= S_SEQ_PI2;
+                        else
+                            str_idx <= str_idx + 7'd1;
+                    end
+                end
+
+                // First pi/2 (phase 0). Arms the gate + loads this window's
+                // free-evolution countdown (T = i*t_step, 0 for window 0).
+                S_SEQ_PI2 : begin
+                    mw_gate_ns   <= PI2_NS;
+                    pll_phase    <= 12'd0;
+                    mw_gate_load <= 1'b1;
+                    gate_seen    <= 1'b0;
+                    seq_dcnt     <= seq_delay;
+                    seq_is_last  <= (seq_i + 11'd1 >= seq_n);
+                    fsm          <= S_SEQ_DLY1;
+                end
+
+                // Wait for the pi/2 gate to finish, then count down T.
+                S_SEQ_DLY1 : begin
+                    if (!gate_seen) begin
+                        if (mw_gate) gate_seen <= 1'b1;
+                    end else if (!mw_gate) begin
+                        if (seq_dcnt == 32'd0) begin
+                            fsm <= (seq_kind == 2'd0) ? S_SEQ_PI2B : S_SEQ_PI;
+                        end else begin
+                            seq_dcnt <= seq_dcnt - 32'd1;
+                        end
+                    end
+                end
+
+                // Pi echo (Hahn/CPMG only, phase 0).
+                S_SEQ_PI : begin
+                    mw_gate_ns   <= PI_NS;
+                    pll_phase    <= 12'd0;
+                    mw_gate_load <= 1'b1;
+                    gate_seen    <= 1'b0;
+                    seq_dcnt     <= seq_delay;
+                    fsm          <= S_SEQ_DLY2;
+                end
+
+                // Wait for the pi gate to finish, then count down T.
+                S_SEQ_DLY2 : begin
+                    if (!gate_seen) begin
+                        if (mw_gate) gate_seen <= 1'b1;
+                    end else if (!mw_gate) begin
+                        if (seq_dcnt == 32'd0)
+                            fsm <= S_SEQ_PI2B;
+                        else
+                            seq_dcnt <= seq_dcnt - 32'd1;
+                    end
+                end
+
+                // Readout pi/2 + trigger the ADC snapshot (parallel, like
+                // ODMR_SWEEP: the gate runs while the read completes).
+                S_SEQ_PI2B : begin
+                    mw_gate_ns   <= PI2_NS;
+                    pll_phase    <= (seq_kind == 2'd0) ? 12'd1024 : 12'd0;
+                    mw_gate_load <= 1'b1;
+                    det_read_one <= 1'b1;
+                    det_site     <= seq_site;
+                    fsm          <= S_SEQ_READ;
+                end
+
+                // Latch the readout code for this window.
+                S_SEQ_READ : begin
+                    if (det_code_valid) begin
+                        code_latch   <= det_code;
+                        det_code_ack <= 1'b1;
+                        fsm          <= S_SEQ_CODE_ENC;
+                    end
+                end
+
+                // Build "<code><sep>" (5-digit dec5_pad + ' ' or '\n').
+                S_SEQ_CODE_ENC : begin
+                    seq_line[0] <= seq_code_pad[39:32];
+                    seq_line[1] <= seq_code_pad[31:24];
+                    seq_line[2] <= seq_code_pad[23:16];
+                    seq_line[3] <= seq_code_pad[15:8];
+                    seq_line[4] <= seq_code_pad[7:0];
+                    seq_line[5] <= seq_sep;
+                    str_idx     <= 7'd0;
+                    fsm         <= S_SEQ_CODE_SEND;
+                end
+
+                S_SEQ_CODE_SEND : begin
+                    if (tx_ready) begin
+                        tx_load <= 1'b1;
+                        tx_din  <= seq_line[str_idx[2:0]];
+                        if (str_idx == 7'd5)
+                            fsm <= S_SEQ_NEXT;
+                        else
+                            str_idx <= str_idx + 7'd1;
+                    end
+                end
+
+                // Advance to the next window, or finish (no OK -- the final
+                // '\n' terminates the single-line reply).
+                S_SEQ_NEXT : begin
+                    seq_i     <= seq_i + 11'd1;
+                    seq_delay <= seq_delay + seq_dly_inc;
+                    if (seq_i + 11'd1 >= seq_n)
+                        fsm <= S_IDLE;
+                    else
+                        fsm <= S_SEQ_PI2;
+                end
+
+                // ============================================================
+                // #58 READ_LOCKIN lock-in accumulator (self-timed on/off).
+                // For each cycle: MW on for a half-period (gate) + read into
+                // sum_on; MW off for a half-period + read into sum_off. Reply
+                // is one line of four raw 10-digit ints then '\n' (no OK); the
+                // host computes diff/sigma/SNR.
+                // ============================================================
+
+                S_LI_INIT : begin
+                    mw_gate_ns <= LI_HALF_NS;
+                    pll_phase  <= 12'd0;
+                    gate_seen  <= 1'b0;
+                    fsm        <= S_LI_ON;
+                end
+
+                // Fire the MW gate for the on half-period.
+                S_LI_ON : begin
+                    mw_gate_load <= 1'b1;
+                    gate_seen    <= 1'b0;
+                    fsm          <= S_LI_ON_WAIT;
+                end
+
+                // Wait for the on-gate to finish, then trigger the on read.
+                S_LI_ON_WAIT : begin
+                    if (!gate_seen) begin
+                        if (mw_gate) gate_seen <= 1'b1;
+                    end else if (!mw_gate) begin
+                        det_read_one <= 1'b1;
+                        det_site     <= li_site;
+                        fsm          <= S_LI_ON_READ;
+                    end
+                end
+
+                S_LI_ON_READ : begin
+                    if (det_code_valid) begin
+                        li_sum_on    <= li_sum_on + det_code;
+                        li_n_on      <= li_n_on + 32'd1;
+                        det_code_ack <= 1'b1;
+                        fsm          <= S_LI_OFF;
+                    end
+                end
+
+                // Off half: no gate, count down the half-period then read.
+                S_LI_OFF : begin
+                    li_dcnt   <= LI_HALF_CYC;
+                    fsm       <= S_LI_OFF_WAIT;
+                end
+
+                S_LI_OFF_WAIT : begin
+                    if (li_dcnt == 32'd0) begin
+                        det_read_one <= 1'b1;
+                        det_site     <= li_site;
+                        fsm          <= S_LI_OFF_READ;
+                    end else begin
+                        li_dcnt <= li_dcnt - 32'd1;
+                    end
+                end
+
+                S_LI_OFF_READ : begin
+                    if (det_code_valid) begin
+                        li_sum_off   <= li_sum_off + det_code;
+                        li_n_off     <= li_n_off + 32'd1;
+                        det_code_ack <= 1'b1;
+                        fsm          <= S_LI_NEXT;
+                    end
+                end
+
+                S_LI_NEXT : begin
+                    li_i <= li_i + 32'd1;
+                    if (li_i + 32'd1 >= li_n)
+                        fsm <= S_LI_ENC;
+                    else
+                        fsm <= S_LI_ON;
+                end
+
+                // Build the 44-byte line:
+                // "<sum_on 10d> <sum_off 10d> <n_on 10d> <n_off 10d>\n"
+                S_LI_ENC : begin
+                    li_line[0]  <= li_sum_on_pad[79:72];
+                    li_line[1]  <= li_sum_on_pad[71:64];
+                    li_line[2]  <= li_sum_on_pad[63:56];
+                    li_line[3]  <= li_sum_on_pad[55:48];
+                    li_line[4]  <= li_sum_on_pad[47:40];
+                    li_line[5]  <= li_sum_on_pad[39:32];
+                    li_line[6]  <= li_sum_on_pad[31:24];
+                    li_line[7]  <= li_sum_on_pad[23:16];
+                    li_line[8]  <= li_sum_on_pad[15:8];
+                    li_line[9]  <= li_sum_on_pad[7:0];
+                    li_line[10] <= 8'h20;
+                    li_line[11] <= li_sum_off_pad[79:72];
+                    li_line[12] <= li_sum_off_pad[71:64];
+                    li_line[13] <= li_sum_off_pad[63:56];
+                    li_line[14] <= li_sum_off_pad[55:48];
+                    li_line[15] <= li_sum_off_pad[47:40];
+                    li_line[16] <= li_sum_off_pad[39:32];
+                    li_line[17] <= li_sum_off_pad[31:24];
+                    li_line[18] <= li_sum_off_pad[23:16];
+                    li_line[19] <= li_sum_off_pad[15:8];
+                    li_line[20] <= li_sum_off_pad[7:0];
+                    li_line[21] <= 8'h20;
+                    li_line[22] <= li_n_on_pad[79:72];
+                    li_line[23] <= li_n_on_pad[71:64];
+                    li_line[24] <= li_n_on_pad[63:56];
+                    li_line[25] <= li_n_on_pad[55:48];
+                    li_line[26] <= li_n_on_pad[47:40];
+                    li_line[27] <= li_n_on_pad[39:32];
+                    li_line[28] <= li_n_on_pad[31:24];
+                    li_line[29] <= li_n_on_pad[23:16];
+                    li_line[30] <= li_n_on_pad[15:8];
+                    li_line[31] <= li_n_on_pad[7:0];
+                    li_line[32] <= 8'h20;
+                    li_line[33] <= li_n_off_pad[79:72];
+                    li_line[34] <= li_n_off_pad[71:64];
+                    li_line[35] <= li_n_off_pad[63:56];
+                    li_line[36] <= li_n_off_pad[55:48];
+                    li_line[37] <= li_n_off_pad[47:40];
+                    li_line[38] <= li_n_off_pad[39:32];
+                    li_line[39] <= li_n_off_pad[31:24];
+                    li_line[40] <= li_n_off_pad[23:16];
+                    li_line[41] <= li_n_off_pad[15:8];
+                    li_line[42] <= li_n_off_pad[7:0];
+                    li_line[43] <= 8'h0A;
+                    str_idx     <= 7'd0;
+                    fsm         <= S_LI_SEND;
+                end
+
+                S_LI_SEND : begin
+                    if (tx_ready) begin
+                        tx_load <= 1'b1;
+                        tx_din  <= li_line[str_idx[5:0]];
+                        if (str_idx == 7'd43)
+                            fsm <= S_IDLE;
+                        else
+                            str_idx <= str_idx + 7'd1;
                     end
                 end
 
