@@ -51,7 +51,7 @@ export function QubitGrid({ sites, counts, numClbits, recovered }) {
             <div key={cell.idx}
                  className={`qcell ${lit ? 'on' : ''} ${cell.signal ? 'signal' : ''} ${cell.measured ? 'measured' : ''} ${cell.usable ? 'usable' : ''}`}
                  style={style}
-                 title={`q${cell.idx} (${cell.r},${cell.c})${cell.measured ? ` · ${cell.signal ? 'signal' : 'top'} bit=${lit ? 1 : 0} · confidence ${(cell.confidence * 100).toFixed(0)}%` : ''}`}>{cell.idx}</div>
+                 title={`q${cell.idx} (${cell.r},${cell.c}) · ~10-NV register${cell.measured ? ` · ${cell.signal ? 'signal' : 'top'} bit=${lit ? 1 : 0} · confidence ${(cell.confidence * 100).toFixed(0)}%` : ''}`}>{cell.idx}</div>
           )
         })}
       </div>
@@ -93,7 +93,8 @@ export function QubitFrequencyTable({ sites, dGhz, loading, error }) {
     <div>
       <div className="hint" style={{ marginBottom: 8 }}>
         Per-pin ODMR + coherence sweep — each pin's dip is fit individually (measured D{dGhz ? `≈${dGhz}` : ''} GHz
-        ± a per-site detuning; a narrow MW pulse at f<sub>i</sub> addresses only pin i). T₂ = Hahn-echo
+        ± a per-site detuning; a narrow MW pulse at f<sub>i</sub> addresses only pin i). Each pin is a
+        ~10-NV register; the resonance shown is the register centre. T₂ = Hahn-echo
         coherence (µs), T₂* = Ramsey inhomogeneous dephasing (µs). Measured detuning spread:{' '}
         <b>{spread.toFixed(2)} MHz</b>.
       </div>

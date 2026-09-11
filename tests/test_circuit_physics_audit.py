@@ -4,10 +4,11 @@ These are the pass/fail companion to the measured parameter-sweep benchmark
 (``tools/benchmark_circuits.py``). They assert the three things the user asked
 to be confirmed about the implementation:
 
-1. **Full magnetic dipole-dipole coupling** -- the physical topology is
-   nearest-neighbour (Manhattan-distance-1) on the 8x8 grid, because real NV
-   magnetic dipole-dipole interaction falls as 1/r**3 (only adjacent sites
-   couple). Not all-to-all.
+1. **Within-pixel all-to-all dipole coupling** -- the circuit qubits are ONE
+   pixel's ~10-NV register: the NVs sit a few nm apart in one microdiamond, so
+   the magnetic dipole-dipole interaction (1/r**3) couples every pair (complete
+   graph K_n). The 64 pixels are INDEPENDENT at 300 K (1/r**3 -> zero at the
+   2.5 mm pitch); cross-pixel 2q is the cryo optical bus, not simulated.
 
 2. **All error channels are simulated** -- the real-mode Aer noise model wires
    in (a) thermal relaxation from the real per-site T1/T2 over each gate
@@ -45,44 +46,54 @@ def _bell_circuit(n=2):
 
 
 # --------------------------------------------------------------------------
-# 1. full magnetic dipole-dipole coupling (nearest-neighbour, 1/r^3)
+# 1. within-pixel all-to-all dipole coupling (1/r^3, ~10 NVs/pixel)
 # --------------------------------------------------------------------------
-def test_coupling_is_nearest_neighbor_dipole_for_all_profiles():
-    """The coupling map contains ONLY Manhattan-distance-1 edges (1/r^3
-    dipole), never an all-to-all or long-range edge, on every profile."""
+def test_coupling_is_within_pixel_all_to_all():
+    """The coupling map is the complete graph K_n of the pixel's ~10-NV
+    register: every pair is an edge (the NVs are a few nm apart in one
+    microdiamond, so 1/r**3 couples them all). All sites share pixel_id=0."""
     for name in PROF_NAMES:
         b = QSSCBackend(name, seed=42, noise_mode="real")
         edges = b._neighbor_pairs()
         assert edges, f"{name}: coupling map is empty"
+        n = b._n_qubits
+        # every register pair is dipole-coupled (within one microdiamond)
+        pixel_ids = {s.pixel_id for s in b.sites}
+        assert pixel_ids == {0}, f"{name}: register sites must share pixel_id=0, got {pixel_ids}"
+        assert len(edges) == n * (n - 1), (
+            f"{name}: expected {n*(n-1)} directed K_{n} edges, got {len(edges)}")
         for i, j in edges:
-            si, sj = b.sites[i], b.sites[j]
-            dist = abs(si.row - sj.row) + abs(si.col - sj.col)
-            assert dist == 1, (
-                f"{name}: edge ({i},{j}) at Manhattan distance {dist} != 1 -- "
-                f"dipole coupling must be nearest-neighbour only (1/r^3)")
+            assert i != j and b.sites[i].pixel_id == b.sites[j].pixel_id, (
+                f"{name}: edge ({i},{j}) spans pixels -- cross-pixel dipole is zero")
 
 
-def test_coupling_not_all_to_all():
-    """An all-to-all 64-qubit map would have 64*63=4032 directed edges; the
-    nearest-neighbour dipole map has far fewer (an 8x8 grid has 112
-    undirected = 224 directed neighbour edges)."""
+def test_coupling_is_complete_graph():
+    """The register's coupling is all-to-all: K_n has n*(n-1) directed edges
+    (e.g. 90 for n=10). This is the within-pixel dipole (1/r**3 at ~3 nm), NOT
+    a cross-pixel grid -- the 64 pixels are independent at 300 K."""
     for name in PROF_NAMES:
         b = QSSCBackend(name, seed=42, noise_mode="real")
         edges = b._neighbor_pairs()
-        assert len(edges) == 224, f"{name}: expected 224 directed neighbour edges, got {len(edges)}"
-        assert len(edges) < 4032, f"{name}: coupling is all-to-all, not dipole-nearest-neighbour"
+        n = b._n_qubits
+        assert len(edges) == n * (n - 1), (
+            f"{name}: expected {n*(n-1)} directed K_{n} edges, got {len(edges)}")
+        # both directions present for every unordered pair
+        eset = set(edges)
+        for i in range(n):
+            for j in range(i + 1, n):
+                assert (i, j) in eset and (j, i) in eset, (
+                    f"{name}: pair ({i},{j}) missing a direction")
 
 
-def test_target_2q_gates_only_on_neighbour_pairs():
-    """The Target truthfully declares a native 2q gate ONLY on grid-neighbour
-    pairs (the physical dipole topology), not all-to-all."""
+def test_target_2q_gates_on_all_register_pairs():
+    """The Target truthfully declares a native 2q gate on every within-register
+    pair (the all-to-all dipole topology), and on no others."""
     for name in PROF_NAMES:
         b = QSSCBackend(name, seed=42, noise_mode="real")
-        cx_props = b.target.qargs_for_operation_name("cx")
+        cx_props = set(b.target.qargs_for_operation_name("cx"))
         nbr = set(b._neighbor_pairs())
-        for pair in cx_props:
-            assert pair in nbr, (
-                f"{name}: Target declares cx on non-neighbour pair {pair}")
+        assert cx_props == nbr, (
+            f"{name}: Target cx qargs differ from the within-register coupling map")
 
 
 # --------------------------------------------------------------------------
@@ -204,15 +215,22 @@ def test_phenomenological_and_real_paths_agree_on_verdict():
 # --------------------------------------------------------------------------
 def test_backend_is_qiskit_BackendV2():
     """The backend exposes the real qiskit BackendV2 interface: a Target,
-    max_circuits, qubit_properties, and the run() -> Job contract."""
+    max_circuits, qubit_properties, and the run() -> Job contract. The Target
+    width is the per-pixel NV register (~10), NOT the 64-pixel hardware die
+    (which is the separate chip view, reported via describe()['pixels'])."""
+    from qssc.simulator import N_NV_PER_PIXEL, N_SITES
     for name in PROF_NAMES:
         b = QSSCBackend(name, seed=42, noise_mode="real")
         assert b.target is not None, f"{name}: no Target"
-        assert b.target.num_qubits == SIM_MAX_QUBITS, (
-            f"{name}: Target num_qubits {b.target.num_qubits} != {SIM_MAX_QUBITS}")
+        assert b.target.num_qubits == N_NV_PER_PIXEL, (
+            f"{name}: Target num_qubits {b.target.num_qubits} != register {N_NV_PER_PIXEL}")
         assert b.target.qubit_properties is not None, (
             f"{name}: Target has no qubit_properties")
         assert hasattr(b, "max_circuits"), f"{name}: not BackendV2 (no max_circuits)"
+        # the 64-pixel hardware die is the separate chip view, not the Target
+        desc = b.describe()
+        assert desc["pixels"] == N_SITES, f"{name}: chip view pixels != {N_SITES}"
+        assert desc["num_qubits"] == N_NV_PER_PIXEL, f"{name}: describe num_qubits != register"
         # run() returns a job whose .result() yields counts (the contract)
         job = b.run(_bell_circuit(2), shots=64)
         res = job.result()
@@ -257,14 +275,19 @@ def test_ideal_and_real_paths_both_execute_through_qiskit():
                     f"{name}/{mode}: ideal Bell top state {top} not 00/11")
 
 
-def test_64_qubit_mps_path_reaches_full_chip():
-    """The MPS path reaches the full 64-site chip (statevector caps at 28):
-    a 64-qubit product-state circuit must simulate, not be rejected."""
+def test_register_mps_path_reaches_64_qubits():
+    """The MPS path reaches the 64-qubit register ceiling (statevector caps at
+    28): a 64-NV product-state register must simulate, not be rejected. The
+    register auto-grows from the default 10 to the circuit width (SIM_MAX_QUBITS
+    = 64, the max NVs in one pixel); 64x10 = 640 stays out of reach (64
+    independent pixels, not one 640-qubit circuit)."""
     b = QSSCBackend("NV", seed=42, noise_mode="ideal")
-    assert SIM_MAX_QUBITS == 64, "chip must be 64 sites"
+    assert SIM_MAX_QUBITS == 64, "register ceiling must be 64"
     assert SV_MAX_QUBITS == 28, "statevector ceiling must be 28"
     qc = QuantumCircuit(64, 64)
     qc.h(range(64))  # product state -> MPS bond dim 1, fast
     qc.measure(range(64), range(64))
     counts = b.run(qc, shots=128).result().get_counts()
     assert sum(counts.values()) == 128, "64-qubit MPS run did not return 128 shots"
+    # the register grew to fit the circuit
+    assert b._n_qubits == 64, "register did not auto-grow to 64 NVs"

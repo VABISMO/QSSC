@@ -17,7 +17,7 @@ from math import gcd
 import numpy as np
 
 from qssc import (
-    auto_align, QSSCBackend, SimulatedFPGA, FPGAConnection,
+    QSSCBackend, SimulatedFPGA, FPGAConnection,
     make_connection, NoFPGADetected,
     create_period_finding_circuit, create_shor_circuit, create_qft_nos_circuit,
     create_math_circuit, grover_search, postprocess_period,
@@ -31,13 +31,16 @@ from qssc.qkd import simulate_bb84
 
 
 def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
-             hardware: bool = False, grid: int = 8) -> QSSCBackend:
-    sites = auto_align(profile=profile, grid=grid, temperature_k=temperature_k,
-                       rng=np.random.default_rng(seed))
+             hardware: bool = False, n_nv_per_pixel: int = 10) -> QSSCBackend:
+    # Register mode: the backend simulates ONE pixel's ~10-NV register (the
+    # circuit qubits, within-pixel all-to-all dipole); the 64-pixel hardware
+    # die is the backend's separate chip view. The register auto-grows to fit
+    # a wider circuit (QSSCBackend._ensure_register). Passing explicit chip-
+    # view sites here would make the 64 pixels a (cross-pixel, unphysical) K_64.
     fpga = _make_fpga(profile, temperature_k, seed, hardware)
-    return QSSCBackend(profile=profile, sites=sites, seed=seed,
+    return QSSCBackend(profile=profile, seed=seed,
                        temperature_k=temperature_k, noise_mode=noise_mode,
-                       hardware=fpga)
+                       hardware=fpga, n_nv_per_pixel=n_nv_per_pixel)
 
 
 def _make_fpga(profile: str, temperature_k: float, seed, hardware: bool):

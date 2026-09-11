@@ -52,6 +52,13 @@ logger = logging.getLogger(__name__)
 # pads on the top edge -- addressed by a single linear index 0..63 (no 8x8
 # row/col crossbar; every channel is independent and simultaneous).
 N_SITES = 64
+# Per-pixel NV register width: each of the 64 pixels holds a small register of
+# NV centres in ONE microdiamond, all-to-all dipole-coupled (1/r^3, ~3 nm apart
+# -> ~2 MHz coupling -> ~200 ns CZ gate). The circuit model simulates ONE
+# pixel's register (64x10 = 640 exceeds the 63-qubit MPS cap, so the 64 pixels
+# are independent parallel processors at 300 K, NOT one 640-qubit machine).
+# Cross-pixel 2q is optical-bus only, cryo (V_HOM -> 1 at cryo, ~2e-7 at 300 K).
+N_NV_PER_PIXEL = 10
 # The AD7616 is a 16-bit bipolar +/-5V ADC. Detector samples are 16-bit
 # (0..65535), the digitised TIA output -- NOT 12-bit XADC codes. The 1 kHz
 # lock-in demodulation that turns these raw samples into a PL/ODMR signal is
@@ -607,6 +614,14 @@ class QubitSite:
     readout_err: float
     frequency: float = 0.0   # ms=0<->ms=+-1 transition frequency (Hz), per-site
     usable: bool = True
+    # Pixel-register identity (qssc-spin-gate-not-photon: the 2q dipole gate is
+    # WITHIN one microdiamond). ``pixel_id`` is which of the 64 die pixels this
+    # NV lives in; ``nv_index`` is which NV within that pixel's register. For
+    # the chip view (register=False) each site is one pixel (pixel_id == qubit_id,
+    # nv_index 0); for the register view (register=True) all sites share one
+    # pixel_id and differ by nv_index.
+    pixel_id: int = 0
+    nv_index: int = 0
 
     def as_dict(self) -> dict:
         d = asdict(self)
@@ -620,20 +635,34 @@ def auto_align(profile: DefectProfile | str = "NV",
                 grid: int = 8, site_pitch_um: float = 2.5,
                 temperature_k: float = 300.0, max_retries: int = 5,
                 rng: Optional[np.random.Generator] = None,
-                progress=None) -> List[QubitSite]:
-    """Calibrate the chip and register ``grid**2`` qubit sites.
+                progress=None,
+                register: bool = False,
+                n_nv_per_pixel: int = N_NV_PER_PIXEL,
+                register_line_spacing_hz: float = 6.0e6,
+                ) -> List[QubitSite]:
+    """Calibrate the chip and build the qubit-site list.
 
-    Mirrors the on-chip calibration flow of the real hardware (protocol §5.6):
-    drive each CQD emitter pixel, sample every graphene detector electrode, and
-    register the electrode that responds above the lock-in threshold -- the
-    emitter-pixel -> qubit-site -> detector-electrode LUT. No camera, no
-    micron-alignment jig: the software discovers the mapping purely from the
-    lock-in photocurrent response, driven by the simulator physics so it is
-    deterministic and fast.
+    Two modes:
+
+    * ``register=False`` (chip view, the historical default): mirror the on-chip
+      calibration flow (protocol §5.6) and register ``grid**2`` pixel sites --
+      one qubit site per die pixel, the 64-pixel hardware view used by
+      ``describe()``, the Calibrate tab, the magneto/field sensors and the
+      FPGA 64-channel readout. Each site is a pixel (``pixel_id == qubit_id``).
+
+    * ``register=True`` (per-pixel register view, used by the circuit backend):
+      build ONE representative pixel's ``n_nv_per_pixel`` NV register -- the
+      qubits the QSSCBackend actually simulates, since 64x10 = 640 exceeds the
+      63-qubit MPS cap. The NVs share ``pixel_id=0`` (one microdiamond), differ
+      by ``nv_index``, and sit on a resolvable ODMR frequency grid
+      (``register_line_spacing_hz`` > linewidth) so the global MW antenna
+      addresses each by frequency. This is the within-pixel all-to-all dipole
+      register (the 300 K on-chip 2q gate, Neumann 2008 / Dolde 2013); the 64
+      pixels are independent at 300 K.
 
     ``site_pitch_um`` is the centre-to-centre pitch of one emitter/detector
-    pixel. A site is registered as usable when it actually contains defects
-    *and* the fabrication step succeeded: the per-site yield is
+    pixel. In the chip view a site is registered as usable when it actually
+    contains defects *and* the fabrication step succeeded: the per-site yield is
     ``SITE_FAB_YIELD * (1 - exp(-density * site_area))`` -- a Poisson "at least
     one defect in the pixel" factor times a fabrication-yield factor. This
     replaces the old ``galvo_area`` camera-era leftover, whose
@@ -643,13 +672,40 @@ def auto_align(profile: DefectProfile | str = "NV",
     populated but still loses ~10% to fab yield, while a sparse hBN V_B- site
     (0.30/um^2) is empty ~15% of the time.
 
-    Returns ``grid**2`` :class:`QubitSite` in index order; sites that fail the
-    yield draw are kept as ``usable=False`` placeholders so the grid is always
-    complete.
+    Returns ``grid**2`` (chip view) or ``n_nv_per_pixel`` (register view)
+    :class:`QubitSite` in index order; chip-view sites that fail the yield
+    draw are kept as ``usable=False`` placeholders so the grid is always
+    complete. Register-view NVs are usable by construction (engineered NVs).
     """
     prof = get_profile(profile) if isinstance(profile, str) else profile
     rng = rng or np.random.default_rng()
     t1, t2 = coherence_at_temperature(prof, temperature_k)
+    # ---- per-pixel NV register view (the circuit backend's qubits) ----------
+    # ONE microdiamond's n_nv_per_pixel NVs: all pixel_id=0, distinct nv_index,
+    # on a resolvable ODMR frequency grid so the global MW antenna addresses
+    # each by frequency (Omega << detuning -> see qssc.dipole.addressing_leakage).
+    # Within-pixel all-to-all dipole coupling is applied by the backend's
+    # _neighbor_pairs (complete graph); these NVs are ~3 nm apart.
+    if register:
+        sites: List[QubitSite] = []
+        n = max(1, int(n_nv_per_pixel))
+        x_um = 0.5 * site_pitch_um
+        y_um = 0.5 * site_pitch_um
+        for k in range(n):
+            spread = prof.frequency_detuning_spread_hz
+            jitter = (float(rng.normal(0.0, spread))
+                      if spread > 0 else 0.0)
+            detune = (k - (n - 1) / 2.0) * register_line_spacing_hz + jitter
+            freq = prof.zero_field_splitting + detune
+            sites.append(QubitSite(
+                qubit_id=k, row=0, col=0,
+                x_um=x_um, y_um=y_um, intensity=float(BRIGHT_CODE),
+                t1=t1, t2=t2, readout_err=prof.readout_error,
+                frequency=freq, usable=t2 > 1e-6,
+                pixel_id=0, nv_index=k,
+            ))
+        return sites
+    # ---- chip view: the 64-pixel hardware grid (historical default) ----------
     n_needed = grid * grid
     site_area_um2 = site_pitch_um * site_pitch_um
     # Poisson ">=1 defect in the pixel" times a fabrication-yield factor.
@@ -691,12 +747,14 @@ def auto_align(profile: DefectProfile | str = "NV",
                 t1=t1, t2=t2, readout_err=err,
                 frequency=freq,
                 usable=code > DETECT_THRESHOLD and t2 > 1e-6,
+                pixel_id=idx, nv_index=0,
             ))
         else:
             sites.append(QubitSite(qubit_id=idx, row=r, col=c,
                                    x_um=0.0, y_um=0.0, intensity=0.0,
                                    t1=t1, t2=t2, readout_err=prof.readout_error,
-                                   frequency=freq, usable=False))
+                                   frequency=freq, usable=False,
+                                   pixel_id=idx, nv_index=0))
     if progress is not None and task is not None:
         progress.update(task, completed=max_retries)
     return sites[:n_needed]

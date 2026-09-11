@@ -67,9 +67,9 @@ const SEQS = [
 // = the number of key-exchange rounds.
 const QUBIT_CFG = {
   custom:  null,                                  // custom circuit defines its own width
-  bell:    { min: 2, max: 64, step: 1, def: 4,  label: 'Qubits n',         hint: 'GHZ chain on n qubits (H + CNOT ladder) — full 64-site chip via MPS' },
-  qrand:   { min: 2, max: 64, step: 1, def: 8,  label: 'Qubits n',         hint: 'n qubits prepared in |+⟩ → von-Neumann-extracted entropy — full 64-site chip via MPS' },
-  qft:     { min: 2, max: 64, step: 1, def: 4,  label: 'Qubits n',         hint: 'QFT of an n-qubit computational-basis state — full 64-site chip via MPS' },
+  bell:    { min: 2, max: 64, step: 1, def: 4,  label: 'Qubits n',         hint: 'GHZ chain on n qubits (H + CNOT ladder) — one pixel’s NV register, MPS for n>28' },
+  qrand:   { min: 2, max: 64, step: 1, def: 8,  label: 'Qubits n',         hint: 'n qubits prepared in |+⟩ → von-Neumann-extracted entropy — one pixel’s NV register, MPS for n>28' },
+  qft:     { min: 2, max: 64, step: 1, def: 4,  label: 'Qubits n',         hint: 'QFT of an n-qubit computational-basis state — one pixel’s NV register, MPS for n>28' },
   grover:  { min: 2, max: 8,  step: 1, def: 3,  label: 'Search qubits n',  hint: 'search space of 2ⁿ items' },
   math:    { min: 2, max: 6,  step: 1, def: 4,  label: 'Word qubits n',    hint: 'n-bit arithmetic register' },
   // shor / period / qftnos: the qubit count is a CONSEQUENCE of the integer N
@@ -1535,7 +1535,8 @@ export default function App() {
                   <div className="stat"><div className="k">1q gate</div><div className="v">{info.data.gate_1q_ns}<small> ns</small></div></div>
                   <div className="stat"><div className="k">2q gate</div><div className="v">{info.data.gate_2q_ns}<small> ns</small></div></div>
                   <div className="stat"><div className="k">Qubits</div><div className="v">{info.data.num_qubits}</div></div>
-                  <div className="stat"><div className="k">Sites</div><div className="v">{info.data.site_count}</div></div>
+                  <div className="stat"><div className="k">Pixels</div><div className="v">{info.data.site_count ?? info.data.pixels}</div></div>
+                  <div className="stat"><div className="k">NVs/pixel</div><div className="v">{info.data.n_nv_per_pixel ?? '–'}</div></div>
                 </div>
               )}
               {info.loading && <div className="muted"><span className="spinner" /> loading backend target…</div>}

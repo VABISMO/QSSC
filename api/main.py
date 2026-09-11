@@ -136,11 +136,13 @@ class CustomCircuitRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
-             grid: int = 8) -> QSSCBackend:
-    sites = auto_align(profile=profile, grid=grid, temperature_k=temperature_k,
-                       rng=np.random.default_rng(seed))
-    return QSSCBackend(profile=profile, sites=sites, seed=seed,
-                       temperature_k=temperature_k, noise_mode=noise_mode)
+             n_nv_per_pixel: int = 10) -> QSSCBackend:
+    # Register mode: the backend simulates ONE pixel's ~10-NV register (the
+    # circuit qubits, within-pixel all-to-all dipole); the 64-pixel hardware
+    # die is the backend's separate chip view (see QSSCBackend).
+    return QSSCBackend(profile=profile, seed=seed,
+                       temperature_k=temperature_k, noise_mode=noise_mode,
+                       n_nv_per_pixel=n_nv_per_pixel)
 
 
 def _req_dict(model) -> dict:

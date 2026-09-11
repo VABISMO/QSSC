@@ -181,6 +181,20 @@ circuits work at 300 K, deep ones (Shor) do not. The gate fidelity is governed
 by the spin T₁/T₂ + depolarization budget above (`signal_retention`), **not** by
 optical photon indistinguishability.
 
+**Per-pixel NV register (within-pixel all-to-all dipole).** The 2q gate is a
+*within one microdiamond* interaction: each of the 64 die pixels holds a small
+(~10 NV) register, the NVs a few nm apart, so the 1/r³ dipole couples every pair
+(complete graph K_n, ODMR-frequency-addressed by one global MW antenna). The
+qiskit backend (`qssc/backend.py`) simulates ONE pixel's ~10-NV register as its
+circuit qubits (64×10 = 640 exceeds the 63-qubit MPS cap, so the 64 pixels are
+modelled as 64 **independent** parallel processors at 300 K — not one 640-qubit
+machine). Cross-pixel 2q is the **cryo optical bus** (V_HOM → 1 only at cryo);
+at 300 K the 1/r³ coupling is zero at the 2.5 mm pixel pitch, so cross-pixel
+entanglement is descriptive only. The 64-pixel hardware die (the detector
+array, `/api/calibration`, the FPGA 64-channel RTL) is unchanged — `num_qubits`
+≈ 10 (the register) and `pixels` = 64 (the die) now diverge. The dipole physics
+is grounded in `qssc/dipole.py` (CZ gate time, addressing leakage, fidelity).
+
 **Optical-coherence channel (HOM visibility) — descriptive, remote-entanglement
 only.** A *photon-mediated* two-qubit gate (emit a photon from each defect,
 interfere them — the mechanism for entangling **remote** defects on separate

@@ -18,7 +18,7 @@ from rich.table import Table
 
 from . import __version__
 from .defects import PROFILES, get_profile
-from .simulator import auto_align, simulate_odmr
+from .simulator import simulate_odmr
 from .backend import (
     QSSCBackend, EmitterController, DetectorInterface, MicrowaveController,
     CalibrationManager, make_connection,
@@ -34,13 +34,12 @@ console = Console()
 
 def _build_backend(profile: str, port, temperature: float, shots: int, seed: int):
     hw = make_connection(port, profile=profile, temperature_k=temperature, seed=seed)
-    sites = auto_align(profile=profile, grid=8, temperature_k=temperature,
-                       rng=np.random.default_rng(seed))
     emitter = EmitterController(hw)
     detector = DetectorInterface(hw)
     mw = MicrowaveController(hw)
-    # drive the on-chip readout (CQD emitter + graphene detector + lock-in)
-    backend = QSSCBackend(profile=profile, sites=sites, hardware=hw,
+    # Register mode: the backend simulates ONE pixel's ~10-NV register; the
+    # 64-pixel hardware die is its separate chip view (see QSSCBackend).
+    backend = QSSCBackend(profile=profile, hardware=hw,
                           shots=shots, seed=seed, temperature_k=temperature)
     return backend, hw, (emitter, detector, mw)
 
@@ -69,8 +68,8 @@ def info(profile, temperature):
     t = Table(title=f"QSSC — {prof.name} @ {temperature} K", show_lines=True)
     t.add_column("Parameter", style="cyan")
     t.add_column("Value", style="green")
-    for k in ("backend", "defect", "num_qubits", "t1_ms", "t2_us",
-              "readout_error", "d_ghz", "shots"):
+    for k in ("backend", "defect", "num_qubits", "pixels", "n_nv_per_pixel",
+              "t1_ms", "t2_us", "readout_error", "d_ghz", "shots"):
         t.add_row(k, str(desc[k]))
     console.print(t)
     console.print(f"[dim]Protocol summary:[/]")
