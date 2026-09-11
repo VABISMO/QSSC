@@ -23,6 +23,8 @@ from qssc import (
     auto_align, simulate_odmr, QSSCBackend,
     make_detector_response, PROFILES,
     compass_measure, gyro_measure,
+    FPGAConnection, NoFPGADetected, make_connection,
+    DetectorInterface, MicrowaveController, EmitterController,
 )
 from qssc.simulator import DETECT_THRESHOLD
 from qssc.protocol import (
@@ -81,6 +83,14 @@ class RunRequest(BaseModel):
     shots: int = Field(2048, ge=1, le=8192)
     seed: int = Field(42, ge=0, le=2_147_483_647)
     noise_mode: str = "real"   # real (default, full physics) | phenomenological | none
+    # Hardware-real mode: drive the real FPGA board (AD7616 readout, ADF4351
+    # pulses, TLC5947 emitters, QRNG, ODMR calibration) over QSSC_FPGA_PORT.
+    # False (default) = Simulator (Aer + the on-chip readout model). The
+    # quantum bitstring always comes from Aer (the chip is a sensor array,
+    # not a gate-model QC); ``hardware`` selects whether the I/O layer is a
+    # real board or the in-process simulator. No board + hardware=True ->
+    # {"error": "no-fpga-detected"} (never a silent sim).
+    hardware: bool = False
     # algorithm-specific
     n: int = Field(15, ge=2, le=100_000)            # shor / period
     a: Optional[int] = None          # base (auto if None)
@@ -110,6 +120,7 @@ class CustomCircuitRequest(BaseModel):
     shots: int = Field(2048, ge=1, le=4096)
     seed: int = Field(42, ge=0, le=2_147_483_647)
     noise_mode: str = "real"   # real (default, full physics) | phenomenological | none
+    hardware: bool = False     # Hardware-real mode (see RunRequest.hardware)
     # Cap at 20 qubits: the chip has 64 physical sites but the circuit is
     # simulated classically (Aer statevector / density matrix, O(2^n) memory).
     # 20 qubits is a safe statevector size (~16 MB) on the free Render worker;
@@ -199,6 +210,30 @@ def _clamp_points(points: int, lo: int = 1, hi: int = 2000) -> int:
     except (TypeError, ValueError):
         n = lo
     return max(lo, min(n, hi))
+
+
+def _real_odmr_sweep(mw: MicrowaveController, det: DetectorInterface,
+                     f0: float, span: float, points: int,
+                     site: int = 0, amp: float = 0.5,
+                     duration_ns: int = 500):
+    """Run a real ODMR sweep on the board and return (f_ghz, contrast).
+
+    For each frequency the ADF4351 is reprogrammed (``APPLY_PULSE``) and the
+    site's photodetector is read (``READ_DETECTOR``). NV fluorescence *drops*
+    on resonance, so the raw 16-bit ADC code is high off-resonance and dips at
+    D +/- gamma*B; normalising to the peak turns that into the same
+    contrast-has-a-minimum-at-the-dip shape ``simulate_odmr`` returns, so the
+    host-side D/linewidth fit is identical. Each point is one serial
+    round-trip, so ``points`` is capped small (<=64) by the caller.
+    """
+    freqs = np.linspace(f0 - span, f0 + span, int(points))
+    codes = np.empty(len(freqs), dtype=np.float64)
+    for i, fg in enumerate(freqs):
+        mw.apply_pulse(site, float(fg), amp, duration_ns)
+        codes[i] = det.read(site)
+    peak = float(codes.max()) or 1.0
+    contrast = codes / peak
+    return freqs, contrast
 
 
 # ---------------------------------------------------------------------------
@@ -348,7 +383,7 @@ def signal(profile: str = "NV", temperature_k: float = 300.0,
 @app.post("/api/calibration/run")
 def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
                     seed: int = 42, grid: int = 8, b_field: float = 1e-3,
-                    points: int = 220):
+                    points: int = 220, hardware: bool = False):
     """Run the full calibration process the way the VABISMO software does.
 
     Stages: (1) scan the on-chip detector array for defect photocurrent
@@ -356,38 +391,85 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
     the microwave frequency to record an ODMR spectrum and fit the zero-field
     splitting D + linewidth. Returns every stage's data so the dashboard can
     render the calibration.
+
+    With ``hardware=True`` the sweep runs against a real board selected by
+    ``QSSC_FPGA_PORT``: stage 1 reads real AD7616 codes (every emitter armed +
+    ``DRIVE_PATTERN`` + ``READ_DETECTORS``) and stage 3 is a real ODMR sweep
+    (``APPLY_PULSE`` per frequency + ``READ_DETECTOR`` per point). The real
+    sweep is one serial round-trip per point, so ``points`` is capped at 64.
+    With ``hardware=True`` and no board connected, returns
+    ``{"error": "no-fpga-detected", ...}`` instead of a silent simulation.
     """
     prof = get_profile(profile)
     rng = np.random.default_rng(seed)
     grid = max(1, min(int(grid), 16))
-    points = _clamp_points(points)
 
-    # Stage 1 — scan the on-chip graphene/MoS2 detector array. Drive every
-    # emitter pixel and read the detector response; a site above the lock-in
-    # threshold counts as "detected". No camera frame — the detector array is
-    # the readout. Response keys are kept (frame_shape = detector-array shape,
-    # defects_detected = sites above threshold, frame_mean/max = photocurrent
-    # code stats) so the stage-0 dashboard render stays unchanged.
-    active = {idx for idx in range(grid * grid)}
-    response = make_detector_response(active, profile=profile,
-                                       n_sites=grid * grid, rng=rng).reshape(grid, grid)
-    threshold = DETECT_THRESHOLD
-    n_detected = int(np.count_nonzero(response > threshold))
+    # Real-hardware path --------------------------------------------------
+    if hardware:
+        port = os.getenv("QSSC_FPGA_PORT", "").strip()
+        if not port:
+            return {"error": "no-fpga-detected",
+                    "message": "No FPGA detected — connect the board and set "
+                               "QSSC_FPGA_PORT, or switch to Simulator."}
+        try:
+            fpga = make_connection(port=port, profile=profile,
+                                   temperature_k=temperature_k, seed=seed)
+        except NoFPGADetected as exc:
+            return {"error": "no-fpga-detected", "message": str(exc)}
+        em = EmitterController(fpga)
+        det = DetectorInterface(fpga)
+        mw = MicrowaveController(fpga)
+        n_sites = grid * grid
+        # Cap the real sweep small — one serial round-trip per point.
+        points = max(4, min(_clamp_points(points), 64))
 
-    # Stage 2 — auto-align grid
-    sites = auto_align(prof, grid=grid, temperature_k=temperature_k, rng=rng)
-    aligned = [{"qubit_id": s.qubit_id, "row": s.row, "col": s.col,
-                "x_um": round(s.x_um, 2), "y_um": round(s.y_um, 2),
-                "intensity": round(s.intensity, 1)} for s in sites]
+        # Stage 1 — real detector-array scan: arm every channel, fire in
+        # parallel, read all 64 ADC codes in one simultaneous-sampling reply.
+        em.clear_emitters()
+        for idx in range(n_sites):
+            em.set_emitter(idx, 4095)
+        em.drive_pattern(50)
+        codes = det.read_all()[:n_sites]
+        response = codes.reshape(grid, grid).astype(np.float64)
+        threshold = DETECT_THRESHOLD
+        n_detected = int(np.count_nonzero(response > threshold))
 
-    # Stage 3 — ODMR sweep + fit D. With a non-zero B field the spectrum
-    # splits into a Zeeman doublet at D +/- gamma*B; the zero-field splitting
-    # D is the *midpoint* of the two dips, not the single argmin (which would
-    # be offset by gamma*B and mis-flag the fit).
-    f0 = prof.d_ghz
-    span = max(0.08, abs(prof.hyperfine_coupling) / 1e9 * prof.n_equivalent_nuclei * 1.15 + 0.03)
-    freqs = np.linspace(f0 - span, f0 + span, int(points))
-    f, c = simulate_odmr(prof, freqs, b_field_t=b_field, linewidth_mhz=5.0)
+        # Stage 2 — auto-align is host geometry, identical to the sim path.
+        sites = auto_align(prof, grid=grid, temperature_k=temperature_k, rng=rng)
+        aligned = [{"qubit_id": s.qubit_id, "row": s.row, "col": s.col,
+                    "x_um": round(s.x_um, 2), "y_um": round(s.y_um, 2),
+                    "intensity": round(s.intensity, 1)} for s in sites]
+
+        # Stage 3 — real ODMR sweep + fit D (same doublet-midpoint fit as sim).
+        f0 = prof.d_ghz
+        span = max(0.08, abs(prof.hyperfine_coupling) / 1e9 * prof.n_equivalent_nuclei * 1.15 + 0.03)
+        f, c = _real_odmr_sweep(mw, det, f0, span, points, site=0)
+        em.clear_emitters()
+        io_label = "real"
+    else:
+        # Simulator path -------------------------------------------------
+        points = _clamp_points(points)
+        active = {idx for idx in range(grid * grid)}
+        response = make_detector_response(active, profile=profile,
+                                          n_sites=grid * grid, rng=rng).reshape(grid, grid)
+        threshold = DETECT_THRESHOLD
+        n_detected = int(np.count_nonzero(response > threshold))
+
+        sites = auto_align(prof, grid=grid, temperature_k=temperature_k, rng=rng)
+        aligned = [{"qubit_id": s.qubit_id, "row": s.row, "col": s.col,
+                    "x_um": round(s.x_um, 2), "y_um": round(s.y_um, 2),
+                    "intensity": round(s.intensity, 1)} for s in sites]
+
+        f0 = prof.d_ghz
+        span = max(0.08, abs(prof.hyperfine_coupling) / 1e9 * prof.n_equivalent_nuclei * 1.15 + 0.03)
+        freqs = np.linspace(f0 - span, f0 + span, int(points))
+        f, c = simulate_odmr(prof, freqs, b_field_t=b_field, linewidth_mhz=5.0)
+        io_label = "simulated"
+
+    # Shared D / linewidth fit (real codes and sim contrast both have a
+    # minimum at the resonance dip; with a non-zero B field the spectrum
+    # splits into a Zeeman doublet at D +/- gamma*B, so D is the *midpoint* of
+    # the two dips, not the single argmin, which would be offset by gamma*B).
     dip_idx = int(np.argmin(c))
     # find the partner dip on the opposite side of D
     if f[dip_idx] < f0:
@@ -423,6 +505,8 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
              "fit_ok": abs(d_fit - prof.d_ghz) < 0.03},
         ],
         "t1_ms": round(t1 * 1e3, 3), "t2_us": round(t2 * 1e6, 3),
+        "source": "hardware" if hardware else "simulator",
+        "io": io_label,
     }
 
 
@@ -540,7 +624,7 @@ _RTL_DESC = {
     "command_parser.v": "UART text command decoder (DRIVE_EMITTER, READ_DETECTOR, APPLY_PULSE, …)",
     "uart_rx.v": "UART receiver, 115200 baud",
     "uart_tx.v": "UART transmitter, 115200 baud",
-    "spi_master.v": "SPI master — AD7616 9-wire + TLC5947 4-wire",
+    "spi_master.v": "SPI master — ADF4351 3-wire latch (the AD7616 9-wire and TLC5947 4-wire each have their own dedicated shift engines in adc_reader.v / tlc5947_ctrl.v)",
     "adf4351_ctrl.v": "ADF4351 PLL microwave synthesizer controller",
     "emitter_array.v": "64-channel emitter enable register",
     "tlc5947_ctrl.v": "3× TLC5947 12-bit constant-current LED driver controller",
@@ -548,6 +632,10 @@ _RTL_DESC = {
     "qrng_entropy.v": "Hardware RNG — AD7616 LSB noise → von-Neumann extractor → 32-bit words",
 }
 _FPGA_PROTOCOL = [
+    {"cmd": "ID", "args": "—", "reply": "QSSC v1",
+     "desc": "board-present/identity probe — a flashed QSSC board replies "
+             "'QSSC v1'; the host FPGAConnection constructor sends this on "
+             "open to detect a live board (NoFPGADetected otherwise)"},
     {"cmd": "DRIVE_EMITTER", "args": "index duration_ms", "reply": "OK / ERR",
      "desc": "pump one CQD emitter at full grayscale (gs=4095)"},
     {"cmd": "SET_EMITTER", "args": "index level(0..4095)", "reply": "OK / ERR",
@@ -727,9 +815,17 @@ def fpga_qrng(n_bytes: int = 32, common_name: str = "QSSC-hw-qrng",
         raise HTTPException(403, "FPGA QRNG endpoint is localhost-only.")
     n_bytes = max(32, min(int(n_bytes), 256))
     try:
-        reply = _fpga().send_command(f"READ_RNG {n_bytes}")
+        fpga = _fpga()
+        reply = fpga.send_command(f"READ_RNG {n_bytes}")
+    except NoFPGADetected as exc:
+        raise HTTPException(503, f"FPGA QRNG failed: {exc}")
     except Exception as exc:  # pyserial link down, etc.
         raise HTTPException(503, f"FPGA QRNG failed: {exc}")
+    # Truthful source label: "hardware-adc-noise" only when a real board
+    # answered; the in-process SimulatedFPGA draws from NumPy, so label it
+    # "simulated" (it is NOT hardware ADC noise).
+    qrng_source = "hardware-adc-noise" if isinstance(fpga, FPGAConnection) \
+        else "simulated"
     if reply == "ERR":
         raise HTTPException(502, "FPGA QRNG returned ERR")
     parts = reply.split()
@@ -771,7 +867,7 @@ def fpga_qrng(n_bytes: int = 32, common_name: str = "QSSC-hw-qrng",
     except ValueError as exc:
         raise HTTPException(500, str(exc))
     return {
-        "source": "hardware-adc-noise",
+        "source": qrng_source,
         "n_bytes": n_bytes,
         "entropy_hex": entropy.hex(),
         "extraction": stats,
@@ -802,6 +898,49 @@ def fpga_status(request: Request = None):
         except ValueError:
             out[k] = v
     return out
+
+
+@app.get("/api/fpga/probe")
+def fpga_probe(request: Request = None):
+    """Board-present probe: is a real QSSC FPGA answering on QSSC_FPGA_PORT?
+
+    Returns ``{"connected": bool, "port": str|None, "id": str|None,
+    "simulator": bool}``. Used by the frontend's Hardware-real indicator so
+    the user sees a green "FPGA connected — QSSC v1 on /dev/ttyUSB0" or a red
+    "No FPGA detected" before running anything. Localhost-only.
+
+    With no ``QSSC_FPGA_PORT`` set -> ``connected=false, simulator=true`` (the
+    app is in Simulator mode). With a port set, opens (or reuses) the
+    connection and sends ``ID``; a flashed board replies ``QSSC v1``. A stale
+    sim cache left from before the port was set is invalidated so a just-plugged
+    board is detected without an API restart.
+    """
+    if not _is_local(request):
+        raise HTTPException(403, "FPGA probe endpoint is localhost-only.")
+    port = os.getenv("QSSC_FPGA_PORT", "").strip()
+    if not port:
+        return {"connected": False, "port": None, "id": None,
+                "simulator": True}
+    # Invalidate a stale sim cache if a port is now configured (board plugged
+    # after the API started). A real FPGAConnection is then built + ID-probed.
+    global _FPGA
+    if _FPGA is not None and not isinstance(_FPGA, FPGAConnection):
+        _FPGA = None
+    try:
+        f = _fpga()  # FPGAConnection.__init__ runs the ID probe
+    except NoFPGADetected as exc:
+        return {"connected": False, "port": port, "id": None,
+                "simulator": False, "reason": str(exc)}
+    if not isinstance(f, FPGAConnection):  # pragma: no cover - port set but sim
+        return {"connected": False, "port": port, "id": None,
+                "simulator": True}
+    try:
+        reply = f.send_command("ID")
+    except Exception as exc:  # link dropped after open
+        return {"connected": False, "port": port, "id": None,
+                "simulator": False, "reason": f"ID query failed: {exc}"}
+    return {"connected": reply.startswith("QSSC"), "port": port,
+            "id": reply, "simulator": False}
 
 
 # image (per-pixel 8x8 array). These model what the ADF4351 -> J3 -> A1 MW

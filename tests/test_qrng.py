@@ -173,7 +173,11 @@ def test_qrng_endpoint_accepts_rtl_zero_stats_reply(monkeypatch):
         r = c.get("/api/fpga/qrng")
     assert r.status_code == 200
     j = r.json()
-    assert j["source"] == "hardware-adc-noise"
+    # The stub device is not a real FPGAConnection, so the truthful source
+    # label is "simulated" (the label flips to "hardware-adc-noise" only when
+    # a real board answered — see test_hardware_real.test_qrng_source_label_sim
+    # and the FPGAConnection path).
+    assert j["source"] == "simulated"
     assert j["entropy_hex"] == entropy.hex()
     assert j["extraction"] == {"raw_bits": 0, "kept": 256,
                                "extract_rate": 0.0}

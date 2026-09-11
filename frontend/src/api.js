@@ -49,6 +49,7 @@ export const api = {
   deleteScript: (id) => del(`/api/scripts/${id}`),
   // FPGA tab — synthesis metrics + live command protocol (localhost-only)
   fpgaInfo: () => get('/api/fpga/info'),
+  fpgaProbe: () => get('/api/fpga/probe'),
   fpgaCommand: (command) => post('/api/fpga/command', { command }),
   // hardware QRNG — ADC-noise entropy -> Ed25519 keypair + cert (wraps READ_RNG)
   fpgaQrng: (o) => get(`/api/fpga/qrng?${q(o)}`),

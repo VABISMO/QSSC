@@ -76,6 +76,30 @@ _MPS_BASIS = ["u", "u1", "u2", "u3", "cx", "x", "h", "s", "t",
 # Hardware abstractions (real serial + simulator share one interface)
 # ---------------------------------------------------------------------------
 
+class NoFPGADetected(RuntimeError):
+    """Raised when hardware-real mode is requested but no live FPGA answers.
+
+    The board-present test is the ``ID`` firmware verb: a flashed QSSC board
+    replies ``QSSC v1``. An empty/unprogrammed port, a wrong device, or a
+    ``readline`` timeout all surface as this exception so the runner/API can
+    return a clear "no FPGA detected" result instead of silently simulating.
+    """
+
+    def __init__(self, port: str, reason: str = ""):
+        self.port = port
+        self.reason = reason
+        msg = f"no FPGA detected on {port}"
+        if reason:
+            msg += f" — {reason}"
+        super().__init__(msg)
+
+
+# Identity string a flashed QSSC board returns on the ``ID`` verb. The host
+# board-present probe (FPGAConnection.__init__) requires a reply that starts
+# with this token. Implemented in fpga/rtl/command_parser.v (PR2).
+FPGA_ID_TOKEN = "QSSC"
+
+
 class FPGAConnection:
     """Thin wrapper over a pyserial link to the Artix-7 board.
 
@@ -84,8 +108,24 @@ class FPGAConnection:
 
     def __init__(self, port: str = "/dev/ttyUSB0", baudrate: int = 115200):
         import serial  # local import
-        self.ser = serial.Serial(port, baudrate, timeout=5)
+        try:
+            self.ser = serial.Serial(port, baudrate, timeout=5)
+        except Exception as exc:  # port absent / permission denied / busy
+            raise NoFPGADetected(port, f"cannot open serial port: {exc}") from exc
         time.sleep(2)
+        # Board-present handshake: a flashed QSSC board answers ``ID`` with
+        # ``QSSC v1``. An unprogrammed FPGA, a wrong device, or a silent port
+        # must surface as NoFPGADetected here so the caller never mistakes a
+        # dead link for a working board and silently falls back to simulation.
+        try:
+            reply = self.send_command("ID")
+        except Exception as exc:
+            self.ser.close()
+            raise NoFPGADetected(port, f"ID probe failed: {exc}") from exc
+        if not reply.startswith(FPGA_ID_TOKEN):
+            self.ser.close()
+            raise NoFPGADetected(
+                port, f"ID reply {reply!r} did not start with {FPGA_ID_TOKEN!r}")
 
     def send_command(self, command: str) -> str:
         self.ser.write((command + "\n").encode())
@@ -1053,10 +1093,18 @@ class QSSCBackend(BackendV2):
                 if str_idx < len(bitstring) and pq < self._n_qubits:
                     bit = int(bitstring[str_idx] == "1")
                     det = lut.get(pq, pq)
-                    # Arm this channel (SET_EMITTER) and set the spin state to
-                    # the measured bit. All armed channels fire together below.
+                    # Arm this channel (SET_EMITTER). All armed channels fire
+                    # together below. The spin state per site is set two ways:
+                    #  - SimulatedFPGA: poke sim_states so its photocurrent model
+                    #    returns the bright/dark code for the measured bit.
+                    #  - real FPGAConnection: the physical spin state is set by
+                    #    the real microwave pulses (APPLY_PULSE) the circuit
+                    #    drove; the readout here reads real AD7616 codes and
+                    #    QubitReadoutProcessor thresholds them. Do NOT poke a
+                    #    sim_states dict -- a real connection has none.
                     emitter.set_emitter(pq, 4095)
-                    self.hardware.sim_states[pq] = bit
+                    if isinstance(self.hardware, SimulatedFPGA):
+                        self.hardware.sim_states[pq] = bit
                     measured_pqs.append((pq, det))
                     measured_pqset.add(pq)
             # Fire every armed emitter in parallel, then read all 64 detectors

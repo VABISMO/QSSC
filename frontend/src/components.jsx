@@ -625,7 +625,9 @@ export function SignalChart({ data, error }) {
 // ---------------------------------------------------------------------------
 // CalibrationPanel — runs the 3-stage VABISMO-style calibration on demand.
 // ---------------------------------------------------------------------------
-export function CalibrationPanel({ profile, temperature, seed, run, running, result, err }) {
+export function CalibrationPanel({ profile, temperature, seed, run, running, result, err,
+                                   sites, dGhz, sitesLoading, sitesError }) {
+  const [freqOpen, setFreqOpen] = React.useState(false)
   return (
     <div>
       <div className="hint" style={{ marginBottom: 10 }}>
@@ -633,9 +635,15 @@ export function CalibrationPanel({ profile, temperature, seed, run, running, res
         (2) auto-align the qubit grid, (3) sweep the microwave frequency and fit the zero-field
         splitting D + linewidth.
       </div>
-      <button onClick={run} disabled={running} className="ghost" type="button">
-        {running ? <><span className="spinner" /> Calibrating…</> : 'Run calibration'}
-      </button>
+      <div className="row" style={{ gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <button onClick={run} disabled={running} className="ghost" type="button">
+          {running ? <><span className="spinner" /> Calibrating…</> : 'Run calibration'}
+        </button>
+        <button onClick={() => setFreqOpen(true)} className="ghost" type="button"
+                disabled={!sites && !sitesLoading}>
+          Per-pin frequencies
+        </button>
+      </div>
       {err && <div className="error" style={{ marginTop: 10 }}>{err}</div>}
       {result && result.stages && (
         <div style={{ marginTop: 14 }}>
@@ -670,6 +678,29 @@ export function CalibrationPanel({ profile, temperature, seed, run, running, res
           </div>
           <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
             At {result.temperature_k} K → T₁ {result.t1_ms} ms · T₂ {result.t2_us} µs
+            {result.source && <span> · <span className="mono" style={{
+              color: result.source === 'hardware' ? 'var(--ok, #2c8a4a)' : 'var(--brand)' }}>
+              {result.source === 'hardware' ? 'hardware I/O' : 'simulator'}
+            </span></span>}
+          </div>
+        </div>
+      )}
+
+      {/* Per-pin resonance / frequency table, behind a button -> modal so it
+          no longer occupies a big inline row. Each die site has its own
+          transition frequency (D + per-site detuning = addressing map). */}
+      {freqOpen && (
+        <div className="cmd-ref-overlay" onClick={() => setFreqOpen(false)} role="dialog" aria-modal="true" aria-label="Per-pin resonance frequencies">
+          <div className="cmd-ref-modal" onClick={e => e.stopPropagation()}>
+            <button type="button" className="cmd-ref-close" onClick={() => setFreqOpen(false)} aria-label="Close per-pin frequencies">✕</button>
+            <h2><span className="dot" />Per-pin resonance frequencies</h2>
+            <div className="hint">Each pin / qubit resonates at D={dGhz ? dGhz.toFixed(3) : '…'} GHz ± its per-site detuning. A narrow MW pulse at f<sub>i</sub> addresses only qubit i — this table is the resonance map.</div>
+            <QubitFrequencyTable
+              sites={sites}
+              dGhz={dGhz}
+              loading={sitesLoading}
+              error={sitesError}
+            />
           </div>
         </div>
       )}

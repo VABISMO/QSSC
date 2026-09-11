@@ -9,6 +9,7 @@ fallback) **and** from an RQ worker process (asynchronous path).
 from __future__ import annotations
 
 import math
+import os
 import time
 from fractions import Fraction
 from math import gcd
@@ -16,7 +17,8 @@ from math import gcd
 import numpy as np
 
 from qssc import (
-    auto_align, QSSCBackend, SimulatedFPGA,
+    auto_align, QSSCBackend, SimulatedFPGA, FPGAConnection,
+    make_connection, NoFPGADetected,
     create_period_finding_circuit, create_shor_circuit, create_qft_nos_circuit,
     create_math_circuit, grover_search, postprocess_period,
     postprocess_period_swapless, select_coprime, is_prime, perfect_power,
@@ -29,18 +31,56 @@ from qssc.qkd import simulate_bb84
 
 
 def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
-             grid: int = 8) -> QSSCBackend:
+             hardware: bool = False, grid: int = 8) -> QSSCBackend:
     sites = auto_align(profile=profile, grid=grid, temperature_k=temperature_k,
                        rng=np.random.default_rng(seed))
-    # Attach a SimulatedFPGA so the on-chip readout path fires per run -- the
-    # CQD emitter + graphene detector + lock-in model produces a displayed
-    # bitstring, per-site read states and a photocurrent mean that the
-    # frontend's Execution component physics card reflects the circuit that
-    # actually ran (not a fixed snapshot).
-    fpga = SimulatedFPGA(profile=profile, temperature_k=temperature_k, seed=seed)
+    fpga = _make_fpga(profile, temperature_k, seed, hardware)
     return QSSCBackend(profile=profile, sites=sites, seed=seed,
                        temperature_k=temperature_k, noise_mode=noise_mode,
                        hardware=fpga)
+
+
+def _make_fpga(profile: str, temperature_k: float, seed, hardware: bool):
+    """Return the FPGA connection for this run.
+
+    ``hardware=False`` (the Simulator mode) -> :class:`SimulatedFPGA` (today's
+    Aer + on-chip readout model). ``hardware=True`` (the Hardware real mode)
+    -> a real :class:`FPGAConnection` opened on ``QSSC_FPGA_PORT``; its
+    constructor runs the ``ID`` board-present probe and raises
+    :class:`NoFPGADetected` if no flashed board answers, so the API surfaces a
+    clear "no FPGA detected" result instead of silently simulating.
+    """
+    if not hardware:
+        # Attach a SimulatedFPGA so the on-chip readout path fires per run --
+        # the CQD emitter + graphene detector + lock-in model produces a
+        # displayed bitstring, per-site read states and a photocurrent mean
+        # that the frontend's Execution component physics card reflects the
+        # circuit that actually ran (not a fixed snapshot).
+        return SimulatedFPGA(profile=profile, temperature_k=temperature_k,
+                             seed=seed)
+    port = os.getenv("QSSC_FPGA_PORT", "").strip()
+    if not port:
+        raise NoFPGADetected(
+            "", "QSSC_FPGA_PORT is not set — connect the board and set "
+                "QSSC_FPGA_PORT (e.g. /dev/ttyUSB0), or switch to Simulator.")
+    # Real board: FPGAConnection.__init__ opens the port AND probes ``ID``.
+    # NoFPGADetected propagates up to the API, which returns the
+    # no-fpga-detected body for the frontend banner.
+    return make_connection(port=port, profile=profile,
+                           temperature_k=temperature_k, seed=seed)
+
+
+def _source_label(fpga) -> str:
+    """'hardware' for a real FPGAConnection, 'simulator' otherwise."""
+    return "hardware" if isinstance(fpga, FPGAConnection) else "simulator"
+
+
+def _no_fpga_result(exc: NoFPGADetected) -> dict:
+    """Structured result body for the frontend's 'no FPGA detected' banner."""
+    return {"error": "no-fpga-detected",
+            "message": ("No FPGA detected — connect the board and set "
+                        "QSSC_FPGA_PORT (e.g. /dev/ttyUSB0), or switch to "
+                        "Simulator. (" + str(exc) + ")")}
 
 
 def _circuit_meta(qc) -> dict:
@@ -55,11 +95,17 @@ def run_circuit(req: dict) -> dict:
     seed = int(req.get("seed", 42))
     shots = int(req.get("shots", 2048))
     noise_mode = req.get("noise_mode", "real")
+    hardware = bool(req.get("hardware", False))
     algo = str(req.get("algorithm", "shor")).lower()
-    b = _backend(profile, temperature_k, seed, noise_mode)
+    try:
+        b = _backend(profile, temperature_k, seed, noise_mode, hardware=hardware)
+    except NoFPGADetected as exc:
+        return _no_fpga_result(exc)
+    src = _source_label(b.hardware)
     result = {"algorithm": algo, "profile": profile,
               "temperature_k": temperature_k, "shots": shots,
-              "noise_mode": noise_mode}
+              "noise_mode": noise_mode,
+              "source": src, "io": "real" if src == "hardware" else "simulated"}
     t0 = time.perf_counter()
     res = None
 
@@ -359,8 +405,13 @@ def run_circuit(req: dict) -> dict:
         # tests. The backend is rebuilt with the entropy seed so the
         # simulated readout noise contributes to the randomness too.
         qrng_seed = seed if "seed" in req else None
-        if qrng_seed != seed:
-            b = _backend(profile, temperature_k, qrng_seed, noise_mode)
+        # Rebuild only for the simulator path (re-seed its readout noise). On
+        # the real-hardware path the readout is live ADC noise (no seed) and
+        # re-opening the serial port would collide with the already-open
+        # connection, so reuse the existing backend.
+        if qrng_seed != seed and not hardware:
+            b = _backend(profile, temperature_k, qrng_seed, noise_mode,
+                         hardware=hardware)
         res = b.run(qc, shots=raw_shots).result()
         counts = res.get_counts()
         # expand the measured outcomes into a flat list and shuffle so that
@@ -550,18 +601,25 @@ def run_custom(req: dict) -> dict:
     except UserCircuitError as exc:
         return {"error": str(exc)}
     profile = req.get("profile", "NV")
-    b = _backend(profile, float(req.get("temperature_k", 300.0)),
-                 int(req.get("seed", 42)), req.get("noise_mode", "real"))
+    hardware = bool(req.get("hardware", False))
+    try:
+        b = _backend(profile, float(req.get("temperature_k", 300.0)),
+                     int(req.get("seed", 42)), req.get("noise_mode", "real"),
+                     hardware=hardware)
+    except NoFPGADetected as exc:
+        return _no_fpga_result(exc)
     try:
         res = b.run(qc, shots=int(req.get("shots", 2048))).result()
         counts = res.get_counts()
     except Exception as exc:  # noqa: BLE001 - surface runtime errors to the user
         return {"error": f"run failed: {exc}"}
+    src = _source_label(b.hardware)
     return {
         "algorithm": "custom", "profile": profile,
         "temperature_k": float(req.get("temperature_k", 300.0)),
         "shots": int(req.get("shots", 2048)),
         "noise_mode": req.get("noise_mode", "real"),
+        "source": src, "io": "real" if src == "hardware" else "simulated",
         "counts": counts,
         "num_qubits": qc.num_qubits, "num_clbits": qc.num_clbits,
         "depth": qc.depth(), "ops": qc.count_ops(),
