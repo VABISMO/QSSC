@@ -108,12 +108,34 @@ module adc_reader #(
     reg [7:0]  wait_cnt;        // generic cycle counter (CONVST width, CS gap)
     reg        busy_seen;       // saw BUSY high during SM_WAIT_BUSY
 
-    // ---- host read FSM (same shape as photon_counter_array) ---------------
-    localparam [1:0] S_IDLE     = 2'd0;
-    localparam [1:0] S_CAPTURE  = 2'd1;
-    localparam [1:0] S_WAIT_ACK = 2'd2;
-    localparam [1:0] S_NEXT     = 2'd3;
-    reg [1:0]  rstate;
+    // write-event pulse: strobed in SM_STORE so the host read FSM can wait for
+    // a FRESH sample of the requested channel rather than snapshotting stale
+    // free-running RAM (the old behavior returned a sample up to a full scan
+    // old, taken during an arbitrary emitter/MW state -- not synchronized to
+    // the optical readout window the host just drove).
+    reg        write_event;     // 1-cycle pulse: sample_ram was just refreshed
+    reg [5:0]  write_ch_va;     // bank-A index written this store (16*chip+pair)
+    reg [5:0]  write_ch_vb;     // bank-B index written this store (16*chip+8+pair)
+
+    // adc_busy comes from an external ADC clocked by adc_sclk -- pass it through
+    // a 2-FF synchronizer before sampling it in the scan FSM (metastability
+    // guard; the BUSY timeout below stays as the hard fallback).
+    reg        adc_busy_s1, adc_busy_s2;
+
+    // ---- host read FSM -----------------------------------------------------
+    // read_one  -> S_WAIT_FRESH: wait for the NEXT background write to the
+    //             requested channel, then return that fresh sample (<= one
+    //             scan, ~86 us). Used by RUN_SEQUENCE / READ_LOCKIN / ODMR_SWEEP
+    //             so each readout reflects the pulse/optical window just driven.
+    // read_all  -> S_CAPTURE -> S_NEXT: snapshot all 64 latest samples (bulk
+    //             circuit readout measures steady-state fluorescence; the
+    //             background scan refreshes every channel each ~86 us).
+    localparam [2:0] S_IDLE       = 3'd0;
+    localparam [2:0] S_WAIT_FRESH = 3'd1;
+    localparam [2:0] S_CAPTURE    = 3'd2;
+    localparam [2:0] S_WAIT_ACK   = 3'd3;
+    localparam [2:0] S_NEXT       = 3'd4;
+    reg [2:0]  rstate;
     reg [5:0]  idx;
     reg        sweep;
 
@@ -138,6 +160,11 @@ module adc_reader #(
         reset_cnt  <= 8'd0;
         wait_cnt   <= 8'd0;
         busy_seen  <= 1'b0;
+        write_event <= 1'b0;
+        write_ch_va <= 6'd0;
+        write_ch_vb <= 6'd0;
+        adc_busy_s1 <= 1'b0;
+        adc_busy_s2 <= 1'b0;
         // read FSM
         rstate     <= S_IDLE;
         idx        <= 6'd0;
@@ -165,6 +192,12 @@ module adc_reader #(
         end
     end
 
+    // ---- adc_busy CDC synchronizer (external ADC -> 100 MHz clk domain) ----
+    always @(posedge clk) begin
+        adc_busy_s1 <= adc_busy;
+        adc_busy_s2 <= adc_busy_s1;
+    end
+
     // ---- background ADC scan FSM -------------------------------------------
     // Continuously refreshes sample_ram: 8 CONVST pairs x 4 chips x 32 bits.
     // Channel mapping (matches gen_qssc_kicad.py wiring):
@@ -186,8 +219,10 @@ module adc_reader #(
             pair       <= 3'd0;
             chip       <= 2'd0;
             entropy_valid <= 1'b0;
+            write_event   <= 1'b0;
         end else begin
             entropy_valid <= 1'b0;      // default: no fresh entropy this cycle
+            write_event   <= 1'b0;      // default: 1-cycle pulse, set in SM_STORE
             case (sm_state)
                 // hold adc_resetn low for ~256 cycles at boot, then release
                 SM_RESET: begin
@@ -215,10 +250,12 @@ module adc_reader #(
                     end
                 end
 
-                // wait for BUSY high (conversion started) then low (done)
+                // wait for BUSY high (conversion started) then low (done).
+                // adc_busy is async (external ADC) -> use the 2-FF synchronized
+                // copy; the timeout guard below is the hard fallback.
                 SM_WAIT_BUSY: begin
-                    if (adc_busy) busy_seen <= 1'b1;
-                    if (busy_seen && !adc_busy) begin
+                    if (adc_busy_s2) busy_seen <= 1'b1;
+                    if (busy_seen && !adc_busy_s2) begin
                         sm_state <= SM_CS_LOW;
                         chip     <= 2'd0;
                         wait_cnt <= 8'd0;
@@ -270,11 +307,16 @@ module adc_reader #(
                     end
                 end
 
-                // store VA[31:16] and VB[15:0] for this chip+pair, deselect CS
+                // store VA[31:16] and VB[15:0] for this chip+pair, deselect CS.
+                // Strobe write_event so the host read FSM can wait for a FRESH
+                // sample of the channel it asked for (read_one -> S_WAIT_FRESH).
                 SM_STORE: begin
                     adc_cs <= 4'b1111;
                     sample_ram[16*chip + pair]     <= shift[31:16];  // VA (bank A)
                     sample_ram[16*chip + 8 + pair] <= shift[15:0];   // VB (bank B)
+                    write_event <= 1'b1;
+                    write_ch_va <= 16*chip + pair;
+                    write_ch_vb <= 16*chip + 8 + pair;
                     // QRNG entropy tap: pulse + emit the fresh sample when the
                     // dark channel (ENTROPY_CH) is the one just refreshed.
                     if ((16*chip + pair) == ENTROPY_CH) begin
@@ -331,15 +373,35 @@ module adc_reader #(
             case (rstate)
                 S_IDLE: begin
                     if (read_one) begin
+                        // Fresh read: wait for the NEXT background-scan write to
+                        // the requested channel, so the returned sample was
+                        // taken AFTER this request (during the optical window
+                        // the host just drove), not a stale free-running value.
                         sweep <= 1'b0;
                         idx   <= site;
                         busy  <= 1'b1;
-                        rstate <= S_CAPTURE;
+                        rstate <= S_WAIT_FRESH;
                     end else if (read_all) begin
+                        // Bulk read: snapshot all 64 latest samples (steady-state
+                        // circuit readout; no pump sync needed).
                         sweep <= 1'b1;
                         idx   <= 6'd0;
                         busy  <= 1'b1;
                         rstate <= S_CAPTURE;
+                    end
+                end
+
+                // Wait until the background scan refreshes sample_ram[idx], then
+                // return that fresh sample. write_event / write_ch_* / sample_ram
+                // are set in the scan FSM (non-blocking); this block samples them
+                // one cycle later, so the snapshot reads the freshly-written RAM.
+                // Latency is bounded by one full scan (~86 us).
+                S_WAIT_FRESH: begin
+                    if (write_event && (write_ch_va == idx || write_ch_vb == idx)) begin
+                        code       <= sample_ram[idx];
+                        code_idx   <= idx;
+                        code_valid <= 1'b1;
+                        rstate     <= S_WAIT_ACK;
                     end
                 end
 
