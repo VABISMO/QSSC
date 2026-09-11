@@ -1564,10 +1564,6 @@ export default function App() {
               <CalibrationPanel
                 profile={profile} temperature={temperature} seed={seed}
                 run={runCalibration} running={calRunning} result={calRun} err={calErr}
-                sites={info.data && info.data.sites}
-                dGhz={info.data && info.data.d_ghz}
-                sitesLoading={info.loading}
-                sitesError={info.error}
               />
             </div>
           </div>

@@ -172,7 +172,7 @@ def test_calibration_no_fpga_detected_body(monkeypatch):
 
 
 def test_calibration_simulator_path_unchanged(monkeypatch):
-    """Simulator calibration still returns the 3-stage result shape."""
+    """Simulator calibration still returns the 4-stage result shape."""
     monkeypatch.delenv("QSSC_FPGA_PORT", raising=False)
     import api.main as main
     from fastapi.testclient import TestClient
@@ -183,7 +183,10 @@ def test_calibration_simulator_path_unchanged(monkeypatch):
     assert "error" not in body
     assert body.get("source") == "simulator"
     assert body.get("io") == "simulated"
-    assert len(body["stages"]) == 3
+    # 4 stages: detector scan, grid align, D+linewidth fit, per-pin resonance+T2
+    assert len(body["stages"]) == 4
+    assert body["stages"][3]["pins_measured"] >= 1
+    assert len(body.get("per_pin", [])) >= 1
 
 
 def test_real_odmr_sweep_helper(monkeypatch):
