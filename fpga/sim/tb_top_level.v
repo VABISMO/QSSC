@@ -107,6 +107,19 @@ module tb_top_level;
         end
     end
 
+    // PLL SPI write counter: counts falling edges of LE (spi_pins[0]). Each
+    // ADF4351 transaction (full R5->R0 program OR an R1-only phase step) is one
+    // LE low->high pulse, so a falling edge marks one register-write burst. Used
+    // to verify the Ramsey R1-only phase write fires mid-sequence (and that
+    // Hahn/CPMG do NOT write the PLL during RUN_SEQUENCE).
+    integer pll_wr_count = 0;
+    integer pll_le_last  = 1;     // LE idles high
+    always @(posedge clk_100mhz) begin
+        if (spi_pins[0] === 1'b0 && pll_le_last === 1)
+            pll_wr_count <= pll_wr_count + 1;
+        pll_le_last <= spi_pins[0];
+    end
+
     // ---- DUT ---------------------------------------------------------------
     top_level dut (
         .clk_100mhz (clk_100mhz),
@@ -252,6 +265,7 @@ module tb_top_level;
     integer c;
     integer k16, ok16;       // RUN_SEQUENCE verify loop
     integer li_k, li_ok;     // READ_LOCKIN verify loop
+    integer k18, ok18;       // Ramsey RUN_SEQUENCE verify loop
     reg [7:0] cmd_bytes [0:39];
     initial begin
         // Reset
@@ -817,6 +831,7 @@ module tb_top_level;
         // pi/2 + pi + pi/2(readout) = 3 mw_gate pulses, so 4 windows => >= 4.
         entropy_mode = 1'b0;
         mw_gate_pulses = 0;
+        pll_wr_count  = 0;
         rx_log_cnt = 0;
         cmd_bytes[0]="R";  cmd_bytes[1]="U";  cmd_bytes[2]="N";  cmd_bytes[3]="_";
         cmd_bytes[4]="S";  cmd_bytes[5]="E";  cmd_bytes[6]="Q";  cmd_bytes[7]="U";
@@ -828,7 +843,8 @@ module tb_top_level;
         for (c=0;c<23;c=c+1) uart_send_byte(cmd_bytes[c]);
         wait_for_bytes(30, W_SAFE);
         // Verify: "00004 " + 4x("01234" + sep) where sep=' ' for the first 3,
-        // '\n' for the last.
+        // '\n' for the last. Hahn (kind=1) must NOT write the PLL mid-sequence
+        // (no R1-only phase step), so pll_wr_count stays 0.
         ok16 = 1;
         if (rx_log_cnt != 30) ok16 = 0;
         if (!(rx_log[0]==="0" && rx_log[1]==="0" && rx_log[2]==="0" &&
@@ -840,14 +856,14 @@ module tb_top_level;
             if (k16<3 && rx_log[11+k16*6] !== " ") ok16 = 0;
             if (k16==3 && rx_log[11+k16*6] !== 8'h0A) ok16 = 0;
         end
-        if (ok16 && mw_gate_pulses >= 4) begin
+        if (ok16 && mw_gate_pulses >= 4 && pll_wr_count == 0) begin
             ok_count = ok_count + 1;
             $display("TB: RUN_SEQUENCE = 00004 + 4x01234 + LF, %0d mw_gate pulses  (PASS)",
                      mw_gate_pulses);
         end else begin
             err_count = err_count + 1;
-            $display("TB: FAIL RUN_SEQUENCE (got %0d bytes, ok=%0d, pulses=%0d)",
-                     rx_log_cnt, ok16, mw_gate_pulses);
+            $display("TB: FAIL RUN_SEQUENCE (got %0d bytes, ok=%0d, pulses=%0d, pll_wr=%0d)",
+                     rx_log_cnt, ok16, mw_gate_pulses, pll_wr_count);
         end
 
         // ---- 17) READ_LOCKIN 0 4 -> "0000004936 0000004936 0000000004 0000000004\n"
@@ -892,6 +908,47 @@ module tb_top_level;
         end else begin
             err_count = err_count + 1;
             $display("TB: FAIL READ_LOCKIN (got %0d bytes)", rx_log_cnt);
+        end
+
+        // ---- 18) RUN_SEQUENCE 0 0 4 500 -> "00004 01234 01234 01234 01234\n"
+        // Ramsey (kind=0), 4 windows, t_step=500 ns. Same reply shape as Hahn
+        // (constant ADC -> 01234 every window), but the readout pi/2 of each
+        // Ramsey window first applies a 90-deg R1-only PLL phase write (no
+        // re-lock) before gating+reading. So pll_wr_count must be >= 4 (one
+        // R1-only write per window) and mw_gate_pulses >= 4 (pi/2 + readout
+        // pi/2 per window). This is the PR4b Ramsey phase-applied check.
+        entropy_mode = 1'b0;
+        mw_gate_pulses = 0;
+        pll_wr_count  = 0;
+        rx_log_cnt = 0;
+        cmd_bytes[0]="R";  cmd_bytes[1]="U";  cmd_bytes[2]="N";  cmd_bytes[3]="_";
+        cmd_bytes[4]="S";  cmd_bytes[5]="E";  cmd_bytes[6]="Q";  cmd_bytes[7]="U";
+        cmd_bytes[8]="E";  cmd_bytes[9]="N";  cmd_bytes[10]="C"; cmd_bytes[11]="E";
+        cmd_bytes[12]=" "; cmd_bytes[13]="0"; cmd_bytes[14]=" "; cmd_bytes[15]="0";
+        cmd_bytes[16]=" "; cmd_bytes[17]="4"; cmd_bytes[18]=" "; cmd_bytes[19]="5";
+        cmd_bytes[20]="0"; cmd_bytes[21]="0"; cmd_bytes[22]=8'h0A;
+        $display("TB: sending RUN_SEQUENCE 0 0 4 500 (Ramsey: expect 00004 + 4x 01234 + >=4 PLL writes)");
+        for (c=0;c<23;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(30, W_SAFE);
+        ok18 = 1;
+        if (rx_log_cnt != 30) ok18 = 0;
+        if (!(rx_log[0]==="0" && rx_log[1]==="0" && rx_log[2]==="0" &&
+              rx_log[3]==="0" && rx_log[4]==="4" && rx_log[5]===" ")) ok18 = 0;
+        for (k18=0;k18<4;k18=k18+1) begin
+            if (!(rx_log[6+k18*6]==="0" && rx_log[7+k18*6]==="1" &&
+                  rx_log[8+k18*6]==="2" && rx_log[9+k18*6]==="3" &&
+                  rx_log[10+k18*6]==="4")) ok18 = 0;
+            if (k18<3 && rx_log[11+k18*6] !== " ") ok18 = 0;
+            if (k18==3 && rx_log[11+k18*6] !== 8'h0A) ok18 = 0;
+        end
+        if (ok18 && mw_gate_pulses >= 4 && pll_wr_count >= 4) begin
+            ok_count = ok_count + 1;
+            $display("TB: Ramsey RUN_SEQUENCE = 00004 + 4x01234, %0d gates, %0d PLL writes  (PASS)",
+                     mw_gate_pulses, pll_wr_count);
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL Ramsey RUN_SEQUENCE (got %0d bytes, ok=%0d, pulses=%0d, pll_wr=%0d)",
+                     rx_log_cnt, ok18, mw_gate_pulses, pll_wr_count);
         end
 
         if (err_count == 0)

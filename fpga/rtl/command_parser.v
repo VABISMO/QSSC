@@ -90,6 +90,7 @@ module command_parser #(
     // ADF4351 PLL
     output reg        pll_start,
     output reg [31:0] pll_freq_khz,
+    output reg        pll_phase_only,   // 1 = R1-only phase step (no re-lock)
     input             pll_busy,
     // ADC reader (64-ch parallel readout via 4x AD7616; same handshake the
     // photon_counter_array used, but `det_code` is a 16-bit intensity sample)
@@ -232,6 +233,10 @@ module command_parser #(
     localparam [6:0] S_LI_NEXT       = 7'd49;  // i++; loop or encode
     localparam [6:0] S_LI_ENC        = 7'd50;  // build the 44-byte accumulators line
     localparam [6:0] S_LI_SEND       = 7'd51;  // stream the accumulators line
+    // PR4b: gate-rise-synchronized read + Ramsey R1-only phase write states.
+    localparam [6:0] S_SEQ_PI2B_PLL  = 7'd52;  // Ramsey: wait R1-only PLL write, then gate+read
+    localparam [6:0] S_SWEEP_GATE_WAIT=7'd53;  // ODMR: wait gate rise, then read
+    localparam [6:0] S_SWEEP_GATE_FALL=7'd54;  // ODMR: wait gate fall, then encode
 
     // ---- Line buffer ------------------------------------------------------
     reg [7:0] cmd_buffer [0:63];
@@ -334,11 +339,22 @@ module command_parser #(
     // RF_PWR), so pi/2 vs pi is a duration ratio, set here.
     localparam [31:0] PI2_NS      = 32'd25;
     localparam [31:0] PI_NS       = 32'd50;
-    // READ_LOCKIN self-timed on/off half-period (ns). Independent of the 1 kHz
-    // mod_sync period so the accumulator is sim-friendly; mod_sync stays the
-    // external lock-in reference for other uses.
-    localparam [31:0] LI_HALF_NS  = 32'd1000;
+    // READ_LOCKIN self-timed on/off half-period (ns). 200 us >= the ~86 us
+    // background scan, so the wait-for-fresh read_one sample lands within the
+    // half that was just started. Independent of the 1 kHz mod_sync period so
+    // the accumulator is sim-friendly; mod_sync stays the external lock-in
+    // reference for other uses.
+    localparam [31:0] LI_HALF_NS  = 32'd200_000;
     localparam [31:0] LI_HALF_CYC = LI_HALF_NS / 32'd10;   // 100 MHz clk cycles
+    // ODMR_SWEEP RF gate per point (ns). 200 us >= the ~86 us scan so the
+    // fresh sample is taken DURING the RF pulse, not outside it.
+    localparam [31:0] ODMR_GATE_NS = 32'd200_000;
+    // FSM watchdogs: if a gate-rise/fall or a det_code_valid does not arrive
+    // within this many clk cycles, proceed with a sentinel so the FSM can never
+    // hang on a stuck mw_gate or dead ADC (only reset otherwise escapes). 2 ms
+    // covers the 200 us max gate + read latency with margin.
+    localparam [31:0] GATE_WDOG_CYC = 32'd200_000;
+    localparam [31:0] READ_WDOG_CYC = 32'd200_000;
 
     // RUN_SEQUENCE loop state. kind: 0=Ramsey, 1=Hahn, 2=CPMG. Per window i the
     // free-evolution time T = i*t_step_ns; seq_delay holds T in clk cycles and
@@ -355,11 +371,12 @@ module command_parser #(
     reg [7:0]  seq_line [0:7];  // 6-byte stream buffer: 5-digit dec + sep
     reg        seq_is_last;     // this code is the final window -> '\n' not ' '
     reg        gate_seen;       // mw_gate rose this pulse (high->low = done)
+    reg [31:0] seq_wdog;        // FSM watchdog for gate/read waits (no-hang)
 
     // READ_LOCKIN accumulator state. Raw on/off sums + counts; the host derives
     // diff/sigma/SNR (no RTL divide/sqrt). li_dcnt is the on/off half countdown.
     reg [5:0]  li_site;
-    reg [31:0] li_n;            // n_cycles 1..100000
+    reg [31:0] li_n;            // n_cycles 1..10000
     reg [31:0] li_i;
     reg [31:0] li_sum_on;
     reg [31:0] li_sum_off;
@@ -566,6 +583,7 @@ module command_parser #(
         tx_start       = 1'b0;
         pll_phase      = 12'd0;
         pll_rf_pwr     = 2'd0;
+        pll_phase_only = 1'b0;
         mw_gate_ns     = 32'd0;
         mw_gate_load   = 1'b0;
         pll_busy_seen  = 1'b0;
@@ -604,6 +622,7 @@ module command_parser #(
         seq_dcnt      = 32'd0;
         seq_is_last   = 1'b0;
         gate_seen     = 1'b0;
+        seq_wdog      = 32'd0;
         li_site       = 6'd0;
         li_n          = 32'd0;
         li_i          = 32'd0;
@@ -711,6 +730,7 @@ module command_parser #(
             code_latch     <= 16'd0;
             pll_phase      <= 12'd0;
             pll_rf_pwr     <= 2'd0;
+            pll_phase_only <= 1'b0;
             mw_gate_ns     <= 32'd0;
             mw_gate_load   <= 1'b0;
             pll_busy_seen  <= 1'b0;
@@ -748,6 +768,7 @@ module command_parser #(
             seq_dcnt       <= 32'd0;
             seq_is_last    <= 1'b0;
             gate_seen      <= 1'b0;
+            seq_wdog       <= 32'd0;
             li_site        <= 6'd0;
             li_n           <= 32'd0;
             li_i           <= 32'd0;
@@ -764,6 +785,7 @@ module command_parser #(
             em_cmd_pattern <= 1'b0;
             em_cmd_clear   <= 1'b0;
             pll_start      <= 1'b0;
+            pll_phase_only <= 1'b0;
             det_read_one   <= 1'b0;
             det_read_all   <= 1'b0;
             det_clear      <= 1'b0;
@@ -1142,6 +1164,7 @@ module command_parser #(
                                 det_site      <= arg_vals[0][5:0];
                                 det_read_one  <= 1'b1;
                                 read_all_mode <= 1'b0;
+                                seq_wdog      <= 32'd0;
                                 fsm           <= S_RONE_WAIT;
                             end
                         end
@@ -1149,6 +1172,7 @@ module command_parser #(
                             det_read_all  <= 1'b1;
                             read_all_mode <= 1'b1;
                             rall_loop     <= 1'b0;
+                            seq_wdog      <= 32'd0;
                             fsm           <= S_RALL_WAIT;
                         end
                         CMD_CLEAR : begin
@@ -1243,7 +1267,7 @@ module command_parser #(
                                                   ? 32'd0
                                                   : ($signed(arg_vals[2]) - $signed(arg_vals[1])) /
                                                     $signed(arg_vals[3] - 32'd1);
-                                mw_gate_ns     <= 32'd1000;   // 1 us ODMR gate per point
+                                mw_gate_ns     <= ODMR_GATE_NS; // 200 us ODMR gate per point
                                 sweep_pll_seen <= 1'b0;
                                 read_all_mode  <= 1'b0;
                                 fsm            <= S_SWEEP_PROG;
@@ -1282,10 +1306,10 @@ module command_parser #(
                             // READ_LOCKIN <site> <n_cycles>: self-timed on/off
                             // lock-in accumulation. Returns four raw ints
                             // (sum_on sum_off n_on n_off); the host computes
-                            // diff/sigma/SNR. Bounds: site 0..63, n 1..100000.
+                            // diff/sigma/SNR. Bounds: site 0..63, n 1..10000.
                             if ($signed(arg_vals[0]) < 0 || $signed(arg_vals[0]) >= N_DET ||
                                 $signed(arg_vals[1]) < 32'd1 ||
-                                $signed(arg_vals[1]) > 32'd100000) begin
+                                $signed(arg_vals[1]) > 32'd10000) begin
                                 reply_ok <= 1'b0;            // ERR
                                 fsm      <= S_REPLY_LOAD;
                             end else begin
@@ -1316,6 +1340,12 @@ module command_parser #(
                         code_latch   <= det_code;  // snapshot before ack
                         det_code_ack <= 1'b1;     // release the counter array
                         fsm          <= S_ENC;
+                    end else if (seq_wdog >= READ_WDOG_CYC) begin
+                        code_latch   <= 16'd0;    // dead-ADC sentinel
+                        det_code_ack <= 1'b1;
+                        fsm          <= S_ENC;
+                    end else begin
+                        seq_wdog <= seq_wdog + 32'd1;
                     end
                 end
 
@@ -1340,6 +1370,13 @@ module command_parser #(
                         code_is_last <= (det_code_idx == (N_DET - 1));
                         det_code_ack <= 1'b1;     // release the sweep for the next
                         fsm          <= S_ENC;
+                    end else if (seq_wdog >= READ_WDOG_CYC) begin
+                        code_latch   <= 16'd0;    // dead-ADC sentinel
+                        code_is_last <= 1'b1;     // stop the read_all loop
+                        det_code_ack <= 1'b1;
+                        fsm          <= S_ENC;
+                    end else begin
+                        seq_wdog <= seq_wdog + 32'd1;
                     end
                 end
 
@@ -1365,6 +1402,7 @@ module command_parser #(
                             // finished this chunk
                             if (rall_loop) begin
                                 rall_loop <= 1'b0;
+                                seq_wdog  <= 32'd0;
                                 fsm       <= S_RALL_WAIT;
                             end else begin
                                 fsm <= S_IDLE;
@@ -1583,16 +1621,35 @@ module command_parser #(
                     fsm            <= S_SWEEP_PLL;
                 end
 
-                // Wait for PLL busy to assert then deassert (rising then done).
+                // Wait for PLL busy to assert then deassert (rising then done),
+                // then arm the RF gate ONLY (the read fires on the gate rise so
+                // the fresh sample is taken DURING the 200 us RF pulse).
                 S_SWEEP_PLL : begin
                     if (pll_busy)
                         sweep_pll_seen <= 1'b1;
                     if (sweep_pll_seen && !pll_busy) begin
-                        mw_gate_load  <= 1'b1;        // 1 us ODMR gate (mw_gate_ns set at dispatch)
-                        det_site      <= sweep_q;
-                        det_read_one  <= 1'b1;
+                        mw_gate_load  <= 1'b1;        // arm the ODMR gate (mw_gate_ns set at dispatch)
+                        gate_seen     <= 1'b0;
+                        seq_wdog      <= 32'd0;
                         read_all_mode <= 1'b0;
-                        fsm           <= S_SWEEP_READ;
+                        fsm           <= S_SWEEP_GATE_WAIT;
+                    end
+                end
+
+                // Wait for the RF gate to rise, then trigger the fresh read.
+                S_SWEEP_GATE_WAIT : begin
+                    if (seq_wdog >= GATE_WDOG_CYC) begin
+                        det_site     <= sweep_q;
+                        det_read_one <= 1'b1;
+                        fsm          <= S_SWEEP_READ;
+                    end else if (mw_gate) begin
+                        gate_seen    <= 1'b1;
+                        det_site     <= sweep_q;
+                        det_read_one <= 1'b1;
+                        seq_wdog     <= 32'd0;
+                        fsm          <= S_SWEEP_READ;
+                    end else begin
+                        seq_wdog <= seq_wdog + 32'd1;
                     end
                 end
 
@@ -1601,7 +1658,26 @@ module command_parser #(
                     if (det_code_valid) begin
                         code_latch   <= det_code;
                         det_code_ack <= 1'b1;
-                        fsm          <= S_SWEEP_ENC;
+                        seq_wdog     <= 32'd0;
+                        fsm          <= S_SWEEP_GATE_FALL;
+                    end else if (seq_wdog >= READ_WDOG_CYC) begin
+                        code_latch   <= 16'd0;        // dead-ADC sentinel
+                        det_code_ack <= 1'b1;
+                        seq_wdog     <= 32'd0;
+                        fsm          <= S_SWEEP_GATE_FALL;
+                    end else begin
+                        seq_wdog <= seq_wdog + 32'd1;
+                    end
+                end
+
+                // Wait for the RF gate to fall before encoding the next point
+                // (no gate overlap onto the next frequency).
+                S_SWEEP_GATE_FALL : begin
+                    if (seq_wdog >= GATE_WDOG_CYC || (gate_seen && !mw_gate)) begin
+                        fsm <= S_SWEEP_ENC;
+                    end else begin
+                        if (mw_gate) gate_seen <= 1'b1;
+                        seq_wdog <= seq_wdog + 32'd1;
                     end
                 end
 
@@ -1657,12 +1733,11 @@ module command_parser #(
                 // only gates the RF switch for each MW pulse and snapshots one
                 // ADC code per window. mw_gate is watched rise->fall so a pulse
                 // is complete before the free-evolution delay / next pulse
-                // starts (no overlap at T=0). NOTE: the ADF4351 R1 PHASE is
-                // latched only on pll_start, so the Ramsey 90-deg readout phase
-                // (set in S_SEQ_PI2B) takes effect on the next APPLY_PULSE, not
-                // mid-sequence -- a real-hardware refinement; in sim the ADC
-                // code is constant so it is invisible. CPMG = Hahn (one pi echo)
-                // here; the multi-echo decay is a host-side model.
+                // starts (no overlap at T=0). For Ramsey (kind==0) the readout
+                // pi/2 applies a 90-deg carrier phase step via an R1-only PLL
+                // write (pll_phase_only) that shifts phase WITHOUT re-locking the
+                // loop, mid-sequence; Hahn/CPMG skip the phase write. CPMG = Hahn
+                // (one pi echo) here; the multi-echo decay is a host-side model.
                 // ============================================================
 
                 // Build the "<count> " prefix (5-digit dec5_pad + space).
@@ -1695,21 +1770,29 @@ module command_parser #(
                     pll_phase    <= 12'd0;
                     mw_gate_load <= 1'b1;
                     gate_seen    <= 1'b0;
+                    seq_wdog     <= 32'd0;
                     seq_dcnt     <= seq_delay;
                     seq_is_last  <= (seq_i + 11'd1 >= seq_n);
                     fsm          <= S_SEQ_DLY1;
                 end
 
-                // Wait for the pi/2 gate to finish, then count down T.
+                // Wait for the pi/2 gate to finish, then count down T. The
+                // watchdog forces the gate-done transition if mw_gate ever
+                // sticks (the T countdown then proceeds to completion).
                 S_SEQ_DLY1 : begin
-                    if (!gate_seen) begin
+                    if (seq_wdog >= GATE_WDOG_CYC && !gate_seen) begin
+                        gate_seen <= 1'b1;
+                    end else if (!gate_seen) begin
                         if (mw_gate) gate_seen <= 1'b1;
+                        seq_wdog <= seq_wdog + 32'd1;
                     end else if (!mw_gate) begin
                         if (seq_dcnt == 32'd0) begin
                             fsm <= (seq_kind == 2'd0) ? S_SEQ_PI2B : S_SEQ_PI;
                         end else begin
                             seq_dcnt <= seq_dcnt - 32'd1;
                         end
+                    end else begin
+                        seq_wdog <= seq_wdog + 32'd1;   // seen, waiting for fall
                     end
                 end
 
@@ -1719,31 +1802,74 @@ module command_parser #(
                     pll_phase    <= 12'd0;
                     mw_gate_load <= 1'b1;
                     gate_seen    <= 1'b0;
+                    seq_wdog     <= 32'd0;
                     seq_dcnt     <= seq_delay;
                     fsm          <= S_SEQ_DLY2;
                 end
 
                 // Wait for the pi gate to finish, then count down T.
                 S_SEQ_DLY2 : begin
-                    if (!gate_seen) begin
+                    if (seq_wdog >= GATE_WDOG_CYC && !gate_seen) begin
+                        gate_seen <= 1'b1;
+                    end else if (!gate_seen) begin
                         if (mw_gate) gate_seen <= 1'b1;
+                        seq_wdog <= seq_wdog + 32'd1;
                     end else if (!mw_gate) begin
                         if (seq_dcnt == 32'd0)
                             fsm <= S_SEQ_PI2B;
                         else
                             seq_dcnt <= seq_dcnt - 32'd1;
+                    end else begin
+                        seq_wdog <= seq_wdog + 32'd1;   // seen, waiting for fall
                     end
                 end
 
-                // Readout pi/2 + trigger the ADC snapshot (parallel, like
-                // ODMR_SWEEP: the gate runs while the read completes).
+                // Readout pi/2. Ramsey (kind==0) first applies a 90-deg carrier
+                // phase step via an R1-only PLL write (no re-lock) and waits for
+                // that write to complete before gating+reading; Hahn/CPMG gate
+                // and read immediately (phase 0, no PLL write).
                 S_SEQ_PI2B : begin
-                    mw_gate_ns   <= PI2_NS;
-                    pll_phase    <= (seq_kind == 2'd0) ? 12'd1024 : 12'd0;
-                    mw_gate_load <= 1'b1;
-                    det_read_one <= 1'b1;
-                    det_site     <= seq_site;
-                    fsm          <= S_SEQ_READ;
+                    mw_gate_ns <= PI2_NS;
+                    if (seq_kind == 2'd0) begin
+                        // Ramsey: phase-step the locked carrier, then gate+read.
+                        pll_phase       <= 12'd1024;    // 90-deg R1 PHASE step
+                        pll_phase_only  <= 1'b1;        // R1-only write, no re-lock
+                        pll_start       <= 1'b1;
+                        pll_busy_seen   <= 1'b0;
+                        seq_wdog        <= 32'd0;
+                        fsm             <= S_SEQ_PI2B_PLL;
+                    end else begin
+                        // Hahn/CPMG: readout pi/2 at phase 0, no PLL write.
+                        pll_phase    <= 12'd0;
+                        mw_gate_load <= 1'b1;
+                        det_read_one <= 1'b1;
+                        det_site     <= seq_site;
+                        seq_wdog     <= 32'd0;
+                        fsm          <= S_SEQ_READ;
+                    end
+                end
+
+                // Ramsey: wait for the R1-only phase write to finish (~2.5 us
+                // SPI transaction, NOT a re-lock), then gate + read.
+                S_SEQ_PI2B_PLL : begin
+                    if (pll_busy) pll_busy_seen <= 1'b1;
+                    if (pll_busy_seen && !pll_busy) begin
+                        mw_gate_load    <= 1'b1;
+                        det_read_one    <= 1'b1;
+                        det_site        <= seq_site;
+                        pll_phase_only  <= 1'b0;
+                        seq_wdog        <= 32'd0;
+                        fsm             <= S_SEQ_READ;
+                    end else if (seq_wdog >= GATE_WDOG_CYC) begin
+                        // PLL stuck: gate+read anyway so the FSM cannot hang.
+                        mw_gate_load    <= 1'b1;
+                        det_read_one    <= 1'b1;
+                        det_site        <= seq_site;
+                        pll_phase_only  <= 1'b0;
+                        fsm             <= S_SEQ_READ;
+                    end else begin
+                        seq_wdog <= seq_wdog + 32'd1;
+                    end
                 end
 
                 // Latch the readout code for this window.
@@ -1752,6 +1878,12 @@ module command_parser #(
                         code_latch   <= det_code;
                         det_code_ack <= 1'b1;
                         fsm          <= S_SEQ_CODE_ENC;
+                    end else if (seq_wdog >= READ_WDOG_CYC) begin
+                        code_latch   <= 16'd0;        // dead-ADC sentinel
+                        det_code_ack <= 1'b1;
+                        fsm          <= S_SEQ_CODE_ENC;
+                    end else begin
+                        seq_wdog <= seq_wdog + 32'd1;
                     end
                 end
 
@@ -1808,17 +1940,29 @@ module command_parser #(
                 S_LI_ON : begin
                     mw_gate_load <= 1'b1;
                     gate_seen    <= 1'b0;
+                    seq_wdog     <= 32'd0;
                     fsm          <= S_LI_ON_WAIT;
                 end
 
-                // Wait for the on-gate to finish, then trigger the on read.
+                // Wait for the on-gate to RISE, then trigger the on read. The
+                // read completes <=86 us after the rise, i.e. DURING the 200 us
+                // on-gate (the gate stays high for the full half; the gate timer
+                // closes it independently). The off-half countdown then places
+                // the off-read the same interval after the gate fall -> symmetric.
                 S_LI_ON_WAIT : begin
-                    if (!gate_seen) begin
-                        if (mw_gate) gate_seen <= 1'b1;
-                    end else if (!mw_gate) begin
+                    if (seq_wdog >= GATE_WDOG_CYC) begin
                         det_read_one <= 1'b1;
                         det_site     <= li_site;
+                        seq_wdog     <= 32'd0;
                         fsm          <= S_LI_ON_READ;
+                    end else if (mw_gate) begin
+                        gate_seen    <= 1'b1;
+                        det_read_one <= 1'b1;
+                        det_site     <= li_site;
+                        seq_wdog     <= 32'd0;
+                        fsm          <= S_LI_ON_READ;
+                    end else begin
+                        seq_wdog <= seq_wdog + 32'd1;
                     end
                 end
 
@@ -1828,12 +1972,19 @@ module command_parser #(
                         li_n_on      <= li_n_on + 32'd1;
                         det_code_ack <= 1'b1;
                         fsm          <= S_LI_OFF;
+                    end else if (seq_wdog >= READ_WDOG_CYC) begin
+                        li_n_on      <= li_n_on + 32'd1;   // count, no sample
+                        det_code_ack <= 1'b1;
+                        fsm          <= S_LI_OFF;
+                    end else begin
+                        seq_wdog <= seq_wdog + 32'd1;
                     end
                 end
 
                 // Off half: no gate, count down the half-period then read.
                 S_LI_OFF : begin
                     li_dcnt   <= LI_HALF_CYC;
+                    seq_wdog  <= 32'd0;
                     fsm       <= S_LI_OFF_WAIT;
                 end
 
@@ -1841,6 +1992,7 @@ module command_parser #(
                     if (li_dcnt == 32'd0) begin
                         det_read_one <= 1'b1;
                         det_site     <= li_site;
+                        seq_wdog     <= 32'd0;
                         fsm          <= S_LI_OFF_READ;
                     end else begin
                         li_dcnt <= li_dcnt - 32'd1;
@@ -1853,6 +2005,12 @@ module command_parser #(
                         li_n_off     <= li_n_off + 32'd1;
                         det_code_ack <= 1'b1;
                         fsm          <= S_LI_NEXT;
+                    end else if (seq_wdog >= READ_WDOG_CYC) begin
+                        li_n_off     <= li_n_off + 32'd1;   // count, no sample
+                        det_code_ack <= 1'b1;
+                        fsm          <= S_LI_NEXT;
+                    end else begin
+                        seq_wdog <= seq_wdog + 32'd1;
                     end
                 end
 
