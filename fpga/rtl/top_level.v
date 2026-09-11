@@ -139,6 +139,7 @@ module top_level (
     wire [31:0] pll_freq_khz;
     wire [11:0] pll_phase;
     wire [1:0]  pll_rf_pwr;
+    wire        pll_phase_only;
     wire        pll_busy;
     wire        pll_done;
     wire        spi_start_w;
@@ -173,6 +174,7 @@ module top_level (
         .target_freq_khz (pll_freq_khz),
         .phase           (pll_phase),
         .rf_pwr          (pll_rf_pwr),
+        .phase_only      (pll_phase_only),
         .busy            (pll_busy),
         .done            (pll_done),
         .spi_start       (spi_start_w),
@@ -284,6 +286,7 @@ module top_level (
         .em_busy          (em_busy),
         .pll_start        (pll_start),
         .pll_freq_khz     (pll_freq_khz),
+        .pll_phase_only   (pll_phase_only),
         .pll_busy         (pll_busy),
         .det_read_one     (det_read_one),
         .det_read_all     (det_read_all),

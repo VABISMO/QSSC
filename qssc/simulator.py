@@ -275,7 +275,7 @@ class SimulatedFPGA:
                 # Mirrors lockin_integrated_readout + the pending RTL lock-in
                 # accumulator (RTL pending). Reply: "diff sigma snr_single snr_int".
                 ref_khz = int(parts[1]); n_cycles = int(parts[2])
-                if n_cycles <= 0 or n_cycles > 100000:
+                if n_cycles <= 0 or n_cycles > 10000:
                     return "ERR"
                 return self._read_lockin(ref_khz, n_cycles)
             if head == "RUN_SEQUENCE":

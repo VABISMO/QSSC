@@ -34,6 +34,7 @@ module adf4351_ctrl (
     input      [31:0] target_freq_khz,// desired RF output in kHz
     input      [11:0] phase,          // R1 PHASE value (carrier phase adjust)
     input      [1:0]  rf_pwr,         // R4 RF_PWR (4 output-power levels)
+    input             phase_only,     // 1 = write R1 only (phase step, no re-lock)
     output            busy,
     output            done,
     // SPI master interface
@@ -71,7 +72,8 @@ module adf4351_ctrl (
     localparam [3:0] ST_GAP   = 4'd4;
     localparam [3:0] ST_DONE  = 4'd5;
     reg [3:0]  state;
-    reg [2:0]  reg_idx;          // 5->4->3->2->1->0
+    reg [2:0]  reg_idx;          // 5->4->3->2->1->0 (full) or 1 only (phase_only)
+    reg [2:0]  last_reg;         // register index that completes the sequence
     reg [15:0] gap_cnt;
     reg        done_reg;
 
@@ -80,6 +82,7 @@ module adf4351_ctrl (
         spi_start  = 1'b0;
         spi_data   = 32'd0;
         reg_idx    = 3'd5;
+        last_reg   = 3'd0;
         gap_cnt    = 16'd0;
         done_reg   = 1'b0;
         r0=0; r1=0; r2=0; r3=0; r4=0; r5=0;
@@ -154,6 +157,7 @@ module adf4351_ctrl (
             state     <= ST_IDLE;
             spi_start <= 1'b0;
             reg_idx   <= 3'd5;
+            last_reg  <= 3'd0;
             gap_cnt   <= 16'd0;
             done_reg  <= 1'b0;
             tgt_reg   <= 32'd0;
@@ -168,7 +172,16 @@ module adf4351_ctrl (
                         tgt_reg  <= target_freq_khz;  // sample input once
                         phase_r <= phase;            // sample R1 PHASE
                         rf_pwr_r <= rf_pwr;           // sample R4 RF_PWR
-                        reg_idx <= 3'd5;             // program R5 first
+                        // phase_only: write just R1 (a phase step applied to an
+                        // already-locked loop -- no re-lock, ~one SPI transaction).
+                        // Otherwise the full R5->R0 program (re-lock).
+                        if (phase_only) begin
+                            reg_idx  <= 3'd1;
+                            last_reg <= 3'd1;
+                        end else begin
+                            reg_idx  <= 3'd5;        // program R5 first
+                            last_reg <= 3'd0;        // ...through R0
+                        end
                         state  <= ST_CALC;
                     end
                 end
@@ -195,7 +208,7 @@ module adf4351_ctrl (
                 end
                 ST_WAIT : begin
                     if (spi_done) begin
-                        if (reg_idx == 3'd0) begin
+                        if (reg_idx == last_reg) begin
                             state <= ST_DONE;
                         end else begin
                             reg_idx  <= reg_idx - 3'd1;
