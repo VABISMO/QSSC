@@ -111,7 +111,12 @@ module command_parser #(
     output reg        rng_flush,
     input      [23:0] rng_samples_seen,  // running raw-sample counter (24-bit)
     input      [31:0] rng_word,
-    input             rng_valid
+    input             rng_valid,
+    // Soft reset (RESET verb): one-cycle pulse ORed into the peripheral reset
+    // tree in top_level (emitter_array / adc_reader / adf4351_ctrl / qrng /
+    // mw_gate timer). The parser itself is NOT reset by it, so it can still
+    // reply OK after re-initialising the peripherals.
+    output reg        soft_rst
 );
     // ---- Command IDs -------------------------------------------------------
     localparam [3:0] CMD_DRIVE     = 4'd0;   // DRIVE_EMITTER (2 args)
@@ -125,6 +130,11 @@ module command_parser #(
     localparam [3:0] CMD_PATTERN   = 4'd9;   // DRIVE_PATTERN (1 arg: duration_ms)
     localparam [3:0] CMD_CLEAR_EM  = 4'd10;  // CLEAR_EMITTERS (0 args)
     localparam [3:0] CMD_RNG       = 4'd11;  // READ_RNG (1 arg: n_bytes 1..256)
+    // PR2 bring-up / calibration verbs (command_parser, not the #58 pulse-engine):
+    localparam [3:0] CMD_ID        = 4'd12;  // ID -> "QSSC v1\n" (probe token)
+    localparam [3:0] CMD_STATUS    = 4'd13;  // STATUS -> rails/PLL/ADC self-status
+    localparam [3:0] CMD_RESET     = 4'd14;  // RESET -> soft-reset peripherals, OK
+    localparam [3:0] CMD_SWEEP     = 4'd15;  // ODMR_SWEEP q f0 f1 n (4 args)
 
     // ---- FSM states --------------------------------------------------------
     localparam [3:0] S_IDLE          = 4'd0;
@@ -150,6 +160,17 @@ module command_parser #(
     localparam [4:0] S_RNG_EMIT      = 5'd18;  // READ_RNG: stream one hex nibble
     localparam [4:0] S_RNG_STATS     = 5'd19;  // READ_RNG: build the stats footer
     localparam [4:0] S_RNG_TAIL      = 5'd20;  // READ_RNG: stream the stats footer
+    // PR2 verbs (ID / STATUS / RESET / ODMR_SWEEP). All use the direct tx_load
+    // streaming path (replies too long for the 8-byte reply_mem, like RNG_TAIL).
+    localparam [4:0] S_ID_SEND       = 5'd21;  // ID: stream "QSSC v1\n"
+    localparam [4:0] S_STATUS_SEND   = 5'd22;  // STATUS: stream the self-status line
+    localparam [4:0] S_RESET_WAIT    = 5'd23;  // RESET: hold soft_rst a few cycles
+    localparam [4:0] S_SWEEP_PROG    = 5'd24;  // ODMR_SWEEP: program PLL for point i
+    localparam [4:0] S_SWEEP_PLL     = 5'd25;  // ODMR_SWEEP: wait PLL done, arm gate
+    localparam [4:0] S_SWEEP_READ    = 5'd26;  // ODMR_SWEEP: read_one site q
+    localparam [4:0] S_SWEEP_ENC     = 5'd27;  // ODMR_SWEEP: encode "f c\n" line
+    localparam [4:0] S_SWEEP_SEND    = 5'd28;  // ODMR_SWEEP: stream the line
+    localparam [4:0] S_SWEEP_NEXT    = 5'd29;  // ODMR_SWEEP: f += step; loop or finish
 
     // ---- Line buffer ------------------------------------------------------
     reg [7:0] cmd_buffer [0:63];
@@ -213,6 +234,39 @@ module command_parser #(
     reg [7:0]  rng_tail [0:10]; // footer bytes: ' ' d d d d d ' ' 0 ' ' 0 LF
     reg [3:0]  rng_tail_idx;    // footer streaming cursor (0..10)
 
+    // ---- PR2 verbs: ID / STATUS / RESET / ODMR_SWEEP ----------------------
+    // ID reply: "QSSC v1\n" (8 bytes) -- the FPGAConnection probe token.
+    reg [7:0]  id_str [0:7];
+    // STATUS reply template (79 bytes): the two single-digit dynamic fields
+    // (PLL_LOCKED at idx 11, ADC_BUSY at idx 22) are patched at send time; the
+    // rail voltages are static nominal mV (no voltage-monitor ADC is fitted)
+    // and TEMP_C is a placeholder (no XADC in this build -- a future on-die
+    // temperature readback replaces it; reported as a fixed 25 C nominal).
+    reg [7:0]  status_tpl [0:78];
+    localparam [6:0] STATUS_LEN      = 7'd79;
+    localparam [6:0] STATUS_PLL_IDX  = 7'd11;  // "PLL_LOCKED <d>"
+    localparam [6:0] STATUS_ADC_IDX  = 7'd22;  // "ADC_BUSY <d>"
+    reg [7:0]  status_pll_dig;       // '0'/'1' latched at dispatch (!pll_busy)
+    reg [7:0]  status_adc_dig;       // '0'/'1' latched at dispatch (det_busy)
+
+    // ODMR_SWEEP loop state. f(i) = f_start + step*i with step = (f_stop -
+    // f_start)/(n-1); implemented incrementally (f += step each point) so no
+    // per-point multiply. q = detector site read per point. Each point streams
+    // a fixed-width "fffffff ccccc\n" line (7-digit kHz + 5-digit ADC code).
+    reg [5:0]  sweep_q;              // site/qubit index (0..63)
+    reg [31:0] sweep_f;              // current point frequency, kHz
+    reg [31:0] sweep_step;           // kHz per point (signed via $signed add)
+    reg [31:0] sweep_n;              // number of points (1..256)
+    reg [31:0] sweep_i;              // points completed
+    reg [5:0]  sweep_len;            // bytes in the current line (14)
+    reg [7:0]  sweep_line [0:15];    // one "f c\n" line buffer
+    reg        sweep_pll_seen;       // pll_busy-seen guard for S_SWEEP_PLL
+
+    // Generic string-stream cursor (shared by ID / STATUS / SWEEP senders).
+    reg [6:0]  str_idx;
+    // RESET soft-rst hold counter (a few cycles so the peripherals catch it).
+    reg [2:0]  rst_hold;
+
     // ---- Calibration LUT (emitter pixel -> detector electrode) ------------
     reg [5:0] cal_lut [0:63];
     assign lut_rd_data = cal_lut[lut_rd_addr];
@@ -274,6 +328,44 @@ module command_parser #(
         end
     endfunction
 
+    // 32-bit value -> 10 zero-padded ASCII decimal digits (ones at [7:0],
+    // billions at [79:72]). Used for the ODMR_SWEEP frequency field (we take
+    // the low 7 digits = kHz up to 9_999_999, well past the ADF4351 4.4 GHz
+    // / 4_400_000 kHz ceiling). Pure combinational; synthesises to a chain of
+    // divide-by-constant/mod-10 which Vivado folds into ROM/LUT.
+    function [79:0] dec32_pad;
+        input [31:0] v;
+        reg [31:0] t;
+        begin
+            t = v;
+            dec32_pad[7:0]    = 8'h30 + (t % 32'd10);  t = t / 32'd10;
+            dec32_pad[15:8]   = 8'h30 + (t % 32'd10);  t = t / 32'd10;
+            dec32_pad[23:16]  = 8'h30 + (t % 32'd10);  t = t / 32'd10;
+            dec32_pad[31:24]  = 8'h30 + (t % 32'd10);  t = t / 32'd10;
+            dec32_pad[39:32]  = 8'h30 + (t % 32'd10);  t = t / 32'd10;
+            dec32_pad[47:40]  = 8'h30 + (t % 32'd10);  t = t / 32'd10;
+            dec32_pad[55:48]  = 8'h30 + (t % 32'd10);  t = t / 32'd10;
+            dec32_pad[63:56]  = 8'h30 + (t % 32'd10);  t = t / 32'd10;
+            dec32_pad[71:64]  = 8'h30 + (t % 32'd10);  t = t / 32'd10;
+            dec32_pad[79:72]  = 8'h30 + (t % 32'd10);
+        end
+    endfunction
+
+    // 16-bit value -> 5 zero-padded ASCII decimal digits (ones at [7:0]).
+    // Used for the ODMR_SWEEP ADC-code field (0..65535).
+    function [39:0] dec5_pad;
+        input [15:0] v;
+        reg [15:0] t;
+        begin
+            t = v;
+            dec5_pad[7:0]    = 8'h30 + (t % 16'd10);  t = t / 16'd10;
+            dec5_pad[15:8]   = 8'h30 + (t % 16'd10);  t = t / 16'd10;
+            dec5_pad[23:16]  = 8'h30 + (t % 16'd10);  t = t / 16'd10;
+            dec5_pad[31:24]  = 8'h30 + (t % 16'd10);  t = t / 16'd10;
+            dec5_pad[39:32]  = 8'h30 + (t % 16'd10);
+        end
+    endfunction
+
     // combinational decimal encoding of the latched detector sample (the live
     // det_code may change once we ack the ADC reader, so S_ENC must use
     // the snapshot taken in S_RONE_WAIT / S_RALL_WAIT).
@@ -303,6 +395,18 @@ module command_parser #(
     wire [15:0] rng_raw_count = (rng_raw_delta > 24'd65535)
                                 ? 16'hFFFF : rng_raw_delta[15:0];
     wire [47:0] enc_raw       = enc_dec(rng_raw_count);
+
+    // ODMR_SWEEP line encode: 7-digit zero-padded kHz + ' ' + 5-digit zero-
+    // padded ADC code + '\n' = 14 bytes. dec32_pad gives 10 digits (ones at
+    // [7:0]); the kHz field takes the low 7 (positions 6..0 -> [55:8]).
+    wire [79:0] sweep_f_pad = dec32_pad(sweep_f);
+    wire [39:0] sweep_c_pad = dec5_pad(code_latch);
+
+    // STATUS send byte: stream the template, patching the two dynamic digit
+    // slots (PLL_LOCKED / ADC_BUSY) at their fixed indices.
+    wire [7:0] status_byte = (str_idx == STATUS_PLL_IDX) ? status_pll_dig :
+                             (str_idx == STATUS_ADC_IDX) ? status_adc_dig :
+                             status_tpl[str_idx[6:0]];
 
     integer k;
     initial begin
@@ -362,6 +466,42 @@ module command_parser #(
         rng_raw_start  = 24'd0;
         rng_watchdog   = 27'd0;
         rng_tail_idx   = 4'd0;
+        // PR2 verb initial state
+        soft_rst        = 1'b0;
+        str_idx         = 7'd0;
+        rst_hold        = 3'd0;
+        status_pll_dig  = 8'h30;
+        status_adc_dig  = 8'h30;
+        sweep_q         = 6'd0;
+        sweep_f         = 32'd0;
+        sweep_step      = 32'd0;
+        sweep_n         = 32'd0;
+        sweep_i         = 32'd0;
+        sweep_len       = 6'd0;
+        sweep_pll_seen  = 1'b0;
+        // ID reply string "QSSC v1\n"
+        id_str[0]="Q"; id_str[1]="S"; id_str[2]="S"; id_str[3]="C"; id_str[4]=" "; id_str[5]="v"; id_str[6]="1"; id_str[7]=8'h0A;
+        // STATUS template (79 bytes; digits at idx 11/22 patched at send time)
+        status_tpl[0]="P"; status_tpl[1]="L"; status_tpl[2]="L"; status_tpl[3]="_";
+        status_tpl[4]="L"; status_tpl[5]="O"; status_tpl[6]="C"; status_tpl[7]="K";
+        status_tpl[8]="E"; status_tpl[9]="D"; status_tpl[10]=" "; status_tpl[11]="1";
+        status_tpl[12]=" "; status_tpl[13]="A"; status_tpl[14]="D"; status_tpl[15]="C";
+        status_tpl[16]="_"; status_tpl[17]="B"; status_tpl[18]="U"; status_tpl[19]="S";
+        status_tpl[20]="Y"; status_tpl[21]=" "; status_tpl[22]="0"; status_tpl[23]=" ";
+        status_tpl[24]="V"; status_tpl[25]="C"; status_tpl[26]="C"; status_tpl[27]="3";
+        status_tpl[28]="V"; status_tpl[29]="3"; status_tpl[30]="_"; status_tpl[31]="m";
+        status_tpl[32]="v"; status_tpl[33]=" "; status_tpl[34]="3"; status_tpl[35]="3";
+        status_tpl[36]="0"; status_tpl[37]="0"; status_tpl[38]=" "; status_tpl[39]="V";
+        status_tpl[40]="C"; status_tpl[41]="C"; status_tpl[42]="5"; status_tpl[43]="V";
+        status_tpl[44]="_"; status_tpl[45]="m"; status_tpl[46]="v"; status_tpl[47]=" ";
+        status_tpl[48]="4"; status_tpl[49]="9"; status_tpl[50]="8"; status_tpl[51]="0";
+        status_tpl[52]=" "; status_tpl[53]="V"; status_tpl[54]="C"; status_tpl[55]="C";
+        status_tpl[56]="1"; status_tpl[57]="2"; status_tpl[58]="V"; status_tpl[59]="_";
+        status_tpl[60]="m"; status_tpl[61]="v"; status_tpl[62]=" "; status_tpl[63]="1";
+        status_tpl[64]="2"; status_tpl[65]="0"; status_tpl[66]="5"; status_tpl[67]="0";
+        status_tpl[68]=" "; status_tpl[69]="T"; status_tpl[70]="E"; status_tpl[71]="M";
+        status_tpl[72]="P"; status_tpl[73]="_"; status_tpl[74]="C"; status_tpl[75]=" ";
+        status_tpl[76]="2"; status_tpl[77]="5"; status_tpl[78]=8'h0A;
         for (k = 0; k < 64; k = k + 1) cal_lut[k] = 6'd0;
     end
 
@@ -451,6 +591,19 @@ module command_parser #(
             rng_tail_idx   <= 4'd0;
             tx_load        <= 1'b0;
             tx_din         <= 8'd0;
+            // PR2 verb state
+            soft_rst       <= 1'b0;
+            rst_hold       <= 3'd0;
+            str_idx        <= 7'd0;
+            status_pll_dig <= 8'h30;
+            status_adc_dig <= 8'h30;
+            sweep_q        <= 6'd0;
+            sweep_f        <= 32'd0;
+            sweep_step     <= 32'd0;
+            sweep_n        <= 32'd0;
+            sweep_i        <= 32'd0;
+            sweep_pll_seen <= 1'b0;
+            sweep_len      <= 6'd0;
         end else begin
             // Default one-cycle pulses
             tx_load        <= 1'b0;
@@ -611,6 +764,37 @@ module command_parser #(
                             cmd_str[3]=="I" && cmd_str[4]=="B" && cmd_str[5]=="R" &&
                             cmd_str[6]=="A" && cmd_str[7]=="T" && cmd_str[8]=="E") begin
                             cmd_id <= CMD_CALIBRATE; arg_count <= 3'd0;
+                            fsm    <= S_DISPATCH;
+                        end else if (cmd_len == 4'd10 &&
+                            // ODMR_SWEEP (10 chars): O D M R _ S W E E P
+                            cmd_str[0]=="O" && cmd_str[1]=="D" && cmd_str[2]=="M" &&
+                            cmd_str[3]=="R" && cmd_str[4]=="_" && cmd_str[5]=="S" &&
+                            cmd_str[6]=="W" && cmd_str[7]=="E" && cmd_str[8]=="E" &&
+                            cmd_str[9]=="P") begin
+                            cmd_id <= CMD_SWEEP; arg_count <= 3'd4;
+                            if (!is_eol && ch == 8'h20) begin
+                                parse_idx <= parse_idx + 7'd1;
+                                fsm       <= S_ARGSP;
+                            end else begin
+                                cmd_id <= CMD_ERR;   // ODMR_SWEEP needs 4 args
+                                fsm    <= S_DISPATCH;
+                            end
+                        end else if (cmd_len == 4'd6 &&
+                            // STATUS (6 chars): S T A T U S
+                            cmd_str[0]=="S" && cmd_str[1]=="T" && cmd_str[2]=="A" &&
+                            cmd_str[3]=="T" && cmd_str[4]=="U" && cmd_str[5]=="S") begin
+                            cmd_id <= CMD_STATUS; arg_count <= 3'd0;
+                            fsm    <= S_DISPATCH;
+                        end else if (cmd_len == 4'd5 &&
+                            // RESET (5 chars): R E S E T
+                            cmd_str[0]=="R" && cmd_str[1]=="E" && cmd_str[2]=="S" &&
+                            cmd_str[3]=="E" && cmd_str[4]=="T") begin
+                            cmd_id <= CMD_RESET; arg_count <= 3'd0;
+                            fsm    <= S_DISPATCH;
+                        end else if (cmd_len == 4'd2 &&
+                            // ID (2 chars): I D
+                            cmd_str[0]=="I" && cmd_str[1]=="D") begin
+                            cmd_id <= CMD_ID; arg_count <= 3'd0;
                             fsm    <= S_DISPATCH;
                         end else if (cmd_len == 4'd8 &&
                             // READ_RNG (8 chars): R E A D _ R N G
@@ -822,6 +1006,62 @@ module command_parser #(
                                 rall_loop      <= 1'b0;
                                 read_all_mode  <= 1'b0;
                                 fsm            <= S_RNG_HARVEST;
+                            end
+                        end
+                        CMD_ID : begin
+                            // ID -> "QSSC v1\n" (the FPGAConnection probe token;
+                            // host validates reply startswith "QSSC").
+                            str_idx <= 7'd0;
+                            fsm     <= S_ID_SEND;
+                        end
+                        CMD_STATUS : begin
+                            // STATUS -> "PLL_LOCKED <0/1> ADC_BUSY <0/1>
+                            // VCC3V3_mv 3300 VCC5V_mv 4980 VCC12V_mv 12050
+                            // TEMP_C 25\n". PLL_LOCKED = !pll_busy (idle =>
+                            // settled; the ADF4351 MUXOUT lock-detect is a
+                            // future refinement), ADC_BUSY = det_busy. The rail
+                            // voltages are static nominal mV (no voltage-monitor
+                            // ADC fitted); TEMP_C is a 25 C placeholder (no XADC
+                            // in this build).
+                            status_pll_dig <= pll_busy ? 8'h30 : 8'h31;
+                            status_adc_dig <= det_busy  ? 8'h31 : 8'h30;
+                            str_idx        <= 7'd0;
+                            fsm            <= S_STATUS_SEND;
+                        end
+                        CMD_RESET : begin
+                            // RESET -> assert soft_rst for a few cycles to re-
+                            // init the peripherals (emitter/ADC/PLL/QRNG/gate),
+                            // then reply OK. The parser is not reset by it.
+                            soft_rst  <= 1'b1;
+                            rst_hold  <= 3'd4;
+                            fsm       <= S_RESET_WAIT;
+                        end
+                        CMD_SWEEP : begin
+                            // ODMR_SWEEP <q> <f_start_khz> <f_stop_khz> <n>:
+                            // per point reprogram the ADF4351 to f(i), gate the
+                            // RF, read detector site q, stream "f c\n". q must
+                            // be 0..63, n 1..256, f_start/f_stop > 0. step =
+                            // (f_stop - f_start)/(n-1) (0 when n=1).
+                            if ($signed(arg_vals[0]) < 0 || $signed(arg_vals[0]) >= N_DET ||
+                                $signed(arg_vals[1]) <= 0 ||
+                                $signed(arg_vals[2]) <= 0 ||
+                                $signed(arg_vals[3]) < 32'd1 ||
+                                $signed(arg_vals[3]) > 32'd256) begin
+                                reply_ok <= 1'b0;            // ERR
+                                fsm      <= S_REPLY_LOAD;
+                            end else begin
+                                sweep_q        <= arg_vals[0][5:0];
+                                sweep_f        <= arg_vals[1];
+                                sweep_n        <= arg_vals[3];
+                                sweep_i        <= 32'd0;
+                                sweep_step     <= (arg_vals[3] == 32'd1)
+                                                  ? 32'd0
+                                                  : ($signed(arg_vals[2]) - $signed(arg_vals[1])) /
+                                                    $signed(arg_vals[3] - 32'd1);
+                                mw_gate_ns     <= 32'd1000;   // 1 us ODMR gate per point
+                                sweep_pll_seen <= 1'b0;
+                                read_all_mode  <= 1'b0;
+                                fsm            <= S_SWEEP_PROG;
                             end
                         end
                         default : begin
@@ -1053,6 +1293,122 @@ module command_parser #(
                             fsm <= S_IDLE;            // footer was the last byte
                         else
                             rng_tail_idx <= rng_tail_idx + 4'd1;
+                    end
+                end
+
+                // ── PR2 verbs: ID / STATUS / RESET / ODMR_SWEEP ───────────────
+                // ID — stream the 8-byte identity string "QSSC v1\n".
+                S_ID_SEND : begin
+                    if (tx_ready) begin
+                        tx_load <= 1'b1;
+                        tx_din  <= id_str[str_idx[2:0]];
+                        if (str_idx == 7'd7)
+                            fsm <= S_IDLE;
+                        else
+                            str_idx <= str_idx + 7'd1;
+                    end
+                end
+
+                // STATUS — stream the 79-byte template, substituting the live
+                // PLL-lock and ADC-busy digits at template indices 11 and 22.
+                S_STATUS_SEND : begin
+                    if (tx_ready) begin
+                        tx_load <= 1'b1;
+                        tx_din  <= status_byte;
+                        if (str_idx == STATUS_LEN - 7'd1)
+                            fsm <= S_IDLE;
+                        else
+                            str_idx <= str_idx + 7'd1;
+                    end
+                end
+
+                // RESET — hold soft_rst for a few cycles so the peripheral
+                // reset trees see a clean pulse, then reply OK.
+                S_RESET_WAIT : begin
+                    if (rst_hold == 3'd0) begin
+                        soft_rst  <= 1'b0;
+                        reply_ok  <= 1'b1;
+                        fsm       <= S_REPLY_LOAD;
+                    end else begin
+                        rst_hold <= rst_hold - 3'd1;
+                    end
+                end
+
+                // ODMR_SWEEP — program the ADF4351 for the current sweep point.
+                S_SWEEP_PROG : begin
+                    pll_freq_khz   <= sweep_f;
+                    pll_phase      <= 12'd0;
+                    pll_rf_pwr     <= 2'd0;
+                    pll_start      <= 1'b1;
+                    sweep_pll_seen <= 1'b0;
+                    fsm            <= S_SWEEP_PLL;
+                end
+
+                // Wait for PLL busy to assert then deassert (rising then done).
+                S_SWEEP_PLL : begin
+                    if (pll_busy)
+                        sweep_pll_seen <= 1'b1;
+                    if (sweep_pll_seen && !pll_busy) begin
+                        mw_gate_load  <= 1'b1;        // 1 us ODMR gate (mw_gate_ns set at dispatch)
+                        det_site      <= sweep_q;
+                        det_read_one  <= 1'b1;
+                        read_all_mode <= 1'b0;
+                        fsm           <= S_SWEEP_READ;
+                    end
+                end
+
+                // Latch the detector code for this point.
+                S_SWEEP_READ : begin
+                    if (det_code_valid) begin
+                        code_latch   <= det_code;
+                        det_code_ack <= 1'b1;
+                        fsm          <= S_SWEEP_ENC;
+                    end
+                end
+
+                // Encode one "fffffff ccccc\n" line (14 bytes, fixed width).
+                S_SWEEP_ENC : begin
+                    sweep_line[0]  <= sweep_f_pad[55:48];
+                    sweep_line[1]  <= sweep_f_pad[47:40];
+                    sweep_line[2]  <= sweep_f_pad[39:32];
+                    sweep_line[3]  <= sweep_f_pad[31:24];
+                    sweep_line[4]  <= sweep_f_pad[23:16];
+                    sweep_line[5]  <= sweep_f_pad[15:8];
+                    sweep_line[6]  <= sweep_f_pad[7:0];
+                    sweep_line[7]  <= 8'h20;          // ' '
+                    sweep_line[8]  <= sweep_c_pad[39:32];
+                    sweep_line[9]  <= sweep_c_pad[31:24];
+                    sweep_line[10] <= sweep_c_pad[23:16];
+                    sweep_line[11] <= sweep_c_pad[15:8];
+                    sweep_line[12] <= sweep_c_pad[7:0];
+                    sweep_line[13] <= 8'h0A;          // '\n'
+                    sweep_len      <= 6'd14;
+                    str_idx        <= 7'd0;
+                    fsm            <= S_SWEEP_SEND;
+                end
+
+                // Stream the 14-byte sweep line.
+                S_SWEEP_SEND : begin
+                    if (tx_ready) begin
+                        tx_load <= 1'b1;
+                        tx_din  <= sweep_line[str_idx[3:0]];
+                        if (str_idx == 7'd13)
+                            fsm <= S_SWEEP_NEXT;
+                        else
+                            str_idx <= str_idx + 7'd1;
+                    end
+                end
+
+                // Advance to the next point, or finish with an OK reply.
+                S_SWEEP_NEXT : begin
+                    sweep_i <= sweep_i + 32'd1;
+                    sweep_f <= sweep_f + sweep_step;
+                    if (sweep_i + 32'd1 >= sweep_n) begin
+                        reply_ok <= 1'b1;
+                        fsm      <= S_REPLY_LOAD;
+                    end else begin
+                        sweep_pll_seen <= 1'b0;
+                        fsm            <= S_SWEEP_PROG;
                     end
                 end
 
