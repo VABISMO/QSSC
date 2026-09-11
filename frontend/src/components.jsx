@@ -689,6 +689,15 @@ export function CalibrationPanel({ profile, temperature, seed, run, running, res
                       {' · '}T₂/T₂* {st.source}</span>}
                   </div>
                 )}
+                {i === 2 && st.register_width != null && (
+                  <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>
+                    register width N ={' '}
+                    <span className="mono" style={{ color: 'var(--brand)' }}>{st.register_width}</span>
+                    {' '}· {st.register_width <= 1
+                      ? <span style={{ color: 'var(--warn, #b8860b)' }}>ensemble (bulk → 1 line)</span>
+                      : <span style={{ color: 'var(--ok)' }}>{st.register_width} resolved lines → register</span>}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -699,6 +708,27 @@ export function CalibrationPanel({ profile, temperature, seed, run, running, res
               {result.source === 'hardware' ? 'hardware I/O' : 'simulator'}
             </span></span>}
           </div>
+          {result.register_width != null && (
+            <div style={{ marginTop: 10, padding: '8px 10px',
+              border: '1px solid var(--border)', borderRadius: 8,
+              background: 'var(--surface, rgba(0,0,0,0.02))' }}>
+              <span className="muted" style={{ fontSize: 11.5 }}>Measured register width</span>{' '}
+              <span className="mono" style={{ color: 'var(--brand)', fontWeight: 600 }}>
+                N = {result.register_width}
+              </span>
+              {' · '}
+              <span className="mono" style={{ fontSize: 12 }}>
+                {result.pixel_mode_recommendation === 'ensemble'
+                  ? '→ ensemble mode (bulk ensemble → 1 line per pixel)'
+                  : `→ register mode (${result.register_width} resolved ODMR lines)`}
+              </span>
+              <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                Applied to the pixel-mode selector above{result.line_freqs_hz
+                  ? ` · ${result.line_freqs_hz.length} line centres sent to the backend`
+                  : ''}.
+              </div>
+            </div>
+          )}
           {perPin && perPin.length > 0 && (
             <button type="button" className="ghost" style={{ marginTop: 12 }}
               onClick={() => setResOpen(true)}>
