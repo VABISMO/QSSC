@@ -127,3 +127,52 @@ def test_ensemble_nuclear_memory_forced_off():
     b = QSSCBackend("NV", seed=42, pixel_mode="ensemble", noise_mode="real",
                     nuclear_memory=True)
     assert b._nuclear_memory is False
+
+
+# --- API + calibration wiring ----------------------------------------------
+def _client():
+    from fastapi.testclient import TestClient
+    from api.main import app
+    return TestClient(app)
+
+
+def test_api_modes_returns_modes_and_inventions():
+    """GET /api/modes lists the two pixel_modes + the shipping inventions with
+    HW badges (needs-HW inventions are NOT listed -- they are GitHub issues)."""
+    c = _client()
+    m = c.get("/api/modes").json()
+    assert [x["key"] for x in m["pixel_modes"]] == ["register", "ensemble"]
+    assert all(x["hw"] is True for x in m["pixel_modes"])
+    inv_keys = {x["key"] for x in m["inventions"]}
+    assert "prime_readout" in inv_keys
+    # needs-HW inventions are NOT surfaced (they go to GitHub issues)
+    assert "nuclear" not in inv_keys
+    assert "gradient" not in inv_keys
+
+
+def test_api_register_run_with_measured_n():
+    """A register-mode run with register_line_freqs_hz builds the backend with
+    the measured register width (the calibration's measured-N flows through)."""
+    c = _client()
+    r = c.post("/api/circuit/run", params={"sync": "true"},
+               json={"algorithm": "bell", "num_qubits": 2,
+                     "pixel_mode": "register",
+                     "register_line_freqs_hz": [2.87e9, 2.876e9, 2.882e9],
+                     "n_nv_per_pixel": 3, "shots": 64})
+    assert r.status_code == 200
+    assert "error" not in r.json()
+
+
+def test_calibration_response_has_register_width():
+    """The calibration response carries the measured register_width +
+    pixel_mode_recommendation (the open loop from ODMR to register N)."""
+    c = _client()
+    d = c.post("/api/calibration/run",
+               params={"profile": "NV", "points": 120, "seed": 42,
+                       "b_field": 0.0}).json()
+    # zero field -> bulk ensemble collapses to 1 line -> ensemble
+    assert d["register_width"] == 1
+    assert d["pixel_mode_recommendation"] == "ensemble"
+    assert d["n_nv_per_pixel"] == 1
+    # stage 3 also carries it
+    assert d["stages"][2]["register_width"] == 1
