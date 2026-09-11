@@ -455,6 +455,11 @@ textarea.code-editor:focus { outline: 1px solid var(--brand); border-color: var(
   box-shadow: 0 4px 16px rgba(34,211,238,.28);
 }
 .seg-toggle .seg.on .seg-ic { opacity: 1; }
+/* Hardware-real selection is green, distinct from the cyan simulator toggle. */
+.seg-toggle .seg.hw.on {
+  background: linear-gradient(135deg, #34d399, #059669);
+  box-shadow: 0 4px 16px rgba(52,211,153,.30);
+}
 .seg-toggle .seg-note {
   font-size: 11.5px; color: var(--dim); margin-left: 6px; line-height: 1.4;
 }

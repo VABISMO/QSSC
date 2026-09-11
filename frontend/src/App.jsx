@@ -48,9 +48,9 @@ const ALGO_LABELS = {
 }
 const MATH_OPS = ['add', 'sub', 'mul', 'sqrt', 'log']
 const NOISE_MODES = [
-  { id: 'real', label: 'Real backend (full physics)' },
+  { id: 'real', label: 'Simulator (full physics)' },
   { id: 'phenomenological', label: 'Simulator (fast approx.)' },
-  { id: 'none', label: 'Ideal (no noise)' },
+  { id: 'none', label: 'Simulator (ideal, no noise)' },
 ]
 const SEQS = [
   { id: 'ramsey', label: 'Ramsey fringes' },
@@ -237,12 +237,18 @@ export default function App() {
   const [qrngLoading, setQrngLoading] = useState(false)
   const [qrngBytes, setQrngBytes] = useState(32)         // entropy bytes (>=32 for Ed25519 seed)
   const [qrngCN, setQrngCN] = useState('QSSC-hw-qrng')
-  // FPGA environment selector shown at the top of the FPGA tab:
-  // 'sim' = simulator (averages freely -> cleaner readout), 'real' = hardware
-  // chain (realistic shot noise at the requested averages). Both drive the
-  // same ADF4351 -> J3 -> A1 + 64-channel AD7616 physics; only the noise floor
-  // differs. Toggling it re-runs the sensor captures.
-  const [fpgaMode, setFpgaMode] = useState('sim')
+  // Top-level execution environment, shown on every tab:
+  // 'simulator'  — Aer runs the circuit under the chip's physics; all on-chip
+  //                I/O is modelled by SimulatedFPGA (today's default path).
+  // 'hardware'   — a real Artix-7 board (QSSC_FPGA_PORT) drives the emitters,
+  //                microwave, AD7616 readout and QRNG; Aer still computes the
+  //                gate-circuit bitstring (the chip is a sensor array, not a
+  //                gate-model QC). No board connected -> a clear "no FPGA
+  //                detected" banner, never a silent simulation.
+  // `fpgaMode` is the derived 'sim'/'real' token the sensor endpoints take.
+  const [hwMode, setHwMode] = useState('simulator')
+  const fpgaMode = hwMode === 'hardware' ? 'real' : 'sim'
+  const [probe, setProbe] = useState({ loading: false, data: null })
 
   const refreshFpga = useCallback(() => {
     setFpgaLoading(true); setFpgaErr(null)
@@ -362,6 +368,19 @@ export default function App() {
       depth_mm: currentDepth, n_avg: fieldAvg, seed })
       .then(setCurrent).catch(e => setCurrentErr(e.message)).finally(() => setCurrentLoading(false))
   }, [profile, fpgaMode, currentI, currentOff, currentDepth, fieldAvg, seed])
+
+  // Probe the real FPGA whenever Hardware-real mode is entered, so the
+  // indicator shows a green "FPGA connected — QSSC v1 on /dev/ttyUSB0" or a
+  // red "No FPGA detected" without the user having to run a circuit first.
+  useEffect(() => {
+    if (hwMode !== 'hardware') { setProbe({ loading: false, data: null }); return }
+    let alive = true
+    setProbe({ loading: true, data: null })
+    api.fpgaProbe()
+      .then(d => { if (alive) setProbe({ loading: false, data: d }) })
+      .catch(() => { if (alive) setProbe({ loading: false, data: { connected: false, port: null, id: null } }) })
+    return () => { alive = false }
+  }, [hwMode])
 
   // Auto-capture an initial reading whenever the Sensors tab is opened and
   // whenever the sim/real environment is toggled, so every sensor shows data
@@ -483,10 +502,11 @@ export default function App() {
   const loadScriptToRunner = (s) => { setAlgo('custom'); setCustomCode(s.code); setMainTab('hardware') }
 
   const buildBody = () => {
+    const hardware = hwMode === 'hardware'
     if (algo === 'custom') {
-      return { code: customCode, profile, temperature_k: temperature, seed, shots, noise_mode: noiseMode }
+      return { code: customCode, profile, temperature_k: temperature, seed, shots, noise_mode: noiseMode, hardware }
     }
-    const body = { algorithm: algo, profile, temperature_k: temperature, shots, noise_mode: noiseMode }
+    const body = { algorithm: algo, profile, temperature_k: temperature, shots, noise_mode: noiseMode, hardware }
     // qrand: do NOT send the fixed seed -- the backend uses OS entropy when no
     // seed is present (issue #45), so each UI run yields fresh quantum entropy
     // and a new Ed25519 key. Sending seed=42 made every default qrand run
@@ -555,7 +575,7 @@ export default function App() {
   const runCalibration = async () => {
     setCalRunning(true); setCalErr(null)
     try {
-      const r = await api.calibrationRun({ profile, temperature_k: temperature, seed })
+      const r = await api.calibrationRun({ profile, temperature_k: temperature, seed, hardware: hwMode === 'hardware' })
       setCalRun(r)
     } catch (e) { setCalErr(e.message) }
     finally { setCalRunning(false) }
@@ -633,19 +653,19 @@ export default function App() {
       {mainTab === 'fpga' ? (
         /* ============================= FPGA (control + metrics) ============================= */
         <>
-          {/* environment selector — drives the sensor captures in the Sensors tab too */}
+          {/* environment selector — mirrors the top-level Simulator / Hardware-real switch */}
           <div className="seg-toggle" role="group" aria-label="FPGA environment">
             <span className="seg-label">Environment</span>
-            <button className={`seg ${fpgaMode === 'sim' ? 'on' : ''}`} onClick={() => setFpgaMode('sim')}>
-              <span className="seg-ic">◈</span> Simulation
+            <button className={`seg ${hwMode === 'simulator' ? 'on' : ''}`} onClick={() => setHwMode('simulator')}>
+              <span className="seg-ic">◈</span> Simulator
             </button>
-            <button className={`seg ${fpgaMode === 'real' ? 'on' : ''}`} onClick={() => setFpgaMode('real')}>
+            <button className={`seg hw ${hwMode === 'hardware' ? 'on' : ''}`} onClick={() => setHwMode('hardware')}>
               <span className="seg-ic">⌬</span> Hardware
             </button>
             <span className="seg-note">
-              {fpgaMode === 'sim'
-                ? 'simulator — averages freely, cleaner readout (no shot-noise floor)'
-                : 'ADF4351 + 64-ch AD7616 chain — realistic linewidth + shot noise'}
+              {hwMode === 'simulator'
+                ? 'Aer + SimulatedFPGA — averages freely, cleaner readout (no shot-noise floor)'
+                : 'real ADF4351 + 64-ch AD7616 chain — live emitter / MW / detector / QRNG I/O'}
             </span>
           </div>
 
@@ -920,16 +940,16 @@ export default function App() {
         <>
           <div className="seg-toggle" role="group" aria-label="FPGA environment">
             <span className="seg-label">Environment</span>
-            <button className={`seg ${fpgaMode === 'sim' ? 'on' : ''}`} onClick={() => setFpgaMode('sim')}>
-              <span className="seg-ic">◈</span> Simulation
+            <button className={`seg ${hwMode === 'simulator' ? 'on' : ''}`} onClick={() => setHwMode('simulator')}>
+              <span className="seg-ic">◈</span> Simulator
             </button>
-            <button className={`seg ${fpgaMode === 'real' ? 'on' : ''}`} onClick={() => setFpgaMode('real')}>
+            <button className={`seg hw ${hwMode === 'hardware' ? 'on' : ''}`} onClick={() => setHwMode('hardware')}>
               <span className="seg-ic">⌬</span> Hardware
             </button>
             <span className="seg-note">
-              {fpgaMode === 'sim'
-                ? 'simulator — averages freely, cleaner readout (no shot-noise floor)'
-                : 'ADF4351 + 64-ch AD7616 chain — realistic linewidth + shot noise'}
+              {hwMode === 'simulator'
+                ? 'Aer + SimulatedFPGA — averages freely, cleaner readout (no shot-noise floor)'
+                : 'real ADF4351 + 64-ch AD7616 chain — compass from live ODMR; gyro / lock-in / sequence simulated (pulse-engine pending #58)'}
             </span>
           </div>
 
@@ -958,7 +978,7 @@ export default function App() {
             </div>
 
             <div className="card">
-              <h2><span className="dot" />Ramsey gyroscope</h2>
+              <h2><span className="dot" />Ramsey gyroscope{hwMode === 'hardware' && <span className="pill" style={{ marginLeft: 8, fontSize: 10.5, color: 'var(--dim)' }}>simulated · pulse-engine pending #58</span>}</h2>
               <div className="hint">π/2–T–π/2; the accumulated phase Ω·T is the rotation rate.</div>
               <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
                 <div className="field"><label>Rate (°/s)</label><input type="number" step="any" value={gyroRate} onChange={e => setGyroRate(+e.target.value)} /></div>
@@ -1140,6 +1160,28 @@ export default function App() {
         <>
           {/* ============================= GLOBAL CONTROLS ============================= */}
           <div className="card" style={{ marginBottom: 18 }}>
+            {/* Top-level Simulator / Hardware-real switch. Green when Hardware
+                real is selected. In Hardware-real mode the Aer noise-mode
+                selector is hidden (the real board's physics replace it) and a
+                probe indicator shows whether a board answered the ID handshake. */}
+            <div className="seg-toggle" role="group" aria-label="Execution environment" style={{ marginBottom: 12 }}>
+              <span className="seg-label">Environment</span>
+              <button className={`seg ${hwMode === 'simulator' ? 'on' : ''}`} onClick={() => setHwMode('simulator')}>
+                <span className="seg-ic">◈</span> Simulator
+              </button>
+              <button className={`seg hw ${hwMode === 'hardware' ? 'on' : ''}`} onClick={() => setHwMode('hardware')}>
+                <span className="seg-ic">⌬</span> Hardware
+              </button>
+              <span className="seg-note">
+                {hwMode === 'simulator'
+                  ? 'Aer computes the circuit under the chip physics; on-chip I/O modelled by SimulatedFPGA'
+                  : probe.loading
+                    ? 'probing the board…'
+                    : probe.data && probe.data.connected
+                      ? `FPGA connected — ${(probe.data.id || 'QSSC').split('\n')[0]} on ${probe.data.port}`
+                      : 'No FPGA detected — connect the board and set QSSC_FPGA_PORT, or switch to Simulator'}
+              </span>
+            </div>
             <div className="row" style={{ marginBottom: 0 }}>
               <div className="field">
                 <label>Defect platform</label>
@@ -1151,12 +1193,21 @@ export default function App() {
                 <label>Temperature (K) <span className="muted">· Peltier setpoint 295 K</span></label>
                 <input type="number" min="0.001" max="600" step="any" value={temperature} onChange={e => setTemperature(+e.target.value)} />
               </div>
-              <div className="field">
-                <label>Execution mode</label>
-                <select value={noiseMode} onChange={e => setNoiseMode(e.target.value)}>
-                  {NOISE_MODES.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-                </select>
-              </div>
+              {hwMode === 'simulator' ? (
+                <div className="field">
+                  <label>Execution mode</label>
+                  <select value={noiseMode} onChange={e => setNoiseMode(e.target.value)}>
+                    {NOISE_MODES.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                  </select>
+                </div>
+              ) : (
+                <div className="field">
+                  <label>Execution mode</label>
+                  <select disabled value="hardware">
+                    <option value="hardware">Hardware (board physics)</option>
+                  </select>
+                </div>
+              )}
               <div className="field">
                 <label>RNG seed</label>
                 <input type="number" value={seed} onChange={e => setSeed(+e.target.value)} />
@@ -1169,6 +1220,12 @@ export default function App() {
               <span className="mono" style={{ color: 'var(--brand)' }}>
                 {info.data ? `${info.data.defect} · D ≈ ${info.data.d_ghz} GHz` : 'loading…'}
               </span>
+              {hwMode === 'hardware' && (
+                <span className="mono" style={{ marginLeft: 'auto', fontSize: '11.5px',
+                  color: probe.data && probe.data.connected ? 'var(--ok, #2c8a4a)' : 'var(--bad, #c0392b)' }}>
+                  {probe.loading ? '◌ probing' : probe.data && probe.data.connected ? '● FPGA online' : '○ no FPGA'}
+                </span>
+              )}
             </div>
           </div>
 
@@ -1335,7 +1392,13 @@ export default function App() {
               </button>
               {job && <span className="muted mono" style={{ marginLeft: 12, fontSize: 12 }}>job {job.job_id} · {job.status}</span>}
               {runErr && <div className="error" style={{ marginTop: 10 }}>{runErr}</div>}
-              {result && (
+              {result && result.error === 'no-fpga-detected' && (
+                <div className="error" style={{ marginTop: 10 }}>
+                  No FPGA detected — connect the board and set QSSC_FPGA_PORT, or switch to Simulator.
+                  {result.message ? ` (${result.message})` : ''}
+                </div>
+              )}
+              {result && !result.error && (
                 <div style={{ marginTop: 16 }}>
                   <div className="kv">
                     <span className="k">Algorithm</span><span className="v">{result.algorithm}</span>

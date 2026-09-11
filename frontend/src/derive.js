@@ -151,11 +151,16 @@ function deriveShorFamily(algo, result) {
     { k: `Fraction(φ).limit_denominator(${n})`, v: fracNum != null ? `${fracNum}/${r}` : '—' },
     { k: 'Period r = denominator', v: `${r}` },
   ]
+  if (a != null) {
+    steps.push({ k: 'Coprime base a (random, gcd(a,N)=1)', v: `${a}` })
+  }
   if (isFactoring && a != null && n != null && r) {
     const half = r / 2
     if (r % 2 === 0) {
       const am = modpow(a, half, n)
       const p = gcd(am - 1, n), q = gcd(am + 1, n)
+      steps.push({ k: `Halve the period: r/2 = ${r}/2`, v: `${half}` })
+      steps.push({ k: `a^(r/2) = ${a}^${half}`, v: `= ${a}^${half}` })
       steps.push({ k: `a^(r/2) mod N = ${a}^${half} mod ${n}`, v: `${am}` })
       steps.push({ k: 'Factors = gcd(a^(r/2)−1, N), gcd(a^(r/2)+1, N)', v: `gcd(${am - 1},${n})=${p}, gcd(${am + 1},${n})=${q}` })
       const factors = result.factors
@@ -164,7 +169,7 @@ function deriveShorFamily(algo, result) {
       steps.push({ k: 'r is odd', v: `r=${r} is odd → a^(r/2) is not integer; retry with another coprime base a` })
     }
   } else if (!isFactoring) {
-    steps.push({ k: 'Order check a^r mod N', v: a != null && n != null ? `${modpow(a, r, n)} (must be 1)` : '—' })
+    steps.push({ k: 'Order check a^r mod N', v: a != null && n != null ? `${a}^${r} mod ${n} = ${modpow(a, r, n)} (must be 1)` : '—' })
     steps.push({ k: 'Result', v: `order of ${a} mod ${n} is r = ${r}` })
   }
 

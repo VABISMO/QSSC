@@ -23,7 +23,7 @@ from .simulator import (
 from .backend import (
     QSSCBackend, QSSCJob, FPGAConnection, EmitterController, DetectorInterface,
     MicrowaveController, CalibrationManager, QubitReadoutProcessor,
-    make_connection,
+    make_connection, NoFPGADetected,
 )
 from .circuits import (
     is_prime, select_coprime, mod_mult_gate, create_period_finding_circuit,
@@ -45,7 +45,7 @@ __all__ = [
     "estimate_coherence_xy8",
     "QSSCBackend", "QSSCJob", "FPGAConnection", "EmitterController",
     "DetectorInterface", "MicrowaveController", "CalibrationManager",
-    "QubitReadoutProcessor", "make_connection",
+    "QubitReadoutProcessor", "make_connection", "NoFPGADetected",
     "is_prime", "select_coprime", "mod_mult_gate", "create_period_finding_circuit",
     "postprocess_period", "create_shor_circuit", "create_qft_nos_circuit",
     "postprocess_period_swapless", "create_math_circuit",

@@ -690,6 +690,10 @@ export function CalibrationPanel({ profile, temperature, seed, run, running, res
           </div>
           <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
             At {result.temperature_k} K → T₁ {result.t1_ms} ms · T₂ {result.t2_us} µs
+            {result.source && <span> · <span className="mono" style={{
+              color: result.source === 'hardware' ? 'var(--ok, #2c8a4a)' : 'var(--brand)' }}>
+              {result.source === 'hardware' ? 'hardware I/O' : 'simulator'}
+            </span></span>}
           </div>
           {perPin && perPin.length > 0 && (
             <button type="button" className="ghost" style={{ marginTop: 12 }}
