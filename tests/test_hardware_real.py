@@ -198,9 +198,11 @@ def test_calibration_simulator_path_unchanged(monkeypatch):
     assert "error" not in body
     assert body.get("source") == "simulator"
     assert body.get("io") == "simulated"
+    assert body.get("stage4_source") == "simulated"
     # 4 stages: detector scan, grid align, D+linewidth fit, per-pin resonance+T2
     assert len(body["stages"]) == 4
     assert body["stages"][3]["pins_measured"] >= 1
+    assert body["stages"][3]["source"] == "simulated"
     assert len(body.get("per_pin", [])) >= 1
 
 

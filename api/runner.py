@@ -49,6 +49,14 @@ def _make_fpga(profile: str, temperature_k: float, seed, hardware: bool):
     constructor runs the ``ID`` board-present probe and raises
     :class:`NoFPGADetected` if no flashed board answers, so the API surfaces a
     clear "no FPGA detected" result instead of silently simulating.
+
+    The real connection is **cached per (port, profile, temperature, seed) and
+    reused across runs** within this process (the RQ worker). Re-opening
+    /dev/ttyUSB0 on every run without closing the previous handle leaks the
+    port -- the OS refuses a second open while the first is unclosed, which
+    surfaced as a spurious NoFPGADetected on the 2nd+ hardware run even with
+    the board plugged in. A config change (port/profile/temperature/seed)
+    re-opens; a failed open is not cached so the next run retries.
     """
     if not hardware:
         # Attach a SimulatedFPGA so the on-chip readout path fires per run --
@@ -66,8 +74,19 @@ def _make_fpga(profile: str, temperature_k: float, seed, hardware: bool):
     # Real board: FPGAConnection.__init__ opens the port AND probes ``ID``.
     # NoFPGADetected propagates up to the API, which returns the
     # no-fpga-detected body for the frontend banner.
-    return make_connection(port=port, profile=profile,
-                           temperature_k=temperature_k, seed=seed)
+    key = (port, profile, float(temperature_k), int(seed))
+    global _HW_FPGA, _HW_FPGA_KEY
+    if _HW_FPGA is not None and _HW_FPGA_KEY == key:
+        return _HW_FPGA
+    _HW_FPGA = make_connection(port=port, profile=profile,
+                               temperature_k=temperature_k, seed=seed)
+    _HW_FPGA_KEY = key
+    return _HW_FPGA
+
+
+# Cached real FPGAConnection for the worker process (see _make_fpga).
+_HW_FPGA = None
+_HW_FPGA_KEY = None
 
 
 def _source_label(fpga) -> str:
