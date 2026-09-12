@@ -727,15 +727,15 @@ export function CalibrationPanel({ profile, temperature, seed, run, running, res
             Qubits found (measured from the ODMR spectrum{qsum.gradient_applied ? ` at gradient ${qsum.gradient_code}` : ', no gradient'})
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, fontSize: 13 }}>
-            <span><b className="mono" style={{ fontSize: 18, color: 'var(--ok, #2c8a4a)' }}>{qsum.qubits_per_pixel}</b> qubits/pixel</span>
+            <span><b className="mono" style={{ fontSize: 18, color: 'var(--ok, #2c8a4a)' }}>{result.register_width}</b> qubits/pixel (register width)</span>
             <span>avg <b className="mono">{qsum.avg_qubits_per_pixel}</b>/pixel</span>
-            <span><b className="mono" style={{ fontSize: 18 }}>{qsum.total_qubits}</b> total across {qsum.n_pixels} pixels</span>
+            <span><b className="mono" style={{ fontSize: 22, color: 'var(--brand)', textShadow: '0 0 12px rgba(34,211,238,0.45)' }}>{qsum.total_qubits}</b> total across {qsum.n_pixels} pixels</span>
             <span>mode: <span className={`tag ${qsum.pixel_mode === 'register' ? 'ok' : 'bad'}`}>{qsum.pixel_mode}</span></span>
             {qsum.gradient_applied && (
               <span className="muted">coil {qsum.coil_current_a} A · spread {qsum.gradient_spread_mhz} MHz</span>
             )}
           </div>
-          {qsum.qubits_per_pixel && qsum.qubits_per_pixel.length > 0 && (
+          {Array.isArray(qsum.qubits_per_pixel) && qsum.qubits_per_pixel.length > 0 && (
             <QubitPixelGrid counts={qsum.qubits_per_pixel} cols={8} />
           )}
         </div>
