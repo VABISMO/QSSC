@@ -12,7 +12,7 @@ import os
 import time
 import math
 from collections import defaultdict, deque
-from typing import Optional
+from typing import List, Optional
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request
@@ -29,7 +29,7 @@ from qssc import (
     DetectorInterface, MicrowaveController, EmitterController,
     decompose_odmr, resolvable_register_width,
 )
-from qssc.simulator import DETECT_THRESHOLD
+from qssc.simulator import DETECT_THRESHOLD, BRIGHT_CODE
 from qssc.backend import _fit_t2_from_codes
 from qssc.protocol import (
     protocol_as_dict, protocol_summary, protocol_platforms,
@@ -120,6 +120,12 @@ class RunRequest(BaseModel):
     # the circuit runs against that many within-pixel register qubits instead of
     # the nominal default, closing the calibration -> circuit loop. None = default.
     n_nv_per_pixel: Optional[int] = Field(None, ge=1, le=64)
+    # Invention 5 calibration -> circuit loop: the applied gradient (MHz/um) and
+    # the MEASURED resolvable ODMR line centres (Hz) from the calibration
+    # response. When supplied the backend builds the register on the real
+    # addressed frequencies at that gradient, not the synthetic 6 MHz grid.
+    gradient_mhz_per_um: float = Field(0.0, ge=0.0, le=100.0)
+    register_line_freqs_hz: Optional[List[int]] = None
 
 
 class CustomCircuitRequest(BaseModel):
@@ -136,6 +142,12 @@ class CustomCircuitRequest(BaseModel):
     # circuits wider than the backend's SIM_MAX_QUBITS (28) are rejected with a
     # clear error rather than silently faked. See qssc.backend.SIM_MAX_QUBITS.
     max_qubits: int = Field(20, ge=1, le=20)
+    # Calibration -> circuit loop (Invention 5): measured register width, the
+    # applied gradient, and the measured ODMR line centres. When supplied the
+    # custom circuit runs on the calibrated register, not the nominal default.
+    n_nv_per_pixel: Optional[int] = Field(None, ge=1, le=64)
+    gradient_mhz_per_um: float = Field(0.0, ge=0.0, le=100.0)
+    register_line_freqs_hz: Optional[List[int]] = None
 
 
 class ParallelRunRequest(BaseModel):
@@ -166,18 +178,23 @@ class ParallelRunRequest(BaseModel):
 
 def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
              n_nv_per_pixel: Optional[int] = None,
-             gradient_mhz_per_um: float = 0.0) -> QSSCBackend:
+             gradient_mhz_per_um: float = 0.0,
+             register_line_freqs_hz: Optional[list] = None) -> QSSCBackend:
     # Register mode: the backend simulates ONE pixel's NV register (the circuit
     # qubits, within-pixel all-to-all dipole); the 64-pixel hardware die is the
     # backend's separate chip view (see QSSCBackend). ``n_nv_per_pixel`` is the
     # MEASURED resolvable ODMR line count from the calibration when supplied;
-    # None falls back to the nominal default.
+    # None falls back to the nominal default. ``register_line_freqs_hz`` (the
+    # measured line CENTRES) + ``gradient_mhz_per_um`` close the calibration ->
+    # circuit loop: the register sits on the real addressed frequencies at the
+    # applied gradient, not the synthetic 6 MHz grid.
     from qssc.backend import N_NV_PER_PIXEL
     return QSSCBackend(profile=profile, seed=seed,
                        temperature_k=temperature_k, noise_mode=noise_mode,
                        n_nv_per_pixel=(n_nv_per_pixel if n_nv_per_pixel is not None
                                        else N_NV_PER_PIXEL),
-                       gradient_mhz_per_um=gradient_mhz_per_um)
+                       gradient_mhz_per_um=gradient_mhz_per_um,
+                       register_line_freqs_hz=register_line_freqs_hz)
 
 
 def _req_dict(model) -> dict:
@@ -548,6 +565,9 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
     # line spread per micron of pixel position; 0 = no gradient (ensemble).
     grad_mhz_per_um, coil_current_a, grad_code = _gradient_from_code(gradient_code)
     grad_spread_mhz = grad_mhz_per_um * GRAD_PIXEL_UM
+    # Default: the sim path always "applies" the gradient via the ODMR model.
+    # The hardware path overrides this with the real SET_GRADIENT result (G6).
+    gradient_applied_ok = grad_code > 0
 
     # Real-hardware path --------------------------------------------------
     if hardware:
@@ -588,11 +608,17 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
         # Stage 3 — real ODMR sweep + fit D (same doublet-midpoint fit as sim).
         # Invention 5: program the gradient coil BEFORE the sweep so the ODMR
         # lines spread by grad_spread_mhz; widen the sweep span to cover them.
+        # Track whether the board actually accepted the gradient (G6): a failed
+        # write must not abort the sweep, but the response must NOT claim the
+        # gradient was applied when it was not -- the register-width measurement
+        # is only valid at the applied gradient.
+        gradient_applied_ok = False
         if grad_code > 0:
             try:
                 fpga.send_command(f"SET_GRADIENT {grad_code}")
+                gradient_applied_ok = True
             except Exception:
-                pass  # a failed gradient write must not abort the sweep
+                gradient_applied_ok = False  # do not abort the sweep
         f0 = prof.d_ghz
         span = max(0.08, abs(prof.hyperfine_coupling) / 1e9 * prof.n_equivalent_nuclei * 1.15 + 0.03)
         span = max(span, grad_spread_mhz / 1e3 + 0.04)
@@ -702,8 +728,25 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
     seq_span_ns = max(2 * t2 * 1e9, 4000)
     seq_t_step = max(10, int(round(seq_span_ns / n_seq)))
     per_pin = []
+    # Per-pixel qubit count (G5/F1): the gradient's resolvable register_width is
+    # the UPPER BOUND on qubits/pixel (a stone+gradient property, measured by the
+    # representative ODMR sweep). Each pixel's ACTUAL count is min(its NV count,
+    # register_width): the per-pixel NV count varies with the detector brightness
+    # (a proxy for microdiamond count -- "count+size per hole"), and an
+    # unusable/empty pixel (no diamond detected) resolves 0. This produces a real
+    # 64-element array for the 8x8 per-pixel grid rather than one scalar repeated
+    # 64 times. A pixel with 2 microdiamonds at a gradient that can resolve 5 ->
+    # 2 qubits; a pixel with 10 -> 5 (capped by the gradient).
+    qubits_per_pixel = []
     for s in sites:
         measured_hz = s.frequency + float(rng.normal(0, meas_sigma_hz))
+        if s.usable:
+            brightness = float(np.clip(s.intensity / BRIGHT_CODE, 0.0, 1.0))
+            n_nv_pixel = max(1, int(round(brightness * n_nv_per_pixel)))
+            n_qubits_pixel = min(n_nv_pixel, register_width)
+        else:
+            n_qubits_pixel = 0
+        qubits_per_pixel.append(n_qubits_pixel)
         if hardware:
             # Measure T2 (Hahn) and T2* (Ramsey) from real ADC codes.
             try:
@@ -731,11 +774,12 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
             # The physical pin-header pin for this pixel (P1 pin-scaffold: one
             # 2.54 mm pin per pixel, pin == pixel == qubit_id 0..63).
             "pin": s.qubit_id,
-            # How many qubits this pixel's NV register resolves at the applied
-            # gradient (the MEASURED register width, same for every pixel since
-            # the sweep is one representative pixel -- a per-pixel ODMR sweep is
-            # a later refinement).
-            "n_qubits": register_width,
+            # How many qubits THIS pixel's NV register resolves at the applied
+            # gradient = min(per-pixel NV count, register_width). register_width
+            # is the gradient's resolvable upper bound (one representative ODMR
+            # sweep); the per-pixel NV count varies with detector brightness, so
+            # this is a real per-pixel measurement, not a repeated scalar.
+            "n_qubits": n_qubits_pixel,
             "resonance_ghz": round(measured_hz / 1e9, 6),
             "detuning_mhz": round((measured_hz - zfs_hz) / 1e6, 4),
             "t2_us": round(t2_meas * 1e6, 1),           # measured Hahn-echo T2
@@ -756,7 +800,11 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
     # ensemble collapses to one line -> 1 qubit/pixel (ensemble mode); with a
     # strong enough gradient the lines resolve -> N qubits/pixel (register mode).
     n_pixels = grid * grid
-    total_qubits = register_width * n_pixels
+    # Real per-pixel average + total (F3): sum the actual 64-element array, not
+    # register_width * n_pixels (which would assume every pixel is populated at
+    # the cap). Empty/low-brightness pixels lower the real average.
+    avg_qubits_per_pixel = float(np.mean(qubits_per_pixel)) if qubits_per_pixel else 0.0
+    total_qubits = int(np.sum(qubits_per_pixel))
 
     return {
         "profile": prof.short, "temperature_k": temperature_k,
@@ -792,17 +840,21 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
         # The headline result: how many qubits the calibration found.
         "qubit_summary": {
             "qubits_per_pixel": register_width,
-            "avg_qubits_per_pixel": register_width,
+            "avg_qubits_per_pixel": round(avg_qubits_per_pixel, 3),
             "total_qubits": total_qubits,
             "n_pixels": n_pixels,
             "pixel_mode": pixel_mode_recommendation,
             "predicted_qubits_per_pixel": predicted_width,
-            "gradient_applied": grad_code > 0,
+            "gradient_applied": bool(gradient_applied_ok),
             "gradient_code": grad_code,
             "gradient_mhz_per_um": round(grad_mhz_per_um, 5),
             "gradient_spread_mhz": round(grad_spread_mhz, 3),
             "coil_current_a": round(coil_current_a, 4),
             "line_freqs_hz": line_freqs_hz,
+            # The 64-element per-pixel qubit-count array (row-major, qubit_id
+            # 0..63) for the 8x8 calibration grid/heatmap. Each entry is the
+            # MEASURED qubit count for that pixel (0 = no diamond detected).
+            "qubits_per_pixel": qubits_per_pixel,
         },
         "per_pin": per_pin,
         "d_fit_ghz": round(d_fit, 5),

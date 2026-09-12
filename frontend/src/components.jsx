@@ -636,6 +636,51 @@ export function SignalChart({ data, error }) {
 // which is shown in a modal -- the map only exists once the calibration has
 // actually swept each pin's ODMR dip, never before.
 // ---------------------------------------------------------------------------
+// 8×8 per-pixel qubit-count heatmap for the calibration result. Each cell is
+// one chip pixel (row-major, qubit_id 0..63); the fill intensity encodes the
+// MEASURED qubit count for that pixel (0 = no diamond detected -> dark cell).
+function QubitPixelGrid({ counts, cols = 8 }) {
+  const max = Math.max(1, ...counts)
+  const rows = Math.ceil(counts.length / cols)
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ fontSize: 12.5, marginBottom: 6, color: 'var(--brand)' }}>
+        Per-pixel qubit scan ({counts.length} pixels · {cols}×{rows} grid)
+      </div>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: `repeat(${cols}, 1fr)`,
+        gap: 3,
+        maxWidth: 360,
+      }}>
+        {counts.map((n, i) => {
+          const f = n / max
+          const empty = n === 0
+          return (
+            <div key={i} title={`pixel ${i} (r${Math.floor(i / cols)} c${i % cols}): ${n} qubit${n === 1 ? '' : 's'}`}
+              style={{
+                aspectRatio: '1 / 1',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 11, fontFamily: 'var(--mono, monospace)',
+                color: empty ? 'var(--muted)' : 'var(--bg, #061018)',
+                background: empty
+                  ? 'var(--surface-2, rgba(255,255,255,0.04))'
+                  : `rgba(44, 138, 74, ${0.25 + 0.75 * f})`,
+                border: '1px solid var(--border, rgba(255,255,255,0.1))',
+                borderRadius: 4,
+              }}>
+              {n}
+            </div>
+          )
+        })}
+      </div>
+      <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>
+        0 = no diamond detected · green intensity ∝ qubits resolved at the applied gradient
+      </div>
+    </div>
+  )
+}
+
 export function CalibrationPanel({ profile, temperature, seed, run, running, result, err }) {
   const [resOpen, setResOpen] = useState(false)
   const [gradCode, setGradCode] = useState(1803)  // MCP4921 DAC code (0..4095); 1803 ≈ 2.2 A addressing gradient
@@ -690,6 +735,9 @@ export function CalibrationPanel({ profile, temperature, seed, run, running, res
               <span className="muted">coil {qsum.coil_current_a} A · spread {qsum.gradient_spread_mhz} MHz</span>
             )}
           </div>
+          {qsum.qubits_per_pixel && qsum.qubits_per_pixel.length > 0 && (
+            <QubitPixelGrid counts={qsum.qubits_per_pixel} cols={8} />
+          )}
         </div>
       )}
       {result && result.stages && (

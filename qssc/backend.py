@@ -649,7 +649,8 @@ class QSSCBackend(BackendV2):
                  register_nv_spacing_nm: float = 2.75,
                  gradient_mhz_per_um: float = 0.0,
                  pixel_size_um: float = 200.0,
-                 nuclear_memory: bool = False):
+                 nuclear_memory: bool = False,
+                 register_line_freqs_hz: Optional[Sequence[float]] = None):
         """noise_mode: 'real' (default, full Aer thermal+depolarizing+readout
         noise from the defect physics) | 'phenomenological' (fast analytic
         approximation) | 'none' (ideal). 'aer' is accepted as an alias of 'real'.
@@ -664,6 +665,12 @@ class QSSCBackend(BackendV2):
         microdiamond; the 2q gate time comes from the dipole-dipole CZ at that
         spacing (qssc.dipole), ~200 ns at 2.75 nm -- matching the defect
         profile's gate_2q_ns target.
+        ``register_line_freqs_hz`` (Invention 5) are the MEASURED resolvable ODMR
+        line centres from the calibration's ``decompose_odmr``. When supplied
+        they override both ``n_nv_per_pixel`` (the measured line count IS the
+        register width N) and the synthetic 6 MHz frequency grid -- the register
+        sits on the real addressed frequencies, closing the calibration -> circuit
+        loop. None falls back to the nominal width + uniform grid.
         """
         super().__init__(name="qssc_simulator")
         prof = get_profile(profile) if isinstance(profile, str) else profile
@@ -688,7 +695,8 @@ class QSSCBackend(BackendV2):
                                register=True, temperature_k=temperature_k,
                                rng=np.random.default_rng(seed),
                                gradient_mhz_per_um=gradient_mhz_per_um,
-                               pixel_size_um=pixel_size_um)
+                               pixel_size_um=pixel_size_um,
+                               register_line_freqs_hz=register_line_freqs_hz)
             self._register_mode = True
             # the gradient may have capped the register below n_nv_per_pixel;
             # re-read the actual width so describe()/Target stay truthful.

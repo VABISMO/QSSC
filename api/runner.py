@@ -33,7 +33,9 @@ from qssc.qkd import simulate_bb84
 
 def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
              hardware: bool = False,
-             n_nv_per_pixel: Optional[int] = None) -> QSSCBackend:
+             n_nv_per_pixel: Optional[int] = None,
+             gradient_mhz_per_um: float = 0.0,
+             register_line_freqs_hz: Optional[list] = None) -> QSSCBackend:
     # Register mode: the backend simulates ONE pixel's NV register (the circuit
     # qubits, within-pixel all-to-all dipole); the 64-pixel hardware die is the
     # backend's separate chip view. The register auto-grows to fit a wider
@@ -41,14 +43,19 @@ def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
     # here would make the 64 pixels a (cross-pixel, unphysical) K_64.
     # ``n_nv_per_pixel`` is the MEASURED resolvable ODMR line count from the
     # calibration (decompose_odmr at the applied gradient) when supplied; None
-    # falls back to the nominal default.
+    # falls back to the nominal default. ``register_line_freqs_hz`` (the measured
+    # line CENTRES) and ``gradient_mhz_per_um`` close the calibration -> circuit
+    # loop: the register sits on the real addressed frequencies at the applied
+    # gradient, not the synthetic 6 MHz grid.
     from qssc.backend import N_NV_PER_PIXEL
     fpga = _make_fpga(profile, temperature_k, seed, hardware)
     return QSSCBackend(profile=profile, seed=seed,
                        temperature_k=temperature_k, noise_mode=noise_mode,
                        hardware=fpga,
                        n_nv_per_pixel=(n_nv_per_pixel if n_nv_per_pixel is not None
-                                       else N_NV_PER_PIXEL))
+                                       else N_NV_PER_PIXEL),
+                       gradient_mhz_per_um=gradient_mhz_per_um,
+                       register_line_freqs_hz=register_line_freqs_hz)
 
 
 def _make_fpga(profile: str, temperature_k: float, seed, hardware: bool):
@@ -128,9 +135,13 @@ def run_circuit(req: dict) -> dict:
     hardware = bool(req.get("hardware", False))
     algo = str(req.get("algorithm", "shor")).lower()
     n_nv = req.get("n_nv_per_pixel")  # measured register width from calibration
+    grad = float(req.get("gradient_mhz_per_um", 0.0) or 0.0)
+    line_freqs = req.get("register_line_freqs_hz")  # measured ODMR line centres
     try:
         b = _backend(profile, temperature_k, seed, noise_mode, hardware=hardware,
-                     n_nv_per_pixel=(int(n_nv) if n_nv is not None else None))
+                     n_nv_per_pixel=(int(n_nv) if n_nv is not None else None),
+                     gradient_mhz_per_um=grad,
+                     register_line_freqs_hz=line_freqs)
     except NoFPGADetected as exc:
         return _no_fpga_result(exc)
     src = _source_label(b.hardware)
@@ -766,10 +777,14 @@ def run_custom(req: dict) -> dict:
         return {"error": str(exc)}
     profile = req.get("profile", "NV")
     hardware = bool(req.get("hardware", False))
+    grad = float(req.get("gradient_mhz_per_um", 0.0) or 0.0)
+    line_freqs = req.get("register_line_freqs_hz")
     try:
         b = _backend(profile, float(req.get("temperature_k", 300.0)),
                      int(req.get("seed", 42)), req.get("noise_mode", "real"),
-                     hardware=hardware)
+                     hardware=hardware,
+                     gradient_mhz_per_um=grad,
+                     register_line_freqs_hz=line_freqs)
     except NoFPGADetected as exc:
         return _no_fpga_result(exc)
     try:

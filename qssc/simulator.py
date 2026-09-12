@@ -36,7 +36,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, asdict
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -659,6 +659,7 @@ def auto_align(profile: DefectProfile | str = "NV",
                 register_line_spacing_hz: float = 6.0e6,
                 gradient_mhz_per_um: float = 0.0,
                 pixel_size_um: float = 200.0,
+                register_line_freqs_hz: Optional[Sequence[float]] = None,
                 ) -> List[QubitSite]:
     """Calibrate the chip and build the qubit-site list.
 
@@ -717,7 +718,15 @@ def auto_align(profile: DefectProfile | str = "NV",
         sites: List[QubitSite] = []
         n = max(1, int(n_nv_per_pixel))
         line_spacing_hz = register_line_spacing_hz
-        if gradient_mhz_per_um > 0.0:
+        # MEASURED ODMR line centres (from decompose_odmr in the calibration)
+        # override both the uniform grid and the gradient-derived spacing: the
+        # register sits on the real resolvable frequency positions, and the
+        # measured line count IS the register width N (it overrides
+        # n_nv_per_pixel). Priority: measured lines > gradient > uniform 6 MHz.
+        measured_freqs = list(register_line_freqs_hz) if register_line_freqs_hz else None
+        if measured_freqs is not None:
+            n = max(1, len(measured_freqs))
+        if gradient_mhz_per_um > 0.0 and measured_freqs is None:
             linewidth_mhz = prof.odmr_linewidth_hz * 1e-6
             # the gradient shifts the ensemble ODMR line by gradient*d MHz per um
             # of spatial offset; across the pixel the spread is gradient*pixel.
@@ -737,7 +746,13 @@ def auto_align(profile: DefectProfile | str = "NV",
             spread = prof.frequency_detuning_spread_hz
             jitter = (float(rng.normal(0.0, spread))
                       if spread > 0 else 0.0)
-            detune = (k - (n - 1) / 2.0) * line_spacing_hz + jitter
+            if measured_freqs is not None:
+                # measured ODMR line centre -> detuning vs ZFS (the MW address).
+                # A small jitter models single-shot fit uncertainty; the line
+                # CENTRE is the measured value, not a synthetic grid point.
+                detune = float(measured_freqs[k]) - prof.zero_field_splitting + jitter
+            else:
+                detune = (k - (n - 1) / 2.0) * line_spacing_hz + jitter
             freq = prof.zero_field_splitting + detune
             sites.append(QubitSite(
                 qubit_id=k, row=0, col=0,

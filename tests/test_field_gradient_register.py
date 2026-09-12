@@ -83,3 +83,63 @@ def test_flat_backend_unaffected():
     b = QSSCBackend("NV", seed=42, noise_mode="real", gradient_mhz_per_um=0.0)
     assert b.n_nv_per_pixel == N_NV_PER_PIXEL
     assert b.target.num_qubits == N_NV_PER_PIXEL
+
+def test_measured_line_freqs_override_width_and_grid():
+    """register_line_freqs_hz (the calibration's decompose_odmr line centres)
+    override both the nominal width and the synthetic 6 MHz grid: the register
+    width = the measured line count, and each NV sits at its measured detuning.
+    Priority: measured lines > gradient > uniform 6 MHz."""
+    prof = get_profile("NV")
+    zfs = prof.zero_field_splitting
+    meas = [zfs - 6e6, zfs, zfs + 6e6]  # 3 measured resolvable lines
+    b = QSSCBackend("NV", seed=2, noise_mode="real",
+                    n_nv_per_pixel=N_NV_PER_PIXEL,  # request 10 -> measured 3 wins
+                    register_line_freqs_hz=meas)
+    assert b.n_nv_per_pixel == 3, "measured line count must override n_nv_per_pixel"
+    assert b.target.num_qubits == 3
+    detunes = sorted(round((s.frequency - zfs) / 1e6, 1) for s in b.sites)
+    # the three lines sit at the measured detunings (-6, 0, +6 MHz), each within
+    # the per-NV inhomogeneous jitter (frequency_detuning_spread_hz).
+    assert detunes[0] < -3.0 and detunes[2] > 3.0, f"lines not at measured grid: {detunes}"
+
+
+def test_calibration_per_pixel_qubit_array():
+    """The calibration response carries a real 64-element qubits_per_pixel array
+    (one MEASURED count per pixel) plus a true average + total, not a scalar
+    repeated 64 times. Empty/unusable pixels contribute 0."""
+    import numpy as np
+    from api.main import calibration_run
+    r = calibration_run(profile="NV", seed=7, grid=8, gradient_code=1803,
+                        n_nv_per_pixel=10)
+    qs = r["qubit_summary"]
+    arr = qs["qubits_per_pixel"]
+    assert len(arr) == 64, f"per-pixel array must be 64 entries, got {len(arr)}"
+    assert all(isinstance(n, int) for n in arr)
+    # avg + total are real statistics of the array, not register_width * n_pixels
+    assert qs["avg_qubits_per_pixel"] == round(float(np.mean(arr)), 3)
+    assert qs["total_qubits"] == int(np.sum(arr))
+    # per_pin n_qubits matches the array (per-pixel, not a repeated scalar)
+    assert [p["n_qubits"] for p in r["per_pin"]] == arr
+    # at the strong gradient the resolvable cap is > 1 -> register mode
+    assert qs["pixel_mode"] == "register"
+    # with a gradient requested in sim, gradient_applied is True
+    assert qs["gradient_applied"] is True
+
+
+def test_calibration_no_gradient_predicted_one():
+    """With gradient_code=0 no gradient is applied (gradient_applied False) and
+    the physics prediction is 1 resolvable line (no gradient to spread them).
+    The MEASURED register_width may still be >1 if decompose_odmr resolves the
+    intrinsic hyperfine sub-structure -- that is the truthful measured count, not
+    a bug. The array + statistics must stay consistent either way."""
+    import numpy as np
+    from api.main import calibration_run
+    r = calibration_run(profile="NV", seed=11, grid=8, gradient_code=0)
+    qs = r["qubit_summary"]
+    assert qs["gradient_applied"] is False
+    assert qs["predicted_qubits_per_pixel"] == 1
+    arr = qs["qubits_per_pixel"]
+    assert len(arr) == 64
+    assert qs["avg_qubits_per_pixel"] == round(float(np.mean(arr)), 3)
+    assert qs["total_qubits"] == int(np.sum(arr))
+    assert [p["n_qubits"] for p in r["per_pin"]] == arr
