@@ -820,7 +820,21 @@ def calibrate_array_endpoint(req: CalibrateArrayRequest, request: Request = None
             f_start = d_khz - span_khz
             f_stop = d_khz + span_khz
             n = int(req.n_points)
-            matrix = fpga.run_all_odmr(f_start, f_stop, n)
+            # Invention 7: N-shot lock-in integration. Average N independent
+            # RUN_ALL_ODMR sweeps -> per-point readout noise drops by sqrt(N)
+            # (uncorrelated thermal/Johnson noise), so dimmer lone-NV ODMR bins
+            # clear the min_snr bar and the MEASURED width rises. Cost is
+            # measurement time xN, not silicon. integration_shots=1 -> one sweep
+            # (unchanged). Each sweep is a single-shot (n,64) matrix.
+            n_shots = max(1, int(req.integration_shots))
+            if n_shots > 1:
+                acc = None
+                for _ in range(n_shots):
+                    m = np.asarray(fpga.run_all_odmr(f_start, f_stop, n), dtype=float)
+                    acc = m if acc is None else acc + m
+                matrix = (acc / n_shots).astype(np.int32)
+            else:
+                matrix = fpga.run_all_odmr(f_start, f_stop, n)
             freqs_ghz = np.linspace(f_start * 1e3, f_stop * 1e3, n) / 1e9
             calib = calibrate_array_from_codes(
                 matrix, freqs_ghz, prof,

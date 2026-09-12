@@ -229,3 +229,61 @@ def test_calibrate_array_endpoint_sub_pixel_reports_channels():
     assert jp["per_pixel_widths"] == js["per_pixel_widths"]
     # per-pixel sub-pixel positions are populated in the sim path
     assert sum(1 for p in js["pixels"] if p["sub_pixel_position"] is not None) == 64
+
+
+def test_calibrate_array_endpoint_real_path_averages_n_sweeps():
+    """Invention 7 real-hardware path: with source=real and integration_shots=N,
+    the endpoint must call run_all_odmr N times and average (noise/sqrt(N)), not
+    call it once while recording integration_shots=N. A spy FPGA counts calls and
+    returns single-shot SimulatedFPGA-style matrices so the averaging is observable."""
+    from fastapi.testclient import TestClient
+    import api.main as api_main
+    from api.main import app
+    from qssc.simulator import SimulatedFPGA
+
+    # A spy that wraps a real SimulatedFPGA (single-shot, integration_shots=1 so
+    # each call is an independent noisy sweep) and counts run_all_odmr calls.
+    base_fpga = SimulatedFPGA("NV", seed=7)
+    for q in range(64):
+        base_fpga.emitter_gs[q] = 4095
+    calls = {"n": 0}
+
+    class _SpyFPGA:
+        def __getattr__(self, name):
+            return getattr(base_fpga, name)
+
+        def run_all_odmr(self, f_start, f_stop, n):
+            calls["n"] += 1
+            return base_fpga.run_all_odmr(f_start, f_stop, n)
+
+    # Bypass _fpga()'s cache so the endpoint uses our spy on the real path.
+    saved = api_main._FPGA
+    api_main._FPGA = _SpyFPGA()
+    try:
+        c = TestClient(app)
+        r = c.post("/api/circuit/calibrate-array", json={
+            "source": "real", "integration_shots": 4, "seed": 42,
+            "gradient_mhz_per_um": 1.0, "n_points": 32,
+        })
+    finally:
+        api_main._FPGA = saved
+    assert r.status_code == 200, r.text
+    j = r.json()
+    # the endpoint actually ran 4 sweeps and averaged them (Invention 7 real path)
+    assert calls["n"] == 4
+    assert j["integration_shots"] == 4
+    assert j["source"] == "real"
+
+    # Averaging lowers noise: the 4-shot real path should detect >= as many lines
+    # as a single-shot real path (same seed/gradient), never fewer.
+    api_main._FPGA = _SpyFPGA()
+    calls["n"] = 0
+    try:
+        r1 = c.post("/api/circuit/calibrate-array", json={
+            "source": "real", "integration_shots": 1, "seed": 42,
+            "gradient_mhz_per_um": 1.0, "n_points": 32,
+        })
+    finally:
+        api_main._FPGA = saved
+    assert r1.status_code == 200 and calls["n"] == 1
+    assert sum(j["per_pixel_widths"]) >= sum(r1.json()["per_pixel_widths"])
