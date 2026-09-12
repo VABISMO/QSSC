@@ -67,9 +67,9 @@ const SEQS = [
 // = the number of key-exchange rounds.
 const QUBIT_CFG = {
   custom:  null,                                  // custom circuit defines its own width
-  bell:    { min: 2, max: 64, step: 1, def: 4,  label: 'Qubits n',         hint: 'GHZ chain on n qubits (H + CNOT ladder) — full 64-site chip via MPS' },
-  qrand:   { min: 2, max: 64, step: 1, def: 8,  label: 'Qubits n',         hint: 'n qubits prepared in |+⟩ → von-Neumann-extracted entropy — full 64-site chip via MPS' },
-  qft:     { min: 2, max: 64, step: 1, def: 4,  label: 'Qubits n',         hint: 'QFT of an n-qubit computational-basis state — full 64-site chip via MPS' },
+  bell:    { min: 2, max: 64, step: 1, def: 4,  label: 'Qubits n',         hint: 'GHZ chain on n qubits (H + CNOT ladder) — one pixel’s NV register, MPS for n>28' },
+  qrand:   { min: 2, max: 64, step: 1, def: 8,  label: 'Qubits n',         hint: 'n qubits prepared in |+⟩ → von-Neumann-extracted entropy — one pixel’s NV register, MPS for n>28' },
+  qft:     { min: 2, max: 64, step: 1, def: 4,  label: 'Qubits n',         hint: 'QFT of an n-qubit computational-basis state — one pixel’s NV register, MPS for n>28' },
   grover:  { min: 2, max: 8,  step: 1, def: 3,  label: 'Search qubits n',  hint: 'search space of 2ⁿ items' },
   math:    { min: 2, max: 6,  step: 1, def: 4,  label: 'Word qubits n',    hint: 'n-bit arithmetic register' },
   // shor / period / qftnos: the qubit count is a CONSEQUENCE of the integer N
@@ -290,6 +290,25 @@ export default function App() {
   const [seed, setSeed] = useState(42)
   const [noiseMode, setNoiseMode] = useState('real')
 
+  // ---- pixel_mode selector (the "multiqbit mode" panel switch) ----
+  // `register` (default): the circuit qubits are one pixel's N-NV register
+  //   (within-pixel all-to-all dipole 2q); N is the MEASURED resolvable ODMR
+  //   line count when the calibration has run, else the nominal default.
+  // `ensemble`: the 64 chip pixels ARE the circuit qubits (one ensemble qubit
+  //   per pixel — the bulk-microdiamond ODMR collapse); no within-pixel 2q at
+  //   300 K, so 2q circuits are rejected. Both modes run on the existing
+  //   firmware (ODMR_SWEEP + READ_DETECTORS), no PCB change.
+  // `nNvPerPixel` is null until the calibration measures the register width
+  // (decompose_odmr → line count); `registerLineFreqsHz` carries the measured
+  //   line centres so the backend places NVs on the measured frequency grid.
+  // `primeReadout` toggles the prime-coprime denoiser (READ_LOCKINP, default on).
+  const [pixelMode, setPixelMode] = useState('register')
+  const [nNvPerPixel, setNNvPerPixel] = useState(null)
+  const [registerLineFreqsHz, setRegisterLineFreqsHz] = useState(null)
+  const [primeReadout, setPrimeReadout] = useState(true)
+  const [modes, setModes] = useState(null)
+  useEffect(() => { api.modes().then(setModes).catch(() => {}) }, [])
+
   // ---- FPGA tab: on-chip quantum sensors (compass / gyro / magneto-optic) ----
   // On-demand measurements (button click), not auto-fetched — active MW sweeps.
   const [compass, setCompass] = useState(null)
@@ -503,10 +522,18 @@ export default function App() {
 
   const buildBody = () => {
     const hardware = hwMode === 'hardware'
+    // pixel_mode + measured register width + prime-denoise toggle flow into
+    // every circuit body (register: one pixel's N-NV register with dipole 2q;
+    // ensemble: 64 chip pixels, no within-pixel 2q). nNvPerPixel is null until
+    // the calibration measures the ODMR line count, so the backend uses its
+    // nominal default when unset.
+    const pixel = { pixel_mode: pixelMode, prime_readout: primeReadout }
+    if (nNvPerPixel != null) pixel.n_nv_per_pixel = nNvPerPixel
+    if (registerLineFreqsHz) pixel.register_line_freqs_hz = registerLineFreqsHz
     if (algo === 'custom') {
-      return { code: customCode, profile, temperature_k: temperature, seed, shots, noise_mode: noiseMode, hardware }
+      return { code: customCode, profile, temperature_k: temperature, seed, shots, noise_mode: noiseMode, hardware, ...pixel }
     }
-    const body = { algorithm: algo, profile, temperature_k: temperature, shots, noise_mode: noiseMode, hardware }
+    const body = { algorithm: algo, profile, temperature_k: temperature, shots, noise_mode: noiseMode, hardware, ...pixel }
     // qrand: do NOT send the fixed seed -- the backend uses OS entropy when no
     // seed is present (issue #45), so each UI run yields fresh quantum entropy
     // and a new Ed25519 key. Sending seed=42 made every default qrand run
@@ -577,6 +604,15 @@ export default function App() {
     try {
       const r = await api.calibrationRun({ profile, temperature_k: temperature, seed, hardware: hwMode === 'hardware' })
       setCalRun(r)
+      // The calibration measures the register width N (decompose_odmr on the
+      // ODMR sweep → resolvable line count). Apply the open loop: set the
+      // pixel mode + register N + measured line centres from the response so
+      // the next circuit run uses the measured truth, not the nominal default.
+      if (r && r.register_width != null) {
+        setNNvPerPixel(r.register_width)
+        if (r.line_freqs_hz) setRegisterLineFreqsHz(r.line_freqs_hz)
+        if (r.pixel_mode_recommendation) setPixelMode(r.pixel_mode_recommendation)
+      }
     } catch (e) { setCalErr(e.message) }
     finally { setCalRunning(false) }
   }
@@ -1213,6 +1249,51 @@ export default function App() {
                 <input type="number" value={seed} onChange={e => setSeed(+e.target.value)} />
               </div>
             </div>
+            {/* Pixel mode (the "multiqbit mode" switch) + Prime-denoise toggle.
+                Both run on the existing firmware (ODMR_SWEEP + READ_DETECTORS +
+                READ_LOCKINP); no PCB change. The HW badge comes from
+                /api/modes. In ensemble mode a 2q circuit is rejected by the
+                backend (no within-pixel 2q at 300 K), so a hint says so. */}
+            <div className="row" style={{ marginBottom: 0, marginTop: 4 }}>
+              <div className="field">
+                <label>Pixel mode <span className="muted">· multiqbit</span></label>
+                <select value={pixelMode} onChange={e => setPixelMode(e.target.value)}>
+                  <option value="register">Register — one pixel's N-NV register (dipole 2q)</option>
+                  <option value="ensemble">Ensemble — 64 chip pixels (no within-pixel 2q)</option>
+                </select>
+              </div>
+              <div className="field">
+                <label>Register width N <span className="muted">· measured</span></label>
+                <span className="mono" style={{ color: 'var(--brand)' }}>
+                  {nNvPerPixel != null
+                    ? `${nNvPerPixel} (calibration)`
+                    : `${modes ? 'nominal' : '—'}${pixelMode === 'ensemble' ? ' · 1/pixel' : ''}`}
+                </span>
+                {modes && modes.pixel_modes && (
+                  <span className="pill" style={{ marginLeft: 8, fontSize: 10.5,
+                    color: 'var(--good)' }}>HW</span>
+                )}
+              </div>
+              <div className="field">
+                <label>Prime denoise <span className="muted">· coprime readout</span></label>
+                <button type="button"
+                  className={`seg ${primeReadout ? 'on' : ''}`}
+                  style={{ minWidth: 86, justifyContent: 'center' }}
+                  onClick={() => setPrimeReadout(v => !v)}
+                  aria-pressed={primeReadout}>
+                  {primeReadout ? '✓ ON' : 'OFF'}
+                </button>
+              </div>
+            </div>
+            {pixelMode === 'ensemble' && (
+              <div className="muted" style={{ fontSize: 11.5, marginTop: 8,
+                color: 'var(--warn, #b8860b)' }}>
+                Ensemble mode: the 64 chip pixels are the circuit qubits (one
+                ensemble qubit per pixel). Cross-pixel coupling is zero at the
+                2.5 mm pitch, so 2q gates are rejected — run 1q circuits, or
+                switch to Register for within-pixel dipole 2q.
+              </div>
+            )}
             {/* Selected defect summary — one horizontal line below the form
                 selectors (label + value inline, not a stacked field). */}
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
@@ -1535,7 +1616,8 @@ export default function App() {
                   <div className="stat"><div className="k">1q gate</div><div className="v">{info.data.gate_1q_ns}<small> ns</small></div></div>
                   <div className="stat"><div className="k">2q gate</div><div className="v">{info.data.gate_2q_ns}<small> ns</small></div></div>
                   <div className="stat"><div className="k">Qubits</div><div className="v">{info.data.num_qubits}</div></div>
-                  <div className="stat"><div className="k">Sites</div><div className="v">{info.data.site_count}</div></div>
+                  <div className="stat"><div className="k">Pixels</div><div className="v">{info.data.site_count ?? info.data.pixels}</div></div>
+                  <div className="stat"><div className="k">NVs/pixel</div><div className="v">{info.data.n_nv_per_pixel ?? '–'}</div></div>
                 </div>
               )}
               {info.loading && <div className="muted"><span className="spinner" /> loading backend target…</div>}

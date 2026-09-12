@@ -13,17 +13,19 @@ import os
 import time
 from fractions import Fraction
 from math import gcd
+from typing import Optional
 
 import numpy as np
 
 from qssc import (
-    auto_align, QSSCBackend, SimulatedFPGA, FPGAConnection,
+    QSSCBackend, SimulatedFPGA, FPGAConnection,
     make_connection, NoFPGADetected,
     create_period_finding_circuit, create_shor_circuit, create_qft_nos_circuit,
     create_math_circuit, grover_search, postprocess_period,
     postprocess_period_swapless, select_coprime, is_prime, perfect_power,
     build_user_circuit, UserCircuitError,
 )
+from qssc.simulator import N_NV_PER_PIXEL
 from qssc.crypto import (
     derive_keypair, von_neumann_extract, bits_to_bytes, entropy_health,
 )
@@ -31,13 +33,40 @@ from qssc.qkd import simulate_bb84
 
 
 def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
-             hardware: bool = False, grid: int = 8) -> QSSCBackend:
-    sites = auto_align(profile=profile, grid=grid, temperature_k=temperature_k,
-                       rng=np.random.default_rng(seed))
+             hardware: bool = False,
+             n_nv_per_pixel: Optional[int] = None,
+             pixel_mode: str = "register",
+             register_nv_spacing_nm: float = 2.75,
+             pixel_size_um: float = 200.0,
+             register_line_freqs_hz: Optional[list] = None) -> QSSCBackend:
+    # pixel_mode selects the circuit-qubit model: register (one pixel's N-NV
+    # register, within-pixel all-to-all dipole 2q) or ensemble (64 chip pixels,
+    # no within-pixel 2q). N is the MEASURED resolvable ODMR line count when
+    # register_line_freqs_hz is given, else the nominal default. The backend
+    # auto-grows the register to fit a wider circuit (QSSCBackend._ensure_register).
     fpga = _make_fpga(profile, temperature_k, seed, hardware)
-    return QSSCBackend(profile=profile, sites=sites, seed=seed,
+    return QSSCBackend(profile=profile, seed=seed,
                        temperature_k=temperature_k, noise_mode=noise_mode,
-                       hardware=fpga)
+                       hardware=fpga, pixel_mode=pixel_mode,
+                       n_nv_per_pixel=(n_nv_per_pixel if n_nv_per_pixel is not None
+                                       else N_NV_PER_PIXEL),
+                       register_nv_spacing_nm=register_nv_spacing_nm,
+                       pixel_size_um=pixel_size_um,
+                       register_line_freqs_hz=register_line_freqs_hz)
+
+
+def _pixel_kwargs(req: dict) -> dict:
+    """Extract the pixel-mode + register-width params from a request payload
+    (RunRequest / CustomCircuitRequest / ParallelRunRequest) for ``_backend``.
+    The measured register_line_freqs_hz from the calibration's decompose_odmr
+    flows in here, so the backend's register width N is the measured truth."""
+    return {
+        "pixel_mode": req.get("pixel_mode", "register"),
+        "n_nv_per_pixel": req.get("n_nv_per_pixel"),
+        "register_nv_spacing_nm": float(req.get("register_nv_spacing_nm", 2.75)),
+        "pixel_size_um": float(req.get("pixel_size_um", 200.0)),
+        "register_line_freqs_hz": req.get("register_line_freqs_hz"),
+    }
 
 
 def _make_fpga(profile: str, temperature_k: float, seed, hardware: bool):
@@ -117,7 +146,8 @@ def run_circuit(req: dict) -> dict:
     hardware = bool(req.get("hardware", False))
     algo = str(req.get("algorithm", "shor")).lower()
     try:
-        b = _backend(profile, temperature_k, seed, noise_mode, hardware=hardware)
+        b = _backend(profile, temperature_k, seed, noise_mode,
+                     hardware=hardware, **_pixel_kwargs(req))
     except NoFPGADetected as exc:
         return _no_fpga_result(exc)
     src = _source_label(b.hardware)
@@ -430,7 +460,7 @@ def run_circuit(req: dict) -> dict:
         # connection, so reuse the existing backend.
         if qrng_seed != seed and not hardware:
             b = _backend(profile, temperature_k, qrng_seed, noise_mode,
-                         hardware=hardware)
+                         hardware=hardware, **_pixel_kwargs(req))
         res = b.run(qc, shots=raw_shots).result()
         counts = res.get_counts()
         # expand the measured outcomes into a flat list and shuffle so that
@@ -627,6 +657,123 @@ def run_circuit(req: dict) -> dict:
     return result
 
 
+def run_parallel(req: dict) -> dict:
+    """Run one circuit per pixel across the 64-pixel array IN PARALLEL and
+    aggregate (Invention 4 — distributed computing).
+
+    The 64 die pixels are INDEPENDENT ~10-NV processors at 300 K (1/r**3 -> 0
+    at the 2.5 mm pitch): the chip's compute throughput is 64x a single pixel,
+    not one 640-qubit circuit. Three modes:
+
+      * ``shor``  -- up to ``n_pixels`` coprime bases ``a`` (one per pixel)
+        factor ``n``; whichever pixel finds the period wins, the rest fail.
+      * ``sample`` -- the same circuit (QASM) on all ``n_pixels`` pixels with
+        independent seeds = n_pixels x shots aggregated in one wall-clock step.
+      * ``custom`` -- a list of QASM circuits, one per pixel.
+
+    Returns ``{mode, n_pixels, throughput_x, per_pixel, aggregate_counts, ...}``.
+    """
+    t0 = time.perf_counter()
+    profile = req.get("profile", "NV")
+    temperature_k = float(req.get("temperature_k", 300.0))
+    seed = int(req.get("seed", 42))
+    shots = int(req.get("shots", 2048))
+    noise_mode = req.get("noise_mode", "real")
+    mode = str(req.get("mode", "sample")).lower()
+    n_pixels = max(1, min(64, int(req.get("n_pixels", 64))))
+    try:
+        b = _backend(profile, temperature_k, seed, noise_mode,
+                     hardware=False, **_pixel_kwargs(req))
+    except NoFPGADetected as exc:
+        return _no_fpga_result(exc)
+
+    out = {"mode": mode, "profile": profile, "n_pixels": n_pixels,
+           "throughput_x": n_pixels, "noise_mode": noise_mode,
+           "temperature_k": temperature_k, "shots": shots}
+
+    if mode == "shor":
+        n = int(req.get("n", 15))
+        if n < 2 or is_prime(n):
+            return {"error": "n must be a composite integer > 1"}
+        nq = 3 * n.bit_length() + 1
+        if nq > 19:
+            return {"error": f"N={n} -> {nq} qubits too large (>19). Use N <= 63."}
+        rng = np.random.default_rng(seed)
+        circuits = []
+        bases = []
+        for _ in range(n_pixels):
+            a = select_coprime(n, rng)
+            qc, _ = create_shor_circuit(n, a=a, rng=rng)
+            circuits.append(qc)
+            bases.append(a)
+        res = b.run_array(circuits, shots=shots, max_pixels=n_pixels)
+        per_pixel = []
+        winner = None
+        for i, (r, a) in enumerate(zip(res["per_pixel"], bases)):
+            counts = r.get_counts()
+            _ret = (None if noise_mode == "none"
+                    else float(r.assessment.get("signal_retention", 0.0) or 0.0))
+            cb = circuits[i].metadata["counting_bits"]
+            r_period, factors = postprocess_period(
+                counts, cb, a, n, signal_retention=_ret)
+            ok = bool(factors[0]) and factors[0] * factors[1] == n
+            entry = {"pixel": i, "a": a, "period": r_period,
+                     "factors": list(factors) if factors[0] else None,
+                     "success": ok, "counts": counts}
+            per_pixel.append(entry)
+            if ok and winner is None:
+                winner = entry
+        out.update({"n": n, "per_pixel": per_pixel,
+                    "aggregate_counts": res["aggregate_counts"],
+                    "factors": (list(winner["factors"]) if winner else None),
+                    "success": winner is not None,
+                    "winner_pixel": (winner["pixel"] if winner else None),
+                    "winner_base": (winner["a"] if winner else None)})
+
+    elif mode == "sample":
+        from qiskit import QuantumCircuit
+        # build the same circuit on every pixel (independent seeds -> 64x shots)
+        qasm = req.get("qasm")
+        if qasm:
+            from qiskit import qasm2
+            qc0 = qasm2.loads(str(qasm)) if isinstance(qasm, str) else list(qasm)[0]
+        else:
+            nq = max(1, min(64, int(req.get("num_qubits", 4))))
+            qc0 = QuantumCircuit(nq, nq)
+            qc0.h(range(nq))
+            qc0.measure(range(nq), range(nq))
+        circuits = [qc0] * n_pixels
+        res = b.run_array(circuits, shots=shots, max_pixels=n_pixels)
+        per_pixel = [{"pixel": i, "counts": r.get_counts(),
+                      "approximate": r.approximate}
+                     for i, r in enumerate(res["per_pixel"])]
+        out.update({"num_qubits": qc0.num_qubits, "per_pixel": per_pixel,
+                    "aggregate_counts": res["aggregate_counts"],
+                    "total_shots": shots * n_pixels})
+
+    elif mode == "custom":
+        qasms = req.get("circuits", [])
+        if not qasms:
+            return {"error": "mode=custom requires a non-empty 'circuits' list"}
+        from qiskit import qasm2
+        circuits = []
+        for q in qasms[:n_pixels]:
+            circuits.append(qasm2.loads(str(q)))
+        res = b.run_array(circuits, shots=shots, max_pixels=len(circuits))
+        per_pixel = [{"pixel": i, "counts": r.get_counts(),
+                      "num_qubits": circuits[i].num_qubits,
+                      "approximate": r.approximate}
+                     for i, r in enumerate(res["per_pixel"])]
+        out.update({"n_pixels": len(circuits), "throughput_x": len(circuits),
+                    "per_pixel": per_pixel, "aggregate_counts": res["aggregate_counts"]})
+    else:
+        return {"error": f"unknown parallel mode '{mode}' "
+                        f"(use shor | sample | custom)"}
+
+    out["elapsed_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+    return out
+
+
 def run_custom(req: dict) -> dict:
     """Execute a user-supplied Qiskit circuit (QASM2 or Python snippet)."""
     t0 = time.perf_counter()
@@ -640,7 +787,7 @@ def run_custom(req: dict) -> dict:
     try:
         b = _backend(profile, float(req.get("temperature_k", 300.0)),
                      int(req.get("seed", 42)), req.get("noise_mode", "real"),
-                     hardware=hardware)
+                     hardware=hardware, **_pixel_kwargs(req))
     except NoFPGADetected as exc:
         return _no_fpga_result(exc)
     try:

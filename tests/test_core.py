@@ -88,6 +88,21 @@ def test_auto_align_grid():
     sites = auto_align("hBN-VB", grid=8, rng=np.random.default_rng(0))
     assert len(sites) == 64
     assert all(s.qubit_id == i for i, s in enumerate(sites))
+    # chip view: one site per pixel (pixel_id == qubit_id, nv_index 0)
+    assert all(s.pixel_id == s.qubit_id and s.nv_index == 0 for s in sites)
+
+
+def test_auto_align_register():
+    # register view: ONE pixel's ~10-NV register (the circuit qubits), all
+    # pixel_id=0, distinct nv_index, on a resolvable ODMR frequency grid.
+    from qssc.simulator import N_NV_PER_PIXEL
+    sites = auto_align("NV", register=True, rng=np.random.default_rng(0))
+    assert len(sites) == N_NV_PER_PIXEL
+    assert all(s.pixel_id == 0 for s in sites)
+    assert len({s.nv_index for s in sites}) == N_NV_PER_PIXEL
+    # the NVs sit on a resolvable frequency grid (distinct detunings)
+    freqs = sorted(s.frequency for s in sites)
+    assert len(set(round(f, 1) for f in freqs)) == N_NV_PER_PIXEL
 
 
 def test_odmr_hbn_resonance():
@@ -460,25 +475,21 @@ def _readout_matrix(nm, qubit=0):
     raise AssertionError(f"no readout error recorded for qubit {qubit}")
 
 
-def test_nearest_neighbor_coupling():
-    # The Target's coupling map must reflect the physical dipole topology:
-    # Manhattan-distance-1 grid neighbours only, NOT all-to-all. Real NV
-    # magnetic dipole-dipole falls as 1/r**3 -> only adjacent sites couple.
+def test_within_pixel_all_to_all_coupling():
+    # The Target's coupling map must reflect the within-pixel dipole topology:
+    # the NVs in one microdiamond are a few nm apart, so 1/r**3 couples EVERY
+    # pair (complete graph K_n, all-to-all) -- not grid-nearest-neighbour. The
+    # 64 pixels are independent at 300 K (cross-pixel 1/r**3 -> zero at 2.5 mm).
     b = QSSCBackend("NV", sites=_quick_sites(16), seed=0)
     cm = b.target.build_coupling_map()
     edges = set(cm.get_edges())
-    # (0,1) is a grid edge (row 0 col 0 -> row 0 col 1): the Bell pair.
-    assert (0, 1) in edges and (1, 0) in edges
-    # (0,8) is a grid edge (row 0 col 0 -> row 1 col 0): vertical neighbour.
-    assert (0, 8) in edges
-    # (0,2) is Manhattan-distance 2 -> NOT an edge (no long-range coupling).
-    assert (0, 2) not in edges
-    assert (0, 15) not in edges  # diagonal/corner, distance 2
-    # every edge is between Manhattan-distance-1 sites.
-    sites = b.sites
-    for i, j in edges:
-        d = abs(sites[i].row - sites[j].row) + abs(sites[i].col - sites[j].col)
-        assert d == 1, (i, j, d)
+    n = b._n_qubits
+    # every unordered pair is an edge in both directions (K_n all-to-all)
+    assert len(edges) == n * (n - 1), (len(edges), n)
+    for i in range(n):
+        for j in range(n):
+            if i != j:
+                assert (i, j) in edges, (i, j)
 
 
 def test_per_qubit_frequency_detuning():

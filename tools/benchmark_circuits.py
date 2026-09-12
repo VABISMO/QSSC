@@ -292,17 +292,17 @@ def physics_audit():
     for name in PROFILES:
         prof = get_profile(name)
         b = QSSCBackend(prof, temperature_k=300.0, seed=42, noise_mode="real")
-        # qiskit Target does not expose a public coupling_map; the neighbour
-        # edges are the source of truth (the Target was built from them).
+        # the register is ONE pixel's ~10-NV register, all-to-all dipole
+        # coupled (complete graph K_n; 1/r**3 at ~3 nm). The Target was built
+        # from these edges.
         edges = b._neighbor_pairs()
-        # every edge must be Manhattan-distance-1 on the 8x8 grid
-        def man(i, j):
-            si, sj = b.sites[i], b.sites[j]
-            return abs(si.row - sj.row) + abs(si.col - sj.col)
-        max_dist = max((man(i, j) for i, j in edges), default=0)
+        n = b._n_qubits
+        # every edge is within the one-pixel register (all sites share pixel_id)
+        same_pixel = all(b.sites[i].pixel_id == b.sites[j].pixel_id
+                        for i, j in edges)
         n_edges = len(edges)
-        n_neighbors = len(edges) // 2  # undirected count
-        # frequencies are per-site (detuned), not uniform
+        n_pairs = len(edges) // 2  # undirected count
+        # frequencies are per-NV (detuned), not uniform
         freqs = [s.frequency for s in b.sites]
         freq_uniform = (max(freqs) - min(freqs)) < 1.0  # <1 Hz spread = uniform
         t1, t2 = coherence_at_temperature(prof, 300.0)
@@ -314,12 +314,13 @@ def physics_audit():
             "freq_detuning_spread_hz": prof.frequency_detuning_spread_hz,
         }
         audit["coupling"][name] = {
-            "topology": "nearest-neighbor Manhattan-1 (1/r^3 dipole)",
-            "max_edge_distance": max_dist,
+            "topology": "within-pixel all-to-all dipole (1/r^3, ~10 NVs/pixel)",
+            "register_qubits": n,
             "directed_edges": n_edges,
-            "undirected_neighbor_pairs": n_neighbors,
-            "all_edges_are_distance_1": max_dist == 1,
-            "per_site_frequency_detuned": not freq_uniform,
+            "undirected_pairs": n_pairs,
+            "is_complete_graph": n_edges == n * (n - 1),
+            "all_edges_within_one_pixel": same_pixel,
+            "per_nv_frequency_detuned": not freq_uniform,
         }
     # error channels present in the Aer noise model (build a tiny circuit)
     qc = QuantumCircuit(2, 2)

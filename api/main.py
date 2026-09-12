@@ -24,10 +24,12 @@ from qssc import (
     auto_align, simulate_odmr, QSSCBackend,
     make_detector_response, PROFILES,
     compass_measure, gyro_measure,
+    magnetometer_sweep, synthetic_field_map,
     FPGAConnection, NoFPGADetected, make_connection,
     DetectorInterface, MicrowaveController, EmitterController,
 )
-from qssc.simulator import DETECT_THRESHOLD
+from qssc.simulator import DETECT_THRESHOLD, N_NV_PER_PIXEL
+from qssc.odmr_decompose import decompose_odmr
 from qssc.backend import _fit_t2_from_codes
 from qssc.protocol import (
     protocol_as_dict, protocol_summary, protocol_platforms,
@@ -113,6 +115,19 @@ class RunRequest(BaseModel):
     # bb84 quantum key distribution
     num_bits: int = Field(128, ge=1, le=2048)      # bb84: qubits/rounds to exchange
     eavesdrop: bool = False         # bb84: simulate intercept-resend Eve
+    # Pixel mode + invention toggles (the panel switches). pixel_mode selects
+    # the circuit-qubit model: register (one pixel's N-NV register, within-
+    # pixel all-to-all dipole 2q, the default) or ensemble (64 chip pixels,
+    # no within-pixel 2q). n_nv_per_pixel / register_line_freqs_hz override
+    # the register width (the measured resolvable ODMR line count from the
+    # calibration's decompose_odmr). prime_readout toggles the prime-coprime
+    # lock-in denoiser (Invention 2+, default on at the panel).
+    pixel_mode: str = "register"          # register | ensemble
+    n_nv_per_pixel: Optional[int] = Field(None, ge=1, le=64)
+    register_nv_spacing_nm: float = Field(2.75, gt=0)
+    pixel_size_um: float = Field(200.0, gt=0)
+    register_line_freqs_hz: Optional[list] = None
+    prime_readout: bool = False
 
 
 class CustomCircuitRequest(BaseModel):
@@ -129,6 +144,42 @@ class CustomCircuitRequest(BaseModel):
     # circuits wider than the backend's SIM_MAX_QUBITS (28) are rejected with a
     # clear error rather than silently faked. See qssc.backend.SIM_MAX_QUBITS.
     max_qubits: int = Field(20, ge=1, le=20)
+    # Pixel mode + invention toggles (see RunRequest).
+    pixel_mode: str = "register"
+    n_nv_per_pixel: Optional[int] = Field(None, ge=1, le=64)
+    register_nv_spacing_nm: float = Field(2.75, gt=0)
+    pixel_size_um: float = Field(200.0, gt=0)
+    register_line_freqs_hz: Optional[list] = None
+    prime_readout: bool = False
+
+
+class ParallelRunRequest(BaseModel):
+    """Invention 4 — 64-parallel distributed computing.
+
+    Run one circuit per pixel across the 64-pixel array (64 INDEPENDENT ~10-NV
+    processors at 300 K) and aggregate. The chip's throughput is 64x a single
+    pixel, not one 640-qubit circuit (64x10 > 63-qubit MPS cap)."""
+    mode: str = "sample"        # shor | sample | custom
+    profile: str = "NV"
+    temperature_k: float = Field(300.0, ge=0.001, le=600)
+    shots: int = Field(2048, ge=1, le=8192)
+    seed: int = Field(42, ge=0, le=2_147_483_647)
+    noise_mode: str = "real"
+    n_pixels: int = Field(64, ge=1, le=64)   # pixels to use (1..64)
+    # shor mode
+    n: int = Field(15, ge=2, le=63)
+    # sample mode
+    num_qubits: int = Field(4, ge=1, le=64)
+    qasm: Optional[str] = None  # sample: a QASM circuit (else uniform H+measure)
+    # custom mode
+    circuits: Optional[list] = None  # list of QASM strings, one per pixel
+    # Pixel mode + invention toggles (see RunRequest).
+    pixel_mode: str = "register"
+    n_nv_per_pixel: Optional[int] = Field(None, ge=1, le=64)
+    register_nv_spacing_nm: float = Field(2.75, gt=0)
+    pixel_size_um: float = Field(200.0, gt=0)
+    register_line_freqs_hz: Optional[list] = None
+    prime_readout: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -136,11 +187,24 @@ class CustomCircuitRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
-             grid: int = 8) -> QSSCBackend:
-    sites = auto_align(profile=profile, grid=grid, temperature_k=temperature_k,
-                       rng=np.random.default_rng(seed))
-    return QSSCBackend(profile=profile, sites=sites, seed=seed,
-                       temperature_k=temperature_k, noise_mode=noise_mode)
+             n_nv_per_pixel: Optional[int] = None,
+             pixel_mode: str = "register",
+             register_nv_spacing_nm: float = 2.75,
+             pixel_size_um: float = 200.0,
+             register_line_freqs_hz: Optional[list] = None) -> QSSCBackend:
+    # pixel_mode selects the circuit-qubit model: register (one pixel's N-NV
+    # register, within-pixel all-to-all dipole 2q) or ensemble (64 chip pixels,
+    # no within-pixel 2q). N is the MEASURED resolvable ODMR line count when
+    # register_line_freqs_hz is given (from decompose_odmr in the calibration),
+    # else the nominal default. See QSSCBackend.
+    return QSSCBackend(profile=profile, seed=seed,
+                       temperature_k=temperature_k, noise_mode=noise_mode,
+                       pixel_mode=pixel_mode,
+                       n_nv_per_pixel=(n_nv_per_pixel if n_nv_per_pixel is not None
+                                       else N_NV_PER_PIXEL),
+                       register_nv_spacing_nm=register_nv_spacing_nm,
+                       pixel_size_um=pixel_size_um,
+                       register_line_freqs_hz=register_line_freqs_hz)
 
 
 def _req_dict(model) -> dict:
@@ -260,6 +324,44 @@ def profiles():
             "notes": p.notes,
         })
     return out
+
+
+@app.get("/api/modes")
+def modes():
+    """Pixel modes + invention toggles the panel can render, each with its
+    hardware-readiness badge. Only inventions that run on the CURRENT PCB
+    (no hardware change) are listed here -- the needs-HW inventions (nuclear
+    memory, gradient register, per-pixel independent MW) are tracked as
+    GitHub issues, not surfaced as panel switches. See docs/INVENTIONS.md."""
+    return {
+        "pixel_modes": [
+            {"key": "register", "label": "Register",
+             "hw": True, "badge": "fits current PCB",
+             "description": "One pixel's N-NV register (within-pixel all-to-all "
+                            "dipole 2q); N is the measured resolvable ODMR line "
+                            "count (decompose_odmr)."},
+            {"key": "ensemble", "label": "Ensemble",
+             "hw": True, "badge": "fits current PCB",
+             "description": "64 chip pixels are the circuit qubits (one ensemble "
+                            "qubit per pixel); no within-pixel 2q at 300 K."},
+        ],
+        "inventions": [
+            {"key": "prime_readout", "label": "Prime denoise",
+             "hw": True, "badge": "RTL done (READ_LOCKINP)", "default": True,
+             "description": "Prime-coprime frequency-multiplexed readout + "
+                            "lock-in denoiser (Invention 2+)."},
+            {"key": "magnetometer", "label": "Vector magnetometer",
+             "hw": True, "badge": "fits current PCB (ODMR_SWEEP)", "default": True,
+             "description": "64-pixel vector magnetometer (Invention 1), in the "
+                            "Sensors tab."},
+            {"key": "parallel", "label": "64-parallel readout",
+             "hw": True, "badge": "fits current PCB (READ_DETECTORS)",
+             "default": True,
+             "description": "64-parallel readout (Invention 4) via the run-parallel "
+                            "endpoint; independent per-pixel circuits need per-"
+                            "pixel MW (GitHub issue)."},
+        ],
+    }
 
 
 @app.get("/api/backend/info")
@@ -543,6 +645,16 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
     inside = np.where(c < half)[0]
     fwhm = float(f[inside[-1]] - f[inside[0]]) if len(inside) > 2 else 0.01
 
+    # Register width = the resolvable ODMR line count (the MEASURED truth from
+    # decompose_odmr, not a hardcoded N). A bulk ensemble collapses to ONE line
+    # -> 1 ensemble qubit/pixel; a controlled-few-NV particle resolves a
+    # handful -> that many register qubits. This drives the pixel_mode
+    # recommendation: register_width <= 1 -> ensemble; > 1 -> register.
+    components = decompose_odmr(f, c)
+    register_width = max(1, len(components))
+    line_freqs_hz = [round(cmp.freq_ghz * 1e9) for cmp in components]
+    pixel_mode_recommendation = "ensemble" if register_width <= 1 else "register"
+
     t1, t2 = coherence_at_temperature(prof, temperature_k)
 
     # Stage 4 -- per-pin ODMR resonance sweep + coherence (Ramsey/Hahn) fit.
@@ -622,7 +734,10 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
              "contrast": [round(float(x), 5) for x in c],
              "d_fit_ghz": round(d_fit, 5), "d_expected_ghz": prof.d_ghz,
              "linewidth_fwhm_ghz": round(fwhm, 5),
-             "fit_ok": abs(d_fit - prof.d_ghz) < 0.03},
+             "fit_ok": abs(d_fit - prof.d_ghz) < 0.03,
+             "register_width": register_width,
+             "register_line_freqs_hz": line_freqs_hz,
+             "pixel_mode_recommendation": pixel_mode_recommendation},
             {"name": "4 · Per-pin resonance + coherence sweep",
              "pins_measured": len(per_pin),
              "detuning_spread_mhz": round(detuning_spread, 3),
@@ -634,6 +749,10 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
         "per_pin": per_pin,
         "d_fit_ghz": round(d_fit, 5),
         "t1_ms": round(t1 * 1e3, 3), "t2_us": round(t2 * 1e6, 3),
+        "register_width": register_width,
+        "register_line_freqs_hz": line_freqs_hz,
+        "pixel_mode_recommendation": pixel_mode_recommendation,
+        "n_nv_per_pixel": register_width,
         "source": "hardware" if hardware else "simulator",
         "io": io_label,
         "stage4_source": stage4_source,
@@ -689,6 +808,34 @@ def run_custom_circuit(req: CustomCircuitRequest, sync: bool = False,
         return {"job_id": None, "status": "finished", "result": _run(payload)}
     job_id = jobs.enqueue("custom", payload)
     return {"job_id": job_id, "status": "queued"}
+
+
+@app.post("/api/circuit/run-parallel")
+def run_parallel_circuits(req: ParallelRunRequest, sync: bool = True,
+                          request: Request = None):
+    """64-parallel distributed computing (Invention 4).
+
+    Run one circuit per pixel across the 64-pixel array -- 64 INDEPENDENT
+    ~10-NV processors at 300 K (1/r**3 -> zero at the 2.5 mm pitch, so the
+    pixels do not couple) -- and aggregate. The chip's compute throughput is
+    64x a single pixel, not one 640-qubit machine. Modes:
+
+      * ``shor``   -- up to n_pixels coprime bases a factor N; first pixel to
+        find the period wins (the rest fail silently).
+      * ``sample`` -- the same circuit on all n_pixels pixels with independent
+        seeds = n_pixels x shots aggregated in one wall-clock step.
+      * ``custom`` -- a list of QASM circuits, one per pixel.
+
+    Runs synchronously in-process (the parallel path is a tight loop over the
+    backend's run_array; no async RQ job wrapper needed for the demo).
+    """
+    if request is not None and _rate_limited(request):
+        raise HTTPException(429, "Rate limit exceeded — too many circuit requests, slow down.")
+    from api.runner import run_parallel as _run
+    try:
+        return _run(_req_dict(req))
+    except Exception as exc:  # noqa: BLE001 - surface sim errors, not a 500
+        return {"error": str(exc)}
 
 
 # --- async job polling + history -------------------------------------------
@@ -1257,6 +1404,66 @@ def api_magneto(
                  f"gradient + dipole offset; linewidth {lw_mhz:g} MHz, {n_eff} "
                  f"averages ({mode} environment) -> sensitivity {sens_ut:.2f} uT. "
                  f"The FPGA returns all 64 AD7616 samples in one parallel frame."),
+    }
+
+
+@app.get("/api/sensor/magneto")
+def api_sensor_magneto(
+    profile: str = "NV",
+    gradient_ut_mm: float = 8.0,
+    base_bx_ut: float = 25.0,
+    base_by_ut: float = 0.0,
+    base_bz_ut: float = -40.0,
+    dipole_moment_am2: float = 0.02,
+    dipole_x_mm: float = 2.0,
+    dipole_y_mm: float = 5.0,
+    dipole_z_mm: float = 15.0,
+    n_avg: int = 500,
+    mode: str = "real",
+    differential: bool = False,
+    average: bool = True,
+    seed: Optional[int] = None,
+):
+    """64-pixel VECTOR magnetometer (Invention 1).
+
+    Unlike the simple /api/magneto |B.n| projection, each of the 64 pixels
+    recovers the full B-VECTOR from its 4 NV <111> doublets (4-axis
+    least-squares reconstruction, the compass physics run independently per
+    pixel). Returns an 8x8 |B| image + per-pin B-vectors + the array mean/std.
+
+    ``differential`` subtracts the linear-gradient baseline (base_bx/by/bz +
+    gradient) so a weak dipole source shows up against the strong DC background
+    that would otherwise swamp it. ``average`` reports the array mean +/- std
+    (the single-number field reading). ``mode='sim'`` averages freely;
+    ``mode='real'`` is shot-noise-limited at the linewidth floor.
+    """
+    rng = np.random.default_rng(seed)
+    fmap = synthetic_field_map(
+        gradient_ut_mm=gradient_ut_mm, base_bx_ut=base_bx_ut,
+        base_by_ut=base_by_ut, base_bz_ut=base_bz_ut,
+        dipole_moment_am2=dipole_moment_am2,
+        dipole_x_mm=dipole_x_mm, dipole_y_mm=dipole_y_mm,
+        dipole_z_mm=dipole_z_mm)
+    baseline = None
+    if differential:
+        # the baseline is the smooth gradient without the dipole perturbation
+        baseline = synthetic_field_map(
+            gradient_ut_mm=gradient_ut_mm, base_bx_ut=base_bx_ut,
+            base_by_ut=base_by_ut, base_bz_ut=base_bz_ut,
+            dipole_moment_am2=0.0)
+    res = magnetometer_sweep(
+        profile=profile, b_field_map_ut=fmap, baseline_map_ut=baseline,
+        n_avg=n_avg, mode=mode, differential=differential, average=average,
+        rng=rng)
+    return {
+        "profile": res.profile, "grid": res.grid, "n_pixels": res.n_pixels,
+        "mode": res.mode, "n_avg": res.n_avg, "linewidth_mhz": res.linewidth_mhz,
+        "sensitivity_ut": res.sensitivity_ut, "differential": res.differential,
+        "average": res.average,
+        "pixels": res.pixels, "image": res.image,
+        "image_min_ut": res.image_min_ut, "image_max_ut": res.image_max_ut,
+        "mean_b_mag_ut": res.mean_b_mag_ut, "mean_b_vector_ut": res.mean_b_vector_ut,
+        "std_b_mag_ut": res.std_b_mag_ut, "stats": res.stats, "note": res.note,
     }
 
 

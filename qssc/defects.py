@@ -140,6 +140,21 @@ class DefectProfile:
     # symmetric ``readout_error`` ``ro`` into p_bright_to_dark = ro*(1-asym) and
     # p_dark_to_bright = ro*(1+asym). Default 0 = symmetric (back-compat).
     readout_asymmetry: float = 0.0
+    # --- Nuclear-spin memory (NV + 13C) -- Invention 3 compute enabler --------
+    # A 13C nucleus next to an NV is a long-lived MEMORY qubit: its spin T2 is
+    # ~seconds (vs the electron's ~ms), so a circuit can STORE an intermediate
+    # result on the 13C, keep computing on the electron, and RECALL it later --
+    # extending the effective coherence window from ~1.8 ms to seconds.
+    # ``nuclear_t2_s`` is the 13C nuclear coherence (s); 0.0 = no nuclear
+    # memory for this profile. ``nuclear_hyperfine_hz`` is the NV-13C
+    # hyperfine coupling A_parallel (Hz), which sets the electron-nuclear SWAP
+    # gate time (t_SWAP ~ 1/2A). NOT QUOTED BY THE SUPPLIER for this chip's
+    # datasheet -- these are literature anchors for an ENGINEERED single-13C
+    # memory nucleus (the 12C-enriched stone has few native 13C, so this is a
+    # deliberately-implanted/selected memory nucleus, Reimer 2016 / Taminiau
+    # 2014), flagged the same way as the gate-timing engineering targets above.
+    nuclear_t2_s: float = 0.0
+    nuclear_hyperfine_hz: float = 0.0
     # Human readable notes + literature citations for every number above
     notes: str = ""
     references: tuple = ()
@@ -285,6 +300,15 @@ NV_DIAMOND = DefectProfile(
     # single-shot readout keeps the bright/dark bias small).
     frequency_detuning_spread_hz=2.0e6,
     readout_asymmetry=0.10,
+    # Nuclear-spin memory (Invention 3): an ENGINEERED single-13C next to each
+    # NV is a ~1 s memory qubit (vs the electron's 1.8 ms), extending the
+    # coherence window ~500x. 13C nuclear T2 ~1 s without decoupling in
+    # 12C-enriched diamond (Reimer 2016, Cramer 2016 report 1-2 s; >80 s with
+    # decoupling). A_parallel ~2 MHz for a moderately-coupled near-13C sets a
+    # ~250 ns electron-nuclear SWAP. NOT QUOTED BY THE SUPPLIER (the 12C stone
+    # has few native 13C; this is a deliberately-implanted memory nucleus).
+    nuclear_t2_s=1.0,
+    nuclear_hyperfine_hz=2.0e6,
     notes="Workhorse room-temperature defect; D~2.87 GHz. T2=1.8 ms is a CONSERVATIVE "
           "literature anchor for the chip's 12C-enriched SYNTHETIC diamond (normal grade, "
           "not ppb electronic grade -- the 300 K compute experiments Neumann 2008 / Dolde "
@@ -316,6 +340,14 @@ NV_DIAMOND = DefectProfile(
         "Xie et al., Phys. Rev. Lett. 130, 030601 (2023) — NV CNOT fidelity "
         "99.92% (depol 0.0008) by noise-tailored subspace randomized "
         "benchmarking, consistent with the cryo floor above.",
+        "Reimer et al., Phys. Rev. B 93, 024104 (2016) — single 13C nuclear "
+        "spin coherence near an NV, ~1-2 s T2 in 12C-enriched diamond (the "
+        "nuclear_t2_s anchor); the nuclear memory qubit architecture.",
+        "Taminiau et al., Nature 486, 91-94 (2014), doi:10.1038/nature11185 — "
+        "NV + 13C universal control + memory (electron-nuclear SWAP gate).",
+        "Cramer et al., Nature Communications 7, 11526 (2016) — 13C nuclear "
+        "T2 > 80 s with decoupling (the decoupled upper bound; nuclear_t2_s "
+        "here is the no-decoupling conservative anchor).",
     ),
 )
 

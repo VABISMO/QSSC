@@ -51,7 +51,7 @@ export function QubitGrid({ sites, counts, numClbits, recovered }) {
             <div key={cell.idx}
                  className={`qcell ${lit ? 'on' : ''} ${cell.signal ? 'signal' : ''} ${cell.measured ? 'measured' : ''} ${cell.usable ? 'usable' : ''}`}
                  style={style}
-                 title={`q${cell.idx} (${cell.r},${cell.c})${cell.measured ? ` · ${cell.signal ? 'signal' : 'top'} bit=${lit ? 1 : 0} · confidence ${(cell.confidence * 100).toFixed(0)}%` : ''}`}>{cell.idx}</div>
+                 title={`q${cell.idx} (${cell.r},${cell.c}) · ~10-NV register${cell.measured ? ` · ${cell.signal ? 'signal' : 'top'} bit=${lit ? 1 : 0} · confidence ${(cell.confidence * 100).toFixed(0)}%` : ''}`}>{cell.idx}</div>
           )
         })}
       </div>
@@ -93,7 +93,8 @@ export function QubitFrequencyTable({ sites, dGhz, loading, error }) {
     <div>
       <div className="hint" style={{ marginBottom: 8 }}>
         Per-pin ODMR + coherence sweep — each pin's dip is fit individually (measured D{dGhz ? `≈${dGhz}` : ''} GHz
-        ± a per-site detuning; a narrow MW pulse at f<sub>i</sub> addresses only pin i). T₂ = Hahn-echo
+        ± a per-site detuning; a narrow MW pulse at f<sub>i</sub> addresses only pin i). Each pin is a
+        ~10-NV register; the resonance shown is the register centre. T₂ = Hahn-echo
         coherence (µs), T₂* = Ramsey inhomogeneous dephasing (µs). Measured detuning spread:{' '}
         <b>{spread.toFixed(2)} MHz</b>.
       </div>
@@ -688,6 +689,15 @@ export function CalibrationPanel({ profile, temperature, seed, run, running, res
                       {' · '}T₂/T₂* {st.source}</span>}
                   </div>
                 )}
+                {i === 2 && st.register_width != null && (
+                  <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>
+                    register width N ={' '}
+                    <span className="mono" style={{ color: 'var(--brand)' }}>{st.register_width}</span>
+                    {' '}· {st.register_width <= 1
+                      ? <span style={{ color: 'var(--warn, #b8860b)' }}>ensemble (bulk → 1 line)</span>
+                      : <span style={{ color: 'var(--ok)' }}>{st.register_width} resolved lines → register</span>}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -698,6 +708,27 @@ export function CalibrationPanel({ profile, temperature, seed, run, running, res
               {result.source === 'hardware' ? 'hardware I/O' : 'simulator'}
             </span></span>}
           </div>
+          {result.register_width != null && (
+            <div style={{ marginTop: 10, padding: '8px 10px',
+              border: '1px solid var(--border)', borderRadius: 8,
+              background: 'var(--surface, rgba(0,0,0,0.02))' }}>
+              <span className="muted" style={{ fontSize: 11.5 }}>Measured register width</span>{' '}
+              <span className="mono" style={{ color: 'var(--brand)', fontWeight: 600 }}>
+                N = {result.register_width}
+              </span>
+              {' · '}
+              <span className="mono" style={{ fontSize: 12 }}>
+                {result.pixel_mode_recommendation === 'ensemble'
+                  ? '→ ensemble mode (bulk ensemble → 1 line per pixel)'
+                  : `→ register mode (${result.register_width} resolved ODMR lines)`}
+              </span>
+              <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                Applied to the pixel-mode selector above{result.line_freqs_hz
+                  ? ` · ${result.line_freqs_hz.length} line centres sent to the backend`
+                  : ''}.
+              </div>
+            </div>
+          )}
           {perPin && perPin.length > 0 && (
             <button type="button" className="ghost" style={{ marginTop: 12 }}
               onClick={() => setResOpen(true)}>
