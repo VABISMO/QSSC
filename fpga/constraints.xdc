@@ -95,6 +95,22 @@ set_property IOSTANDARD LVCMOS33 [get_ports mw_gate]
 set_property SLEW FAST [get_ports mw_gate]
 set_property DRIVE 8   [get_ports mw_gate]
 
+# ---- Gradient coil DAC (MCP4921, Invention 5 field gradient) ----------
+# 3-wire SPI to the MCP4921 12-bit DAC (grad_cs/sclk/mosi) + grad_en,
+# which gates the coil supply (high = a nonzero gradient is commanded).
+# The DAC sets the gradient-coil current (I = Vdac/Rsense) for per-NV
+# frequency addressing at 300 K; ODMR_SWEEP then counts resolved lines.
+set_property PACKAGE_PIN V6   [get_ports grad_cs]
+set_property PACKAGE_PIN V9   [get_ports grad_sclk]
+set_property PACKAGE_PIN V12   [get_ports grad_mosi]
+set_property PACKAGE_PIN V7   [get_ports grad_en]
+set_property IOSTANDARD LVCMOS33 [get_ports grad_cs]
+set_property IOSTANDARD LVCMOS33 [get_ports grad_sclk]
+set_property IOSTANDARD LVCMOS33 [get_ports grad_mosi]
+set_property IOSTANDARD LVCMOS33 [get_ports grad_en]
+set_property SLEW FAST [get_ports grad_sclk]
+set_property DRIVE 8   [get_ports grad_sclk]
+
 # ---- ADF4351 SPI: {LE, CLK, DATA, MUXOUT} -----------------------------------
 # spi_pins[0]=LE, [1]=CLK, [2]=DATA (FPGA outputs), [3]=MUXOUT (FPGA input)
 set_property PACKAGE_PIN G1  [get_ports {spi_pins[0]}]

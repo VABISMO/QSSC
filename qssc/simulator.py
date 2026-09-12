@@ -746,15 +746,16 @@ def auto_align(profile: DefectProfile | str = "NV",
         sites: List[QubitSite] = []
         n = max(1, int(n_nv_per_pixel))
         line_spacing_hz = register_line_spacing_hz
-        # MEASURED register width (the truth from decompose_odmr): when the
-        # resolved ODMR line centres are given, N = len(lines) and each NV sits
-        # at its measured frequency (not the synthetic 6 MHz grid). Priority:
-        # measured lines > gradient-derived spacing > uniform 6 MHz default.
+        # MEASURED ODMR line centres (from decompose_odmr in the calibration)
+        # override both the uniform grid and the gradient-derived spacing: the
+        # register sits on the real resolvable frequency positions, and the
+        # measured line count IS the register width N (it overrides
+        # n_nv_per_pixel). Priority: measured lines > gradient > uniform 6 MHz.
         measured_freqs = (list(register_line_freqs_hz)
-                          if register_line_freqs_hz is not None else None)
+                          if register_line_freqs_hz else None)
         if measured_freqs is not None:
             n = max(1, len(measured_freqs))
-        if gradient_mhz_per_um > 0.0:
+        if gradient_mhz_per_um > 0.0 and measured_freqs is None:
             linewidth_mhz = prof.odmr_linewidth_hz * 1e-6
             # the gradient shifts the ensemble ODMR line by gradient*d MHz per um
             # of spatial offset; across the pixel the spread is gradient*pixel.
@@ -852,7 +853,10 @@ def auto_align(profile: DefectProfile | str = "NV",
 def simulate_odmr(profile: DefectProfile | str = "NV",
                   freqs_ghz: Optional[np.ndarray] = None,
                   b_field_t: float = 1e-3, linewidth_mhz: float = 5.0,
-                  contrast_depth: float = 0.03) -> Tuple[np.ndarray, np.ndarray]:
+                  contrast_depth: float = 0.03,
+                  gradient_mhz_per_um: float = 0.0,
+                  pixel_size_um: float = 200.0,
+                  n_nv_per_pixel: int = 10) -> Tuple[np.ndarray, np.ndarray]:
     """Analytic ODMR spectrum with hyperfine replicas.
 
     Builds the dip pattern for a spin-1 defect coupled to ``n_equivalent_nuclei``
@@ -870,6 +874,17 @@ def simulate_odmr(profile: DefectProfile | str = "NV",
     The two electron spin transitions (ms=0 <-> +-1) are Zeeman-split by gamma*B.
     Returns frequencies (GHz) and contrast (0..1, dips), with the deepest line at
     ``contrast_depth``.
+
+    **Field gradient (Invention 5):** with ``gradient_mhz_per_um > 0`` the N NVs
+    in one pixel no longer collapse onto a single ensemble line. Each NV at
+    position ``r_i`` (uniform across the ``pixel_size_um`` pixel) sees a
+    position-dependent field, so its resonance shifts by
+    ``gradient_mhz_per_um * r_i``. The single hyperfine pattern is replicated at
+    ``n_nv_per_pixel`` uniformly spaced positions, spreading the lines across
+    ``gradient_mhz_per_um * pixel_size_um`` MHz. When that spread exceeds the
+    linewidth the lines resolve (Case D) and ``decompose_odmr`` counts them --
+    turning the per-pixel register width into a *measured* quantity. With no
+    gradient the spectrum is unchanged (one ensemble line).
     """
     prof = get_profile(profile) if isinstance(profile, str) else profile
     if freqs_ghz is None:
@@ -907,15 +922,33 @@ def simulate_odmr(profile: DefectProfile | str = "NV",
     _c = _Counter(round(o, 3) for o in offsets)
     d_max = max(_c.values()) if _c else 1
 
+    # Field-gradient spread (Invention 5). Without a gradient the N NVs share one
+    # ensemble line (one position -> one shift of 0). With a gradient the NVs sit
+    # at uniform positions across the pixel; each copy of the hyperfine pattern is
+    # shifted by gradient * position, so the lines spread and resolve.
+    if gradient_mhz_per_um > 0.0 and n_nv_per_pixel > 1:
+        n_nv = max(2, int(n_nv_per_pixel))
+        # uniform positions across [0, pixel_size_um] (centred so the spread is
+        # symmetric about D, matching the no-gradient centre).
+        positions_um = np.linspace(-pixel_size_um / 2.0, pixel_size_um / 2.0, n_nv)
+        shifts_hz = (gradient_mhz_per_um * positions_um) * 1e6
+        # each NV carries 1/n of the ensemble contrast so the integrated dip is
+        # conserved whether the lines overlap (no gradient) or separate.
+        nv_amp = 1.0 / n_nv
+    else:
+        shifts_hz = [0.0]
+        nv_amp = 1.0
+
     contrast = np.ones_like(freqs_ghz)
     sigma = linewidth_mhz * 1e6
     f_hz = freqs_ghz * 1e9
-    for ft in transitions:
-        for off in offsets:
-            centre = ft + off
-            amp = contrast_depth / d_max
-            dip = amp * np.exp(-((f_hz - centre) ** 2) / (2 * sigma ** 2))
-            contrast = contrast - dip
+    for shift in shifts_hz:
+        for ft in transitions:
+            for off in offsets:
+                centre = ft + off + float(shift)
+                amp = (contrast_depth / d_max) * nv_amp
+                dip = amp * np.exp(-((f_hz - centre) ** 2) / (2 * sigma ** 2))
+                contrast = contrast - dip
     contrast = np.clip(contrast, 0.0, 1.0)
     return freqs_ghz, contrast
 

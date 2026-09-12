@@ -3,7 +3,7 @@ import { api } from './api.js'
 import { deriveMeasurement } from './derive.js'
 import {
   QubitGrid, OdmrChart, BarCounts, MeasurementHelp,
-  SignalChart, CalibrationPanel, Verdict,
+  SignalChart, CalibrationPanel, Verdict, NoiseBudget,
   OpticalChainDiagram, RunPhysics,
   CompassRose, GyroPanel, MagnetoImage, SensorField,
 } from './components.jsx'
@@ -599,10 +599,15 @@ export default function App() {
     } catch (e) { setRunErr(e.message); setJob(null) }
   }
 
-  const runCalibration = async () => {
+  const runCalibration = async (opts = {}) => {
     setCalRunning(true); setCalErr(null)
     try {
-      const r = await api.calibrationRun({ profile, temperature_k: temperature, seed, hardware: hwMode === 'hardware' })
+      const r = await api.calibrationRun({
+        profile, temperature_k: temperature, seed,
+        hardware: hwMode === 'hardware',
+        gradient_code: opts.gradient_code ?? null,
+        n_nv_per_pixel: opts.n_nv_per_pixel ?? 10,
+      })
       setCalRun(r)
       // The calibration measures the register width N (decompose_odmr on the
       // ODMR sweep → resolvable line count). Apply the open loop: set the
@@ -1622,6 +1627,7 @@ export default function App() {
               )}
               {info.loading && <div className="muted"><span className="spinner" /> loading backend target…</div>}
               {runAssessment && <div style={{ marginTop: 12 }}><Verdict assessment={runAssessment} /></div>}
+              {result && result.noise && <NoiseBudget noise={result.noise} />}
             </div>
 
             <RunPhysics result={result} profile={profile} temperature={temperature} infoData={info.data} />

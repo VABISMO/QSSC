@@ -145,6 +145,13 @@ hardware/pcb/*.maze*.kicad_pcb
 hardware/pcb/*.maze*.kicad_pro
 hardware/pcb/*.closed*.kicad_pcb
 hardware/pcb/*.closed*.kicad_pro
+# Gradient-variant router scratch (tools/route_grad_nets / freeroute / maze)
+hardware/pcb/qssc-grad.dsn
+hardware/pcb/qssc-grad.freeroute.log
+hardware/pcb/qssc-grad.maze3d.kicad_pcb
+hardware/pcb/qssc-grad.maze3d.kicad_pro
+hardware/pcb/qssc-grad.maze3d.kicad_prl
+
 
 # Parameter-sweep benchmark outputs (tools/run_benchmark.py -- regenerable)
 benchmark_circuits.json

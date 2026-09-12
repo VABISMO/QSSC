@@ -13,12 +13,27 @@ principled closure.
 
 Non-destructive: writes <board>.maze3d.kicad_pcb. DRC the result to validate.
 
-Usage: python3 tools/maze_bridge_3d.py <board.kicad_pcb> [net1,net2,...]
+Usage: python3 tools/maze_bridge_3d.py <board.kicad_pcb> [net1,net2,...] [--keep-power[=NET,..]]
+
+By default every net in tc.PLANE_NETS is skipped (planes are poured, not routed).
+--keep-power lets power-plane nets through the maze instead of treating them as
+already-poured planes -- used by the gradient-variant pipeline where +5V is a
+poured plane on the base board but must also reach the gradient coil as a routed
+spur on qssc-grad. With no `=NET,..` list, keeps +5V (the grad-coil supply).
 """
 import sys, math, heapq, os
 from pathlib import Path
-bp = Path(sys.argv[1]).resolve()
-only = set(sys.argv[2].split(",")) if len(sys.argv) > 2 else None
+_keep_power_arg = [a for a in sys.argv if a.startswith("--keep-power")]
+argv = [a for a in sys.argv if not a.startswith("--keep-power")]
+KEEP_POWER = set()
+if _keep_power_arg:
+    spec = _keep_power_arg[-1]
+    if "=" in spec:
+        KEEP_POWER = {n.strip() for n in spec.split("=", 1)[1].split(",") if n.strip()}
+    else:
+        KEEP_POWER = {"+5V"}  # default: the gradient-coil supply
+bp = Path(argv[1]).resolve()
+only = set(argv[2].split(",")) if len(argv) > 2 else None
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tests"))
 import pcbnew
 import test_pcb_connectivity as tc
@@ -415,7 +430,7 @@ n_nets = len(by_net)
 _maze_out = bp.with_suffix(".maze3d.kicad_pcb")
 for idx, (nc, items) in enumerate(by_net.items(), 1):
     nm = netnames.get(nc, "")
-    if not nm or nm in tc.PLANE_NETS: continue
+    if not nm or (nm in tc.PLANE_NETS and nm not in KEEP_POWER): continue
     if only and nm not in only: continue
     clusters, _ = cluster_pads_and_vias(items)
     if len(clusters) < 2:

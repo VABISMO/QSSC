@@ -155,22 +155,39 @@ per pixel and aggregates.
 
 A field gradient across the die makes adjacent NVs (within a pixel) sit
 one ODMR linewidth apart, so the per-pixel register width becomes a
-MEASURED quantity: `resolvable = floor(gradient · pixel_size / linewidth)`
-(Case D threshold; separation > linewidth else the lines collapse).
+**design-N / addressable-N upper bound**: `resolvable = floor(gradient ·
+pixel_size / linewidth)` (Case D threshold; separation > linewidth else the
+lines collapse). This is the count of *resolvable* ODMR lines — an upper bound
+on the addressable register, not the literal NV count. `decompose_odmr`
+resolves the intrinsic ¹⁴N hyperfine doublet even at zero gradient (→ 2
+lines), so the line count is best read as "addressable lines", not "measured
+NVs"; the per-pixel NV count varies with detector brightness (Invention 1
+proxy), see `qubits_per_pixel` in the calibration response.
 
 - **SIM ✅** — `qssc/simulator.py` `resolvable_register_width(...)` +
-  `auto_align(gradient_mhz_per_um=, pixel_size_um=)` caps `n` to the
-  resolvable count; `qssc/backend.py` `__init__(gradient_mhz_per_um=,
-  pixel_size_um=)`.
-- **Tests** — `tests/test_field_gradient_register.py` (5 tests).
-- **needs-HW** ❗ — a **field-gradient coil + DAC** (a small pair of
-  anti-Helmholtz coils or a shaped pole piece + a DAC channel the FPGA
-  drives). The current PCB has NO gradient coil. To run this on hardware:
-  - add the **gradient coil + DAC** to the PCB, and
-  - an RTL verb that sets the DAC current per sweep (then `ODMR_SWEEP`
-    measures the line count → the register width).
-  The simulator models the physics today; the PCB needs the coil.
-- **Commit** — `8428f96`.
+  `auto_align(gradient_mhz_per_um=, pixel_size_um=,
+  register_line_freqs_hz=)` caps `n` to the resolvable count and, when
+  measured line centres are supplied, seats the register on the real ODMR
+  frequencies instead of the synthetic 6 MHz grid; `qssc/backend.py`
+  `__init__(gradient_mhz_per_um=, pixel_size_um=, register_line_freqs_hz=)`.
+- **Tests** — `tests/test_field_gradient_register.py` (8 tests incl.
+  measured-line override of width + grid, per-pixel qubit array, and the
+  no-gradient predicted-1 / array-consistency case).
+- **HW-fits (qssc-grad variant)** ✅ — the **gradient coil + DAC now exist**
+  on the `qssc-grad` extended variant (a 1.5 mm PCB copper trace coil +
+  MCP4921 12-bit SPI DAC + LM358 servo + IRLML2502 MOSFET + Rsense,
+  fully routed, DRC 0/0/0; `tools/gen_qssc_kicad.py build_gradient_board()`).
+  The `SET_GRADIENT <code>` RTL verb (`fpga/rtl/command_parser.v` CMD_GRADIENT
+  → `dac_ctrl` SPI master) programs the coil current; `ODMR_SWEEP` then
+  counts the resolved lines = the register width at that gradient. **RESET
+  clears `grad_dac_value` to 0** (G1 fix): the load pulse is deferred to the
+  `rst_hold==0` cycle so `dac_ctrl` (synchronously reset by `peri_rst`)
+  actually latches the zero — verified by iverilog testbench scenario 20.
+  The base `qssc.*` board has no gradient coil; the variant is opt-in.
+- **needs-HW** — none on the `qssc-grad` variant (coil + DAC + verb all
+  present). The base board remains without a coil.
+- **Commit** — `8428f96` (sim); gradient-variant routing + `SET_GRADIENT`
+  RTL + G1 RESET fix on `pcb/gradient-variant-fix`.
 
 ---
 
@@ -194,9 +211,9 @@ MEASURED quantity: `resolvable = floor(gradient · pixel_size / linewidth)`
 | — | **Pixel-mode selector** (ensemble ↔ register, measured-N) | ✅ | **YES** — `pixel_mode` panel switch + `prime_readout` toggle; both run on existing firmware | — |
 | 1 | 64-pixel vector magnetometer | ✅ | **YES** — `/api/sensor/magneto` real path = ODMR_SWEEP → `decompose_odmr` → B | — |
 | 2+ | Prime-coprime readout + denoiser | ✅ | **YES** — `READ_LOCKINP` verb DONE (`375d394`); `prime_readout` toggle default on | — |
-| 3 | Nuclear-spin memory (NV+¹³C) | ✅ | NO — needs RF ~2 MHz channel + coil + `RUN_SEQUENCE` kind 3 | **GitHub issue** (RF DAC + coil + RTL kind 3) |
-| 4 | 64-parallel distributed computing | ✅ | **YES (readout)** — `READ_DETECTORS` 64-sweep DONE; `run_array` = replica sampling in ensemble | **GitHub issue** (per-pixel MW for independent circuits) |
-| 5 | Gradient register width | ✅ | NO — needs gradient coil + DAC + `SET_GRADIENT` | **GitHub issue** (gradient coil + DAC + RTL verb) |
+| 3 | Nuclear-spin memory (NV+¹³C) | ✅ | NO — needs RF ~2 MHz channel + coil + `RUN_SEQUENCE` kind 3 | **GitHub issue #75** (RF DAC + coil + RTL kind 3) |
+| 4 | 64-parallel distributed computing | ✅ | **YES (readout)** — `READ_DETECTORS` 64-sweep DONE; `run_array` = replica sampling in ensemble | **GitHub issue #77** (per-pixel MW for independent circuits) |
+| 5 | Gradient register width | ✅ | **YES (on the qssc-grad variant)** — `SET_GRADIENT` + coil/DAC (routed DRC 0/0/0) | — (issue #76 resolved by the variant) |
 
 The **pixel-mode selector** is the panel "multiqbit mode" switch (invention
 delivery vehicle): `register` (default, one pixel's N-NV register with
@@ -206,7 +223,10 @@ width **N is a measured quantity** — `decompose_odmr` on the ODMR calibration
 (`ODMR_SWEEP` verb) counts the resolvable lines, and the backend places NVs on
 the measured frequency grid (`register_line_freqs_hz`), not a hardcoded 10. A
 bulk microdiamond collapses to one line → ensemble mode is recommended; a
-resolved multi-line ODMR → register mode. `qubit = address not NV count`.
+resolved multi-line ODMR → register mode. `qubit = address not NV count`. The
+field gradient that spreads the lines (Invention 5) is **not** a panel mode —
+it is a hardware add-on built on the opt-in `qssc-grad` board variant (coil +
+DAC + `SET_GRADIENT` verb), not the base board.
 
 ## What to touch on the PCB for the needs-HW inventions
 
@@ -215,18 +235,23 @@ because they need a PCB change to the hardware we already have). The simulator
 models the physics today; the issues track the PCB + RTL work to run them for
 real.
 
-1. **RF channel for ¹³C SWAP (invention 3):** add a DDS/synthesizer at
+1. **RF channel for ¹³C SWAP (invention 3 — #75):** add a DDS/synthesizer at
    ~2 MHz + a small RF coil near the diamond die + an FPGA SPI/DAC port
    (mirror the ADF4351 control path). Then add `RUN_SEQUENCE` kind 3
    (MW+RF SWAP timing) in `fpga/rtl/command_parser.v`.
-2. **Gradient coil (invention 5):** add a gradient coil pair + a DAC
-   channel the FPGA drives + a `SET_GRADIENT` verb. Then `ODMR_SWEEP`
-   measures the per-pixel line count = the register width.
-3. **Per-pixel MW (invention 4, independent circuits):** either fast
+2. **Gradient coil (invention 5):** ✅ **done on the `qssc-grad` variant** —
+   a 1.5 mm PCB copper trace coil + MCP4921 DAC + LM358/IRLML2502 current
+   sink + Rsense, routed DRC 0/0/0, and the `SET_GRADIENT` RTL verb drives
+   it; `ODMR_SWEEP` measures the per-pixel line count = the register width
+   (the design-N / addressable-N upper bound). Issue #76 is resolved by the
+   variant. The base board is unchanged.
+3. **Per-pixel MW (invention 4, independent circuits — #77):** either fast
    ADF4351 hopping for frequency-multiplexed per-pixel gates, or 64 small
    per-pixel loop antennas. Then a `RUN_PARALLEL` verb that loads 64
    sequence descriptors.
 
-None of these PCB additions exist today; the simulator carries the physics
-until they do. The `pixel_mode=gradient` mode (invention 5's delivery vehicle)
-is **dropped** from the panel — gradient register width goes to its issue.
+Of the three, only inventions 3 (RF ¹³C channel, #75) and 4's independent-circuit
+per-pixel MW (#77) still need a PCB addition; the gradient coil (5) is built on
+the `qssc-grad` variant (#76 resolved). The simulator carries the physics for
+the remaining two. The field gradient is **not** a `pixel_mode` panel switch —
+it is a hardware add-on on the opt-in variant board, not the base board.

@@ -19,6 +19,7 @@ from .defects import (
 from .simulator import (
     SimulatedFPGA, QubitSite, auto_align, simulate_odmr, simulate_cqd_pulse,
     make_detector_response, xy8_decoupling, estimate_coherence_xy8,
+    resolvable_register_width,
 )
 from .backend import (
     QSSCBackend, QSSCJob, FPGAConnection, EmitterController, DetectorInterface,
@@ -47,6 +48,10 @@ from .prime_readout import (
     best_prime_for_nv, assign_prime_channels, prime_orthogonality,
     prime_decompose, prime_denoise, prime_noise_rejection, cross_talk_residual,
 )
+from .odmr_decompose import (
+    decompose_odmr, OdmrComponent, BFieldEstimate, b_field_from_odmr,
+    count_nv_centers,
+)
 
 __version__ = "2.0.0"
 __all__ = [
@@ -54,7 +59,7 @@ __all__ = [
     "coherence_at_temperature", "optical_coherence_at_temperature",
     "SimulatedFPGA", "QubitSite", "auto_align", "simulate_odmr",
     "simulate_cqd_pulse", "make_detector_response", "xy8_decoupling",
-    "estimate_coherence_xy8",
+    "estimate_coherence_xy8", "resolvable_register_width",
     "QSSCBackend", "QSSCJob", "FPGAConnection", "EmitterController",
     "DetectorInterface", "MicrowaveController", "CalibrationManager",
     "QubitReadoutProcessor", "make_connection", "NoFPGADetected",
@@ -71,5 +76,7 @@ __all__ = [
     "n_resolvable_prime_channels", "best_prime_for_nv",
     "assign_prime_channels", "prime_orthogonality", "prime_decompose",
     "prime_denoise", "prime_noise_rejection", "cross_talk_residual",
+    "decompose_odmr", "OdmrComponent", "BFieldEstimate", "b_field_from_odmr",
+    "count_nv_centers",
     "__version__",
 ]

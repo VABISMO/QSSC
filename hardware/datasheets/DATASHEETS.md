@@ -413,6 +413,122 @@ a different mechanism (the die is **removable**):
 
 ---
 
+## qssc-grad extended variant — gradient coil + DAC (Invention 5)
+
+The `qssc-grad` board is the **main board + an Invention 5 field-gradient
+coil and its current driver** — a separate extended variant generated from
+the same `tools/gen_qssc_kicad.py` (`build_gradient_board()` calls
+`build_main_board(grad=True)` then adds the 7 parts below).  The base
+`qssc.*` board is unchanged (0 grad nets, ERC/DRC identical).  The gradient
+is the **gate** that makes per-NV frequency addressing work at 300 K: the
+design target is one datasheet linewidth (5 MHz) of separation per addressable
+NV across the 200 µm pixel, so an N-line register needs ~N·5 MHz = N·0.18 mT
+(at the NV gyromagnetic ratio γ = 28 MHz/mT); at that detuning `qssc/dipole.py`
+puts the addressing leakage at 0.06×, and `ODMR_SWEEP` then counts the resolved
+lines to *measure* the per-pixel register width (the design-N / addressable-N
+upper bound).  The actual field the 1.5 mm PCB trace produces at a given
+`I_coil` is NOT QUOTED BY THE SUPPLIER — it is set by the coil geometry and
+measured by the ODMR line count.  The coil is a 1.5 mm PCB copper trace on
+F.Cu (free — no wound part), driven by a unipolar magnitude-programmable
+current sink: a 12-bit SPI DAC sets the current
+(`I_coil = Vdac / Rsense`), an op-amp servos the MOSFET gate to hold that
+current, and writing code 0 zero-cuts the coil.  Full copper routing is a
+follow-up (the base board was routed separately via FreeRouting); the
+schematic + netlist + placement are DRC 0/0/0.
+
+### Ugrad — MCP4921  (Microchip, 12-bit SPI DAC, 8-pin SOIC)
+- **Function:** sets the gradient-coil current.  12-bit voltage-output DAC,
+  VOUTA = VREF · code/4096 (1× gain).  VREF tied to +5V (VDD) → 0..5 V out →
+  0..5 A through the 1 Ω sense resistor (sized for the ~2.2 A clean-addressing
+  current; the ~0.56 A resolvable-measurement current is mid-range).
+- **Verified pinout (8-pin SOIC/PDIP/MSOP, DS22248A / DS21897B — confirmed
+  against the downloaded `pdfs/MCP4921.pdf`):**
+
+  | pin | name  | type    | net            | note                                    |
+  |-----|-------|---------|----------------|-----------------------------------------|
+  | 1   | VDD   | power   | +5V            |                                         |
+  | 2   | !CS   | input   | grad_cs        | FPGA SPI CS (idle high, go-low-then-latch)|
+  | 3   | SCK   | input   | grad_sclk      | FPGA SPI clock                          |
+  | 4   | SDI   | input   | grad_mosi      | FPGA SPI data                           |
+  | 5   | !LDAC | input   | GND            | tied low = transparent (update on CS↑)  |
+  | 6   | VREF  | input   | +5V            | tied to VDD for rail-to-rail Vout       |
+  | 7   | AVSS  | power   | GND            |                                         |
+  | 8   | VOUTA | output  | GRAD_DAC_OUT   | → LM358 non-inverting input             |
+
+  **The 8-pin single MCP4921 has NO !SHDN pin** (shutdown is SPI write-word
+  bit 12, kept =1 active by `dac_ctrl.v`'s `{4'b0011, code}` framing — the
+  14-pin MCP4922 is the one with a SHDN pin).  The coil is cut by writing
+  code 0 → VOUTA = 0 → op-amp → MOSFET off.  `grad_en` is an FPGA STATUS
+  output only (the ball stays NC on the PCB — a spare for a future high-side
+  enable); it does **not** wire to any DAC pin.
+- **SPI write word:** `{4'b0011, code[11:0]}` — bit15=0 (write), bit14=0
+  (unbuffered VREF), bit13=1 (1× gain), bit12=1 (active/!SHDN), bits11:0=data.
+- **Datasheet:** <https://ww1.microchip.com/downloads/en/DeviceDoc/22248A.pdf> (`pdfs/MCP4921.pdf`)
+
+### Udrv — LM358  (TI, dual op-amp, 8-pin SOIC)
+- **Function:** current-servo.  Amp A: INA+ = DAC VOUTA, INA− = sense voltage
+  (GRAD_SENSE), OUTA = MOSFET gate → the loop holds V_sense = V_dac, i.e.
+  I_coil = Vdac/Rsense.  Amp B parked as a unity follower (INB+ = GND,
+  INB− = OUTB) so the unused half cannot oscillate.
+- **Verified pinout (8-pin SOIC, standard LM358 dual op-amp):**
+
+  | pin | name  | net            |
+  |-----|-------|----------------|
+  | 1   | OUTA  | GRAD_GATE      |
+  | 2   | INA−  | GRAD_SENSE     |
+  | 3   | INA+  | GRAD_DAC_OUT   |
+  | 4   | VCC   | +5V            |
+  | 5   | INB+  | GND            |
+  | 6   | INB−  | GRAD_NFB       |
+  | 7   | OUTB  | GRAD_NFB       |
+  | 8   | GND   | GND            |
+
+- **Datasheet:** <https://www.ti.com/lit/ds/symlink/lm358.pdf> (`pdfs/LM358.pdf`)
+
+### Qgrad — IRLML2502  (Infineon, N-channel MOSFET, SOT-23-3)
+- **Function:** low-side current switch.  Gate = GRAD_GATE (op-amp OUTA),
+  source = GRAD_SENSE (→ Rsense → GND), drain = GRAD_COIL_N (coil return).
+  R_DS(on) ≈ 45 mΩ at V_GS=4.5 V, Id up to 4.2 A — comfortably above the
+  ~2.2 A clean-addressing current.
+- **Verified pinout (SOT-23-3):** 1=Gate (GRAD_GATE), 2=Source (GRAD_SENSE),
+  3=Drain (GRAD_COIL_N).
+- **Datasheet:** <https://www.infineon.com/dgdl/irlml2502.pdf> (`pdfs/IRLML2502.pdf`)
+
+### Lgrad — gradient coil (PCB copper trace, qssc:GradCoil footprint)
+- **Function:** the field-gradient coil — a 1.5 mm F.Cu trace (2 oz Cu, sized
+  for ~2 A) running along the die socket left edge.  Pin 1 = +5V feed,
+  pin 2 = GRAD_COIL_N → MOSFET drain.  No wound part — the "inductor" is PCB
+  copper (free); the footprint draws the trace on F.Fab (the actual copper is
+  laid in the routing step).
+
+### Rsense — 1 Ω current-sense (2512 power thick-film, ≥5 W)
+- **Function:** source-degeneration sense resistor.  I_coil = Vdac/1 Ω.  At
+  the 2.2 A clean-addressing current, P = I²R = 4.84 W, so the part must be
+  rated ≥5 W.  Pin 1 = GRAD_SENSE, pin 2 = GND.
+- **MPN:** a single 1 Ω / 5 W / 2512 chip is non-standard — 5 W 2512
+  current-sense parts are mΩ-range, and 1 Ω 2512 thick-film parts (e.g. Yageo
+  RC2512FK-071RL, TT Electronics LR2512-1R0FW) are 1–1.5 W.  NOT QUOTED BY THE
+  SUPPLIER — procurement should use either a larger high-power package (e.g.
+  6432/5025) at 1 Ω/5 W, or two 0.5 Ω 3 W 2512 parts in series.  MPN to be
+  confirmed at procurement.
+
+### C_grad1 / C_grad2 — 100 nF DAC VDD decoupling (0603)
+- **Function:** HF + bulk-bypass on the +5V rail at Ugrad.  Pin 1 = +5V,
+  pin 2 = GND.
+
+### BOM cost (gradient add-on, single qty)
+| ref        | part        | qty | ~unit  | ~ext   |
+|------------|-------------|-----|--------|--------|
+| Ugrad      | MCP4921     | 1   | $1.50  | $1.50  |
+| Udrv       | LM358       | 1   | $0.20  | $0.20  |
+| Qgrad      | IRLML2502   | 1   | $0.30  | $0.30  |
+| Rsense     | 1Ω 5W 2512  | 1   | $0.10  | $0.10  |
+| C_grad1/2  | 100 nF 0603 | 2   | $0.05  | $0.10  |
+| Lgrad      | PCB copper  | 1   | $0.00  | $0.00  |
+| **total**  |             |     |        | **~$2.50** |
+
+---
+
 ## KiCad footprints & 3D models
 
 All 2D footprints used by both sandwich boards are present in the installed

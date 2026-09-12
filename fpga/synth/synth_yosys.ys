@@ -19,6 +19,7 @@ read_verilog fpga/rtl/emitter_array.v
 read_verilog fpga/rtl/adc_reader.v
 read_verilog fpga/rtl/adf4351_ctrl.v
 read_verilog fpga/rtl/qrng_entropy.v
+read_verilog fpga/rtl/dac_ctrl.v
 read_verilog fpga/rtl/command_parser.v
 read_verilog fpga/rtl/top_level.v
 

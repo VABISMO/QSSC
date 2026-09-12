@@ -69,6 +69,11 @@ module tb_top_level;
     wire        mw_gate;
     wire [3:0]  spi_pins;
     wire        refclk_out;
+    // Gradient coil DAC (Invention 5): 3-wire SPI + enable.
+    wire        grad_cs;
+    wire        grad_sclk;
+    wire        grad_mosi;
+    wire        grad_en;
 
     // ---- Captured TX bytes -------------------------------------------------
     reg [7:0]   rx_log [0:1023];
@@ -120,6 +125,29 @@ module tb_top_level;
         pll_le_last <= spi_pins[0];
     end
 
+    // ---- Gradient DAC SPI monitor: capture the 16-bit MOSI word shifted out
+    // during a cs_n-low window (MSB-first on grad_sclk rising edge) and count
+    // completed transactions (cs_n falling->rising). Verifies SET_GRADIENT
+    // drives the MCP4921 with the framed word {4'b0011, code[11:0]}.
+    integer      grad_xact_count = 0;   // completed cs_n-low transactions
+    integer      grad_bit_count  = 0;   // bits shifted in the current xact
+    reg [15:0]   grad_shift_reg  = 16'd0;
+    reg          grad_cs_last    = 1'b1;
+    reg          grad_sclk_last  = 1'b0;
+    always @(posedge clk_100mhz) begin
+        // rising edge of grad_sclk while CS low -> shift in one MOSI bit (MSB-first)
+        if (grad_sclk === 1'b1 && grad_sclk_last === 1'b0 && grad_cs === 1'b0) begin
+            grad_shift_reg <= {grad_shift_reg[14:0], grad_mosi};
+            grad_bit_count  <= grad_bit_count + 1;
+        end
+        grad_sclk_last <= grad_sclk;
+        // transaction complete on cs_n rising edge
+        if (grad_cs === 1'b1 && grad_cs_last === 1'b0) begin
+            grad_xact_count <= grad_xact_count + 1;
+        end
+        grad_cs_last <= grad_cs;
+    end
+
     // ---- DUT ---------------------------------------------------------------
     top_level dut (
         .clk_100mhz (clk_100mhz),
@@ -139,7 +167,11 @@ module tb_top_level;
         .mod_sync   (mod_sync),
         .spi_pins   (spi_pins),
         .refclk_out (refclk_out),
-        .mw_gate    (mw_gate)
+        .mw_gate    (mw_gate),
+        .grad_cs    (grad_cs),
+        .grad_sclk  (grad_sclk),
+        .grad_mosi  (grad_mosi),
+        .grad_en    (grad_en)
     );
 
     //========================================================================
@@ -266,6 +298,7 @@ module tb_top_level;
     integer k16, ok16;       // RUN_SEQUENCE verify loop
     integer li_k, li_ok;     // READ_LOCKIN verify loop
     integer k18, ok18;       // Ramsey RUN_SEQUENCE verify loop
+    integer ok19;            // SET_GRADIENT verify
     reg [7:0] cmd_bytes [0:39];
     initial begin
         // Reset
@@ -1012,6 +1045,67 @@ module tb_top_level;
             err_count = err_count + 1;
             $display("TB: FAIL Ramsey RUN_SEQUENCE (got %0d bytes, ok=%0d, pulses=%0d, pll_wr=%0d)",
                      rx_log_cnt, ok18, mw_gate_pulses, pll_wr_count);
+        end
+
+        // ---- 19) SET_GRADIENT 2048 -> OK + MCP4921 framed SPI word 0x3800 --
+        // Programs the Invention 5 gradient-coil DAC to midscale (code 2048).
+        // The dac_ctrl must shift the 16-bit framed word {4'b0011, 12'd2048}
+        // = 0x3800 (channel A, unbuffered, 1x gain, !SHDN) and pulse cs_n, then
+        // the parser replies OK. grad_en must be high (nonzero code -> coil on).
+        grad_xact_count = 0;
+        grad_bit_count  = 0;
+        grad_shift_reg  = 16'd0;
+        rx_log_cnt = 0;
+        cmd_bytes[0]="S";  cmd_bytes[1]="E";  cmd_bytes[2]="T";  cmd_bytes[3]="_";
+        cmd_bytes[4]="G";  cmd_bytes[5]="R";  cmd_bytes[6]="A";  cmd_bytes[7]="D";
+        cmd_bytes[8]="I";  cmd_bytes[9]="E";  cmd_bytes[10]="N"; cmd_bytes[11]="T";
+        cmd_bytes[12]=" "; cmd_bytes[13]="2"; cmd_bytes[14]="0"; cmd_bytes[15]="4";
+        cmd_bytes[16]="8"; cmd_bytes[17]=8'h0A;
+        $display("TB: sending SET_GRADIENT 2048 (expect OK + MCP4921 word 0x3800)");
+        for (c=0;c<18;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(3, W_GENERIC);        // OK\n (after the 16-bit SPI shift)
+        ok19 = 1;
+        if (!(rx_log_cnt >= 3 &&
+              rx_log[0] === 8'h4F && rx_log[1] === 8'h4B && rx_log[2] === 8'h0A))
+            ok19 = 0;
+        if (grad_xact_count < 1)  ok19 = 0;   // one cs_n-low transaction
+        if (grad_shift_reg !== 16'h3800) ok19 = 0;  // {4'b0011, 12'd2048}
+        if (grad_en !== 1'b1)     ok19 = 0;   // nonzero code -> coil enabled
+        if (ok19) begin
+            ok_count = ok_count + 1;
+            $display("TB: SET_GRADIENT 2048 = OK, MCP4921 word=0x%04h, grad_en=1  (PASS)",
+                     grad_shift_reg);
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL SET_GRADIENT (rx=%0d, xact=%0d, word=0x%04h, en=%b)",
+                     rx_log_cnt, grad_xact_count, grad_shift_reg, grad_en);
+        end
+
+        // ---- 20) RESET clears the gradient DAC (G1) -------------------------
+        // Scenario 19 left grad_dac_value_w=2048 (grad_en=1, coil on). A RESET
+        // must zero grad_dac_value_w so the coil turns OFF (only power-on reset
+        // cleared it before -- a stray field survived RESET). The load pulse is
+        // deferred to the end of S_RESET_WAIT so dac_ctrl (held in sync reset by
+        // soft_rst->peri_rst) actually processes it once peri_rst drops; the
+        // zero is observable in grad_dac_value_w right after the OK reply.
+        rst_pulses_before = adc_rst_pulses;
+        grad_xact_count = 0;
+        rx_log_cnt = 0;
+        cmd_bytes[0]="R";  cmd_bytes[1]="E";  cmd_bytes[2]="S";  cmd_bytes[3]="E";
+        cmd_bytes[4]="T";  cmd_bytes[5]=8'h0A;
+        $display("TB: sending RESET after SET_GRADIENT (expect OK + grad cleared)");
+        for (c=0;c<6;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(3, W_GENERIC);        // OK\n
+        repeat(600) @(posedge clk_100mhz);   // past rst_hold + the DAC SPI shift
+        if (rx_log_cnt >= 3 &&
+            rx_log[0] === 8'h4F && rx_log[1] === 8'h4B && rx_log[2] === 8'h0A &&
+            dut.parser_inst.grad_dac_value === 12'd0 && grad_en === 1'b0) begin
+            ok_count = ok_count + 1;
+            $display("TB: RESET cleared gradient (grad_dac_value=0, grad_en=0)  (PASS)");
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL RESET-clears-grad (rx=%0d, grad=%0d, en=%b)",
+                     rx_log_cnt, dut.parser_inst.grad_dac_value, grad_en);
         end
 
         if (err_count == 0)

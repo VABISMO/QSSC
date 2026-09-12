@@ -25,7 +25,6 @@ from qssc import (
     postprocess_period_swapless, select_coprime, is_prime, perfect_power,
     build_user_circuit, UserCircuitError,
 )
-from qssc.simulator import N_NV_PER_PIXEL
 from qssc.crypto import (
     derive_keypair, von_neumann_extract, bits_to_bytes, entropy_health,
 )
@@ -37,13 +36,22 @@ def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
              n_nv_per_pixel: Optional[int] = None,
              pixel_mode: str = "register",
              register_nv_spacing_nm: float = 2.75,
+             gradient_mhz_per_um: float = 0.0,
              pixel_size_um: float = 200.0,
-             register_line_freqs_hz: Optional[list] = None) -> QSSCBackend:
+             register_line_freqs_hz: Optional[list] = None,
+             prime_readout: bool = False,
+             n_noise_bins: int = 64) -> QSSCBackend:
     # pixel_mode selects the circuit-qubit model: register (one pixel's N-NV
     # register, within-pixel all-to-all dipole 2q) or ensemble (64 chip pixels,
     # no within-pixel 2q). N is the MEASURED resolvable ODMR line count when
-    # register_line_freqs_hz is given, else the nominal default. The backend
-    # auto-grows the register to fit a wider circuit (QSSCBackend._ensure_register).
+    # register_line_freqs_hz is given (the calibration's decompose_odmr at the
+    # applied gradient), else the nominal default. The register auto-grows to
+    # fit a wider circuit (QSSCBackend._ensure_register). Passing explicit
+    # chip-view sites here would make the 64 pixels a (cross-pixel, unphysical)
+    # K_64. ``gradient_mhz_per_um`` + ``register_line_freqs_hz`` close the
+    # calibration -> circuit loop: the register sits on the real addressed
+    # frequencies at the applied gradient, not the synthetic 6 MHz grid.
+    from qssc.backend import N_NV_PER_PIXEL
     fpga = _make_fpga(profile, temperature_k, seed, hardware)
     return QSSCBackend(profile=profile, seed=seed,
                        temperature_k=temperature_k, noise_mode=noise_mode,
@@ -51,21 +59,28 @@ def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
                        n_nv_per_pixel=(n_nv_per_pixel if n_nv_per_pixel is not None
                                        else N_NV_PER_PIXEL),
                        register_nv_spacing_nm=register_nv_spacing_nm,
+                       gradient_mhz_per_um=gradient_mhz_per_um,
                        pixel_size_um=pixel_size_um,
-                       register_line_freqs_hz=register_line_freqs_hz)
+                       register_line_freqs_hz=register_line_freqs_hz,
+                       prime_readout=prime_readout,
+                       n_noise_bins=n_noise_bins)
 
 
 def _pixel_kwargs(req: dict) -> dict:
     """Extract the pixel-mode + register-width params from a request payload
     (RunRequest / CustomCircuitRequest / ParallelRunRequest) for ``_backend``.
     The measured register_line_freqs_hz from the calibration's decompose_odmr
-    flows in here, so the backend's register width N is the measured truth."""
+    and the applied gradient_mhz_per_um flow in here, so the backend's register
+    width N is the measured truth on the real addressed frequency grid."""
     return {
         "pixel_mode": req.get("pixel_mode", "register"),
         "n_nv_per_pixel": req.get("n_nv_per_pixel"),
         "register_nv_spacing_nm": float(req.get("register_nv_spacing_nm", 2.75)),
+        "gradient_mhz_per_um": float(req.get("gradient_mhz_per_um", 0.0)),
         "pixel_size_um": float(req.get("pixel_size_um", 200.0)),
         "register_line_freqs_hz": req.get("register_line_freqs_hz"),
+        "prime_readout": bool(req.get("prime_readout", False)),
+        "n_noise_bins": int(req.get("n_noise_bins", 64)),
     }
 
 
@@ -653,6 +668,11 @@ def run_circuit(req: dict) -> dict:
     result["approximate"] = getattr(res, "approximate", False)
     if getattr(res, "optical", None) is not None:
         result["optical"] = res.optical
+    # Per-run noise budget so the frontend can compare prime readout on vs
+    # off: the base optical readout error, the prime SNR improvement factor,
+    # and the EFFECTIVE readout error after the coprime matched-filter denoiser
+    # (equal to the base when prime_readout is off).
+    result["noise"] = b.noise_summary()
     result["elapsed_ms"] = round((time.perf_counter() - t0) * 1000, 2)
     return result
 
@@ -770,6 +790,7 @@ def run_parallel(req: dict) -> dict:
         return {"error": f"unknown parallel mode '{mode}' "
                         f"(use shor | sample | custom)"}
 
+    out["noise"] = b.noise_summary()
     out["elapsed_ms"] = round((time.perf_counter() - t0) * 1000, 2)
     return out
 
@@ -807,6 +828,7 @@ def run_custom(req: dict) -> dict:
         "depth": qc.depth(), "ops": qc.count_ops(),
         "assessment": getattr(res, "assessment", {}),
         "approximate": getattr(res, "approximate", False),
+        "noise": b.noise_summary(),
         "elapsed_ms": round((time.perf_counter() - t0) * 1000, 2),
         **({"optical": res.optical} if getattr(res, "optical", None) is not None else {}),
     }

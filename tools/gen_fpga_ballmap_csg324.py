@@ -228,6 +228,21 @@ def main() -> None:
     # 3d. control nets -> remaining general IO (prefer SRCC/centre, then rest).
     # (I2C_SDA/I2C_SCL are GONE: the MCP4725 threshold DAC was removed with the
     # comparator/photon-counter chain -- the AD7616 range is HW-pin-strapped.)
+    # Invention 5 adds 4 gradient-coil DAC pins (grad_cs/sclk/mosi/en) for the
+    # MCP4921 field-gradient current driver on the extended qssc-grad board.
+    # The 3 SPI balls + grad_en are pinned to the FPGA SOUTH edge (row V, the
+    # 0.8 mm-pitch BGA's bottom row) -- clear of the base board's SPI/adc
+    # inner-layer escape band (y 56-60, x 99-138) which boxed in the earlier
+    # left-first pick (M1/N1/R1 had SPI_CS/adc_cs2/SPI_D3 routed through their
+    # pads on In3/In4/B.Cu). Row V is >1.6 mm from every base track on
+    # In3/In4/B.Cu, so a 0.30 mm blind F.Cu->In3 via-in-pad fits, and In3 from
+    # row V straight down to Ugrad (y 97-100) is clear. grad_en is status-only NC.
+    grad_pins = {"grad_cs": "V6", "grad_sclk": "V9",
+                 "grad_mosi": "V12", "grad_en": "V7"}
+    for name, b in grad_pins.items():
+        assert b in avail and b not in taken, f"grad pin {b} unavailable"
+        signals[name] = b
+        taken.add(b)
     control = ["reset", "tx", "rx", "SPI_CLK", "SPI_DATA", "SPI_LE",
                "ADF_MUXOUT", "mod_sync", "mw_gate"]
     ctrl_pool = sorted(

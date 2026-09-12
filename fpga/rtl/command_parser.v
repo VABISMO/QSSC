@@ -131,10 +131,18 @@ module command_parser #(
     input      [23:0] rng_samples_seen,  // running raw-sample counter (24-bit)
     input      [31:0] rng_word,
     input             rng_valid,
+    // Gradient DAC (Invention 5 field-gradient coil current driver). The
+    // MCP4921 12-bit DAC sets the coil current (I = Vdac / Rsense); a SET_GRADIENT
+    // verb writes the 12-bit code and waits for the dac_ctrl SPI shift to finish
+    // before replying OK (serialized, like SET_EMITTER). The DAC framing bits are
+    // added in top_level; the parser only carries the 12-bit value.
+    output reg [11:0] grad_dac_value,   // 12-bit MCP4921 code (0..4095)
+    output reg        grad_dac_load,    // 1-cycle pulse: start a DAC write
+    input             grad_dac_busy,    // dac_ctrl shift in progress
     // Soft reset (RESET verb): one-cycle pulse ORed into the peripheral reset
     // tree in top_level (emitter_array / adc_reader / adf4351_ctrl / qrng /
-    // mw_gate timer). The parser itself is NOT reset by it, so it can still
-    // reply OK after re-initialising the peripherals.
+    // mw_gate timer / dac_ctrl). The parser itself is NOT reset by it, so it can
+    // still reply OK after re-initialising the peripherals.
     output reg        soft_rst
 );
     // ---- Command IDs -------------------------------------------------------
@@ -161,6 +169,10 @@ module command_parser #(
     localparam [4:0] CMD_SEQ       = 5'd16;  // RUN_SEQUENCE site kind n t_step (4 args)
     localparam [4:0] CMD_LOCKIN    = 5'd17;  // READ_LOCKIN site n_cycles (2 args)
     localparam [4:0] CMD_LOCKINP   = 5'd18;  // READ_LOCKINP site n_cycles half_ns (3 args, prime-period lock-in)
+    // Invention 5 field-gradient verb. SET_GRADIENT <code 0..4095> programs the
+    // MCP4921 DAC that sets the gradient-coil current; ODMR_SWEEP then counts the
+    // resolved NV lines = the per-pixel register width at that gradient.
+    localparam [4:0] CMD_GRADIENT  = 5'd19;  // SET_GRADIENT code (1 arg)
 
     // ---- FSM states --------------------------------------------------------
     // 7-bit: S_SWEEP_NEXT=29 plus the #58 pulse-engine states (30..51) exceed
@@ -182,6 +194,8 @@ module command_parser #(
     localparam [6:0] S_PULSE_WAIT    = 7'd14;  // APPLY_PULSE: wait PLL done, arm gate
     // SET/CLEAR_EMITTER: wait for the TLC5947 load to finish, then reply OK.
     localparam [6:0] S_EM_WAIT       = 7'd16;
+    // SET_GRADIENT: wait for the dac_ctrl SPI shift to finish, then reply OK.
+    localparam [6:0] S_GRAD_WAIT     = 7'd55;
     localparam [6:0] S_RNG_HARVEST   = 7'd17;  // READ_RNG: wait for a qrng word
     localparam [6:0] S_RNG_EMIT      = 7'd18;  // READ_RNG: stream one hex nibble
     localparam [6:0] S_RNG_STATS     = 7'd19;  // READ_RNG: build the stats footer
@@ -274,6 +288,7 @@ module command_parser #(
     // ---- APPLY_PULSE / SET_EMITTER: wait for the peripheral -----------------
     reg        pll_busy_seen;
     reg        em_busy_seen;
+    reg        grad_busy_seen;
 
     // ---- Calibration helpers ----------------------------------------------
     reg [15:0] cal_max_code;
@@ -573,6 +588,7 @@ module command_parser #(
         em_level       = 12'd0;
         em_duration_ms = 32'd0;
         em_busy_seen   = 1'b0;
+        grad_busy_seen = 1'b0;
         pll_start      = 1'b0;
         pll_freq_khz   = 32'd0;
         det_read_one   = 1'b0;
@@ -590,6 +606,8 @@ module command_parser #(
         pll_phase_only = 1'b0;
         mw_gate_ns     = 32'd0;
         mw_gate_load   = 1'b0;
+        grad_dac_value = 12'd0;
+        grad_dac_load  = 1'b0;
         pll_busy_seen  = 1'b0;
         rng_harvest_en = 1'b0;
         rng_flush      = 1'b0;
@@ -726,6 +744,7 @@ module command_parser #(
             em_level       <= 12'd0;
             em_duration_ms <= 32'd0;
             em_busy_seen   <= 1'b0;
+            grad_busy_seen <= 1'b0;
             pll_start      <= 1'b0;
             pll_freq_khz   <= 32'd0;
             det_read_one   <= 1'b0;
@@ -739,6 +758,8 @@ module command_parser #(
             pll_phase_only <= 1'b0;
             mw_gate_ns     <= 32'd0;
             mw_gate_load   <= 1'b0;
+            grad_dac_value <= 12'd0;
+            grad_dac_load  <= 1'b0;
             pll_busy_seen  <= 1'b0;
             rng_harvest_en <= 1'b0;
             rng_flush      <= 1'b0;
@@ -797,6 +818,7 @@ module command_parser #(
             det_clear      <= 1'b0;
             det_code_ack   <= 1'b0;
             mw_gate_load   <= 1'b0;
+            grad_dac_load  <= 1'b0;
             rng_flush      <= 1'b0;
 
             // Line accumulation only while idle and no line pending.
@@ -939,6 +961,20 @@ module command_parser #(
                                     fsm       <= S_ARGSP;
                                 end else begin
                                     cmd_id <= CMD_ERR;  // READ_LOCKINP needs args
+                                    fsm    <= S_DISPATCH;
+                                end
+                            end else if
+                                // SET_GRADIENT (12 chars): code 0..4095
+                                (cmd_str[0]=="S" && cmd_str[1]=="E" && cmd_str[2]=="T" &&
+                                 cmd_str[3]=="_" && cmd_str[4]=="G" && cmd_str[5]=="R" &&
+                                 cmd_str[6]=="A" && cmd_str[7]=="D" && cmd_str[8]=="I" &&
+                                 cmd_str[9]=="E" && cmd_str[10]=="N" && cmd_str[11]=="T") begin
+                                cmd_id <= CMD_GRADIENT; arg_count <= 3'd1;
+                                if (!is_eol && ch == 8'h20) begin
+                                    parse_idx <= parse_idx + 7'd1;
+                                    fsm       <= S_ARGSP;
+                                end else begin
+                                    cmd_id <= CMD_ERR;  // SET_GRADIENT needs a code
                                     fsm    <= S_DISPATCH;
                                 end
                             end else begin
@@ -1267,9 +1303,19 @@ module command_parser #(
                             // RESET -> assert soft_rst for a few cycles to re-
                             // init the peripherals (emitter/ADC/PLL/QRNG/gate),
                             // then reply OK. The parser is not reset by it.
-                            soft_rst  <= 1'b1;
-                            rst_hold  <= 3'd4;
-                            fsm       <= S_RESET_WAIT;
+                            // Also zero the gradient DAC code so RESET turns the
+                            // gradient coil OFF. The actual DAC load pulse is
+                            // deferred to the end of S_RESET_WAIT (below): firing
+                            // it here would be ignored, because soft_rst ORs into
+                            // peri_rst which holds dac_ctrl in sync reset for the
+                            // whole rst_hold window. Without this clear the coil
+                            // keeps its last programmed current across a RESET
+                            // (only power-on `reset` cleared grad_dac_value),
+                            // leaving a stray field on the next ODMR sweep.
+                            soft_rst       <= 1'b1;
+                            rst_hold       <= 3'd4;
+                            grad_dac_value <= 12'd0;
+                            fsm            <= S_RESET_WAIT;
                         end
                         CMD_SWEEP : begin
                             // ODMR_SWEEP <q> <f_start_khz> <f_stop_khz> <n>:
@@ -1387,6 +1433,22 @@ module command_parser #(
                                 read_all_mode <= 1'b0;
                                 str_idx   <= 7'd0;
                                 fsm       <= S_LI_INIT;
+                            end
+                        end
+                        CMD_GRADIENT : begin
+                            // SET_GRADIENT <code 0..4095>: program the MCP4921
+                            // DAC that sets the gradient-coil current. Wait for
+                            // the dac_ctrl SPI shift to finish before replying
+                            // (serialized, like SET_EMITTER on the TLC5947).
+                            if ($signed(arg_vals[0]) < 32'd0 ||
+                                $signed(arg_vals[0]) > 32'd4095) begin
+                                reply_ok <= 1'b0;            // ERR
+                                fsm      <= S_REPLY_LOAD;
+                            end else begin
+                                grad_dac_value <= arg_vals[0][11:0];
+                                grad_dac_load  <= 1'b1;
+                                grad_busy_seen <= 1'b0;
+                                fsm            <= S_GRAD_WAIT;
                             end
                         end
                         default : begin
@@ -1557,6 +1619,17 @@ module command_parser #(
                     end
                 end
 
+                // ---- SET_GRADIENT: wait for the dac_ctrl SPI shift to finish,
+                // then reply OK. The busy-seen guard avoids racing on a
+                // momentary !busy before dac_ctrl has asserted busy.
+                S_GRAD_WAIT : begin
+                    if (grad_dac_busy)        grad_busy_seen <= 1'b1;
+                    if (grad_busy_seen && !grad_dac_busy) begin
+                        reply_ok <= 1'b1;
+                        fsm      <= S_REPLY_LOAD;
+                    end
+                end
+
                 // ---- READ_RNG: harvest one qrng word at a time and stream it
                 // as hex. harvest_en pauses while a word is being emitted so no
                 // rng_valid pulse is missed (the extractor only accumulates
@@ -1665,9 +1738,18 @@ module command_parser #(
                 // reset trees see a clean pulse, then reply OK.
                 S_RESET_WAIT : begin
                     if (rst_hold == 3'd0) begin
-                        soft_rst  <= 1'b0;
-                        reply_ok  <= 1'b1;
-                        fsm       <= S_REPLY_LOAD;
+                        // soft_rst deasserts next cycle -> peri_rst drops ->
+                        // dac_ctrl leaves sync reset. Pulse grad_dac_load HERE
+                        // so dac_ctrl sees start=1 (with grad_dac_value=0) on
+                        // the first out-of-reset cycle and writes 0 to the
+                        // MCP4921, hard-clearing the coil current. The load is a
+                        // 1-cycle pulse (the line-815 default clears it next
+                        // cycle); the SPI shift runs in the background after the
+                        // OK reply is sent.
+                        soft_rst      <= 1'b0;
+                        grad_dac_load <= 1'b1;
+                        reply_ok      <= 1'b1;
+                        fsm           <= S_REPLY_LOAD;
                     end else begin
                         rst_hold <= rst_hold - 3'd1;
                     end
