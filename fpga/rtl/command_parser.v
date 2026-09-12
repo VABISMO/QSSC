@@ -160,6 +160,13 @@ module command_parser #(
     // the host runs RUN_SEQUENCE (Ramsey) and fits the rate, so no CMD_GYRO.
     localparam [4:0] CMD_SEQ       = 5'd16;  // RUN_SEQUENCE site kind n t_step (4 args)
     localparam [4:0] CMD_LOCKIN    = 5'd17;  // READ_LOCKIN site n_cycles (2 args)
+    // Invention 4+5 — 64-parallel calibration sweep. Sweep the ADF4351 across
+    // [f_start, f_stop] in n points; at each point gate the MW and read ALL 64
+    // AD7616 channels -> one row of 64 codes per point. The host runs
+    // decompose_odmr per column to count each pixel's resolved ODMR lines =
+    // its calibrated register width. Reply = n rows of 64 space-separated
+    // decimal codes (LF-terminated) + OK.
+    localparam [4:0] CMD_ALL_SWEEP = 5'd18;  // RUN_ALL_ODMR f0 f1 n (3 args)
 
     // ---- FSM states --------------------------------------------------------
     // 7-bit: S_SWEEP_NEXT=29 plus the #58 pulse-engine states (30..51) exceed
@@ -237,6 +244,15 @@ module command_parser #(
     localparam [6:0] S_SEQ_PI2B_PLL  = 7'd52;  // Ramsey: wait R1-only PLL write, then gate+read
     localparam [6:0] S_SWEEP_GATE_WAIT=7'd53;  // ODMR: wait gate rise, then read
     localparam [6:0] S_SWEEP_GATE_FALL=7'd54;  // ODMR: wait gate fall, then encode
+    // RUN_ALL_ODMR (Invention 4+5): same PLL-sweep + gate as ODMR_SWEEP, but
+    // each point reads ALL 64 channels (one row) via the S_RALL_WAIT/S_ENC/
+    // S_REPLY_SEND read_all path (asweep_mode reroutes the post-row target to
+    // S_ASWEEP_GATE_FALL instead of S_IDLE).
+    localparam [6:0] S_ASWEEP_PROG     = 7'd55;  // program PLL for point i
+    localparam [6:0] S_ASWEEP_PLL      = 7'd56;  // wait PLL done, arm gate
+    localparam [6:0] S_ASWEEP_GATE_WAIT= 7'd57;  // wait gate rise, then read_all
+    localparam [6:0] S_ASWEEP_GATE_FALL= 7'd58;  // wait gate fall, then next
+    localparam [6:0] S_ASWEEP_NEXT     = 7'd59;  // f += step; loop or finish OK
 
     // ---- Line buffer ------------------------------------------------------
     reg [7:0] cmd_buffer [0:63];
@@ -269,6 +285,10 @@ module command_parser #(
 
     // ---- Read-one / read-all mode flag ------------------------------------
     reg        read_all_mode;
+    // RUN_ALL_ODMR (Invention 4+5) mode: like read_all_mode but the 64-code
+    // stream is one row of an n-point sweep, so after the last code S_REPLY_SEND
+    // continues to the all-sweep gate-fall/next state instead of S_IDLE.
+    reg        asweep_mode;
 
     // ---- APPLY_PULSE / SET_EMITTER: wait for the peripheral -----------------
     reg        pll_busy_seen;
@@ -558,6 +578,7 @@ module command_parser #(
         rall_loop      = 1'b0;
         code_is_last   = 1'b0;
         read_all_mode  = 1'b0;
+        asweep_mode    = 1'b0;
         cal_max_code   = 16'd0;
         cal_max_det    = 6'd0;
         cal_em         = 6'd0;
@@ -724,6 +745,7 @@ module command_parser #(
             pll_freq_khz   <= 32'd0;
             det_read_one   <= 1'b0;
             det_read_all   <= 1'b0;
+            asweep_mode    <= 1'b0;
             det_clear      <= 1'b0;
             det_site       <= 6'd0;
             det_code_ack   <= 1'b0;
@@ -913,6 +935,21 @@ module command_parser #(
                                     fsm       <= S_ARGSP;
                                 end else begin
                                     cmd_id <= CMD_ERR;  // RUN_SEQUENCE needs args
+                                    fsm    <= S_DISPATCH;
+                                end
+                            end else if (
+                                // RUN_ALL_ODMR (12 chars): R U N _ A L L _ O D M R
+                                cmd_str[0]=="R" && cmd_str[1]=="U" && cmd_str[2]=="N" &&
+                                cmd_str[3]=="_" && cmd_str[4]=="A" && cmd_str[5]=="L" &&
+                                cmd_str[6]=="L" && cmd_str[7]=="_" && cmd_str[8]=="O" &&
+                                cmd_str[9]=="D" && cmd_str[10]=="M" &&
+                                cmd_str[11]=="R") begin
+                                cmd_id <= CMD_ALL_SWEEP; arg_count <= 3'd3;
+                                if (!is_eol && ch == 8'h20) begin
+                                    parse_idx <= parse_idx + 7'd1;
+                                    fsm       <= S_ARGSP;
+                                end else begin
+                                    cmd_id <= CMD_ERR;   // RUN_ALL_ODMR needs 3 args
                                     fsm    <= S_DISPATCH;
                                 end
                             end else begin
@@ -1273,6 +1310,32 @@ module command_parser #(
                                 fsm            <= S_SWEEP_PROG;
                             end
                         end
+                        CMD_ALL_SWEEP : begin
+                            // RUN_ALL_ODMR <f_start_khz> <f_stop_khz> <n_points>
+                            // (Invention 4+5): per point reprogram the ADF4351 to
+                            // f(i), gate the RF, and read ALL 64 AD7616 channels
+                            // (one row of 64 codes), then advance. f_start/f_stop
+                            // > 0, n 1..256. step = (f_stop-f_start)/(n-1).
+                            if ($signed(arg_vals[0]) <= 0 ||
+                                $signed(arg_vals[1]) <= 0 ||
+                                $signed(arg_vals[2]) < 32'd1 ||
+                                $signed(arg_vals[2]) > 32'd256) begin
+                                reply_ok <= 1'b0;            // ERR
+                                fsm      <= S_REPLY_LOAD;
+                            end else begin
+                                sweep_f        <= arg_vals[0];
+                                sweep_n        <= arg_vals[2];
+                                sweep_i        <= 32'd0;
+                                sweep_step     <= (arg_vals[2] == 32'd1)
+                                                  ? 32'd0
+                                                  : ($signed(arg_vals[1]) - $signed(arg_vals[0])) /
+                                                    $signed(arg_vals[2] - 32'd1);
+                                mw_gate_ns     <= ODMR_GATE_NS; // 200 us ODMR gate per point
+                                sweep_pll_seen <= 1'b0;
+                                asweep_mode    <= 1'b1;
+                                fsm            <= S_ASWEEP_PROG;
+                            end
+                        end
                         CMD_SEQ : begin
                             // RUN_SEQUENCE <site> <kind> <n> <t_step_ns>:
                             // drive a Ramsey(0)/Hahn(1)/CPMG(2) sequence over n
@@ -1404,6 +1467,10 @@ module command_parser #(
                                 rall_loop <= 1'b0;
                                 seq_wdog  <= 32'd0;
                                 fsm       <= S_RALL_WAIT;
+                            end else if (asweep_mode) begin
+                                // last code of this all-sweep freq point sent;
+                                // wait for the MW gate to fall before advancing
+                                fsm <= S_ASWEEP_GATE_FALL;
                             end else begin
                                 fsm <= S_IDLE;
                             end
@@ -1724,6 +1791,81 @@ module command_parser #(
                     end else begin
                         sweep_pll_seen <= 1'b0;
                         fsm            <= S_SWEEP_PROG;
+                    end
+                end
+
+                // ============================================================
+                // Invention 4+5 — RUN_ALL_ODMR (CMD_ALL_SWEEP).
+                // Same PLL-sweep + RF-gate structure as ODMR_SWEEP, but each
+                // point reads ALL 64 AD7616 channels (one row) instead of one
+                // site. The 64-code row is emitted by the shared S_RALL_WAIT /
+                // S_ENC / S_REPLY_SEND read_all path (read_all_mode drives the
+                // space separator + the per-channel rall_loop; asweep_mode
+                // reroutes the end-of-row target from S_IDLE to S_ASWEEP_GATE_FALL
+                // so the sweep can advance to the next frequency). No per-row
+                // header: the reply is just n rows of 64 decimal codes + OK.
+                // ============================================================
+                S_ASWEEP_PROG : begin
+                    pll_freq_khz   <= sweep_f;
+                    pll_phase      <= 12'd0;
+                    pll_rf_pwr     <= 2'd0;
+                    pll_start      <= 1'b1;
+                    sweep_pll_seen <= 1'b0;
+                    fsm            <= S_ASWEEP_PLL;
+                end
+
+                // Wait for PLL busy to assert then deassert, then arm the RF gate.
+                S_ASWEEP_PLL : begin
+                    if (pll_busy)
+                        sweep_pll_seen <= 1'b1;
+                    if (sweep_pll_seen && !pll_busy) begin
+                        mw_gate_load  <= 1'b1;        // arm the ODMR gate
+                        gate_seen     <= 1'b0;
+                        seq_wdog      <= 32'd0;
+                        read_all_mode <= 1'b1;        // 64-code row, space-separated
+                        fsm           <= S_ASWEEP_GATE_WAIT;
+                    end
+                end
+
+                // Wait for the RF gate to rise, then trigger the all-channel read.
+                S_ASWEEP_GATE_WAIT : begin
+                    if (seq_wdog >= GATE_WDOG_CYC) begin
+                        det_read_all <= 1'b1;
+                        seq_wdog     <= 32'd0;
+                        fsm          <= S_RALL_WAIT;  // shared 64-code read loop
+                    end else if (mw_gate) begin
+                        gate_seen    <= 1'b1;
+                        det_read_all <= 1'b1;
+                        seq_wdog     <= 32'd0;
+                        fsm          <= S_RALL_WAIT;
+                    end else begin
+                        seq_wdog <= seq_wdog + 32'd1;
+                    end
+                end
+
+                // All 64 codes for this row streamed (S_REPLY_SEND -> here via
+                // asweep_mode). Wait for the RF gate to fall before the next
+                // frequency point (no gate overlap onto the next PLL setting).
+                S_ASWEEP_GATE_FALL : begin
+                    if (seq_wdog >= GATE_WDOG_CYC || (gate_seen && !mw_gate)) begin
+                        fsm <= S_ASWEEP_NEXT;
+                    end else begin
+                        if (mw_gate) gate_seen <= 1'b1;
+                        seq_wdog <= seq_wdog + 32'd1;
+                    end
+                end
+
+                // Advance to the next point, or finish with an OK reply.
+                S_ASWEEP_NEXT : begin
+                    sweep_i <= sweep_i + 32'd1;
+                    sweep_f <= sweep_f + sweep_step;
+                    if (sweep_i + 32'd1 >= sweep_n) begin
+                        asweep_mode <= 1'b0;
+                        reply_ok    <= 1'b1;
+                        fsm         <= S_REPLY_LOAD;
+                    end else begin
+                        sweep_pll_seen <= 1'b0;
+                        fsm            <= S_ASWEEP_PROG;
                     end
                 end
 

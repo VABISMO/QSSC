@@ -13,6 +13,7 @@ import os
 import time
 from fractions import Fraction
 from math import gcd
+from pathlib import Path
 
 import numpy as np
 
@@ -24,23 +25,55 @@ from qssc import (
     postprocess_period_swapless, select_coprime, is_prime, perfect_power,
     build_user_circuit, UserCircuitError,
 )
+from qssc.array_calibration import (
+    ArrayCalibration, best_uniform_width,
+)
 from qssc.crypto import (
     derive_keypair, von_neumann_extract, bits_to_bytes, entropy_health,
 )
 from qssc.qkd import simulate_bb84
 
+# Path to the cached per-pixel array calibration (Invention 4). The API's
+# /api/circuit/calibrate-array endpoint writes it; run_parallel reads it so
+# each pixel runs at its MEASURED register width without the caller re-running
+# the calibration. Repo root = parent of this api/ directory.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_CALIB_FILE = _REPO_ROOT / "hardware" / "calibration" / "array_calibration.json"
+
+
+def _load_cached_calibration() -> ArrayCalibration | None:
+    """Return the cached array calibration, or None if not yet calibrated."""
+    try:
+        if _CALIB_FILE.exists():
+            return ArrayCalibration.from_json(_CALIB_FILE)
+    except Exception:  # noqa: BLE001 - a corrupt cache must never break a run
+        return None
+    return None
+
 
 def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
-             hardware: bool = False, n_nv_per_pixel: int = 10) -> QSSCBackend:
+             hardware: bool = False, n_nv_per_pixel: int = 10,
+             gradient_mhz_per_um: float = 0.0,
+             pixel_size_um: float = 200.0,
+             register_widths_per_pixel=None) -> QSSCBackend:
     # Register mode: the backend simulates ONE pixel's ~10-NV register (the
     # circuit qubits, within-pixel all-to-all dipole); the 64-pixel hardware
     # die is the backend's separate chip view. The register auto-grows to fit
     # a wider circuit (QSSCBackend._ensure_register). Passing explicit chip-
     # view sites here would make the 64 pixels a (cross-pixel, unphysical) K_64.
+    #
+    # Invention 4 calibrated path: when register_widths_per_pixel is given (a
+    # per-pixel MEASURED width list from calibrate_array), the backend builds
+    # one independent register per pixel and run_array runs each pixel at its
+    # own width (skipping narrow pixels). gradient_mhz_per_um / pixel_size_um
+    # must match the calibration so each pixel's register is capped consistently.
     fpga = _make_fpga(profile, temperature_k, seed, hardware)
     return QSSCBackend(profile=profile, seed=seed,
                        temperature_k=temperature_k, noise_mode=noise_mode,
-                       hardware=fpga, n_nv_per_pixel=n_nv_per_pixel)
+                       hardware=fpga, n_nv_per_pixel=n_nv_per_pixel,
+                       gradient_mhz_per_um=gradient_mhz_per_um,
+                       pixel_size_um=pixel_size_um,
+                       register_widths_per_pixel=register_widths_per_pixel)
 
 
 def _make_fpga(profile: str, temperature_k: float, seed, hardware: bool):
@@ -654,14 +687,36 @@ def run_parallel(req: dict) -> dict:
     noise_mode = req.get("noise_mode", "real")
     mode = str(req.get("mode", "sample")).lower()
     n_pixels = max(1, min(64, int(req.get("n_pixels", 64))))
+    # Invention 4: when the caller opts in (use_calibration=true), load the
+    # cached per-pixel calibration so each pixel runs at its MEASURED register
+    # width (skip-narrow). Default False = the uniform-register back-compat
+    # path (the existing behaviour; calibrate first via /api/circuit/calibrate-
+    # array, then set use_calibration=true).
+    use_cal = bool(req.get("use_calibration", False))
+    calib = _load_cached_calibration() if use_cal else None
+    reg_widths = None
+    grad = 0.0
+    psz = 200.0
+    if calib is not None and calib.profile.lower() == str(profile).lower():
+        reg_widths = calib.widths
+        grad = calib.gradient_mhz_per_um
+        psz = calib.pixel_size_um
     try:
-        b = _backend(profile, temperature_k, seed, noise_mode, hardware=False)
+        b = _backend(profile, temperature_k, seed, noise_mode, hardware=False,
+                     gradient_mhz_per_um=grad, pixel_size_um=psz,
+                     register_widths_per_pixel=reg_widths)
     except NoFPGADetected as exc:
         return _no_fpga_result(exc)
 
     out = {"mode": mode, "profile": profile, "n_pixels": n_pixels,
            "throughput_x": n_pixels, "noise_mode": noise_mode,
-           "temperature_k": temperature_k, "shots": shots}
+           "temperature_k": temperature_k, "shots": shots,
+           "calibrated": reg_widths is not None}
+    if reg_widths is not None:
+        bw = best_uniform_width(reg_widths[:n_pixels])
+        out["per_pixel_widths"] = reg_widths[:n_pixels]
+        out["best_uniform_width"] = bw[0]
+        out["best_uniform_pixels"] = bw[1]
 
     if mode == "shor":
         n = int(req.get("n", 15))
@@ -682,6 +737,12 @@ def run_parallel(req: dict) -> dict:
         per_pixel = []
         winner = None
         for i, (r, a) in enumerate(zip(res["per_pixel"], bases)):
+            if isinstance(r, dict) and r.get("skipped"):
+                per_pixel.append({"pixel": i, "a": a, "skipped": True,
+                                  "reason": r.get("reason"),
+                                  "pixel_width": r.get("pixel_width"),
+                                  "circuit_width": r.get("circuit_width")})
+                continue
             counts = r.get_counts()
             _ret = (None if noise_mode == "none"
                     else float(r.assessment.get("signal_retention", 0.0) or 0.0))
@@ -701,6 +762,11 @@ def run_parallel(req: dict) -> dict:
                     "success": winner is not None,
                     "winner_pixel": (winner["pixel"] if winner else None),
                     "winner_base": (winner["a"] if winner else None)})
+        if "skipped_pixels" in res:
+            out["skipped_pixels"] = res["skipped_pixels"]
+            out["n_run"] = res["n_run"]
+            out["min_width"] = res["min_width"]
+            out["max_width"] = res["max_width"]
 
     elif mode == "sample":
         from qiskit import QuantumCircuit
@@ -716,12 +782,25 @@ def run_parallel(req: dict) -> dict:
             qc0.measure(range(nq), range(nq))
         circuits = [qc0] * n_pixels
         res = b.run_array(circuits, shots=shots, max_pixels=n_pixels)
-        per_pixel = [{"pixel": i, "counts": r.get_counts(),
-                      "approximate": r.approximate}
-                     for i, r in enumerate(res["per_pixel"])]
+        per_pixel = []
+        for i, r in enumerate(res["per_pixel"]):
+            if isinstance(r, dict) and r.get("skipped"):
+                per_pixel.append({"pixel": i, "skipped": True,
+                                  "reason": r.get("reason"),
+                                  "pixel_width": r.get("pixel_width"),
+                                  "circuit_width": r.get("circuit_width")})
+                continue
+            per_pixel.append({"pixel": i, "counts": r.get_counts(),
+                              "approximate": r.approximate})
+        n_run = sum(1 for p in per_pixel if not p.get("skipped"))
         out.update({"num_qubits": qc0.num_qubits, "per_pixel": per_pixel,
                     "aggregate_counts": res["aggregate_counts"],
-                    "total_shots": shots * n_pixels})
+                    "total_shots": shots * n_run,
+                    "n_run": n_run})
+        if "skipped_pixels" in res:
+            out["skipped_pixels"] = res["skipped_pixels"]
+            out["min_width"] = res["min_width"]
+            out["max_width"] = res["max_width"]
 
     elif mode == "custom":
         qasms = req.get("circuits", [])
@@ -732,12 +811,26 @@ def run_parallel(req: dict) -> dict:
         for q in qasms[:n_pixels]:
             circuits.append(qasm2.loads(str(q)))
         res = b.run_array(circuits, shots=shots, max_pixels=len(circuits))
-        per_pixel = [{"pixel": i, "counts": r.get_counts(),
-                      "num_qubits": circuits[i].num_qubits,
-                      "approximate": r.approximate}
-                     for i, r in enumerate(res["per_pixel"])]
-        out.update({"n_pixels": len(circuits), "throughput_x": len(circuits),
+        per_pixel = []
+        for i, r in enumerate(res["per_pixel"]):
+            if isinstance(r, dict) and r.get("skipped"):
+                per_pixel.append({"pixel": i, "skipped": True,
+                                  "reason": r.get("reason"),
+                                  "pixel_width": r.get("pixel_width"),
+                                  "circuit_width": r.get("circuit_width"),
+                                  "num_qubits": circuits[i].num_qubits})
+                continue
+            per_pixel.append({"pixel": i, "counts": r.get_counts(),
+                              "num_qubits": circuits[i].num_qubits,
+                              "approximate": r.approximate})
+        n_run = sum(1 for p in per_pixel if not p.get("skipped"))
+        out.update({"n_pixels": len(circuits), "throughput_x": n_run,
+                    "n_run": n_run,
                     "per_pixel": per_pixel, "aggregate_counts": res["aggregate_counts"]})
+        if "skipped_pixels" in res:
+            out["skipped_pixels"] = res["skipped_pixels"]
+            out["min_width"] = res["min_width"]
+            out["max_width"] = res["max_width"]
     else:
         return {"error": f"unknown parallel mode '{mode}' "
                         f"(use shor | sample | custom)"}

@@ -211,6 +211,36 @@ class FPGAConnection:
             "dark_code": round(mean_on, 2),
         }
 
+    def run_all_odmr(self, f_start_khz: int, f_stop_khz: int,
+                     n_points: int) -> np.ndarray:
+        """``RUN_ALL_ODMR <f_start> <f_stop> <n>`` -> ``(n, 64)`` ADC code matrix.
+
+        The firmware sweeps the ADF4351 across [f_start, f_stop] in ``n`` steps
+        ON-CHIP (one command, not n serial round-trips); at each step it gates
+        the MW for the ODMR window and reads all 64 AD7616 channels
+        simultaneously, emitting one line of 64 space-separated 16-bit codes per
+        frequency point, then a final ``OK``. Row ``i`` is the 64-pixel
+        photocurrent at freq point ``i``. The host runs
+        :func:`qssc.odmr_decompose.decompose_odmr` per column (pixel) to count
+        each pixel's resolved ODMR lines = its calibrated register width.
+        Returns an ``int32`` array of shape ``(n_points, 64)``.
+        """
+        if n_points <= 0 or n_points > 4096:
+            raise ValueError("n_points out of range 1..4096")
+        cmd = f"RUN_ALL_ODMR {int(f_start_khz)} {int(f_stop_khz)} {int(n_points)}\n"
+        self.ser.write(cmd.encode())
+        rows = []
+        for _ in range(n_points):
+            line = self.ser.readline().decode().strip()
+            toks = line.split()
+            if len(toks) != N_SITES:
+                raise IOError(f"RUN_ALL_ODMR row mismatch: {line!r}")
+            rows.append([int(t) for t in toks])
+        ok = self.ser.readline().decode().strip()
+        if ok != "OK":
+            raise IOError(f"RUN_ALL_ODMR missing OK: {ok!r}")
+        return np.array(rows, dtype=np.int32)
+
     def read_gyro(self, site: int, t_ns: int, n_windows: int = 64) -> dict:
         """Ramsey pi/2-T-pi/2 -> rotation rate (dps) from real ADC codes.
 
@@ -649,7 +679,8 @@ class QSSCBackend(BackendV2):
                  register_nv_spacing_nm: float = 2.75,
                  gradient_mhz_per_um: float = 0.0,
                  pixel_size_um: float = 200.0,
-                 nuclear_memory: bool = False):
+                 nuclear_memory: bool = False,
+                 register_widths_per_pixel: Optional[Sequence[int]] = None):
         """noise_mode: 'real' (default, full Aer thermal+depolarizing+readout
         noise from the defect physics) | 'phenomenological' (fast analytic
         approximation) | 'none' (ideal). 'aer' is accepted as an alias of 'real'.
@@ -664,6 +695,17 @@ class QSSCBackend(BackendV2):
         microdiamond; the 2q gate time comes from the dipole-dipole CZ at that
         spacing (qssc.dipole), ~200 ns at 2.75 nm -- matching the defect
         profile's gate_2q_ns target.
+
+        ``register_widths_per_pixel`` (Invention 4 — calibrated 64-parallel): a
+        per-pixel list of MEASURED register widths (from
+        :func:`qssc.array_calibration.calibrate_array`). When provided, the
+        backend builds one independent register per pixel
+        (``self._pixel_registers``) and :meth:`run_array` runs each pixel at its
+        own calibrated width, SKIPPING pixels whose width is narrower than the
+        circuit (a truncated Shor run gives wrong factors, so a narrow pixel is
+        never run with a too-wide circuit — it is skipped and reported). When
+        ``None`` (default) the backend uses the single uniform ``n_nv_per_pixel``
+        register for every pixel — full back-compat with the existing path.
         """
         super().__init__(name="qssc_simulator")
         prof = get_profile(profile) if isinstance(profile, str) else profile
@@ -719,6 +761,27 @@ class QSSCBackend(BackendV2):
             self.sites = self.sites + self._nuclear_sites(self.sites)
             self._n_qubits = len(self.sites)
             self.n_nv_per_pixel = self._n_electron  # electron width unchanged
+        # Invention 4 — calibrated 64-parallel: build one independent register
+        # per pixel at its MEASURED width. run_array swaps these in per pixel
+        # and skips pixels narrower than the circuit. Each pixel's register is
+        # drawn with its own seed so the per-pixel site positions/frequencies
+        # vary (the pixels are physically independent); the gradient caps each
+        # register at its calibrated width (<= resolvable_register_width). When
+        # register_widths_per_pixel is None this stays None and run_array uses
+        # the single uniform register above (full back-compat).
+        self._pixel_registers: Optional[dict[int, list[QubitSite]]] = None
+        self._pixel_widths: Optional[list[int]] = None
+        if register_widths_per_pixel is not None and self._register_mode:
+            widths = [max(1, int(w)) for w in register_widths_per_pixel]
+            self._pixel_widths = widths
+            self._pixel_registers = {}
+            for i, w in enumerate(widths):
+                self._pixel_registers[i] = auto_align(
+                    prof, n_nv_per_pixel=w, register=True,
+                    temperature_k=temperature_k,
+                    rng=np.random.default_rng(seed + 1000 + i),
+                    gradient_mhz_per_um=gradient_mhz_per_um,
+                    pixel_size_um=pixel_size_um)
         t1, t2 = coherence_at_temperature(prof, temperature_k)
         self._t1, self._t2 = t1, t2
         # Optical-coherence material property (photon indistinguishability):
@@ -816,6 +879,25 @@ class QSSCBackend(BackendV2):
                               num_qubits=self._n_qubits, coupling_map=coupling)
         self._build_target()
 
+    def _set_register(self, electron_sites: Sequence[QubitSite]):
+        """Set the active register to the given electron-NV sites (ONE pixel's
+        register), append nuclear memory if enabled, and rebuild the Target /
+        coupling map so the noise model and topology track the active pixel.
+        Shared by :meth:`_ensure_register` (grow to fit a wider circuit) and
+        :meth:`run_array` (per-pixel calibrated-width swap). The caller passes
+        the ELECTRON sites; the paired 13C nuclear sites are appended here so
+        the electron<->nuclear index pairing (i <-> i + n_electron) stays
+        consistent regardless of how the register was chosen.
+        """
+        self.sites = list(electron_sites)
+        self._n_electron = len(self.sites)
+        if self._nuclear_memory and self._register_mode:
+            # keep one 13C memory qubit per electron NV, paired by index
+            self.sites = self.sites + self._nuclear_sites(self.sites)
+        self._n_qubits = len(self.sites)
+        self.n_nv_per_pixel = self._n_electron
+        self._build_target_topology()
+
     def _ensure_register(self, n_qubits: int):
         """Grow the per-pixel NV register to at least ``n_qubits`` so a circuit
         wider than the default register is fully covered by the noise model and
@@ -830,18 +912,12 @@ class QSSCBackend(BackendV2):
         if n <= self._n_qubits:
             return
         prof = self.profile
-        self.sites = auto_align(prof, n_nv_per_pixel=n, register=True,
-                                temperature_k=self.temperature_k,
-                                rng=np.random.default_rng(self._seed),
-                                gradient_mhz_per_um=self.gradient_mhz_per_um,
-                                pixel_size_um=self.pixel_size_um)
-        self._n_electron = len(self.sites)
-        if self._nuclear_memory:
-            # keep one 13C memory qubit per (grown) electron NV, paired by index
-            self.sites = self.sites + self._nuclear_sites(self.sites)
-        self._n_qubits = len(self.sites)
-        self.n_nv_per_pixel = self._n_electron
-        self._build_target_topology()
+        sites = auto_align(prof, n_nv_per_pixel=n, register=True,
+                           temperature_k=self.temperature_k,
+                           rng=np.random.default_rng(self._seed),
+                           gradient_mhz_per_um=self.gradient_mhz_per_um,
+                           pixel_size_um=self.pixel_size_um)
+        self._set_register(sites)
 
     def _nuclear_sites(self, electron_sites: Sequence[QubitSite]) -> list:
         """Build the paired 13C nuclear memory qubits (one per electron NV).
@@ -1057,6 +1133,16 @@ class QSSCBackend(BackendV2):
         -- one per pixel -- each an independent noise realization (per-pixel
         seed offset), and returns per-pixel counts plus the aggregate.
 
+        Calibrated per-pixel width (Invention 4+5): when the backend was built
+        with ``register_widths_per_pixel`` (a measured width per pixel from
+        :func:`qssc.array_calibration.calibrate_array`), each pixel runs at its
+        OWN width. A circuit WIDER than a pixel's calibrated width is SKIPPED
+        for that pixel (reported in ``skipped_pixels``) — it is never truncated,
+        because a truncated Shor run returns wrong factors (does not work). A
+        pixel only runs when the circuit fits; this maximizes the number of
+        qubits that actually produce correct results. When no calibration is
+        loaded every pixel uses the single uniform register (back-compat).
+
         Use cases:
           * parallel Shor: 64 coprime bases ``a`` (one per pixel) -- whichever
             pixel finds the period wins; the rest fail silently.
@@ -1064,8 +1150,10 @@ class QSSCBackend(BackendV2):
           * parallel sampling: the same circuit on all 64 pixels with
             independent seeds = 64x the shots in one wall-clock step.
 
-        Returns ``{"per_pixel": [result,...], "aggregate_counts": {...},
-        "n_pixels": n, "throughput_x": n}``.
+        Returns ``{"per_pixel": [...], "aggregate_counts": {...}, "n_pixels":
+        n, "throughput_x": n_run}``. With a calibration loaded, also includes
+        ``per_pixel_widths``, ``skipped_pixels`` (list of pixel ids), ``n_run``,
+        ``min_width``, ``max_width``.
         """
         circs = list(circuits)
         if not circs:
@@ -1075,20 +1163,59 @@ class QSSCBackend(BackendV2):
         circs = circs[:n]
         base_seed = self._seed
         per_pixel = []
+        skipped: list[int] = []
+        calibrated = self._pixel_registers is not None
+        # save the default (uniform) register's electron sites so the per-pixel
+        # swap can restore it after the loop (the active register is shared
+        # state; run_array must leave it as it found it).
+        if calibrated:
+            saved_electron = list(self.sites[:self._n_electron])
+            widths = self._pixel_widths or []
         for i, qc in enumerate(circs):
+            if calibrated and i < len(widths):
+                w = widths[i]
+                if qc.num_qubits > w:
+                    # SKIP narrow pixels — never truncate (truncation breaks
+                    # Shor / any algorithm relying on the full register).
+                    per_pixel.append({
+                        "skipped": True,
+                        "reason": "circuit wider than pixel register",
+                        "pixel_id": i,
+                        "pixel_width": w,
+                        "circuit_width": qc.num_qubits,
+                    })
+                    skipped.append(i)
+                    continue
+                # swap in this pixel's calibrated register; _execute's
+                # _ensure_register sees width >= circuit width and is a no-op.
+                self._set_register(self._pixel_registers[i])
             # independent noise realization per pixel (pixels are physically
             # independent; the seed offset makes the rng draws independent).
             self._seed = base_seed + i
             self._job_counter += 1
             opts = {"shots": shots} if shots is not None else {}
             per_pixel.append(self._execute(qc, opts))
-        self._seed = base_seed  # restore
+        # restore the default register + seed
+        if calibrated:
+            self._set_register(saved_electron)
+        self._seed = base_seed
+        n_run = n - len(skipped)
+        # aggregate counts only over pixels that actually ran (not skipped)
         agg: dict = {}
         for r in per_pixel:
+            if isinstance(r, dict) and r.get("skipped"):
+                continue
             for k, v in r.get_counts().items():
                 agg[k] = agg.get(k, 0) + int(v)
-        return {"per_pixel": per_pixel, "aggregate_counts": agg,
-            "n_pixels": n, "throughput_x": n}
+        out = {"per_pixel": per_pixel, "aggregate_counts": agg,
+            "n_pixels": n, "throughput_x": n_run, "n_run": n_run}
+        if calibrated:
+            pw = [w for w in widths[:n]] if widths else []
+            out["per_pixel_widths"] = pw
+            out["skipped_pixels"] = skipped
+            out["min_width"] = min(pw) if pw else 0
+            out["max_width"] = max(pw) if pw else 0
+        return out
 
     # -- execution ---------------------------------------------------------
     def _execute(self, circuit: QuantumCircuit, options: dict):
@@ -1840,8 +1967,16 @@ class QSSCBackend(BackendV2):
             # sites = the 64-pixel CHIP view (the physical die, one entry per
             # pixel, pixel_id == qubit_id, nv_index 0) -- what the Calibrate tab
             # and the 64-channel readout see. The circuit register NVs are the
-            # ``num_qubits`` (~10) above; a per-pixel NV drill-down is future work.
+            # ``num_qubits`` (~10) above.
             "sites": [self._site_view(s) for s in self._chip_sites],
+            # Invention 4 — calibrated per-pixel register drill-down. When a
+            # calibration is loaded, each pixel's MEASURED register width (the
+            # resolvable ODMR line count under the gradient) is reported; the
+            # uniform fallback reports the single n_nv_per_pixel for all 64.
+            "per_pixel_widths": (list(self._pixel_widths)
+                                 if self._pixel_widths is not None
+                                 else [self.n_nv_per_pixel] * len(self._chip_sites)),
+            "calibrated": self._pixel_registers is not None,
         }
 
     def _site_view(self, s) -> dict:
