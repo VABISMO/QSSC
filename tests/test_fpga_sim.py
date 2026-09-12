@@ -67,3 +67,24 @@ def test_detector_parallel_frame():
     """READ_DETECTORS streams all 64 AD7616 16-bit samples (320 ASCII bytes)."""
     _rc, out = _run_tb()
     assert "detector stream length = 320 bytes" in out, out
+
+
+def test_run_all_odmr_verb_passes():
+    """The RUN_ALL_ODMR RTL verb (Invention 4+5 calibration primitive) emits
+    n rows of 64 codes + OK. The self-check in tb_top_level.v covers the RTL."""
+    _rc, out = _run_tb()
+    assert 'RUN_ALL_ODMR = 2 rows x 64 "1234" + OK  (PASS)' in out, out
+
+
+def test_simulated_fpga_run_all_odmr_shape():
+    """SimulatedFPGA.run_all_odmr returns an (n_points, 64) int code matrix --
+    the host-side mirror of the RTL verb, used for the sim calibration path."""
+    import numpy as np
+    from qssc.simulator import SimulatedFPGA
+    fpga = SimulatedFPGA("NV", seed=5)
+    codes = fpga.run_all_odmr(2_870_000, 2_880_000, 16)
+    assert isinstance(codes, np.ndarray)
+    assert codes.shape == (16, 64)
+    assert codes.dtype.kind in "iu"
+    # codes are 16-bit ADC samples -> bounded [0, 65535]
+    assert int(codes.min()) >= 0 and int(codes.max()) <= 0xFFFF

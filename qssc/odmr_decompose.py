@@ -194,12 +194,20 @@ def decompose_odmr(
         p0 += [a, f, sigma0]
         lb += [0.0, f_min, 1e-5]
         ub += [1.0, f_max, (f_max - f_min)]
-    try:
-        popt, _ = curve_fit(_gaussian_sum, freqs, dip, p0=p0,
-                            bounds=(lb, ub), maxfev=20000)
-    except Exception:
-        # fall back to the raw peak amplitudes if the global fit fails
-        popt = p0
+    # For dense spectra the global sum-of-Gaussians fit is expensive (3 params
+    # per peak) and only refines freq/contrast — it does not change the line
+    # COUNT, which find_peaks already fixed under the SNR prominence and
+    # min-separation constraints. Skip it past this many peaks and use the raw
+    # peak amplitudes (the SNR filter below still applies).
+    _MAX_FIT_PEAKS = 8
+    popt = p0
+    if len(peaks) <= _MAX_FIT_PEAKS:
+        try:
+            popt, _ = curve_fit(_gaussian_sum, freqs, dip, p0=p0,
+                                bounds=(lb, ub), maxfev=8000)
+        except Exception:
+            # fall back to the raw peak amplitudes if the global fit fails
+            popt = p0
 
     # --- 5. accept components above the SNR bar ----------------------------
     components: list[OdmrComponent] = []

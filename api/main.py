@@ -189,6 +189,33 @@ class ParallelRunRequest(BaseModel):
     register_line_freqs_hz: Optional[list] = None
     prime_readout: bool = False
     n_noise_bins: int = Field(64, ge=1, le=4096)
+    # Invention 4: opt in to the cached per-pixel calibration (each pixel runs
+    # at its MEASURED register width, narrow pixels skipped). Default False =
+    # the uniform-register back-compat path. Calibrate first via
+    # /api/circuit/calibrate-array, then set use_calibration=true here.
+    use_calibration: bool = False
+
+
+class CalibrateArrayRequest(BaseModel):
+    """Invention 4+5 — calibrate the 64-pixel array's per-pixel qubit register
+    width (a MEASURED quantity: the number of ODMR lines the field gradient
+    makes resolvable in each pixel, capped by the NVs present).
+
+    ``source="sim"`` synthesizes each pixel's ODMR spectrum and counts the
+    resolved lines analytically; ``source="real"`` drives the ``RUN_ALL_ODMR``
+    firmware verb (sweep MW, read all 64 detectors per point) and counts the
+    lines from the measured codes. Both produce the same
+    ``ArrayCalibration`` shape and persist it to
+    ``hardware/calibration/array_calibration.json`` so subsequent
+    ``run-parallel`` calls run each pixel at its own calibrated width."""
+    profile: str = "NV"
+    gradient_mhz_per_um: float = Field(0.5, ge=0.0, le=100.0)
+    pixel_size_um: float = Field(200.0, ge=1.0, le=5000.0)
+    seed: int = Field(42, ge=0, le=2_147_483_647)
+    temperature_k: float = Field(300.0, ge=0.001, le=600)
+    source: str = "sim"          # sim | real
+    max_nv_per_microdiamond: int = Field(100, ge=1, le=1000)
+    n_points: int = Field(400, ge=32, le=4096)  # real path sweep points
 
 
 # ---------------------------------------------------------------------------
@@ -1019,6 +1046,96 @@ def run_parallel_circuits(req: ParallelRunRequest, sync: bool = True,
         return {"error": str(exc)}
 
 
+@app.post("/api/circuit/calibrate-array")
+def calibrate_array_endpoint(req: CalibrateArrayRequest, request: Request = None):
+    """Calibrate the 64-pixel array's per-pixel register width (Invention 4+5).
+
+    The width is the number of ODMR lines the field gradient (Invention 5) makes
+    resolvable in each pixel, capped by the NVs physically present — a MEASURED
+    quantity, not a fixed knob. ``source="sim"`` synthesizes each pixel's
+    spectrum and counts the lines; ``source="real"`` runs the ``RUN_ALL_ODMR``
+    firmware verb and counts the lines from the measured 64-channel codes. The
+    result is persisted to ``hardware/calibration/array_calibration.json`` and
+    later ``run-parallel`` calls load it so each pixel runs at its own width.
+    """
+    if request is not None and _rate_limited(request):
+        raise HTTPException(429, "Rate limit exceeded — too many circuit requests, slow down.")
+    from qssc.array_calibration import (
+        calibrate_array, calibrate_array_from_codes, best_uniform_width,
+    )
+    from qssc.defects import get_profile
+    prof = get_profile(req.profile)
+    source = str(req.source).lower()
+    try:
+        if source == "real":
+            fpga = _fpga()
+            if not hasattr(fpga, "run_all_odmr"):
+                return {"error": "real calibration needs a board with run_all_odmr "
+                                 "(set QSSC_FPGA_PORT or use source=sim)"}
+            # sweep +/- a few linewidths around D (the gradient spreads lines
+            # across the pixel; span covers the spread + margin)
+            d_khz = int(prof.zero_field_splitting / 1e3)
+            spread_khz = int(req.gradient_mhz_per_um * req.pixel_size_um * 1e3)
+            span_khz = max(spread_khz + int(prof.odmr_linewidth_hz / 1e3) * 4,
+                           int(prof.odmr_linewidth_hz / 1e3) * 6)
+            f_start = d_khz - span_khz
+            f_stop = d_khz + span_khz
+            n = int(req.n_points)
+            matrix = fpga.run_all_odmr(f_start, f_stop, n)
+            freqs_ghz = np.linspace(f_start * 1e3, f_stop * 1e3, n) / 1e9
+            calib = calibrate_array_from_codes(
+                matrix, freqs_ghz, prof,
+                gradient_mhz_per_um=req.gradient_mhz_per_um,
+                pixel_size_um=req.pixel_size_um,
+                seed=req.seed, temperature_k=req.temperature_k)
+            io_label = "real"
+        else:
+            calib = calibrate_array(
+                req.profile,
+                gradient_mhz_per_um=req.gradient_mhz_per_um,
+                pixel_size_um=req.pixel_size_um,
+                seed=req.seed,
+                temperature_k=req.temperature_k,
+                max_nv_per_microdiamond=req.max_nv_per_microdiamond)
+            io_label = "simulated"
+    except NoFPGADetected as exc:
+        return {"error": "no-fpga-detected",
+                "message": ("No FPGA detected — connect the board and set "
+                            "QSSC_FPGA_PORT, or use source=sim. (" + str(exc) + ")")}
+    except Exception as exc:  # noqa: BLE001 - surface errors, not a 500
+        return {"error": str(exc)}
+    # persist the calibration cache
+    try:
+        from pathlib import Path
+        cache = Path(__file__).resolve().parent.parent / "hardware" / "calibration"
+        cache.mkdir(parents=True, exist_ok=True)
+        calib.to_json(cache / "array_calibration.json")
+    except Exception:  # noqa: BLE001 - a cache write failure must not break the reply
+        pass
+    bw = best_uniform_width(calib.widths)
+    return {
+        "profile": calib.profile,
+        "source": io_label,
+        "gradient_mhz_per_um": calib.gradient_mhz_per_um,
+        "pixel_size_um": calib.pixel_size_um,
+        "seed": calib.seed,
+        "temperature_k": calib.temperature_k,
+        "n_pixels": calib.n_pixels,
+        "per_pixel_widths": calib.widths,
+        "min_width": calib.min_width,
+        "max_width": calib.max_width,
+        "best_uniform_width": bw[0],
+        "best_uniform_pixels": bw[1],
+        "total_working_qubits": bw[0] * bw[1],
+        "pixels": [
+            {"pixel_id": p.pixel_id, "nv_present": p.nv_present,
+             "microdiamonds": p.microdiamonds, "register_width": p.register_width,
+             "odmr_lines": p.odmr_lines}
+            for p in calib.pixels
+        ],
+    }
+
+
 # --- async job polling + history -------------------------------------------
 
 @app.get("/api/jobs/{job_id}")
@@ -1120,6 +1237,12 @@ _FPGA_PROTOCOL = [
     {"cmd": "ODMR_SWEEP", "args": "qubit f_start_khz f_stop_khz n_points",
      "reply": "<n> f0 c0 f1 c1 … / ERR",
      "desc": "sweep the ADF4351 across the NV resonance, one AD7616 sample per point"},
+    {"cmd": "RUN_ALL_ODMR", "args": "f_start_khz f_stop_khz n_points",
+     "reply": "n × (64 × 0..65535) + OK / ERR",
+     "desc": "64-parallel calibration sweep (Invention 4+5): sweep the ADF4351 "
+             "and read all 64 AD7616 channels per point → one ODMR spectrum per "
+             "pixel; the host runs decompose_odmr per column to count each "
+             "pixel's resolved lines = its calibrated register width"},
     {"cmd": "READ_COMPASS", "args": "[n_avg]", "reply": "<B_nT> <heading°> <elev°> <sens_µT> <axes> / ERR",
      "desc": "4-axis ODMR doublet fit → ambient B-vector + heading (compass_measure)"},
     {"cmd": "READ_GYRO", "args": "T_ns", "reply": "<rate_dps> <noise_dps> <t2_µs> <grade> / ERR",
