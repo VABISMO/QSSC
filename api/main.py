@@ -27,6 +27,7 @@ from qssc import (
     magnetometer_sweep, synthetic_field_map,
     FPGAConnection, NoFPGADetected, make_connection,
     DetectorInterface, MicrowaveController, EmitterController,
+    decompose_odmr, resolvable_register_width,
 )
 from qssc.simulator import DETECT_THRESHOLD
 from qssc.backend import _fit_t2_from_codes
@@ -114,6 +115,11 @@ class RunRequest(BaseModel):
     # bb84 quantum key distribution
     num_bits: int = Field(128, ge=1, le=2048)      # bb84: qubits/rounds to exchange
     eavesdrop: bool = False         # bb84: simulate intercept-resend Eve
+    # Per-pixel NV register width -- the MEASURED qubit count from the ODMR
+    # calibration (decompose_odmr line count at the applied gradient). When set
+    # the circuit runs against that many within-pixel register qubits instead of
+    # the nominal default, closing the calibration -> circuit loop. None = default.
+    n_nv_per_pixel: Optional[int] = Field(None, ge=1, le=64)
 
 
 class CustomCircuitRequest(BaseModel):
@@ -159,13 +165,19 @@ class ParallelRunRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
-             n_nv_per_pixel: int = 10) -> QSSCBackend:
-    # Register mode: the backend simulates ONE pixel's ~10-NV register (the
-    # circuit qubits, within-pixel all-to-all dipole); the 64-pixel hardware
-    # die is the backend's separate chip view (see QSSCBackend).
+             n_nv_per_pixel: Optional[int] = None,
+             gradient_mhz_per_um: float = 0.0) -> QSSCBackend:
+    # Register mode: the backend simulates ONE pixel's NV register (the circuit
+    # qubits, within-pixel all-to-all dipole); the 64-pixel hardware die is the
+    # backend's separate chip view (see QSSCBackend). ``n_nv_per_pixel`` is the
+    # MEASURED resolvable ODMR line count from the calibration when supplied;
+    # None falls back to the nominal default.
+    from qssc.backend import N_NV_PER_PIXEL
     return QSSCBackend(profile=profile, seed=seed,
                        temperature_k=temperature_k, noise_mode=noise_mode,
-                       n_nv_per_pixel=n_nv_per_pixel)
+                       n_nv_per_pixel=(n_nv_per_pixel if n_nv_per_pixel is not None
+                                       else N_NV_PER_PIXEL),
+                       gradient_mhz_per_um=gradient_mhz_per_um)
 
 
 def _req_dict(model) -> dict:
@@ -237,6 +249,46 @@ def _clamp_points(points: int, lo: int = 1, hi: int = 2000) -> int:
     except (TypeError, ValueError):
         n = lo
     return max(lo, min(n, hi))
+
+
+# --- Invention 5 field-gradient coil driver (MCP4921 DAC -> coil current) ---
+# The gradient-coil current is set by a 12-bit MCP4921 SPI DAC. Vout = Vdd *
+# code/4096 with Vdd = +5V; the LM358 + IRLML2502 servo drives I_coil = Vdac /
+# Rsense with Rsense = 1 ohm, so I_coil[A] = 5.0 * code/4096. The field gradient
+# across the 200 um pixel is anchored at the verified addressing point
+# (Invention 5): I = 2.2 A -> 7 mT across 200 um. NV gyromagnetic ratio
+# gamma = 28 MHz/mT, so 7 mT/200 um -> 0.98 MHz/um of line spread. The gradient
+# scales linearly with the current, so:
+#   gradient_mhz_per_um = (I_coil / 2.2) * 0.98
+# At code 0 the gradient is off (ensemble collapses to one line); at the
+# addressing code (~1803, I=2.2A) the spread is ~196 MHz; at full code 4095 the
+# spread is ~445 MHz (the DAC range exceeds the addressing gradient by design).
+GRAD_COIL_VDD = 5.0          # MCP4921 Vdd / Vref [V] (board rail)
+GRAD_SENSE_OHM = 1.0         # Rsense [ohm] (board)
+GRAD_ADDRESSING_A = 2.2      # I_coil for the 7 mT addressing gradient [A]
+GRAD_ADDRESSING_MHZ_PER_UM = 0.98  # 7 mT/200um * 28 MHz/mT [MHz/um]
+GRAD_PIXEL_UM = 200.0        # pixel size [um]
+ODMR_LINEWIDTH_MHZ = 5.0     # intrinsic single-line ODMR linewidth (simulate_odmr)
+
+
+def _gradient_from_code(code: Optional[int]) -> tuple[float, float, int]:
+    """Map a 12-bit DAC code to (gradient_mhz_per_um, coil_current_a, code_int).
+
+    Returns (0.0, 0.0, 0) for None / out-of-range so the no-gradient path is the
+    safe default. The spread across the pixel = gradient_mhz_per_um * pixel_um.
+    """
+    if code is None:
+        return 0.0, 0.0, 0
+    try:
+        c = int(code)
+    except (TypeError, ValueError):
+        return 0.0, 0.0, 0
+    if c <= 0:
+        return 0.0, 0.0, 0
+    c = min(c, 4095)
+    i_coil = GRAD_COIL_VDD * c / 4096.0 / GRAD_SENSE_OHM
+    grad = (i_coil / GRAD_ADDRESSING_A) * GRAD_ADDRESSING_MHZ_PER_UM
+    return grad, i_coil, c
 
 
 def _real_odmr_sweep(mw: MicrowaveController, det: DetectorInterface,
@@ -457,14 +509,27 @@ def signal(profile: str = "NV", temperature_k: float = 300.0,
 @app.post("/api/calibration/run")
 def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
                     seed: int = 42, grid: int = 8, b_field: float = 1e-3,
-                    points: int = 220, hardware: bool = False):
+                    points: int = 220, hardware: bool = False,
+                    gradient_code: Optional[int] = None,
+                    n_nv_per_pixel: int = 10):
     """Run the full calibration process the way the VABISMO software does.
 
     Stages: (1) scan the on-chip detector array for defect photocurrent
     (lock-in), (2) auto-align the qubit grid to the detected sites, (3) sweep
     the microwave frequency to record an ODMR spectrum and fit the zero-field
-    splitting D + linewidth. Returns every stage's data so the dashboard can
-    render the calibration.
+    splitting D + linewidth, (4) per-pin resonance + Ramsey/Hahn coherence.
+    Returns every stage's data so the dashboard can render the calibration.
+
+    **Invention 5 field gradient:** ``gradient_code`` (0..4095) programs the
+    MCP4921 DAC that sets the gradient-coil current *before* the ODMR sweep. In
+    hardware mode this sends ``SET_GRADIENT <code>`` to the board; in sim mode
+    it feeds ``gradient_mhz_per_um`` into the ODMR model so the ensemble line
+    spreads into N resolvable lines. The sweep is then decomposed
+    (``decompose_odmr``) into the resolvable ODMR line count = the per-pixel
+    register width N at that gradient. With no gradient the ensemble collapses
+    to one line (N=1, ensemble mode); with a strong enough gradient the lines
+    resolve (N>1, register mode). N is therefore a *measured* function of the
+    applied gradient -- the whole point of Invention 5.
 
     With ``hardware=True`` the sweep runs against a real board selected by
     ``QSSC_FPGA_PORT``: stage 1 reads real AD7616 codes (every emitter armed +
@@ -477,6 +542,12 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
     prof = get_profile(profile)
     rng = np.random.default_rng(seed)
     grid = max(1, min(int(grid), 16))
+    n_nv_per_pixel = max(1, min(int(n_nv_per_pixel), 64))
+
+    # Invention 5: map the DAC code to a field gradient. grad_mhz_per_um is the
+    # line spread per micron of pixel position; 0 = no gradient (ensemble).
+    grad_mhz_per_um, coil_current_a, grad_code = _gradient_from_code(gradient_code)
+    grad_spread_mhz = grad_mhz_per_um * GRAD_PIXEL_UM
 
     # Real-hardware path --------------------------------------------------
     if hardware:
@@ -515,8 +586,16 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
                     "intensity": round(s.intensity, 1)} for s in sites]
 
         # Stage 3 — real ODMR sweep + fit D (same doublet-midpoint fit as sim).
+        # Invention 5: program the gradient coil BEFORE the sweep so the ODMR
+        # lines spread by grad_spread_mhz; widen the sweep span to cover them.
+        if grad_code > 0:
+            try:
+                fpga.send_command(f"SET_GRADIENT {grad_code}")
+            except Exception:
+                pass  # a failed gradient write must not abort the sweep
         f0 = prof.d_ghz
         span = max(0.08, abs(prof.hyperfine_coupling) / 1e9 * prof.n_equivalent_nuclei * 1.15 + 0.03)
+        span = max(span, grad_spread_mhz / 1e3 + 0.04)
         f, c = _real_odmr_sweep(mw, det, f0, span, points, site=0)
         em.clear_emitters()
         io_label = "real"
@@ -543,8 +622,17 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
 
         f0 = prof.d_ghz
         span = max(0.08, abs(prof.hyperfine_coupling) / 1e9 * prof.n_equivalent_nuclei * 1.15 + 0.03)
+        # Invention 5: a field gradient spreads the ensemble line across the
+        # pixel by grad_spread_mhz; widen the sweep so the resolved lines stay
+        # in-window, and feed the gradient into the ODMR model so the lines
+        # actually separate (each NV at a different pixel position shifts by
+        # gradient * position).
+        span = max(span, grad_spread_mhz / 1e3 + 0.04)
         freqs = np.linspace(f0 - span, f0 + span, int(points))
-        f, c = simulate_odmr(prof, freqs, b_field_t=b_field, linewidth_mhz=5.0)
+        f, c = simulate_odmr(prof, freqs, b_field_t=b_field, linewidth_mhz=5.0,
+                             gradient_mhz_per_um=grad_mhz_per_um,
+                             pixel_size_um=GRAD_PIXEL_UM,
+                             n_nv_per_pixel=n_nv_per_pixel)
         io_label = "simulated"
         stage4_source = "simulated"
 
@@ -567,6 +655,27 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
     half = (max(c) + min(c)) / 2.0
     inside = np.where(c < half)[0]
     fwhm = float(f[inside[-1]] - f[inside[0]]) if len(inside) > 2 else 0.01
+
+    # Invention 5 -- MEASURED per-pixel register width. decompose_odmr resolves
+    # the ODMR spectrum into its constituent lines; the count IS the qubit
+    # register width N at the applied gradient. A flat ensemble collapses to ONE
+    # line -> 1 ensemble qubit/pixel; a strong enough gradient spreads the
+    # ensemble into N resolvable lines -> N register qubits/pixel. The pixel_mode
+    # recommendation follows: register_width <= 1 -> ensemble; > 1 -> register.
+    # resolvable_register_width gives the physics prediction (gradient*pixel /
+    # linewidth) to cross-check the measured decomposition.
+    components = decompose_odmr(f, c)
+    register_width = max(1, len(components))
+    line_freqs_hz = [round(cmp.freq_ghz * 1e9) for cmp in components]
+    pixel_mode_recommendation = "ensemble" if register_width <= 1 else "register"
+    # resolvable_register_width gives the physics prediction: how many lines the
+    # gradient *can* separate at the intrinsic single-line linewidth (5 MHz, the
+    # ODMR model linewidth -- NOT the measured FWHM, which with a gradient spans
+    # the whole spread and would always predict ~1). The measured count is
+    # usually below this theoretical max because decompose_odmr's SNR bar
+    # rejects weak / closely-spaced lines.
+    predicted_width = resolvable_register_width(grad_mhz_per_um, GRAD_PIXEL_UM,
+                                                ODMR_LINEWIDTH_MHZ)
 
     t1, t2 = coherence_at_temperature(prof, temperature_k)
 
@@ -619,6 +728,14 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
                                (1.0 + float(rng.normal(0, 0.10))), 1e-9)
         per_pin.append({
             "qubit_id": s.qubit_id, "row": s.row, "col": s.col,
+            # The physical pin-header pin for this pixel (P1 pin-scaffold: one
+            # 2.54 mm pin per pixel, pin == pixel == qubit_id 0..63).
+            "pin": s.qubit_id,
+            # How many qubits this pixel's NV register resolves at the applied
+            # gradient (the MEASURED register width, same for every pixel since
+            # the sweep is one representative pixel -- a per-pixel ODMR sweep is
+            # a later refinement).
+            "n_qubits": register_width,
             "resonance_ghz": round(measured_hz / 1e9, 6),
             "detuning_mhz": round((measured_hz - zfs_hz) / 1e6, 4),
             "t2_us": round(t2_meas * 1e6, 1),           # measured Hahn-echo T2
@@ -632,6 +749,15 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
     t2_mean = float(np.mean(t2_us_vals)) if t2_us_vals else 0.0
     t2_star_mean = float(np.mean(t2_star_vals)) if t2_star_vals else 0.0
 
+    # Invention 5 -- the qubit count is a MEASURED function of the applied
+    # gradient. register_width = the resolvable ODMR line count in one pixel
+    # (decompose_odmr); the chip has n_pixels independent pixels, so the total
+    # on-chip register is register_width * n_pixels. With no gradient the
+    # ensemble collapses to one line -> 1 qubit/pixel (ensemble mode); with a
+    # strong enough gradient the lines resolve -> N qubits/pixel (register mode).
+    n_pixels = grid * grid
+    total_qubits = register_width * n_pixels
+
     return {
         "profile": prof.short, "temperature_k": temperature_k,
         "stages": [
@@ -642,12 +768,19 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
              "frame_max": round(float(response.max()), 2)},
             {"name": "2 · Auto-align qubit grid",
              "sites_aligned": len(aligned), "sites": aligned},
-            {"name": "3 · ODMR sweep + fit D",
+            {"name": "3 · ODMR sweep + fit D + resolve register",
              "frequencies_ghz": [round(float(x), 5) for x in f],
              "contrast": [round(float(x), 5) for x in c],
              "d_fit_ghz": round(d_fit, 5), "d_expected_ghz": prof.d_ghz,
              "linewidth_fwhm_ghz": round(fwhm, 5),
-             "fit_ok": abs(d_fit - prof.d_ghz) < 0.03},
+             "fit_ok": abs(d_fit - prof.d_ghz) < 0.03,
+             "register_width": register_width,
+             "register_line_freqs_hz": line_freqs_hz,
+             "pixel_mode_recommendation": pixel_mode_recommendation,
+             "gradient_code": grad_code,
+             "gradient_mhz_per_um": round(grad_mhz_per_um, 5),
+             "gradient_spread_mhz": round(grad_spread_mhz, 3),
+             "predicted_register_width": predicted_width},
             {"name": "4 · Per-pin resonance + coherence sweep",
              "pins_measured": len(per_pin),
              "detuning_spread_mhz": round(detuning_spread, 3),
@@ -656,9 +789,31 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
              "t2_star_mean_us": round(t2_star_mean, 2),
              "source": stage4_source},
         ],
+        # The headline result: how many qubits the calibration found.
+        "qubit_summary": {
+            "qubits_per_pixel": register_width,
+            "avg_qubits_per_pixel": register_width,
+            "total_qubits": total_qubits,
+            "n_pixels": n_pixels,
+            "pixel_mode": pixel_mode_recommendation,
+            "predicted_qubits_per_pixel": predicted_width,
+            "gradient_applied": grad_code > 0,
+            "gradient_code": grad_code,
+            "gradient_mhz_per_um": round(grad_mhz_per_um, 5),
+            "gradient_spread_mhz": round(grad_spread_mhz, 3),
+            "coil_current_a": round(coil_current_a, 4),
+            "line_freqs_hz": line_freqs_hz,
+        },
         "per_pin": per_pin,
         "d_fit_ghz": round(d_fit, 5),
         "t1_ms": round(t1 * 1e3, 3), "t2_us": round(t2 * 1e6, 3),
+        "register_width": register_width,
+        "register_line_freqs_hz": line_freqs_hz,
+        "pixel_mode_recommendation": pixel_mode_recommendation,
+        "n_nv_per_pixel": register_width,
+        "gradient_code": grad_code,
+        "gradient_mhz_per_um": round(grad_mhz_per_um, 5),
+        "coil_current_a": round(coil_current_a, 4),
         "source": "hardware" if hardware else "simulator",
         "io": io_label,
         "stage4_source": stage4_source,

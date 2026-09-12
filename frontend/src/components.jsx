@@ -93,16 +93,17 @@ export function QubitFrequencyTable({ sites, dGhz, loading, error }) {
     <div>
       <div className="hint" style={{ marginBottom: 8 }}>
         Per-pin ODMR + coherence sweep — each pin's dip is fit individually (measured D{dGhz ? `≈${dGhz}` : ''} GHz
-        ± a per-site detuning; a narrow MW pulse at f<sub>i</sub> addresses only pin i). Each pin is a
-        ~10-NV register; the resonance shown is the register centre. T₂ = Hahn-echo
-        coherence (µs), T₂* = Ramsey inhomogeneous dephasing (µs). Measured detuning spread:{' '}
-        <b>{spread.toFixed(2)} MHz</b>.
+        ± a per-site detuning; a narrow MW pulse at f<sub>i</sub> addresses only pin i). The <b>Qubits</b> column
+        is the per-pixel register width N resolved by the field gradient (Invention 5: the ODMR line count at the
+        applied gradient). T₂ = Hahn-echo coherence (µs), T₂* = Ramsey inhomogeneous dephasing (µs).
+        Measured detuning spread: <b>{spread.toFixed(2)} MHz</b>.
       </div>
       <div className="qfreq-scroll">
         <table className="qfreq">
           <thead>
             <tr>
               <th>Pin</th><th>R</th><th>C</th>
+              <th>Qubits</th>
               <th>Measured fᵢ (GHz)</th>
               <th>Detuning (MHz)</th>
               <th>T₂ (µs)</th>
@@ -114,11 +115,13 @@ export function QubitFrequencyTable({ sites, dGhz, loading, error }) {
             {rows.map(s => {
               const det = s.detuning_mhz
               const pos = det > 0
+              const nq = s.n_qubits != null ? s.n_qubits : 1
               return (
                 <tr key={s.qubit_id} className={s.usable === false ? 'drop' : ''}>
-                  <td className="mono">q{s.qubit_id}</td>
+                  <td className="mono">{s.pin != null ? s.pin : s.qubit_id}</td>
                   <td>{s.row}</td>
                   <td>{s.col}</td>
+                  <td className="mono" style={{ color: nq > 1 ? 'var(--ok, #2c8a4a)' : 'var(--muted)', fontWeight: 600 }}>{nq}</td>
                   <td className="mono">{(s.resonance_ghz != null ? s.resonance_ghz : s.frequency_ghz).toFixed(6)}</td>
                   <td className={`mono det ${pos ? 'pos' : 'neg'}`}>{det != null ? (det > 0 ? '+' : '') + det.toFixed(3) : '—'}</td>
                   <td className="mono">{(s.t2_us != null ? s.t2_us : 0).toFixed(1)}</td>
@@ -635,8 +638,14 @@ export function SignalChart({ data, error }) {
 // ---------------------------------------------------------------------------
 export function CalibrationPanel({ profile, temperature, seed, run, running, result, err }) {
   const [resOpen, setResOpen] = useState(false)
+  const [gradCode, setGradCode] = useState(1803)  // MCP4921 DAC code (0..4095); 1803 ≈ 2.2 A addressing gradient
   const perPin = result && result.per_pin
   const dFit = result && result.d_fit_ghz
+  const qsum = result && result.qubit_summary
+  const gradOn = gradCode > 0
+  // DAC code -> coil current (I = 5V * code/4096 / 1Ω) and spread (0.98 MHz/µm at 2.2 A)
+  const coilA = gradOn ? (5.0 * gradCode / 4096) : 0
+  const spreadMhz = gradOn ? (coilA / 2.2) * 0.98 * 200 : 0
   return (
     <div>
       <div className="hint" style={{ marginBottom: 10 }}>
@@ -644,11 +653,45 @@ export function CalibrationPanel({ profile, temperature, seed, run, running, res
         (2) auto-align the qubit grid, (3) sweep the microwave frequency and fit the zero-field
         splitting D + linewidth, (4) sweep each pin's ODMR dip individually + fit Ramsey T₂* and
         Hahn-echo T₂ → the per-pin resonance / addressing map and the measured coherence budget.
+        Invention 5 field gradient: the MCP4921 DAC sets the coil current before the ODMR sweep,
+        spreading the ensemble line into N resolvable lines — the per-pixel qubit count N becomes
+        a <b>measured</b> function of the applied gradient.
       </div>
-      <button onClick={run} disabled={running} className="ghost" type="button">
-        {running ? <><span className="spinner" /> Calibrating…</> : 'Run calibration'}
-      </button>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end', marginBottom: 8 }}>
+        <label className="muted" style={{ fontSize: 12.5 }}>
+          Gradient DAC code (0..4095)
+          <input type="range" min="0" max="4095" step="1" value={gradCode}
+            onChange={e => setGradCode(+e.target.value)} style={{ display: 'block', width: 220 }} />
+          <span className="mono" style={{ color: gradOn ? 'var(--brand)' : 'var(--muted)' }}>
+            {gradCode} {gradOn ? `· ${coilA.toFixed(2)} A · ~${spreadMhz.toFixed(0)} MHz spread` : '· gradient off (ensemble)'}
+          </span>
+        </label>
+        <button onClick={() => run({ gradient_code: gradCode, n_nv_per_pixel: 10 })}
+          disabled={running} className="ghost" type="button">
+          {running ? <><span className="spinner" /> Calibrating…</> : 'Run calibration'}
+        </button>
+      </div>
       {err && <div className="error" style={{ marginTop: 10 }}>{err}</div>}
+      {qsum && (
+        <div className="qubit-summary" style={{
+          marginTop: 10, padding: '10px 12px', borderRadius: 8,
+          background: 'var(--surface-2, rgba(255,255,255,0.04))',
+          border: '1px solid var(--border, rgba(255,255,255,0.1))',
+        }}>
+          <div style={{ fontSize: 13, marginBottom: 6, color: 'var(--brand)' }}>
+            Qubits found (measured from the ODMR spectrum{qsum.gradient_applied ? ` at gradient ${qsum.gradient_code}` : ', no gradient'})
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, fontSize: 13 }}>
+            <span><b className="mono" style={{ fontSize: 18, color: 'var(--ok, #2c8a4a)' }}>{qsum.qubits_per_pixel}</b> qubits/pixel</span>
+            <span>avg <b className="mono">{qsum.avg_qubits_per_pixel}</b>/pixel</span>
+            <span><b className="mono" style={{ fontSize: 18 }}>{qsum.total_qubits}</b> total across {qsum.n_pixels} pixels</span>
+            <span>mode: <span className={`tag ${qsum.pixel_mode === 'register' ? 'ok' : 'bad'}`}>{qsum.pixel_mode}</span></span>
+            {qsum.gradient_applied && (
+              <span className="muted">coil {qsum.coil_current_a} A · spread {qsum.gradient_spread_mhz} MHz</span>
+            )}
+          </div>
+        </div>
+      )}
       {result && result.stages && (
         <div style={{ marginTop: 14 }}>
           <div className="calgrid">

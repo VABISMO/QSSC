@@ -572,10 +572,15 @@ export default function App() {
     } catch (e) { setRunErr(e.message); setJob(null) }
   }
 
-  const runCalibration = async () => {
+  const runCalibration = async (opts = {}) => {
     setCalRunning(true); setCalErr(null)
     try {
-      const r = await api.calibrationRun({ profile, temperature_k: temperature, seed, hardware: hwMode === 'hardware' })
+      const r = await api.calibrationRun({
+        profile, temperature_k: temperature, seed,
+        hardware: hwMode === 'hardware',
+        gradient_code: opts.gradient_code ?? null,
+        n_nv_per_pixel: opts.n_nv_per_pixel ?? 10,
+      })
       setCalRun(r)
     } catch (e) { setCalErr(e.message) }
     finally { setCalRunning(false) }
