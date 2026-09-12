@@ -693,15 +693,6 @@ export function CalibrationPanel({ profile, temperature, seed, run, running, res
   const spreadMhz = gradOn ? (coilA / 2.2) * 0.98 * 200 : 0
   return (
     <div>
-      <div className="hint" style={{ marginBottom: 10 }}>
-        Full calibration: (1) scan the on-chip detector array for defect photocurrent (lock-in),
-        (2) auto-align the qubit grid, (3) sweep the microwave frequency and fit the zero-field
-        splitting D + linewidth, (4) sweep each pin's ODMR dip individually + fit Ramsey T₂* and
-        Hahn-echo T₂ → the per-pin resonance / addressing map and the measured coherence budget.
-        Invention 5 field gradient: the MCP4921 DAC sets the coil current before the ODMR sweep,
-        spreading the ensemble line into N resolvable lines — the per-pixel qubit count N becomes
-        a <b>measured</b> function of the applied gradient.
-      </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end', marginBottom: 8 }}>
         <label className="muted" style={{ fontSize: 12.5 }}>
           Gradient DAC code (0..4095)
