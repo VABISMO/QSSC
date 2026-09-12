@@ -1018,6 +1018,33 @@ module tb_top_level;
                      rx_log_cnt, grad_xact_count, grad_shift_reg, grad_en);
         end
 
+        // ---- 20) RESET clears the gradient DAC (G1) -------------------------
+        // Scenario 19 left grad_dac_value_w=2048 (grad_en=1, coil on). A RESET
+        // must zero grad_dac_value_w so the coil turns OFF (only power-on reset
+        // cleared it before -- a stray field survived RESET). The load pulse is
+        // deferred to the end of S_RESET_WAIT so dac_ctrl (held in sync reset by
+        // soft_rst->peri_rst) actually processes it once peri_rst drops; the
+        // zero is observable in grad_dac_value_w right after the OK reply.
+        rst_pulses_before = adc_rst_pulses;
+        grad_xact_count = 0;
+        rx_log_cnt = 0;
+        cmd_bytes[0]="R";  cmd_bytes[1]="E";  cmd_bytes[2]="S";  cmd_bytes[3]="E";
+        cmd_bytes[4]="T";  cmd_bytes[5]=8'h0A;
+        $display("TB: sending RESET after SET_GRADIENT (expect OK + grad cleared)");
+        for (c=0;c<6;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(3, W_GENERIC);        // OK\n
+        repeat(600) @(posedge clk_100mhz);   // past rst_hold + the DAC SPI shift
+        if (rx_log_cnt >= 3 &&
+            rx_log[0] === 8'h4F && rx_log[1] === 8'h4B && rx_log[2] === 8'h0A &&
+            dut.parser_inst.grad_dac_value === 12'd0 && grad_en === 1'b0) begin
+            ok_count = ok_count + 1;
+            $display("TB: RESET cleared gradient (grad_dac_value=0, grad_en=0)  (PASS)");
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL RESET-clears-grad (rx=%0d, grad=%0d, en=%b)",
+                     rx_log_cnt, dut.parser_inst.grad_dac_value, grad_en);
+        end
+
         if (err_count == 0)
             $display("TB: === ALL CHECKS PASSED ===");
         else

@@ -1277,9 +1277,19 @@ module command_parser #(
                             // RESET -> assert soft_rst for a few cycles to re-
                             // init the peripherals (emitter/ADC/PLL/QRNG/gate),
                             // then reply OK. The parser is not reset by it.
-                            soft_rst  <= 1'b1;
-                            rst_hold  <= 3'd4;
-                            fsm       <= S_RESET_WAIT;
+                            // Also zero the gradient DAC code so RESET turns the
+                            // gradient coil OFF. The actual DAC load pulse is
+                            // deferred to the end of S_RESET_WAIT (below): firing
+                            // it here would be ignored, because soft_rst ORs into
+                            // peri_rst which holds dac_ctrl in sync reset for the
+                            // whole rst_hold window. Without this clear the coil
+                            // keeps its last programmed current across a RESET
+                            // (only power-on `reset` cleared grad_dac_value),
+                            // leaving a stray field on the next ODMR sweep.
+                            soft_rst       <= 1'b1;
+                            rst_hold       <= 3'd4;
+                            grad_dac_value <= 12'd0;
+                            fsm            <= S_RESET_WAIT;
                         end
                         CMD_SWEEP : begin
                             // ODMR_SWEEP <q> <f_start_khz> <f_stop_khz> <n>:
@@ -1666,9 +1676,18 @@ module command_parser #(
                 // reset trees see a clean pulse, then reply OK.
                 S_RESET_WAIT : begin
                     if (rst_hold == 3'd0) begin
-                        soft_rst  <= 1'b0;
-                        reply_ok  <= 1'b1;
-                        fsm       <= S_REPLY_LOAD;
+                        // soft_rst deasserts next cycle -> peri_rst drops ->
+                        // dac_ctrl leaves sync reset. Pulse grad_dac_load HERE
+                        // so dac_ctrl sees start=1 (with grad_dac_value=0) on
+                        // the first out-of-reset cycle and writes 0 to the
+                        // MCP4921, hard-clearing the coil current. The load is a
+                        // 1-cycle pulse (the line-815 default clears it next
+                        // cycle); the SPI shift runs in the background after the
+                        // OK reply is sent.
+                        soft_rst      <= 1'b0;
+                        grad_dac_load <= 1'b1;
+                        reply_ok      <= 1'b1;
+                        fsm           <= S_REPLY_LOAD;
                     end else begin
                         rst_hold <= rst_hold - 3'd1;
                     end

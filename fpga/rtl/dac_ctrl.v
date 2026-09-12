@@ -10,10 +10,9 @@
 // The 16-bit write word is assembled by top_level as
 //   {4'b0011, data[11:0]}      (channel A, unbuffered, 1x gain, !SHDN)
 // so this module stays a dumb shifter with no DAC-specific framing. Protocol:
-// on `start`, drive CS_n low, shift 16 bits MSB-first (data set up before the
-// SCLK rising edge, held through the high half -- the MCP4921 samples on the
-// SCLK falling edge and sees the same bit still valid), then raise CS_n to
-// latch. One transaction per start. `done` pulses for one clock when complete.
+// on `start`, drive CS_n low, shift 16 bits MSB-first (data set up during the
+// SCLK low half and sampled by the MCP4921 on the SCLK rising edge, then held
+// through the high half), then raise CS_n to latch. One transaction per start. `done` pulses for one clock when complete.
 // CLK_DIV sets the SCLK half-period (default 4 -> 40 ns high / 40 ns low =
 // 12.5 MHz SCLK from 100 MHz; the MCP4921 supports 20 MHz at Vdd >= 4.5 V).
 //============================================================================
