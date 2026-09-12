@@ -45,7 +45,8 @@ PWR_W_NM = 500_000            # 0.50 mm track for the 2.2 A coil feed/return
 
 # nets that route on B.Cu (long) vs F.Cu (short, grad cluster)
 LONG_NETS = ("grad_cs", "grad_sclk", "grad_mosi", "GRAD_COIL_N")
-SHORT_NETS = ("GRAD_DAC_OUT", "GRAD_GATE", "GRAD_NFB", "GRAD_SENSE")
+SHORT_NETS = ("GRAD_DAC_OUT", "GRAD_GATE", "GRAD_NFB", "GRAD_SENSE",
+              "GRAD_COIL_P")
 # nets this script OWNS and re-routes from scratch (idempotent clear target).
 # +5V is intentionally EXCLUDED: it is a shared power rail with many pads we
 # do not own -- clearing it would wipe the rail and orphan every +5V pad.  We
@@ -191,21 +192,28 @@ def _route_long(board, netmap, pad_index, netname):
 
 
 def _route_5v_feed(board, netmap, pad_index):
-    """Connect Lgrad pad1 (+5V coil feed) to the existing +5V rail on B.Cu.
+    """Connect Rgrad_feed pad1 (+5V) to the existing +5V rail on B.Cu.
+
+    The coil is a KiCad net-tie (Lgrad pads 1,2 merged by its fp_poly), so
+    Lgrad no longer carries the +5V net -- pin1 is GRAD_COIL_P.  A 0R feed
+    resistor Rgrad_feed bridges +5V (pin1) -> GRAD_COIL_P (pin2 -> Lgrad.1),
+    keeping +5V and the coil nets electrically separate everywhere except at
+    the resistor.  This stub feeds only the Rgrad_feed +5V pad to the rail.
 
     The +5V rail runs as a B.Cu track along the top of the board at y~16.8 mm
-    (x 67.6->106).  Lgrad.1 sits at (70,40) on F.Cu.  A 0.40 mm through via
-    drops the pad to B.Cu, then a 0.50 mm B.Cu track runs straight up to the
-    rail at (70,16.8), T-joining it (same net -> a clean junction, no DRC).
-    The 0.50 mm track carries the 2.2 A coil current on 2 oz Cu.
+    (x 67.6->106).  Rgrad_feed.1 is placed at (70,82) on F.Cu, inside the
+    rail's x-range.  A 0.40 mm through via drops the pad to B.Cu, then a 0.50
+    mm B.Cu track runs straight up to the rail at (70,16.8), T-joining it
+    (same net -> a clean junction, no DRC).  The 0.50 mm track carries the
+    2.2 A coil current on 2 oz Cu.
     """
     nc = _netcode(netmap, "+5V")
-    lpads = [p for p in _pads(pad_index, "+5V") if p[0] == "Lgrad"]
-    if not lpads:
+    rpads = [p for p in _pads(pad_index, "+5V") if p[0] == "Rgrad_feed"]
+    if not rpads:
         return 0
-    _, _, px, py = lpads[0]  # Lgrad.1 at (70,40)
-    rail_x, rail_y = px, int(16.8 * NM)  # +5V rail crosses x=70 at y=16.8
-    vx, vy = px, py + int(1.30 * NM)     # via south of the coil pad
+    _, _, px, py = rpads[0]  # Rgrad_feed.1 (+5V pad)
+    rail_x, rail_y = px, int(16.8 * NM)  # +5V rail crosses x=px at y=16.8
+    vx, vy = px, py - int(1.30 * NM)     # via north of the resistor pad
     _add_track(board, px, py, vx, vy, F_CU, nc, w=PWR_W_NM)
     _add_via(board, vx, vy, nc, w=PWR_VIA_W_NM, drill=PWR_VIA_DRILL_NM)
     _add_track(board, vx, vy, rail_x, rail_y, B_CU, nc, w=PWR_W_NM)

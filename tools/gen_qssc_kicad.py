@@ -739,41 +739,58 @@ def conn_02x10_footprint():
 
 
 def grad_coil_footprint():
-    """Invention 5 field-gradient coil -- a PCB copper trace on F.Cu running
-    along one edge of the die socket.  Two SMD pads (1 = +5V feed, 2 = coil
-    return -> MOSFET drain) sit 20 mm apart; a 1.5 mm gr_line on F.Cu between
-    them IS the coil trace (2 oz Cu carries the ~2.2 A clean-addressing
-    current).  Represented in the schematic as a generic qssc:L inductor with
-    this custom footprint.  The pad pitch matches the placement span so the
-    trace lands along the die left edge when the footprint is placed there."""
+    """Invention 5 field-gradient coil -- a real PCB copper trace on F.Cu
+    running along one edge of the die socket.  Two SMD pads (1 = GRAD_COIL_P
+    feed, 2 = coil return GRAD_COIL_N -> MOSFET drain) sit 20 mm apart; a
+    filled 1.5 mm fp_poly on F.Cu between them IS the manufactured coil trace
+    (2 oz Cu carries the ~2.2 A clean-addressing current).
+
+    This is a KiCad *net-tie* footprint (net_tie_pad_groups "1, 2"): the two
+    pads sit on DIFFERENT nets (GRAD_COIL_P and GRAD_COIL_N) and the footprint-
+    internal F.Cu fp_poly bridges them.  KiCad's DRC allows the bridge because
+    the pads are declared tied, and -- critically -- the tie is the ONLY point
+    the two nets join, so the MOSFET drain (GRAD_COIL_N) cannot reach the +5V
+    plane except through the coil trace.  +5V feeds GRAD_COIL_P through a
+    separate 0-ohm resistor (Rgrad_feed) so the +5V plane and GRAD_COIL_N stay
+    distinct nets (a direct +5V-to-pad1 tie would merge +5V with GRAD_COIL_N
+    and let the MOSFET bypass the coil via the +5V plane -- a short).  Pattern
+    copied from KiCad's canonical NetTie.pretty footprints."""
     def pad(name, x):
+        # bare F.Cu copper pads (no paste -- nothing is soldered here; the
+        # fp_poly is the "component"). Routes tie to the pad copper directly.
         return L(A("pad"), S(name), A("smd"), A("rect"),
                  L(A("at"), A(x), A(0)),
                  L(A("size"), A(2.0), A(2.0)),
-                 L(A("layers"), S("F.Cu"), S("F.Paste"), S("F.Mask")))
+                 L(A("layers"), S("F.Cu"), S("F.Mask")))
     return L(A("footprint"), S("qssc:GradCoil"),
              L(A("layer"), S("F.Cu")),
              L(A("version"), A(20240108)),
              L(A("generator"), S("gen_qssc_kicad")),
              L(A("generator_version"), S("8.0")),
-             L(A("descr"), S("Invention 5 field-gradient coil: 1.5 mm PCB copper trace on F.Cu along the die socket edge (~2.2 A)")),
-             L(A("attr"), A("smd")),
+             L(A("descr"), S("Invention 5 field-gradient coil: 1.5 mm PCB copper trace on F.Cu along the die socket edge (~2.2 A); KiCad net-tie (pads 1,2 tied by the fp_poly)")),
+             L(A("attr"), A("smd"), A("exclude_from_pos_files"),
+               A("allow_missing_courtyard")),
+             # net tie: pads 1,2 are joined by the footprint's own F.Cu fp_poly;
+             # DRC allows the inter-pad copper AND the two nets stay joined only here.
+             L(A("net_tie_pad_groups"), S("1, 2")),
              L(A("property"), S("Reference"), S("L"), L(A("at"), A(0), A(-4), A(0)),
                L(A("effects"), L(A("font"), L(A("size"), A(1.27), A(1.27))))),
              L(A("property"), S("Value"), S("GradCoil"), L(A("at"), A(0), A(4), A(0)),
                L(A("effects"), L(A("font"), L(A("size"), A(1.27), A(1.27))))),
-             # the coil trace: drawn on F.Fab as the 1.5 mm coil representation
-             # (pad-centre to pad-centre). The actual 2-oz F.Cu copper coil is a
-             # routing/fabrication step -- this generator places + nets pads but
-             # does not signal-route, and a footprint F.Cu graphic cannot carry a
-             # net (the coil bridges two distinct nets, +5V and GRAD_COIL_N, so it
-             # cannot be a single netted pad either). F.Fab keeps DRC clean while
-             # documenting the coil geometry for the layout step.
-             L(A("fp_line"), L(A("start"), A(-10.0), A(0)),
-              L(A("end"), A(10.0), A(0)),
-              L(A("stroke"), L(A("width"), A(1.5)), L(A("type"), A("solid"))),
-              L(A("layer"), S("F.Fab")), L(A("uuid"), S(u()))),
-             # Fab + CrtYd outline (20 mm trace + pad extent)
+             # the coil trace: a 20 mm x 1.5 mm filled F.Cu polygon pad-centre to
+             # pad-centre. This IS the manufactured 2-oz copper coil -- not a fab
+             # drawing.  As a footprint-internal copper item in a net-tie group it
+             # is DRC-exempt from clearance checks against the tied pads.
+             L(A("fp_poly"),
+               L(A("pts"),
+                 L(A("xy"), A(-10.0), A(-0.75)),
+                 L(A("xy"), A(10.0), A(-0.75)),
+                 L(A("xy"), A(10.0), A(0.75)),
+                 L(A("xy"), A(-10.0), A(0.75))),
+               L(A("stroke"), L(A("width"), A(0)), L(A("type"), A("solid"))),
+               L(A("fill"), A("solid")),
+               L(A("layer"), S("F.Cu")), L(A("uuid"), S(u()))),
+             # Fab outline (documents the coil geometry for the layout drawing)
              L(A("fp_rect"), L(A("start"), A(-12.0), A(-2.0)), L(A("end"), A(12.0), A(2.0)),
               L(A("stroke"), L(A("width"), A(0.1)), L(A("type"), A("solid"))),
               L(A("fill"), A("none")), L(A("layer"), S("F.Fab")), L(A("uuid"), S(u()))),
@@ -1949,10 +1966,17 @@ def build_gradient_board():
     add("Qgrad", "qssc:IRLML2502", "IRLML2502", "Package_TO_SOT_SMD:SOT-23-3",
         405, 150, pins={"1": "GRAD_GATE", "2": "GRAD_SENSE", "3": "GRAD_COIL_N"})
     # Lgrad: the gradient coil -- a 1.5 mm PCB copper trace on F.Cu (qssc:GradCoil
-    # footprint), drawn along the die socket left edge. 2-terminal inductor
-    # symbol: pin 1 = +5V feed, pin 2 = coil return -> MOSFET drain.
+    # footprint, a KiCad net-tie), drawn along the die socket bottom edge.  The
+    # coil bridges two nets: pin 1 = GRAD_COIL_P (the +5V side, fed through
+    # Rgrad_feed), pin 2 = GRAD_COIL_N (coil return -> MOSFET drain).  The
+    # net-tie joins GRAD_COIL_P and GRAD_COIL_N ONLY through the coil trace, so
+    # +5V (a poured plane) and the MOSFET drain stay distinct nets -- the coil
+    # cannot be bypassed.  Rgrad_feed (0 ohm) is the single component tie from
+    # the +5V plane to GRAD_COIL_P.
+    add("Rgrad_feed", "qssc:R", "0R", "Resistor_SMD:R_0805_2012Metric",
+        352, 175, pins={"1": "+5V", "2": "GRAD_COIL_P"})
     add("Lgrad", "qssc:L", "GradCoil", "qssc:GradCoil",
-        360, 175, pins={"1": "+5V", "2": "GRAD_COIL_N"})
+        360, 175, pins={"1": "GRAD_COIL_P", "2": "GRAD_COIL_N"})
     # Rsense: 1 ohm current-sense in the MOSFET source -> GND (2512 power: at the
     # 2.2 A clean-addressing current I^2*R = 4.84 W -> use a 5 W thick-film part).
     add("Rsense", "qssc:R", "1", "Resistor_SMD:R_2512_6332Metric",
@@ -2471,7 +2495,13 @@ def emit_pro(cfg=None):
     ds["rules"]["min_via_diameter"] = 0.20
     ds["rules"]["min_via_annular_width"] = 0.05
     ds["rules"]["min_hole_clearance"] = 0.15
-    ds["rules"]["min_hole_to_hole"] = 0.25
+    # 0.20 mm hole-to-hole matches the hand-routed main board (qssc.kicad_pro),
+    # whose dense 0.10 mm-drill HDI vias (e.g. adjacent emitter_cat dog-bones at
+    # ~0.20-0.25 mm edge-to-edge) were DRC'd to 0/0/0 at this value.  The old
+    # 0.25 mm default tripped 3 hole_near_hole errors on those same vias when
+    # re-injected into qssc-grad, so both boards must share the main board's
+    # validated floor.
+    ds["rules"]["min_hole_to_hole"] = 0.20
     # 0.15 mm (6 mil) board min hole_clearance -- the floor for drill-hole-to-copper
     # of a DIFFERENT net. At the current 2.5 mm die pitch the QSSC_Chip dog-bone
     # vias (0.20 mm via 1.0 mm out) clear the neighbour pad by 0.80 mm, so 0.15 mm
@@ -2866,6 +2896,7 @@ def assign_pcb_positions_gradient():
         "Qgrad":   (126, 107, 0),   # IRLML2502 N-MOSFET (SOT-23-3)
         "Rsense":  (138, 107, 0),   # 1 ohm current-sense (2512 power)
         "Lgrad":   (80, 74, 0),     # gradient coil trace, horizontal along die bottom edge
+        "Rgrad_feed": (70, 82, 0),  # 0R feed: +5V rail -> GRAD_COIL_P -> Lgrad pad1 (below coil)
         "C_grad1": (126, 90, 0),    # DAC Vdd decoupling (0603)
         "C_grad2": (132, 90, 0),    # DAC Vdd decoupling (0603)
     }
@@ -3004,7 +3035,8 @@ def assign_sch_positions():
                             "UE", "Riref", "Cem"))]
     # Invention 5 gradient parts (qssc-grad board only): gridded into the same
     # x>=420 free area so they cannot collide with the x<410 RF/USB/FPGA content.
-    grad_refs = ("Ugrad", "Udrv", "Qgrad", "Rsense", "Lgrad", "C_grad1", "C_grad2")
+    grad_refs = ("Ugrad", "Udrv", "Qgrad", "Rsense", "Rgrad_feed", "Lgrad",
+                 "C_grad1", "C_grad2")
     new += [c for c in COMPONENTS if c["ref"] in grad_refs]
     cols, step_x, step_y = 19, 22.0, 20.0
     for idx, c in enumerate(new):

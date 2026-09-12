@@ -100,10 +100,10 @@ set_property DRIVE 8   [get_ports mw_gate]
 # which gates the coil supply (high = a nonzero gradient is commanded).
 # The DAC sets the gradient-coil current (I = Vdac/Rsense) for per-NV
 # frequency addressing at 300 K; ODMR_SWEEP then counts resolved lines.
-set_property PACKAGE_PIN M1   [get_ports grad_cs]
-set_property PACKAGE_PIN N1   [get_ports grad_sclk]
-set_property PACKAGE_PIN R1   [get_ports grad_mosi]
-set_property PACKAGE_PIN T1   [get_ports grad_en]
+set_property PACKAGE_PIN V6   [get_ports grad_cs]
+set_property PACKAGE_PIN V9   [get_ports grad_sclk]
+set_property PACKAGE_PIN V12   [get_ports grad_mosi]
+set_property PACKAGE_PIN V7   [get_ports grad_en]
 set_property IOSTANDARD LVCMOS33 [get_ports grad_cs]
 set_property IOSTANDARD LVCMOS33 [get_ports grad_sclk]
 set_property IOSTANDARD LVCMOS33 [get_ports grad_mosi]
