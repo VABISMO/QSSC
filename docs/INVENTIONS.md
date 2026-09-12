@@ -194,9 +194,9 @@ MEASURED quantity: `resolvable = floor(gradient · pixel_size / linewidth)`
 | — | **Pixel-mode selector** (ensemble ↔ register, measured-N) | ✅ | **YES** — `pixel_mode` panel switch + `prime_readout` toggle; both run on existing firmware | — |
 | 1 | 64-pixel vector magnetometer | ✅ | **YES** — `/api/sensor/magneto` real path = ODMR_SWEEP → `decompose_odmr` → B | — |
 | 2+ | Prime-coprime readout + denoiser | ✅ | **YES** — `READ_LOCKINP` verb DONE (`375d394`); `prime_readout` toggle default on | — |
-| 3 | Nuclear-spin memory (NV+¹³C) | ✅ | NO — needs RF ~2 MHz channel + coil + `RUN_SEQUENCE` kind 3 | **GitHub issue** (RF DAC + coil + RTL kind 3) |
-| 4 | 64-parallel distributed computing | ✅ | **YES (readout)** — `READ_DETECTORS` 64-sweep DONE; `run_array` = replica sampling in ensemble | **GitHub issue** (per-pixel MW for independent circuits) |
-| 5 | Gradient register width | ✅ | NO — needs gradient coil + DAC + `SET_GRADIENT` | **GitHub issue** (gradient coil + DAC + RTL verb) |
+| 3 | Nuclear-spin memory (NV+¹³C) | ✅ | NO — needs RF ~2 MHz channel + coil + `RUN_SEQUENCE` kind 3 | **GitHub issue #75** (RF DAC + coil + RTL kind 3) |
+| 4 | 64-parallel distributed computing | ✅ | **YES (readout)** — `READ_DETECTORS` 64-sweep DONE; `run_array` = replica sampling in ensemble | **GitHub issue #77** (per-pixel MW for independent circuits) |
+| 5 | Gradient register width | ✅ | NO — needs gradient coil + DAC + `SET_GRADIENT` | **GitHub issue #76** (gradient coil + DAC + RTL verb) |
 
 The **pixel-mode selector** is the panel "multiqbit mode" switch (invention
 delivery vehicle): `register` (default, one pixel's N-NV register with
@@ -215,14 +215,14 @@ because they need a PCB change to the hardware we already have). The simulator
 models the physics today; the issues track the PCB + RTL work to run them for
 real.
 
-1. **RF channel for ¹³C SWAP (invention 3):** add a DDS/synthesizer at
+1. **RF channel for ¹³C SWAP (invention 3 — #75):** add a DDS/synthesizer at
    ~2 MHz + a small RF coil near the diamond die + an FPGA SPI/DAC port
    (mirror the ADF4351 control path). Then add `RUN_SEQUENCE` kind 3
    (MW+RF SWAP timing) in `fpga/rtl/command_parser.v`.
-2. **Gradient coil (invention 5):** add a gradient coil pair + a DAC
+2. **Gradient coil (invention 5 — #76):** add a gradient coil pair + a DAC
    channel the FPGA drives + a `SET_GRADIENT` verb. Then `ODMR_SWEEP`
    measures the per-pixel line count = the register width.
-3. **Per-pixel MW (invention 4, independent circuits):** either fast
+3. **Per-pixel MW (invention 4, independent circuits — #77):** either fast
    ADF4351 hopping for frequency-multiplexed per-pixel gates, or 64 small
    per-pixel loop antennas. Then a `RUN_PARALLEL` verb that loads 64
    sequence descriptors.
