@@ -53,7 +53,14 @@ module top_level (
     inout  [3:0]      spi_pins,
     output            refclk_out,      // 25 MHz to ADF4351 REF_IN
     // RF-switch gate pulse (MW pulse envelope duration)
-    output            mw_gate
+    output            mw_gate,
+    // Gradient coil DAC (Invention 5 field-gradient current driver). The
+    // MCP4921 12-bit DAC is driven over 3-wire SPI (cs/sclk/mosi); grad_en
+    // gates the coil supply (high = a nonzero gradient is commanded).
+    output            grad_cs,
+    output            grad_sclk,
+    output            grad_mosi,
+    output            grad_en
 );
     // ---- Parameters --------------------------------------------------------
     // FAST_SIM collapses the slow real-time counters (UART bit period, emitter
@@ -266,6 +273,36 @@ module top_level (
     wire [31:0] mw_gate_ns_w;
     wire        mw_gate_load;
 
+    // ---- Gradient coil DAC (Invention 5 field-gradient current driver) ----
+    // command_parser holds the 12-bit MCP4921 code (grad_dac_value) and pulses
+    // grad_dac_load; dac_ctrl shifts the 16-bit framed word
+    // {4'b0011, grad_dac_value} (channel A, unbuffered, 1x gain, !SHDN) to the
+    // DAC over 3-wire SPI. grad_en asserts whenever a nonzero gradient is
+    // commanded (grad_dac_value != 0) so the coil supply can be hard-gated.
+    wire [11:0] grad_dac_value_w;
+    wire        grad_dac_load_w;
+    wire        grad_dac_busy_w;
+    wire        grad_dac_done_w;
+    wire        grad_cs_int;
+    wire        grad_sclk_int;
+    wire        grad_mosi_int;
+
+    dac_ctrl #(.CLK_DIV(4)) dac_inst (
+        .clk     (clk_100mhz),
+        .reset   (peri_rst),
+        .start   (grad_dac_load_w),
+        .data_in ({4'b0011, grad_dac_value_w}),
+        .busy    (grad_dac_busy_w),
+        .done    (grad_dac_done_w),
+        .sclk    (grad_sclk_int),
+        .mosi    (grad_mosi_int),
+        .cs_n    (grad_cs_int)
+    );
+    assign grad_cs   = grad_cs_int;
+    assign grad_sclk = grad_sclk_int;
+    assign grad_mosi = grad_mosi_int;
+    assign grad_en   = |grad_dac_value_w;   // nonzero code -> coil enabled
+
     // ---- Command parser (ties everything together) -------------------------
     // parser_soft_rst is declared with reset_sync above; it ORs into peri_rst.
     command_parser #(.N_DET(64)) parser_inst (
@@ -305,6 +342,9 @@ module top_level (
         .mw_gate_ns       (mw_gate_ns_w),
         .mw_gate_load     (mw_gate_load),
         .mw_gate          (mw_gate),
+        .grad_dac_value   (grad_dac_value_w),
+        .grad_dac_load    (grad_dac_load_w),
+        .grad_dac_busy    (grad_dac_busy_w),
         .rng_harvest_en   (rng_harvest_en),
         .rng_flush        (rng_flush),
         .rng_word         (rng_word),

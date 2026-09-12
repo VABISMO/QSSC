@@ -1,0 +1,727 @@
+{
+  "board": {
+    "3dviewports": [],
+    "design_settings": {
+      "defaults": {
+        "apply_defaults_to_fp_fields": false,
+        "apply_defaults_to_fp_shapes": false,
+        "apply_defaults_to_fp_text": false,
+        "board_outline_line_width": 0.05,
+        "copper_line_width": 0.2,
+        "copper_text_italic": false,
+        "copper_text_size_h": 1.5,
+        "copper_text_size_v": 1.5,
+        "copper_text_thickness": 0.3,
+        "copper_text_upright": false,
+        "courtyard_line_width": 0.05,
+        "dimension_precision": 4,
+        "dimension_units": 3,
+        "dimensions": {
+          "arrow_length": 1270000,
+          "extension_offset": 500000,
+          "keep_text_aligned": true,
+          "suppress_zeroes": false,
+          "text_position": 0,
+          "units_format": 1
+        },
+        "fab_line_width": 0.1,
+        "fab_text_italic": false,
+        "fab_text_size_h": 1.0,
+        "fab_text_size_v": 1.0,
+        "fab_text_thickness": 0.15,
+        "fab_text_upright": false,
+        "other_line_width": 0.1,
+        "other_text_italic": false,
+        "other_text_size_h": 1.0,
+        "other_text_size_v": 1.0,
+        "other_text_thickness": 0.15,
+        "other_text_upright": false,
+        "pads": {
+          "drill": 0.762,
+          "height": 1.524,
+          "width": 1.524
+        },
+        "silk_line_width": 0.1,
+        "silk_text_italic": false,
+        "silk_text_size_h": 1.0,
+        "silk_text_size_v": 1.0,
+        "silk_text_thickness": 0.1,
+        "silk_text_upright": false,
+        "zones": {
+          "min_clearance": 0.2
+        }
+      },
+      "diff_pair_dimensions": [],
+      "drc_exclusions": [],
+      "meta": {
+        "version": 2
+      },
+      "rule_severities": {
+        "annular_width": "error",
+        "clearance": "error",
+        "connection_width": "warning",
+        "copper_edge_clearance": "ignore",
+        "copper_sliver": "warning",
+        "courtyards_overlap": "error",
+        "diff_pair_gap_out_of_range": "error",
+        "diff_pair_uncoupled_length_too_long": "error",
+        "drill_out_of_range": "error",
+        "duplicate_footprints": "warning",
+        "extra_footprint": "warning",
+        "footprint": "error",
+        "footprint_symbol_mismatch": "warning",
+        "footprint_type_mismatch": "ignore",
+        "hole_clearance": "error",
+        "hole_near_hole": "error",
+        "holes_co_located": "ignore",
+        "invalid_outline": "error",
+        "isolated_copper": "warning",
+        "item_on_disabled_layer": "error",
+        "items_not_allowed": "error",
+        "length_out_of_range": "error",
+        "lib_footprint_issues": "ignore",
+        "lib_footprint_mismatch": "ignore",
+        "malformed_courtyard": "error",
+        "microvia_drill_out_of_range": "error",
+        "missing_courtyard": "ignore",
+        "missing_footprint": "warning",
+        "net_conflict": "warning",
+        "npth_inside_courtyard": "ignore",
+        "padstack": "warning",
+        "pth_inside_courtyard": "ignore",
+        "shorting_items": "error",
+        "silk_edge_clearance": "ignore",
+        "silk_over_copper": "ignore",
+        "silk_overlap": "ignore",
+        "skew_out_of_range": "error",
+        "solder_mask_bridge": "error",
+        "starved_thermal": "error",
+        "text_height": "ignore",
+        "text_thickness": "ignore",
+        "through_hole_pad_without_hole": "error",
+        "too_many_vias": "error",
+        "track_dangling": "ignore",
+        "track_width": "error",
+        "tracks_crossing": "error",
+        "unconnected_items": "ignore",
+        "unresolved_variable": "error",
+        "via_dangling": "ignore",
+        "zones_intersect": "error"
+      },
+      "rules": {
+        "max_error": 0.005,
+        "min_clearance": 0.1,
+        "min_connection": 0.0,
+        "min_copper_edge_clearance": 0.3,
+        "min_hole_clearance": 0.15,
+        "min_hole_to_hole": 0.25,
+        "min_microvia_diameter": 0.2,
+        "min_microvia_drill": 0.1,
+        "min_resolved_spokes": 2,
+        "min_silk_clearance": 0.0,
+        "min_text_height": 0.8,
+        "min_text_thickness": 0.08,
+        "min_through_hole_diameter": 0.1,
+        "min_track_width": 0.1,
+        "min_via_annular_width": 0.05,
+        "min_via_diameter": 0.2,
+        "solder_mask_to_copper_clearance": 0.0,
+        "use_height_for_length_calcs": true
+      },
+      "teardrop_options": [
+        {
+          "td_onpadsmd": true,
+          "td_onroundshapesonly": false,
+          "td_ontrackend": false,
+          "td_onviapad": true
+        }
+      ],
+      "teardrop_parameters": [
+        {
+          "td_allow_use_two_tracks": true,
+          "td_curve_segcount": 0,
+          "td_height_ratio": 1.0,
+          "td_length_ratio": 0.5,
+          "td_maxheight": 2.0,
+          "td_maxlen": 1.0,
+          "td_on_pad_in_zone": false,
+          "td_target_name": "td_round_shape",
+          "td_width_to_size_filter_ratio": 0.9
+        },
+        {
+          "td_allow_use_two_tracks": true,
+          "td_curve_segcount": 0,
+          "td_height_ratio": 1.0,
+          "td_length_ratio": 0.5,
+          "td_maxheight": 2.0,
+          "td_maxlen": 1.0,
+          "td_on_pad_in_zone": false,
+          "td_target_name": "td_rect_shape",
+          "td_width_to_size_filter_ratio": 0.9
+        },
+        {
+          "td_allow_use_two_tracks": true,
+          "td_curve_segcount": 0,
+          "td_height_ratio": 1.0,
+          "td_length_ratio": 0.5,
+          "td_maxheight": 2.0,
+          "td_maxlen": 1.0,
+          "td_on_pad_in_zone": false,
+          "td_target_name": "td_track_end",
+          "td_width_to_size_filter_ratio": 0.9
+        }
+      ],
+      "track_widths": [],
+      "tuning_pattern_settings": {
+        "diff_pair_defaults": {
+          "corner_radius_percentage": 80,
+          "corner_style": 1,
+          "max_amplitude": 1.0,
+          "min_amplitude": 0.2,
+          "single_sided": false,
+          "spacing": 1.0
+        },
+        "diff_pair_skew_defaults": {
+          "corner_radius_percentage": 80,
+          "corner_style": 1,
+          "max_amplitude": 1.0,
+          "min_amplitude": 0.2,
+          "single_sided": false,
+          "spacing": 0.6
+        },
+        "single_track_defaults": {
+          "corner_radius_percentage": 80,
+          "corner_style": 1,
+          "max_amplitude": 1.0,
+          "min_amplitude": 0.2,
+          "single_sided": false,
+          "spacing": 0.6
+        }
+      },
+      "via_dimensions": [],
+      "zones_allow_external_fillets": false
+    },
+    "ipc2581": {
+      "dist": "",
+      "distpn": "",
+      "internal_id": "",
+      "mfg": "",
+      "mpn": ""
+    },
+    "layer_presets": [],
+    "viewports": []
+  },
+  "boards": [],
+  "cvpcb": {
+    "equivalence_files": []
+  },
+  "erc": {
+    "rule_severities": {
+      "endpoint_off_grid": "warning",
+      "label_dangling": "warning",
+      "lib_symbol_issues": "ignore",
+      "pin_not_connected": "warning",
+      "pin_not_driven": "warning"
+    },
+    "severities": {
+      "endpoint_off_grid": "warning",
+      "label_dangling": "warning",
+      "lib_symbol_issues": "ignore",
+      "pin_not_connected": "warning",
+      "pin_not_driven": "warning"
+    }
+  },
+  "libraries": {
+    "pinned_footprint_libs": [],
+    "pinned_symbol_libs": []
+  },
+  "meta": {
+    "filename": "qssc.kicad_pro",
+    "version": 1
+  },
+  "net_settings": {
+    "classes": [
+      {
+        "bus_width": 12,
+        "clearance": 0.15,
+        "diff_pair_gap": 0.25,
+        "diff_pair_via_gap": 0.25,
+        "diff_pair_width": 0.2,
+        "line_style": 0,
+        "microvia_diameter": 0.2,
+        "microvia_drill": 0.1,
+        "name": "Default",
+        "pcb_color": "rgba(0, 0, 0, 0.000)",
+        "schematic_color": "rgba(0, 0, 0, 0.000)",
+        "track_width": 0.2,
+        "via_diameter": 0.6,
+        "via_drill": 0.3,
+        "wire_width": 6
+      },
+      {
+        "bus_width": 12,
+        "clearance": 0.15,
+        "diff_pair_gap": 0.25,
+        "diff_pair_via_gap": 0.25,
+        "diff_pair_width": 0.2,
+        "line_style": 0,
+        "microvia_diameter": 0.2,
+        "microvia_drill": 0.1,
+        "name": "RF",
+        "pcb_color": "rgba(255, 0, 0, 0.000)",
+        "schematic_color": "rgba(0, 0, 0, 0.000)",
+        "track_width": 0.3,
+        "via_diameter": 0.6,
+        "via_drill": 0.3,
+        "wire_width": 6
+      },
+      {
+        "bus_width": 12,
+        "clearance": 0.15,
+        "diff_pair_gap": 0.25,
+        "diff_pair_via_gap": 0.25,
+        "diff_pair_width": 0.2,
+        "line_style": 0,
+        "microvia_diameter": 0.2,
+        "microvia_drill": 0.1,
+        "name": "Power",
+        "pcb_color": "rgba(0, 0, 255, 0.000)",
+        "schematic_color": "rgba(0, 0, 0, 0.000)",
+        "track_width": 0.5,
+        "via_diameter": 0.6,
+        "via_drill": 0.3,
+        "wire_width": 6
+      },
+      {
+        "bus_width": 12,
+        "clearance": 0.15,
+        "diff_pair_gap": 0.25,
+        "diff_pair_via_gap": 0.25,
+        "diff_pair_width": 0.2,
+        "line_style": 0,
+        "microvia_diameter": 0.2,
+        "microvia_drill": 0.1,
+        "name": "USB",
+        "pcb_color": "rgba(0, 255, 0, 0.000)",
+        "schematic_color": "rgba(0, 0, 0, 0.000)",
+        "track_width": 0.2,
+        "via_diameter": 0.6,
+        "via_drill": 0.3,
+        "wire_width": 6
+      },
+      {
+        "bus_width": 12,
+        "clearance": 0.15,
+        "diff_pair_gap": 0.25,
+        "diff_pair_via_gap": 0.25,
+        "diff_pair_width": 0.2,
+        "line_style": 0,
+        "microvia_diameter": 0.2,
+        "microvia_drill": 0.1,
+        "name": "Analog",
+        "pcb_color": "rgba(255, 255, 0, 0.000)",
+        "schematic_color": "rgba(0, 0, 0, 0.000)",
+        "track_width": 0.2,
+        "via_diameter": 0.6,
+        "via_drill": 0.3,
+        "wire_width": 6
+      },
+      {
+        "bus_width": 12,
+        "clearance": 0.1,
+        "diff_pair_gap": 0.25,
+        "diff_pair_via_gap": 0.25,
+        "diff_pair_width": 0.2,
+        "line_style": 0,
+        "microvia_diameter": 0.2,
+        "microvia_drill": 0.1,
+        "name": "Chip",
+        "pcb_color": "rgba(0, 255, 255, 0.000)",
+        "schematic_color": "rgba(0, 0, 0, 0.000)",
+        "track_width": 0.1,
+        "via_diameter": 0.2,
+        "via_drill": 0.1,
+        "wire_width": 6
+      }
+    ],
+    "meta": {
+      "version": 3
+    },
+    "net_colors": null,
+    "netclass_assignments": null,
+    "netclass_patterns": [
+      {
+        "netclass": "Power",
+        "pattern": "+12V_EMIT"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "+12V_EMIT_IN"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "+1V0"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "+1V8"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "+3V3"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "+5V"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "+5V_IN"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "+5V_RF"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "3V3OUT"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "GND"
+      },
+      {
+        "netclass": "RF",
+        "pattern": "J3_SIG"
+      },
+      {
+        "netclass": "RF",
+        "pattern": "LF_CP"
+      },
+      {
+        "netclass": "RF",
+        "pattern": "LF_MID"
+      },
+      {
+        "netclass": "RF",
+        "pattern": "LF_OUT"
+      },
+      {
+        "netclass": "RF",
+        "pattern": "RF_AMP_OUT"
+      },
+      {
+        "netclass": "RF",
+        "pattern": "RF_IN"
+      },
+      {
+        "netclass": "RF",
+        "pattern": "RF_OUT"
+      },
+      {
+        "netclass": "USB",
+        "pattern": "USB_DM"
+      },
+      {
+        "netclass": "USB",
+        "pattern": "USB_DM_F"
+      },
+      {
+        "netclass": "USB",
+        "pattern": "USB_DP"
+      },
+      {
+        "netclass": "USB",
+        "pattern": "USB_DP_F"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "VBUS_USB"
+      },
+      {
+        "netclass": "Analog",
+        "pattern": "VREFP"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat0"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat1"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat10"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat11"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat12"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat13"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat14"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat15"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat16"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat17"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat18"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat19"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat2"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat20"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat21"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat22"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat23"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat24"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat25"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat26"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat27"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat28"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat29"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat3"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat30"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat31"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat32"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat33"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat34"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat35"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat36"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat37"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat38"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat39"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat4"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat40"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat41"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat42"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat43"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat44"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat45"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat46"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat47"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat48"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat49"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat5"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat50"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat51"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat52"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat53"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat54"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat55"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat56"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat57"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat58"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat59"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat6"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat60"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat61"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat62"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat63"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat7"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat8"
+      },
+      {
+        "netclass": "Chip",
+        "pattern": "emitter_cat9"
+      },
+      {
+        "netclass": "RF",
+        "pattern": "refclk_25m"
+      }
+    ]
+  },
+  "pcbnew": {
+    "last_paths": {
+      "gencad": "",
+      "idf": "",
+      "netlist": "../../../../../",
+      "plot": "",
+      "pos_files": "",
+      "specctra_dsn": "",
+      "step": "",
+      "svg": "",
+      "vrml": ""
+    },
+    "page_layout_descr_file": ""
+  },
+  "schematic": {
+    "legacy_lib_dir": "",
+    "legacy_lib_list": []
+  },
+  "sheets": [],
+  "text_variables": {}
+}

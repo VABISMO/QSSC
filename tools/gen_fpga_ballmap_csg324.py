@@ -228,8 +228,11 @@ def main() -> None:
     # 3d. control nets -> remaining general IO (prefer SRCC/centre, then rest).
     # (I2C_SDA/I2C_SCL are GONE: the MCP4725 threshold DAC was removed with the
     # comparator/photon-counter chain -- the AD7616 range is HW-pin-strapped.)
+    # Invention 5 adds 4 gradient-coil DAC pins (grad_cs/sclk/mosi/en) for the
+    # MCP4921 field-gradient current driver on the extended qssc-grad board.
     control = ["reset", "tx", "rx", "SPI_CLK", "SPI_DATA", "SPI_LE",
-               "ADF_MUXOUT", "mod_sync", "mw_gate"]
+               "ADF_MUXOUT", "mod_sync", "mw_gate",
+               "grad_cs", "grad_sclk", "grad_mosi", "grad_en"]
     ctrl_pool = sorted(
         (b for b in avail if b not in taken),
         key=lambda b: (col(b), rowidx(b)))            # left/centre first
