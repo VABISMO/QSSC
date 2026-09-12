@@ -189,15 +189,31 @@ MEASURED quantity: `resolvable = floor(gradient · pixel_size / linewidth)`
 
 ## Summary table
 
-| # | Invention | SIM | HW-fits (RTL status) | needs-HW (PCB add) |
+| # | Invention | SIM | Ships in sim + real (panel switch)? | needs-HW → GitHub issue |
 |---|---|---|---|---|
-| 1 | 64-pixel vector magnetometer | ✅ | ODMR_SWEEP → B (existing verb) | — |
-| 2+ | Prime-coprime readout + denoiser | ✅ | `READ_LOCKINP` verb DONE (`375d394`) | — |
-| 3 | Nuclear-spin memory (NV+¹³C) | ✅ | — | RF DAC channel at ~2 MHz + RF coil + RTL kind 3 |
-| 4 | 64-parallel distributed computing | ✅ | `READ_DETECTORS` 64-sweep DONE (existing verb) | per-pixel MW (freq-mux or 64 coils) for independent circuits |
-| 5 | Gradient register width | ✅ | — | gradient coil + DAC + RTL verb |
+| — | **Pixel-mode selector** (ensemble ↔ register, measured-N) | ✅ | **YES** — `pixel_mode` panel switch + `prime_readout` toggle; both run on existing firmware | — |
+| 1 | 64-pixel vector magnetometer | ✅ | **YES** — `/api/sensor/magneto` real path = ODMR_SWEEP → `decompose_odmr` → B | — |
+| 2+ | Prime-coprime readout + denoiser | ✅ | **YES** — `READ_LOCKINP` verb DONE (`375d394`); `prime_readout` toggle default on | — |
+| 3 | Nuclear-spin memory (NV+¹³C) | ✅ | NO — needs RF ~2 MHz channel + coil + `RUN_SEQUENCE` kind 3 | **GitHub issue** (RF DAC + coil + RTL kind 3) |
+| 4 | 64-parallel distributed computing | ✅ | **YES (readout)** — `READ_DETECTORS` 64-sweep DONE; `run_array` = replica sampling in ensemble | **GitHub issue** (per-pixel MW for independent circuits) |
+| 5 | Gradient register width | ✅ | NO — needs gradient coil + DAC + `SET_GRADIENT` | **GitHub issue** (gradient coil + DAC + RTL verb) |
+
+The **pixel-mode selector** is the panel "multiqbit mode" switch (invention
+delivery vehicle): `register` (default, one pixel's N-NV register with
+within-pixel all-to-all dipole 2q) ↔ `ensemble` (64 chip pixels are the circuit
+qubits, one ensemble qubit per pixel, no within-pixel 2q at 300 K). The register
+width **N is a measured quantity** — `decompose_odmr` on the ODMR calibration
+(`ODMR_SWEEP` verb) counts the resolvable lines, and the backend places NVs on
+the measured frequency grid (`register_line_freqs_hz`), not a hardcoded 10. A
+bulk microdiamond collapses to one line → ensemble mode is recommended; a
+resolved multi-line ODMR → register mode. `qubit = address not NV count`.
 
 ## What to touch on the PCB for the needs-HW inventions
+
+These three inventions are **tracked as GitHub issues** (not implemented here,
+because they need a PCB change to the hardware we already have). The simulator
+models the physics today; the issues track the PCB + RTL work to run them for
+real.
 
 1. **RF channel for ¹³C SWAP (invention 3):** add a DDS/synthesizer at
    ~2 MHz + a small RF coil near the diamond die + an FPGA SPI/DAC port
@@ -212,4 +228,5 @@ MEASURED quantity: `resolvable = floor(gradient · pixel_size / linewidth)`
    sequence descriptors.
 
 None of these PCB additions exist today; the simulator carries the physics
-until they do.
+until they do. The `pixel_mode=gradient` mode (invention 5's delivery vehicle)
+is **dropped** from the panel — gradient register width goes to its issue.
