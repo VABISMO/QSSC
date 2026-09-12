@@ -420,12 +420,17 @@ coil and its current driver** — a separate extended variant generated from
 the same `tools/gen_qssc_kicad.py` (`build_gradient_board()` calls
 `build_main_board(grad=True)` then adds the 7 parts below).  The base
 `qssc.*` board is unchanged (0 grad nets, ERC/DRC identical).  The gradient
-is the **gate** that makes per-NV frequency addressing work at 300 K: a
-~7 mT spread across the 200 µm pixel (= 200 MHz at NV γ = 28 MHz/mT) drops
-addressing leakage 6.25× → 0.06×, and `ODMR_SWEEP` then counts the resolved
-lines to *measure* the per-pixel register width.  The coil is a 1.5 mm PCB
-copper trace on F.Cu (free — no wound part), driven by a unipolar
-magnitude-programmable current sink: a 12-bit SPI DAC sets the current
+is the **gate** that makes per-NV frequency addressing work at 300 K: the
+design target is one datasheet linewidth (5 MHz) of separation per addressable
+NV across the 200 µm pixel, so an N-line register needs ~N·5 MHz = N·0.18 mT
+(at the NV gyromagnetic ratio γ = 28 MHz/mT); at that detuning `qssc/dipole.py`
+puts the addressing leakage at 0.06×, and `ODMR_SWEEP` then counts the resolved
+lines to *measure* the per-pixel register width (the design-N / addressable-N
+upper bound).  The actual field the 1.5 mm PCB trace produces at a given
+`I_coil` is NOT QUOTED BY THE SUPPLIER — it is set by the coil geometry and
+measured by the ODMR line count.  The coil is a 1.5 mm PCB copper trace on
+F.Cu (free — no wound part), driven by a unipolar magnitude-programmable
+current sink: a 12-bit SPI DAC sets the current
 (`I_coil = Vdac / Rsense`), an op-amp servos the MOSFET gate to hold that
 current, and writing code 0 zero-cuts the coil.  Full copper routing is a
 follow-up (the base board was routed separately via FreeRouting); the
@@ -496,10 +501,16 @@ schematic + netlist + placement are DRC 0/0/0.
   copper (free); the footprint draws the trace on F.Fab (the actual copper is
   laid in the routing step).
 
-### Rsense — 1 Ω current-sense (2512 power thick-film, 5 W)
+### Rsense — 1 Ω current-sense (2512 power thick-film, ≥5 W)
 - **Function:** source-degeneration sense resistor.  I_coil = Vdac/1 Ω.  At
-  the 2.2 A clean-addressing current, P = I²R = 4.84 W → use a 5 W 2512
-  thick-film part.  Pin 1 = GRAD_SENSE, pin 2 = GND.
+  the 2.2 A clean-addressing current, P = I²R = 4.84 W, so the part must be
+  rated ≥5 W.  Pin 1 = GRAD_SENSE, pin 2 = GND.
+- **MPN:** a single 1 Ω / 5 W / 2512 chip is non-standard — 5 W 2512
+  current-sense parts are mΩ-range, and 1 Ω 2512 thick-film parts (e.g. Yageo
+  RC2512FK-071RL, TT Electronics LR2512-1R0FW) are 1–1.5 W.  NOT QUOTED BY THE
+  SUPPLIER — procurement should use either a larger high-power package (e.g.
+  6432/5025) at 1 Ω/5 W, or two 0.5 Ω 3 W 2512 parts in series.  MPN to be
+  confirmed at procurement.
 
 ### C_grad1 / C_grad2 — 100 nF DAC VDD decoupling (0603)
 - **Function:** HF + bulk-bypass on the +5V rail at Ugrad.  Pin 1 = +5V,
