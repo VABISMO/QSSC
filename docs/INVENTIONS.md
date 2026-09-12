@@ -71,11 +71,15 @@ in-band noise inside a prime channel's linewidth still passes).
   `test_16_symbols_are_channels_not_qudit_states` pinning that 16 prime
   symbols = 16 ADDRESS CHANNELS = 16 NVs, NOT a 16-state qudit — a 10-NV
   pixel is `2^10`, not `16^10`).
-- **HW-fits** — a **prime-period lock-in mode** in the existing
-  `READ_LOCKIN` FPGA verb (pass the prime `p` as the modulation period;
-  the lock-in is self-timed already). One global MW antenna + the 64
-  parallel detectors is enough: the prime period is the modulation
-  timing, independent of the carrier. **RTL to do.**
+- **HW-fits — DONE** — the new `READ_LOCKINP <site> <n_cycles>
+  <half_ns>` FPGA verb (branch `fpga/run-all-prime-lockin`, commit
+  `375d394`) demodulates at a host-supplied on/off half-period
+  `half_ns = p*tau/2` for the prime `p` this NV's channel uses. The prime
+  selection + coprime orthogonality stays in Python (`qssc.prime_readout`);
+  the RTL just demodulates at the requested half. Backward compatible:
+  `READ_LOCKIN` keeps the 200 us default. One global MW antenna + the 64
+  parallel detectors is enough: the prime period is the modulation timing,
+  independent of the carrier.
 - **needs-HW** — none for the lock-in demod. (Per-NV frequency addressing
   at the carrier needs the per-NV ODMR detuning to exceed the linewidth —
   the existing `frequency_detuning_spread_hz = 2 MHz` model; physically
@@ -124,10 +128,11 @@ per pixel and aggregates.
   max_pixels=64)`; `api/runner.py` `run_parallel` (shor / sample / custom);
   `api/main.py` `POST /api/circuit/run-parallel`.
 - **Tests** — `tests/test_parallel_computing.py` (8 tests).
-- **HW-fits (partial)** — the 64 detectors + 4× AD7616 read all 64 pixels
-  in parallel; a **`RUN_ALL` verb** that sweeps all 64 sites' readout in
-  one command is genuine parallel READOUT and feasible on the current
-  hardware. **RTL to do.**
+- **HW-fits (readout DONE)** — the 64 detectors + 4× AD7616 read all 64
+  pixels in parallel. The **existing `READ_DETECTORS` verb**
+  (`CMD_READ_ALL`, already in the firmware) already sweeps all 64
+  detectors in one command — the parallel-64 READOUT was already there.
+  So the 64× throughput readout path needs no new RTL.
 - **needs-HW** ❗ — independent per-pixel **gate sequences** (a different
   circuit per pixel simultaneously) need per-pixel MW addressing. Today
   there is ONE global MW antenna, so all pixels see the same MW drive at
@@ -140,7 +145,7 @@ per pixel and aggregates.
   - **per-pixel MW coils** — 64 small loop antennas, one per pixel
     (a PCB revision; large).
   Until one of those lands, hardware "parallel" = the same circuit on
-  every pixel (the 64× throughput path, via `RUN_ALL`), not 64 different
+  every pixel (the 64× throughput path, via the existing `READ_DETECTORS`), not 64 different
   circuits at once.
 - **Commit** — `570d051`.
 
@@ -201,17 +206,36 @@ proxy), see `qubits_per_pixel` in the calibration response.
 
 ## Summary table
 
-| # | Invention | SIM | HW-fits (RTL to do) | needs-HW (PCB add) |
+| # | Invention | SIM | Ships in sim + real (panel switch)? | needs-HW → GitHub issue |
 |---|---|---|---|---|
-| 1 | 64-pixel vector magnetometer | ✅ | ODMR_SWEEP → B (existing verb) | — |
-| 2+ | Prime-coprime readout + denoiser | ✅ | prime-period `READ_LOCKIN` mode | — |
-| 3 | Nuclear-spin memory (NV+¹³C) | ✅ | — | RF DAC channel at ~2 MHz + RF coil + RTL kind 3 |
-| 4 | 64-parallel distributed computing | ✅ | `RUN_ALL` 64-detector sweep | per-pixel MW (freq-mux or 64 coils) for independent circuits |
-| 5 | Gradient register width | ✅ | `SET_GRADIENT` + coil/DAC (qssc-grad variant, routed) | — (on the variant) |
+| — | **Pixel-mode selector** (ensemble ↔ register, measured-N) | ✅ | **YES** — `pixel_mode` panel switch + `prime_readout` toggle; both run on existing firmware | — |
+| 1 | 64-pixel vector magnetometer | ✅ | **YES** — `/api/sensor/magneto` real path = ODMR_SWEEP → `decompose_odmr` → B | — |
+| 2+ | Prime-coprime readout + denoiser | ✅ | **YES** — `READ_LOCKINP` verb DONE (`375d394`); `prime_readout` toggle default on | — |
+| 3 | Nuclear-spin memory (NV+¹³C) | ✅ | NO — needs RF ~2 MHz channel + coil + `RUN_SEQUENCE` kind 3 | **GitHub issue #75** (RF DAC + coil + RTL kind 3) |
+| 4 | 64-parallel distributed computing | ✅ | **YES (readout)** — `READ_DETECTORS` 64-sweep DONE; `run_array` = replica sampling in ensemble | **GitHub issue #77** (per-pixel MW for independent circuits) |
+| 5 | Gradient register width | ✅ | **YES (on the qssc-grad variant)** — `SET_GRADIENT` + coil/DAC (routed DRC 0/0/0) | — (issue #76 resolved by the variant) |
+
+The **pixel-mode selector** is the panel "multiqbit mode" switch (invention
+delivery vehicle): `register` (default, one pixel's N-NV register with
+within-pixel all-to-all dipole 2q) ↔ `ensemble` (64 chip pixels are the circuit
+qubits, one ensemble qubit per pixel, no within-pixel 2q at 300 K). The register
+width **N is a measured quantity** — `decompose_odmr` on the ODMR calibration
+(`ODMR_SWEEP` verb) counts the resolvable lines, and the backend places NVs on
+the measured frequency grid (`register_line_freqs_hz`), not a hardcoded 10. A
+bulk microdiamond collapses to one line → ensemble mode is recommended; a
+resolved multi-line ODMR → register mode. `qubit = address not NV count`. The
+field gradient that spreads the lines (Invention 5) is **not** a panel mode —
+it is a hardware add-on built on the opt-in `qssc-grad` board variant (coil +
+DAC + `SET_GRADIENT` verb), not the base board.
 
 ## What to touch on the PCB for the needs-HW inventions
 
-1. **RF channel for ¹³C SWAP (invention 3):** add a DDS/synthesizer at
+These three inventions are **tracked as GitHub issues** (not implemented here,
+because they need a PCB change to the hardware we already have). The simulator
+models the physics today; the issues track the PCB + RTL work to run them for
+real.
+
+1. **RF channel for ¹³C SWAP (invention 3 — #75):** add a DDS/synthesizer at
    ~2 MHz + a small RF coil near the diamond die + an FPGA SPI/DAC port
    (mirror the ADF4351 control path). Then add `RUN_SEQUENCE` kind 3
    (MW+RF SWAP timing) in `fpga/rtl/command_parser.v`.
@@ -219,12 +243,15 @@ proxy), see `qubits_per_pixel` in the calibration response.
    a 1.5 mm PCB copper trace coil + MCP4921 DAC + LM358/IRLML2502 current
    sink + Rsense, routed DRC 0/0/0, and the `SET_GRADIENT` RTL verb drives
    it; `ODMR_SWEEP` measures the per-pixel line count = the register width
-   (the design-N / addressable-N upper bound). The base board is unchanged.
-3. **Per-pixel MW (invention 4, independent circuits):** either fast
+   (the design-N / addressable-N upper bound). Issue #76 is resolved by the
+   variant. The base board is unchanged.
+3. **Per-pixel MW (invention 4, independent circuits — #77):** either fast
    ADF4351 hopping for frequency-multiplexed per-pixel gates, or 64 small
    per-pixel loop antennas. Then a `RUN_PARALLEL` verb that loads 64
    sequence descriptors.
 
-Of the three, only inventions 3 (RF ¹³C channel) and 4's independent-circuit
-per-pixel MW still need a PCB addition; the gradient coil (5) is built on the
-`qssc-grad` variant. The simulator carries the physics for the remaining two.
+Of the three, only inventions 3 (RF ¹³C channel, #75) and 4's independent-circuit
+per-pixel MW (#77) still need a PCB addition; the gradient coil (5) is built on
+the `qssc-grad` variant (#76 resolved). The simulator carries the physics for
+the remaining two. The field gradient is **not** a `pixel_mode` panel switch —
+it is a hardware add-on on the opt-in variant board, not the base board.

@@ -285,6 +285,20 @@ class SimulatedFPGA:
                 if n_cycles <= 0 or n_cycles > 10000:
                     return "ERR"
                 return self._read_lockin(ref_khz, n_cycles)
+            if head == "READ_LOCKINP":
+                # READ_LOCKINP <site> <n_cycles> <half_ns>: prime-period lock-in.
+                # Same accumulator as READ_LOCKIN with a host-supplied on/off
+                # half-period (half_ns = p*tau/2 for the prime p the Python
+                # qssc.prime_readout assigned to this NV channel). The simulator
+                # stub reuses the lock-in model (the half-period does not change
+                # the sim physics); the real RTL demodulates at half_ns.
+                if len(parts) < 4:
+                    return "ERR"
+                n_cycles = int(parts[2])
+                half_ns = int(parts[3])
+                if n_cycles <= 0 or n_cycles > 10000 or half_ns < 2000:
+                    return "ERR"
+                return self._read_lockin(int(parts[1]) or 1000, n_cycles)
             if head == "RUN_SEQUENCE":
                 # RUN_SEQUENCE <kind> <n_windows>: pulse-sequence engine stub
                 # (RTL pending). kind in {ramsey, hahn, cpmg}; returns
@@ -523,6 +537,19 @@ class SimulatedFPGA:
         return lockin_integrated_readout(BRIGHT_CODE, ODMR_CONTRAST,
                                          int(n_cycles), READOUT_NOISE, rng=self.rng)
 
+    def read_lockinp(self, site: int, n_cycles: int, half_ns: int) -> dict:
+        """Prime-period lock-in -> differential + SNR (mirrors FPGAConnection).
+
+        The half-period ``half_ns`` (= p*tau/2 for the prime p the Python
+        :mod:`qssc.prime_readout` assigned to this NV channel) selects the
+        orthogonal modulation channel. The simulator stub reuses the lock-in
+        model (the half-period does not change the sim physics); the real RTL
+        demodulates at ``half_ns``. Same dict shape as :meth:`read_lockin`.
+        """
+        if int(half_ns) < 2000:
+            raise ValueError("half_ns must be >= 2000")
+        return self.read_lockin(site, n_cycles)
+
     def read_gyro(self, site: int, t_ns: int, n_windows: int = 64) -> dict:
         """Ramsey pi/2-T-pi/2 -> rotation rate (gyro_measure dict shape)."""
         from dataclasses import asdict
@@ -723,7 +750,8 @@ def auto_align(profile: DefectProfile | str = "NV",
         # register sits on the real resolvable frequency positions, and the
         # measured line count IS the register width N (it overrides
         # n_nv_per_pixel). Priority: measured lines > gradient > uniform 6 MHz.
-        measured_freqs = list(register_line_freqs_hz) if register_line_freqs_hz else None
+        measured_freqs = (list(register_line_freqs_hz)
+                          if register_line_freqs_hz else None)
         if measured_freqs is not None:
             n = max(1, len(measured_freqs))
         if gradient_mhz_per_um > 0.0 and measured_freqs is None:
@@ -746,14 +774,14 @@ def auto_align(profile: DefectProfile | str = "NV",
             spread = prof.frequency_detuning_spread_hz
             jitter = (float(rng.normal(0.0, spread))
                       if spread > 0 else 0.0)
-            if measured_freqs is not None:
-                # measured ODMR line centre -> detuning vs ZFS (the MW address).
-                # A small jitter models single-shot fit uncertainty; the line
-                # CENTRE is the measured value, not a synthetic grid point.
-                detune = float(measured_freqs[k]) - prof.zero_field_splitting + jitter
+            if measured_freqs is not None and k < len(measured_freqs):
+                # measured ODMR line centre (the truth from decompose_odmr) +
+                # small per-NV strain jitter. The register uses the MEASURED
+                # frequency grid, not a hardcoded 6 MHz spacing.
+                freq = float(measured_freqs[k]) + jitter
             else:
                 detune = (k - (n - 1) / 2.0) * line_spacing_hz + jitter
-            freq = prof.zero_field_splitting + detune
+                freq = prof.zero_field_splitting + detune
             sites.append(QubitSite(
                 qubit_id=k, row=0, col=0,
                 x_um=x_um, y_um=y_um, intensity=float(BRIGHT_CODE),

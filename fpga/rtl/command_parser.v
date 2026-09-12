@@ -168,10 +168,11 @@ module command_parser #(
     // the host runs RUN_SEQUENCE (Ramsey) and fits the rate, so no CMD_GYRO.
     localparam [4:0] CMD_SEQ       = 5'd16;  // RUN_SEQUENCE site kind n t_step (4 args)
     localparam [4:0] CMD_LOCKIN    = 5'd17;  // READ_LOCKIN site n_cycles (2 args)
+    localparam [4:0] CMD_LOCKINP   = 5'd18;  // READ_LOCKINP site n_cycles half_ns (3 args, prime-period lock-in)
     // Invention 5 field-gradient verb. SET_GRADIENT <code 0..4095> programs the
     // MCP4921 DAC that sets the gradient-coil current; ODMR_SWEEP then counts the
     // resolved NV lines = the per-pixel register width at that gradient.
-    localparam [4:0] CMD_GRADIENT  = 5'd18;  // SET_GRADIENT code (1 arg)
+    localparam [4:0] CMD_GRADIENT  = 5'd19;  // SET_GRADIENT code (1 arg)
 
     // ---- FSM states --------------------------------------------------------
     // 7-bit: S_SWEEP_NEXT=29 plus the #58 pulse-engine states (30..51) exceed
@@ -398,6 +399,9 @@ module command_parser #(
     reg [31:0] li_n_on;
     reg [31:0] li_n_off;
     reg [31:0] li_dcnt;
+    reg [31:0] li_half_ns;      // on/off half-period (ns); default LI_HALF_NS,
+                               // set by READ_LOCKINP for the prime-period lock-in
+    reg [31:0] li_half_cyc;     // li_half_ns / 10 (100 MHz clk cycles)
     reg [7:0]  li_line [0:43];  // 44-byte line: 4x dec32_pad + 3 ' ' + '\n'
 
     // ---- Calibration LUT (emitter pixel -> detector electrode) ------------
@@ -649,6 +653,8 @@ module command_parser #(
         li_n_on       = 32'd0;
         li_n_off      = 32'd0;
         li_dcnt       = 32'd0;
+        li_half_ns    = LI_HALF_NS;
+        li_half_cyc   = LI_HALF_CYC;
         // ID reply string "QSSC v1\n"
         id_str[0]="Q"; id_str[1]="S"; id_str[2]="S"; id_str[3]="C"; id_str[4]=" "; id_str[5]="v"; id_str[6]="1"; id_str[7]=8'h0A;
         // STATUS template (79 bytes; digits at idx 11/22 patched at send time)
@@ -935,6 +941,26 @@ module command_parser #(
                                     fsm       <= S_ARGSP;
                                 end else begin
                                     cmd_id <= CMD_ERR;  // RUN_SEQUENCE needs args
+                                    fsm    <= S_DISPATCH;
+                                end
+                            end else if (cmd_str[0]=="R" && cmd_str[1]=="E" &&
+                                         cmd_str[2]=="A" && cmd_str[3]=="D" &&
+                                         cmd_str[4]=="_" && cmd_str[5]=="L" &&
+                                         cmd_str[6]=="O" && cmd_str[7]=="C" &&
+                                         cmd_str[8]=="K" && cmd_str[9]=="I" &&
+                                         cmd_str[10]=="N" && cmd_str[11]=="P") begin
+                                // READ_LOCKINP (12 chars): site n_cycles half_ns
+                                // -- prime-period lock-in. The host passes the
+                                // modulation half-period half_ns = p*tau/2 for a
+                                // prime p (qssc.prime_readout picks the prime); the
+                                // RTL just demodulates at that half-period. Same
+                                // FSM as READ_LOCKIN with a configurable half.
+                                cmd_id <= CMD_LOCKINP; arg_count <= 3'd3;
+                                if (!is_eol && ch == 8'h20) begin
+                                    parse_idx <= parse_idx + 7'd1;
+                                    fsm       <= S_ARGSP;
+                                end else begin
+                                    cmd_id <= CMD_ERR;  // READ_LOCKINP needs args
                                     fsm    <= S_DISPATCH;
                                 end
                             end else if
@@ -1367,6 +1393,42 @@ module command_parser #(
                                 li_n_on   <= 32'd0;
                                 li_n_off  <= 32'd0;
                                 li_dcnt   <= 32'd0;
+                                li_half_ns<= LI_HALF_NS;       // default half
+                                li_half_cyc<= LI_HALF_CYC;
+                                pll_phase <= 12'd0;
+                                read_all_mode <= 1'b0;
+                                str_idx   <= 7'd0;
+                                fsm       <= S_LI_INIT;
+                            end
+                        end
+                        CMD_LOCKINP : begin
+                            // READ_LOCKINP <site> <n_cycles> <half_ns>: prime-
+                            // period lock-in. Same accumulator as READ_LOCKIN
+                            // but the on/off half-period is the host-supplied
+                            // half_ns (= p*tau/2 for the prime p the Python
+                            // qssc.prime_readout assigned to this NV channel).
+                            // Bounds: site 0..63, n 1..10000, half_ns >= 2000
+                            // (>= 20 clk cycles so the off-wait countdown and
+                            // the gate timer resolve; 2000 ns >> the ~86 us ADC
+                            // scan is NOT required -- the read happens after the
+                            // half, not during it).
+                            if ($signed(arg_vals[0]) < 0 || $signed(arg_vals[0]) >= N_DET ||
+                                $signed(arg_vals[1]) < 32'd1 ||
+                                $signed(arg_vals[1]) > 32'd10000 ||
+                                $signed(arg_vals[2]) < 32'd2000) begin
+                                reply_ok <= 1'b0;            // ERR
+                                fsm      <= S_REPLY_LOAD;
+                            end else begin
+                                li_site   <= arg_vals[0][5:0];
+                                li_n      <= arg_vals[1];
+                                li_i      <= 32'd0;
+                                li_sum_on <= 32'd0;
+                                li_sum_off<= 32'd0;
+                                li_n_on   <= 32'd0;
+                                li_n_off  <= 32'd0;
+                                li_dcnt   <= 32'd0;
+                                li_half_ns <= arg_vals[2];
+                                li_half_cyc<= arg_vals[2] / 32'd10;
                                 pll_phase <= 12'd0;
                                 read_all_mode <= 1'b0;
                                 str_idx   <= 7'd0;
@@ -2012,7 +2074,7 @@ module command_parser #(
                 // ============================================================
 
                 S_LI_INIT : begin
-                    mw_gate_ns <= LI_HALF_NS;
+                    mw_gate_ns <= li_half_ns;
                     pll_phase  <= 12'd0;
                     gate_seen  <= 1'b0;
                     fsm        <= S_LI_ON;
@@ -2065,7 +2127,7 @@ module command_parser #(
 
                 // Off half: no gate, count down the half-period then read.
                 S_LI_OFF : begin
-                    li_dcnt   <= LI_HALF_CYC;
+                    li_dcnt   <= li_half_cyc;
                     seq_wdog  <= 32'd0;
                     fsm       <= S_LI_OFF_WAIT;
                 end

@@ -34,28 +34,48 @@ from qssc.qkd import simulate_bb84
 def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
              hardware: bool = False,
              n_nv_per_pixel: Optional[int] = None,
+             pixel_mode: str = "register",
+             register_nv_spacing_nm: float = 2.75,
              gradient_mhz_per_um: float = 0.0,
+             pixel_size_um: float = 200.0,
              register_line_freqs_hz: Optional[list] = None) -> QSSCBackend:
-    # Register mode: the backend simulates ONE pixel's NV register (the circuit
-    # qubits, within-pixel all-to-all dipole); the 64-pixel hardware die is the
-    # backend's separate chip view. The register auto-grows to fit a wider
-    # circuit (QSSCBackend._ensure_register). Passing explicit chip-view sites
-    # here would make the 64 pixels a (cross-pixel, unphysical) K_64.
-    # ``n_nv_per_pixel`` is the MEASURED resolvable ODMR line count from the
-    # calibration (decompose_odmr at the applied gradient) when supplied; None
-    # falls back to the nominal default. ``register_line_freqs_hz`` (the measured
-    # line CENTRES) and ``gradient_mhz_per_um`` close the calibration -> circuit
-    # loop: the register sits on the real addressed frequencies at the applied
-    # gradient, not the synthetic 6 MHz grid.
+    # pixel_mode selects the circuit-qubit model: register (one pixel's N-NV
+    # register, within-pixel all-to-all dipole 2q) or ensemble (64 chip pixels,
+    # no within-pixel 2q). N is the MEASURED resolvable ODMR line count when
+    # register_line_freqs_hz is given (the calibration's decompose_odmr at the
+    # applied gradient), else the nominal default. The register auto-grows to
+    # fit a wider circuit (QSSCBackend._ensure_register). Passing explicit
+    # chip-view sites here would make the 64 pixels a (cross-pixel, unphysical)
+    # K_64. ``gradient_mhz_per_um`` + ``register_line_freqs_hz`` close the
+    # calibration -> circuit loop: the register sits on the real addressed
+    # frequencies at the applied gradient, not the synthetic 6 MHz grid.
     from qssc.backend import N_NV_PER_PIXEL
     fpga = _make_fpga(profile, temperature_k, seed, hardware)
     return QSSCBackend(profile=profile, seed=seed,
                        temperature_k=temperature_k, noise_mode=noise_mode,
-                       hardware=fpga,
+                       hardware=fpga, pixel_mode=pixel_mode,
                        n_nv_per_pixel=(n_nv_per_pixel if n_nv_per_pixel is not None
                                        else N_NV_PER_PIXEL),
+                       register_nv_spacing_nm=register_nv_spacing_nm,
                        gradient_mhz_per_um=gradient_mhz_per_um,
+                       pixel_size_um=pixel_size_um,
                        register_line_freqs_hz=register_line_freqs_hz)
+
+
+def _pixel_kwargs(req: dict) -> dict:
+    """Extract the pixel-mode + register-width params from a request payload
+    (RunRequest / CustomCircuitRequest / ParallelRunRequest) for ``_backend``.
+    The measured register_line_freqs_hz from the calibration's decompose_odmr
+    and the applied gradient_mhz_per_um flow in here, so the backend's register
+    width N is the measured truth on the real addressed frequency grid."""
+    return {
+        "pixel_mode": req.get("pixel_mode", "register"),
+        "n_nv_per_pixel": req.get("n_nv_per_pixel"),
+        "register_nv_spacing_nm": float(req.get("register_nv_spacing_nm", 2.75)),
+        "gradient_mhz_per_um": float(req.get("gradient_mhz_per_um", 0.0)),
+        "pixel_size_um": float(req.get("pixel_size_um", 200.0)),
+        "register_line_freqs_hz": req.get("register_line_freqs_hz"),
+    }
 
 
 def _make_fpga(profile: str, temperature_k: float, seed, hardware: bool):
@@ -134,14 +154,9 @@ def run_circuit(req: dict) -> dict:
     noise_mode = req.get("noise_mode", "real")
     hardware = bool(req.get("hardware", False))
     algo = str(req.get("algorithm", "shor")).lower()
-    n_nv = req.get("n_nv_per_pixel")  # measured register width from calibration
-    grad = float(req.get("gradient_mhz_per_um", 0.0) or 0.0)
-    line_freqs = req.get("register_line_freqs_hz")  # measured ODMR line centres
     try:
-        b = _backend(profile, temperature_k, seed, noise_mode, hardware=hardware,
-                     n_nv_per_pixel=(int(n_nv) if n_nv is not None else None),
-                     gradient_mhz_per_um=grad,
-                     register_line_freqs_hz=line_freqs)
+        b = _backend(profile, temperature_k, seed, noise_mode,
+                     hardware=hardware, **_pixel_kwargs(req))
     except NoFPGADetected as exc:
         return _no_fpga_result(exc)
     src = _source_label(b.hardware)
@@ -454,7 +469,7 @@ def run_circuit(req: dict) -> dict:
         # connection, so reuse the existing backend.
         if qrng_seed != seed and not hardware:
             b = _backend(profile, temperature_k, qrng_seed, noise_mode,
-                         hardware=hardware)
+                         hardware=hardware, **_pixel_kwargs(req))
         res = b.run(qc, shots=raw_shots).result()
         counts = res.get_counts()
         # expand the measured outcomes into a flat list and shuffle so that
@@ -676,7 +691,8 @@ def run_parallel(req: dict) -> dict:
     mode = str(req.get("mode", "sample")).lower()
     n_pixels = max(1, min(64, int(req.get("n_pixels", 64))))
     try:
-        b = _backend(profile, temperature_k, seed, noise_mode, hardware=False)
+        b = _backend(profile, temperature_k, seed, noise_mode,
+                     hardware=False, **_pixel_kwargs(req))
     except NoFPGADetected as exc:
         return _no_fpga_result(exc)
 
@@ -777,14 +793,10 @@ def run_custom(req: dict) -> dict:
         return {"error": str(exc)}
     profile = req.get("profile", "NV")
     hardware = bool(req.get("hardware", False))
-    grad = float(req.get("gradient_mhz_per_um", 0.0) or 0.0)
-    line_freqs = req.get("register_line_freqs_hz")
     try:
         b = _backend(profile, float(req.get("temperature_k", 300.0)),
                      int(req.get("seed", 42)), req.get("noise_mode", "real"),
-                     hardware=hardware,
-                     gradient_mhz_per_um=grad,
-                     register_line_freqs_hz=line_freqs)
+                     hardware=hardware, **_pixel_kwargs(req))
     except NoFPGADetected as exc:
         return _no_fpga_result(exc)
     try:

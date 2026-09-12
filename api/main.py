@@ -115,17 +115,23 @@ class RunRequest(BaseModel):
     # bb84 quantum key distribution
     num_bits: int = Field(128, ge=1, le=2048)      # bb84: qubits/rounds to exchange
     eavesdrop: bool = False         # bb84: simulate intercept-resend Eve
-    # Per-pixel NV register width -- the MEASURED qubit count from the ODMR
-    # calibration (decompose_odmr line count at the applied gradient). When set
-    # the circuit runs against that many within-pixel register qubits instead of
-    # the nominal default, closing the calibration -> circuit loop. None = default.
+    # Pixel mode + invention toggles (the panel switches). pixel_mode selects
+    # the circuit-qubit model: register (one pixel's N-NV register, within-
+    # pixel all-to-all dipole 2q, the default) or ensemble (64 chip pixels,
+    # no within-pixel 2q). n_nv_per_pixel / register_line_freqs_hz override
+    # the register width (the measured resolvable ODMR line count from the
+    # calibration's decompose_odmr). gradient_mhz_per_um (Invention 5, the
+    # applied field gradient) + register_line_freqs_hz close the calibration
+    # -> circuit loop: the register sits on the real addressed frequencies at
+    # that gradient, not the synthetic 6 MHz grid. prime_readout toggles the
+    # prime-coprime lock-in denoiser (Invention 2+, default on at the panel).
+    pixel_mode: str = "register"          # register | ensemble
     n_nv_per_pixel: Optional[int] = Field(None, ge=1, le=64)
-    # Invention 5 calibration -> circuit loop: the applied gradient (MHz/um) and
-    # the MEASURED resolvable ODMR line centres (Hz) from the calibration
-    # response. When supplied the backend builds the register on the real
-    # addressed frequencies at that gradient, not the synthetic 6 MHz grid.
+    register_nv_spacing_nm: float = Field(2.75, gt=0)
     gradient_mhz_per_um: float = Field(0.0, ge=0.0, le=100.0)
+    pixel_size_um: float = Field(200.0, gt=0)
     register_line_freqs_hz: Optional[List[int]] = None
+    prime_readout: bool = False
 
 
 class CustomCircuitRequest(BaseModel):
@@ -142,12 +148,14 @@ class CustomCircuitRequest(BaseModel):
     # circuits wider than the backend's SIM_MAX_QUBITS (28) are rejected with a
     # clear error rather than silently faked. See qssc.backend.SIM_MAX_QUBITS.
     max_qubits: int = Field(20, ge=1, le=20)
-    # Calibration -> circuit loop (Invention 5): measured register width, the
-    # applied gradient, and the measured ODMR line centres. When supplied the
-    # custom circuit runs on the calibrated register, not the nominal default.
+    # Pixel mode + invention toggles (see RunRequest).
+    pixel_mode: str = "register"
     n_nv_per_pixel: Optional[int] = Field(None, ge=1, le=64)
+    register_nv_spacing_nm: float = Field(2.75, gt=0)
     gradient_mhz_per_um: float = Field(0.0, ge=0.0, le=100.0)
+    pixel_size_um: float = Field(200.0, gt=0)
     register_line_freqs_hz: Optional[List[int]] = None
+    prime_readout: bool = False
 
 
 class ParallelRunRequest(BaseModel):
@@ -170,6 +178,14 @@ class ParallelRunRequest(BaseModel):
     qasm: Optional[str] = None  # sample: a QASM circuit (else uniform H+measure)
     # custom mode
     circuits: Optional[list] = None  # list of QASM strings, one per pixel
+    # Pixel mode + invention toggles (see RunRequest).
+    pixel_mode: str = "register"
+    n_nv_per_pixel: Optional[int] = Field(None, ge=1, le=64)
+    register_nv_spacing_nm: float = Field(2.75, gt=0)
+    gradient_mhz_per_um: float = Field(0.0, ge=0.0, le=100.0)
+    pixel_size_um: float = Field(200.0, gt=0)
+    register_line_freqs_hz: Optional[list] = None
+    prime_readout: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -178,22 +194,28 @@ class ParallelRunRequest(BaseModel):
 
 def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
              n_nv_per_pixel: Optional[int] = None,
+             pixel_mode: str = "register",
+             register_nv_spacing_nm: float = 2.75,
              gradient_mhz_per_um: float = 0.0,
+             pixel_size_um: float = 200.0,
              register_line_freqs_hz: Optional[list] = None) -> QSSCBackend:
-    # Register mode: the backend simulates ONE pixel's NV register (the circuit
-    # qubits, within-pixel all-to-all dipole); the 64-pixel hardware die is the
-    # backend's separate chip view (see QSSCBackend). ``n_nv_per_pixel`` is the
-    # MEASURED resolvable ODMR line count from the calibration when supplied;
-    # None falls back to the nominal default. ``register_line_freqs_hz`` (the
-    # measured line CENTRES) + ``gradient_mhz_per_um`` close the calibration ->
-    # circuit loop: the register sits on the real addressed frequencies at the
-    # applied gradient, not the synthetic 6 MHz grid.
+    # pixel_mode selects the circuit-qubit model: register (one pixel's N-NV
+    # register, within-pixel all-to-all dipole 2q) or ensemble (64 chip pixels,
+    # no within-pixel 2q). N is the MEASURED resolvable ODMR line count when
+    # register_line_freqs_hz is given (from decompose_odmr in the calibration),
+    # else the nominal default. gradient_mhz_per_um + register_line_freqs_hz
+    # close the calibration -> circuit loop: the register sits on the real
+    # addressed frequencies at the applied gradient, not the synthetic 6 MHz
+    # grid. See QSSCBackend.
     from qssc.backend import N_NV_PER_PIXEL
     return QSSCBackend(profile=profile, seed=seed,
                        temperature_k=temperature_k, noise_mode=noise_mode,
+                       pixel_mode=pixel_mode,
                        n_nv_per_pixel=(n_nv_per_pixel if n_nv_per_pixel is not None
                                        else N_NV_PER_PIXEL),
+                       register_nv_spacing_nm=register_nv_spacing_nm,
                        gradient_mhz_per_um=gradient_mhz_per_um,
+                       pixel_size_um=pixel_size_um,
                        register_line_freqs_hz=register_line_freqs_hz)
 
 
@@ -354,6 +376,44 @@ def profiles():
             "notes": p.notes,
         })
     return out
+
+
+@app.get("/api/modes")
+def modes():
+    """Pixel modes + invention toggles the panel can render, each with its
+    hardware-readiness badge. Only inventions that run on the CURRENT PCB
+    (no hardware change) are listed here -- the needs-HW inventions (nuclear
+    memory, gradient register, per-pixel independent MW) are tracked as
+    GitHub issues, not surfaced as panel switches. See docs/INVENTIONS.md."""
+    return {
+        "pixel_modes": [
+            {"key": "register", "label": "Register",
+             "hw": True, "badge": "fits current PCB",
+             "description": "One pixel's N-NV register (within-pixel all-to-all "
+                            "dipole 2q); N is the measured resolvable ODMR line "
+                            "count (decompose_odmr)."},
+            {"key": "ensemble", "label": "Ensemble",
+             "hw": True, "badge": "fits current PCB",
+             "description": "64 chip pixels are the circuit qubits (one ensemble "
+                            "qubit per pixel); no within-pixel 2q at 300 K."},
+        ],
+        "inventions": [
+            {"key": "prime_readout", "label": "Prime denoise",
+             "hw": True, "badge": "RTL done (READ_LOCKINP)", "default": True,
+             "description": "Prime-coprime frequency-multiplexed readout + "
+                            "lock-in denoiser (Invention 2+)."},
+            {"key": "magnetometer", "label": "Vector magnetometer",
+             "hw": True, "badge": "fits current PCB (ODMR_SWEEP)", "default": True,
+             "description": "64-pixel vector magnetometer (Invention 1), in the "
+                            "Sensors tab."},
+            {"key": "parallel", "label": "64-parallel readout",
+             "hw": True, "badge": "fits current PCB (READ_DETECTORS)",
+             "default": True,
+             "description": "64-parallel readout (Invention 4) via the run-parallel "
+                            "endpoint; independent per-pixel circuits need per-"
+                            "pixel MW (GitHub issue)."},
+        ],
+    }
 
 
 @app.get("/api/backend/info")
@@ -682,12 +742,12 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
     inside = np.where(c < half)[0]
     fwhm = float(f[inside[-1]] - f[inside[0]]) if len(inside) > 2 else 0.01
 
-    # Invention 5 -- MEASURED per-pixel register width. decompose_odmr resolves
-    # the ODMR spectrum into its constituent lines; the count IS the qubit
-    # register width N at the applied gradient. A flat ensemble collapses to ONE
-    # line -> 1 ensemble qubit/pixel; a strong enough gradient spreads the
-    # ensemble into N resolvable lines -> N register qubits/pixel. The pixel_mode
-    # recommendation follows: register_width <= 1 -> ensemble; > 1 -> register.
+    # MEASURED per-pixel register width. decompose_odmr resolves the ODMR
+    # spectrum into its constituent lines; the count IS the qubit register
+    # width N at the applied gradient. A bulk ensemble collapses to ONE line
+    # -> 1 ensemble qubit/pixel; a strong enough gradient spreads the ensemble
+    # into N resolvable lines -> N register qubits/pixel. This drives the
+    # pixel_mode recommendation: register_width <= 1 -> ensemble; > 1 -> register.
     # resolvable_register_width gives the physics prediction (gradient*pixel /
     # linewidth) to cross-check the measured decomposition.
     components = decompose_odmr(f, c)
@@ -839,7 +899,6 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
         ],
         # The headline result: how many qubits the calibration found.
         "qubit_summary": {
-            "qubits_per_pixel": register_width,
             "avg_qubits_per_pixel": round(avg_qubits_per_pixel, 3),
             "total_qubits": total_qubits,
             "n_pixels": n_pixels,

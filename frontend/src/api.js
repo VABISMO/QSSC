@@ -29,6 +29,9 @@ const q = (o) => new URLSearchParams(o).toString()
 export const api = {
   health: () => get('/api/health'),
   profiles: () => get('/api/profiles'),
+  // pixel_mode (register/ensemble) + shipping-invention HW badges. Used by the
+  // global-controls card to label the two modes and the Prime-denoise toggle.
+  modes: () => get('/api/modes'),
   backendInfo: (profile, temperature_k, seed) =>
     get(`/api/backend/info?profile=${profile}&temperature_k=${temperature_k}&seed=${seed}`),
   odmr: (profile, b_field, points) =>
