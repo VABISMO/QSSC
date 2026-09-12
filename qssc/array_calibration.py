@@ -34,6 +34,7 @@ NV datasheet values). ``max_nv_per_microdiamond`` is a user-supplied model input
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Optional, Sequence
@@ -42,7 +43,17 @@ import numpy as np
 
 from .defects import DefectProfile, get_profile
 from .odmr_decompose import decompose_odmr
-from .simulator import resolvable_register_width
+from .simulator import resolvable_register_width, BRIGHT_CODE, READOUT_NOISE
+from .detector_centroid import SubPixelModel, localize_spots, pad_grid_centers
+
+# Readout noise expressed on the ODMR contrast axis (0..1): the lock-in photocurrent
+# noise (READOUT_NOISE, 16-bit counts) over the bright level (BRIGHT_CODE) -- the
+# datasheet-grounded relative noise. A lone-NV bin has contrast ~0.03, so its
+# single-shot SNR is 0.03 / 0.0125 ~= 2.4, BELOW the min_snr=3 detection bar -> it
+# is NOT resolved at 1 shot. N-shot integration raises SNR by sqrt(N) (Invention 7),
+# so e.g. 16 shots -> SNR 9.6 -> the lone-NV bin is resolved. This is the physical
+# reason integration raises the MEASURED width toward min(resolvable, nv_present).
+READOUT_NOISE_REL: float = READOUT_NOISE / BRIGHT_CODE
 
 # 64 die pixels (N_SITES in qssc.simulator); kept here to avoid an import cycle
 # with the backend just for the constant.
@@ -68,6 +79,11 @@ class PixelCalibration:
     microdiamonds: int       # how many microdiamonds were drawn in this pixel
     register_width: int      # MEASURED resolvable line count = usable qubits
     odmr_lines: list[float] = field(default_factory=list)  # resolved line freqs (GHz)
+    # Invention 6 (centroiding): the sub-pixel (x, y) position of this pixel's
+    # dip on the 64-pad grid (mm, grid-centered), if a SubPixelModel was used.
+    # Imaging metadata only -- does NOT change register_width (within-pad spots
+    # merge; centroiding localizes one spot, it does not resolve multiple).
+    sub_pixel_position: Optional[tuple[float, float]] = None
 
     @property
     def n_qubits(self) -> int:
@@ -84,6 +100,17 @@ class ArrayCalibration:
     seed: int
     temperature_k: float
     pixels: list[PixelCalibration] = field(default_factory=list)
+    # Invention 7 (integration): N-shot lock-in averaging raises per-line SNR by
+    # sqrt(N), so dimmer lone-NV bins clear the min_snr detection bar and the
+    # MEASURED width rises toward min(resolvable, nv_present). 1 = no averaging
+    # (identical to the original Invention 4+5 behaviour).
+    integration_shots: int = 1
+    # Invention 6 (centroiding): sub-pixel detector model used. Reporting only --
+    # spatial_channels = 64 * S is the detector's imaging resolution; it does NOT
+    # change register_width (the per-pixel qubit count).
+    sub_pixel_factor: int = 0        # 0 = no sub-pixel model (back-compat)
+    spatial_channels: int = 0        # 64 * S when a SubPixelModel was used, else 0
+    sub_pixel: Optional[dict] = None  # the SubPixelModel params (JSON round-trip)
 
     @property
     def widths(self) -> list[int]:
@@ -110,6 +137,10 @@ class ArrayCalibration:
             "seed": self.seed,
             "temperature_k": self.temperature_k,
             "pixels": [asdict(p) for p in self.pixels],
+            "integration_shots": self.integration_shots,
+            "sub_pixel_factor": self.sub_pixel_factor,
+            "spatial_channels": self.spatial_channels,
+            "sub_pixel": self.sub_pixel,
         }
 
     def to_json(self, path: str | Path) -> None:
@@ -125,6 +156,10 @@ class ArrayCalibration:
             seed=int(d["seed"]),
             temperature_k=float(d.get("temperature_k", 300.0)),
             pixels=pixels,
+            integration_shots=int(d.get("integration_shots", 1)),
+            sub_pixel_factor=int(d.get("sub_pixel_factor", 0)),
+            spatial_channels=int(d.get("spatial_channels", 0)),
+            sub_pixel=d.get("sub_pixel"),
         )
 
     @classmethod
@@ -159,7 +194,8 @@ def _pixel_odmr_spectrum(prof: DefectProfile, nv_present: int,
                          rng: np.random.Generator,
                          n_points: int = 800,
                          contrast_single: float = 0.03,
-                         noise_sigma: float = 0.004,
+                         noise_sigma: float = READOUT_NOISE_REL,
+                         integration_shots: int = 1,
                          ) -> tuple[np.ndarray, np.ndarray]:
     """Synthesize one pixel's multi-line ODMR spectrum under the gradient.
 
@@ -213,7 +249,13 @@ def _pixel_odmr_spectrum(prof: DefectProfile, nv_present: int,
         c_hz = c_ghz * 1e9
         contrast = contrast - amp * np.exp(-((f_hz - c_hz) ** 2) / (2 * sigma_hz ** 2))
     contrast = np.clip(contrast, 0.0, 1.0)
-    contrast = contrast + rng.normal(0.0, noise_sigma, size=freqs.size)
+    # Invention 7: N-shot lock-in averaging raises per-line SNR by sqrt(N) (the
+    # noise on the averaged spectrum drops as 1/sqrt(N) for uncorrelated
+    # thermal/Johnson readout noise). This lets dimmer lone-NV bins clear the
+    # min_snr detection bar in decompose_odmr -> the MEASURED width rises toward
+    # min(resolvable, nv_present). integration_shots=1 -> unchanged.
+    eff_noise = noise_sigma / math.sqrt(max(1, int(integration_shots)))
+    contrast = contrast + rng.normal(0.0, eff_noise, size=freqs.size)
     contrast = np.clip(contrast, 0.0, 1.0)
     return freqs, contrast
 
@@ -228,6 +270,8 @@ def calibrate_array(profile: DefectProfile | str = "NV",
                     max_microdiamonds_per_pixel: int = MAX_MICRODIAMONDS_PER_PIXEL,
                     temperature_k: float = 300.0,
                     rng: Optional[np.random.Generator] = None,
+                    integration_shots: int = 1,
+                    sub_pixel: Optional[SubPixelModel] = None,
                     ) -> ArrayCalibration:
     """Calibrate all 64 pixels: measure each pixel's usable qubit register width.
 
@@ -240,6 +284,19 @@ def calibrate_array(profile: DefectProfile | str = "NV",
     Parameters mirror the backend's gradient knobs. ``gradient_mhz_per_um`` is
     the Invention-5 field gradient (the hardware that produces it is the
     ``qssc-grad`` PCB variant); 0 gives one ensemble qubit per pixel.
+
+    ``integration_shots`` (Invention 7): N-shot lock-in averaging raises per-line
+    SNR by sqrt(N), so dimmer lone-NV bins clear the ``min_snr`` bar and the
+    MEASURED width rises toward ``min(resolvable, nv_present)``. 1 = no averaging
+    (identical to the original Invention 4+5 behaviour).
+
+    ``sub_pixel`` (Invention 6): a :class:`~qssc.detector_centroid.SubPixelModel`
+    for charge-sharing centroiding. When provided, the calibration reports
+    ``spatial_channels = 64 * S`` (the detector's sub-pixel imaging resolution)
+    and a per-pixel ``sub_pixel_position`` (the microdiamond's localized (x, y) on
+    the pad grid). This is imaging metadata only -- it does NOT change
+    ``register_width`` (within-pad spots merge; centroiding localizes one spot,
+    not multiple). See :mod:`qssc.detector_centroid`.
     """
     prof = get_profile(profile) if isinstance(profile, str) else profile
     if rng is None:
@@ -247,6 +304,16 @@ def calibrate_array(profile: DefectProfile | str = "NV",
     linewidth_mhz = prof.odmr_linewidth_hz * 1e-6
     resolvable = resolvable_register_width(
         gradient_mhz_per_um, pixel_size_um, linewidth_mhz)
+    # Invention 6: the 64-pad grid (for per-pixel sub-pixel positions). Drawn
+    # once, fixed by the SubPixelModel pitch. A SEPARATE rng draws the sub-pixel
+    # jitter so it never perturbs the main nv_present draw sequence (which would
+    # change register_width and break reproducibility vs. sub_pixel=None).
+    pad_centers = (pad_grid_centers(sub_pixel.pad_pitch_mm)
+                   if sub_pixel is not None else None)
+    s_factor = sub_pixel.space_bins() if sub_pixel is not None else 0
+    s_channels = sub_pixel.spatial_channels() if sub_pixel is not None else 0
+    sp_rng = (np.random.default_rng((seed * 1_000_003) + 7)
+              if sub_pixel is not None else None)
 
     pixels: list[PixelCalibration] = []
     for i in range(n_pixels):
@@ -258,7 +325,8 @@ def calibrate_array(profile: DefectProfile | str = "NV",
         # present.
         n_bins = max(1, min(nv_present, resolvable)) if nv_present > 0 else 1
         freqs, contrast = _pixel_odmr_spectrum(
-            prof, nv_present, n_bins, gradient_mhz_per_um, pixel_size_um, rng)
+            prof, nv_present, n_bins, gradient_mhz_per_um, pixel_size_um, rng,
+            integration_shots=integration_shots)
         comps = decompose_odmr(
             freqs, contrast,
             min_snr=3.0,
@@ -268,12 +336,22 @@ def calibrate_array(profile: DefectProfile | str = "NV",
         measured = max(1, len(comps))
         register_width = min(measured, n_bins)
         odmr_lines = [round(c.freq_ghz, 6) for c in comps]
+        # Invention 6: a sub-pixel (x, y) offset for this pixel's microdiamond on
+        # the pad grid (drawn from the pad center +/- a sub-pixel jitter). The
+        # centroiding would localize the pixel's dip here. Imaging metadata only.
+        sub_pos: Optional[tuple[float, float]] = None
+        if sub_pixel is not None and pad_centers is not None and sp_rng is not None:
+            base = pad_centers[i % N_PIXELS_DEFAULT]
+            jitter = sp_rng.normal(0.0, sub_pixel.pad_pitch_mm / (2.0 * max(1, s_factor)),
+                                   size=2)
+            sub_pos = (float(base[0] + jitter[0]), float(base[1] + jitter[1]))
         pixels.append(PixelCalibration(
             pixel_id=i,
             nv_present=nv_present,
             microdiamonds=n_stones,
             register_width=register_width,
             odmr_lines=odmr_lines,
+            sub_pixel_position=sub_pos,
         ))
     return ArrayCalibration(
         profile=prof.short if isinstance(profile, str) else prof.short,
@@ -282,6 +360,10 @@ def calibrate_array(profile: DefectProfile | str = "NV",
         seed=int(seed),
         temperature_k=float(temperature_k),
         pixels=pixels,
+        integration_shots=int(integration_shots),
+        sub_pixel_factor=int(s_factor),
+        spatial_channels=int(s_channels),
+        sub_pixel=sub_pixel.to_dict() if sub_pixel is not None else None,
     )
 
 
@@ -295,6 +377,8 @@ def calibrate_array_from_codes(
     seed: int = 42,
     temperature_k: float = 300.0,
     min_snr: float = 3.0,
+    integration_shots: int = 1,
+    sub_pixel: Optional[SubPixelModel] = None,
 ) -> ArrayCalibration:
     """Build an :class:`ArrayCalibration` from a MEASURED ``(n_points, 64)`` code
     matrix — the real-hardware path.
@@ -311,12 +395,43 @@ def calibrate_array_from_codes(
     codes alone (only the resolved line count is), so they are reported as the
     measured width / 0 — the usable register width is what matters and is the
     field the backend consumes.
+
+    ``integration_shots`` (Invention 7) is recorded on the calibration (the caller
+    is expected to pass the N-shot-AVERAGED ``codes`` matrix, whose noise is
+    already reduced by sqrt(N); the sim path models this internally, the real
+    path does the averaging in firmware/host before calling here).
+
+    ``sub_pixel`` (Invention 6): when provided, :func:`~qssc.detector_centroid.localize_spots`
+    is run on each frequency-point row (the 64-pad snapshot) to report the
+    sub-pixel (x, y) position of each pixel's dip -- the charge-sharing
+    centroiding image. This is imaging metadata (``spatial_channels = 64 * S``)
+    and does NOT change ``register_width``.
     """
     prof = get_profile(profile) if isinstance(profile, str) else profile
     codes = np.asarray(codes, dtype=float)
     freqs = np.asarray(freqs_ghz, dtype=float)
     n_points, n_pixels = codes.shape
     linewidth_mhz = prof.odmr_linewidth_hz * 1e-6
+    # Invention 6: per-frequency-point centroiding on the 64-pad rows. Each row
+    # is one MW frequency; the dips across the 64 pads are the resonant pixels,
+    # localized to sub-pixel (x, y) by charge-sharing centroiding.
+    pad_centers = (pad_grid_centers(sub_pixel.pad_pitch_mm)
+                   if sub_pixel is not None else None)
+    s_factor = sub_pixel.space_bins() if sub_pixel is not None else 0
+    s_channels = sub_pixel.spatial_channels() if sub_pixel is not None else 0
+    spot_pos: dict[int, tuple[float, float]] = {}
+    if sub_pixel is not None and pad_centers is not None:
+        for i in range(n_points):
+            spots = localize_spots(
+                codes[i, :], pad_centers, sub_pixel.sigma_sheet_mm,
+                min_snr=min_snr)
+            for sp in spots:
+                # attribute the spot to its nearest pad (pixel) -- the imaging
+                # output is the sub-pixel position of each pixel's dip
+                idx = int(np.argmin(
+                    (pad_centers[:, 0] - sp.x_mm) ** 2 +
+                    (pad_centers[:, 1] - sp.y_mm) ** 2))
+                spot_pos.setdefault(idx, (sp.x_mm, sp.y_mm))
     pixels: list[PixelCalibration] = []
     for j in range(n_pixels):
         col = codes[:, j]
@@ -336,6 +451,7 @@ def calibrate_array_from_codes(
             microdiamonds=0,             # not measurable from codes
             register_width=register_width,
             odmr_lines=odmr_lines,
+            sub_pixel_position=spot_pos.get(j),
         ))
     return ArrayCalibration(
         profile=prof.short,
@@ -344,6 +460,10 @@ def calibrate_array_from_codes(
         seed=int(seed),
         temperature_k=float(temperature_k),
         pixels=pixels,
+        integration_shots=int(integration_shots),
+        sub_pixel_factor=int(s_factor),
+        spatial_channels=int(s_channels),
+        sub_pixel=sub_pixel.to_dict() if sub_pixel is not None else None,
     )
 
 

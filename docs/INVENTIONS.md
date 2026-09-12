@@ -169,6 +169,91 @@ MEASURED quantity: `resolvable = floor(gradient · pixel_size / linewidth)`
 
 ---
 
+## 6. Sub-pixel detector resolution via charge-sharing centroiding
+
+The QSSC detector is a **continuous graphene/MoS₂+PEDOT sheet on ITO**
+(`DET_COMMON`) read by 64 discrete pads on a 2.5 mm pitch (8×8 grid, 1.0×1.0 mm
+active pad area). A fluorescence spot landing on the sheet splits its
+photocurrent across the neighbouring pads by the sheet's lateral charge-spreading
+length; measuring the per-pad ratio localizes the spot to ~`pitch/(2·SNR)` ≈
+15 µm — the resistive-charge-sharing / centroiding principle (wedge-and-strip,
+delay-line anodes). This is **detector spatial imaging resolution**: the 64-pad
+grid resolves `64 · S` positions, where `S = floor(SNR/threshold) = 8` at the
+default readout SNR (`BRIGHT_CODE/READOUT_NOISE = 80`), growing as
+`floor(80·√N/10)` with N-shot integration.
+
+**Important limitation (physics):** centroiding *localizes one spot*; it does
+**NOT** increase the per-pixel qubit register. The 64 pads are on 2.5 mm pitch
+but each pixel's NV active region is only ~200 µm wide, so two microdiamonds
+inside one pixel are ≤200 µm apart — far under the ~one-pad-pitch separation
+needed for their charge clouds to hit *different* pads. They merge into one blob.
+So `register_width` is unchanged by centroiding (it is set by
+`min(freq_bins, nv_present, SNR-detectable lines)` — see Invention 7 for the
+qubit gain). Centroiding improves **where** a signal can be localized
+(magnetometry, calibration, sensor imaging), not **how many** qubits a pixel has.
+
+- **SIM ✅** — `qssc/detector_centroid.py` (`SubPixelModel`,
+  `charge_share_weights`, `centroid_estimate`, `localize_spots`,
+  `sub_pixel_factor_from_snr`); `calibrate_array(sub_pixel=)` /
+  `calibrate_array_from_codes(sub_pixel=)` report `spatial_channels = 64·S` and
+  per-pixel `sub_pixel_position`; `SimulatedFPGA(sub_pixel=)` spreads each
+  pixel's dip to its neighbours via the charge-share kernel.
+- **Tests** — `tests/test_detector_centroid.py` (9), `tests/test_array_calibration.py`
+  sub-pixel additions, `tests/test_fpga_sim.py` sub-pixel addition.
+- **HW-fits** ✅ — uses the **existing `RUN_ALL_ODMR` verb** (Invention 4+5); the
+  64-pad-per-point snapshot is centroided **host-side**. **No new RTL, no new
+  pads, no new ADC channels.** Real path in `calibrate_array_from_codes`.
+- **needs-HW** ❗ — engineer the graphene/MoS₂ sheet's **lateral resistance**
+  (`sigma_sheet_mm`, tunable, same 64 electrodes) so a spot spills to ≥2 pads
+  (`sigma` ~ pad_pitch/2). Characterize `sigma_sheet` per die. **No PCB respin**,
+  no new electrodes — the sheet resistance is the one engineering knob.
+- **Grounding** — `pad_pitch=2.5 mm` + 1.0×1.0 mm active area (fab docs +
+  `qssc/magnetometry.py:269`); `SNR=80` (`BRIGHT_CODE/READOUT_NOISE`,
+  datasheet-derived); `sigma_sheet_mm` and `threshold=10` are tunable model
+  inputs / assumptions, NOT datasheet constants.
+
+---
+
+## 7. N-shot lock-in integration (per-pixel qubit gain)
+
+The per-pixel register width is the number of ODMR lines that clear the
+`min_snr=3` detection bar. A lone-NV bin has contrast 0.03; at the real readout
+noise (`READOUT_NOISE/BRIGHT_CODE ≈ 0.0125`) its single-shot SNR is
+`0.03/0.0125 ≈ 2.4 < 3` → **undetected**. Averaging N frequency-sweep shots
+raises the per-line SNR by `√N` (classical, uncorrelated thermal/Johnson readout
+noise), so dimmer lone-NV bins clear the bar and the **MEASURED** width rises
+toward `min(resolvable, nv_present)`.
+
+Measured (sim, grounded noise, 64 pixels):
+
+| gradient | resolvable | 1 shot (max/avg) | 16 shots | 256 shots |
+|---|---|---|---|---|
+| g=0.5 | 20 | 10 / 6.8 | 12 / 7.8 | 12 / 7.8 |
+| g=1.0 | 40 | 15 / 10.6 | 16 / 11.9 | 16 / 11.7 |
+| g=2.0 | 80 | 20 / 14.4 | 25 / 18.4 | 26 / 19.0 |
+| g=3.0 | 120 | 20 / 12.5 | 23 / 15.4 | 23 / 15.6 |
+
+**Best case ~26 qubits/pixel (max), ~19 avg, at g=2.0 with integration** — up
+from ~20/14 at 1 shot (**+30% per pixel, +32% total working qubits**). Saturates
+around 16–256 shots (once all occupied bins are detected, the cap is bin
+occupancy + `nv_present`, not SNR). The gradient (g=2.0) remains the dominant
+lever; integration adds ~30% on top. Shor bits ≈ (w−1)//3 → +1–2 bits.
+
+- **SIM ✅** — `calibrate_array(integration_shots=N)` / `_pixel_odmr_spectrum`
+  scales noise as `1/√N`; `SimulatedFPGA(integration_shots=N)` scales the
+  `RUN_ALL_ODMR` readout noise by `1/√N`.
+- **Tests** — `tests/test_array_calibration.py` integration additions,
+  `tests/test_fpga_sim.py` integration addition, `tests/test_parallel_computing.py`
+  endpoint test.
+- **HW-fits** ✅ — **zero hardware change**. The host runs the existing
+  `RUN_ALL_ODMR` sweep N times and averages (or the firmware accumulates N
+  lock-in samples per point). Cost is **measurement time ×N**, not silicon.
+- **needs-HW** — none (host-side averaging protocol on the existing verb).
+- **Grounding** — `READOUT_NOISE/BRIGHT_CODE` (datasheet readout constants);
+  √N scaling is classical for uncorrelated thermal/Johnson noise.
+
+---
+
 ## Supporting modules (already implemented, used by the inventions)
 
 - `qssc/odmr_decompose.py` — ODMR spectral decomposition into NV lines
@@ -179,6 +264,10 @@ MEASURED quantity: `resolvable = floor(gradient · pixel_size / linewidth)`
   time, addressing leakage, gate fidelity. Used by the per-pixel
   register model. SIM ✅.
 - `qssc/sensors.py` — lock-in integrated readout, compass/gyro. SIM ✅.
+- `qssc/detector_centroid.py` — charge-sharing centroiding on the continuous
+  graphene/MoS₂ sheet (Invention 6): `SubPixelModel`, `charge_share_weights`,
+  `centroid_estimate`, `localize_spots`. Sub-pixel detector imaging; does NOT
+  raise the per-pixel qubit count (within-pad spots merge). SIM ✅.
 
 ---
 
@@ -191,6 +280,8 @@ MEASURED quantity: `resolvable = floor(gradient · pixel_size / linewidth)`
 | 3 | Nuclear-spin memory (NV+¹³C) | ✅ | — | RF DAC channel at ~2 MHz + RF coil + RTL kind 3 |
 | 4 | 64-parallel distributed computing | ✅ | `RUN_ALL` 64-detector sweep | per-pixel MW (freq-mux or 64 coils) for independent circuits |
 | 5 | Gradient register width | ✅ | — | gradient coil + DAC + RTL verb |
+| 6 | Sub-pixel detector (charge-sharing centroiding) | ✅ | host-side centroid on `RUN_ALL` (no new RTL) | engineer graphene/MoS₂ sheet resistance (no new pads/ADC) |
+| 7 | N-shot lock-in integration | ✅ | host-side averaging on `RUN_ALL` (no new RTL) | — |
 
 ## What to touch on the PCB for the needs-HW inventions
 
@@ -205,6 +296,16 @@ MEASURED quantity: `resolvable = floor(gradient · pixel_size / linewidth)`
    ADF4351 hopping for frequency-multiplexed per-pixel gates, or 64 small
    per-pixel loop antennas. Then a `RUN_PARALLEL` verb that loads 64
    sequence descriptors.
+4. **Graphene/MoS₂ sheet resistance (invention 6, sub-pixel centroiding):**
+   NO new pads, NO new ADC, NO new RTL — centroiding runs host-side on the
+   existing `RUN_ALL_ODMR` matrix. The one engineering knob is the detector
+   sheet's lateral charge-spreading length (`sigma_sheet` ~ pad_pitch/2): tune
+   the graphene/MoS₂+PEDOT sheet resistance so a fluorescence spot spills to
+   ≥2 neighbouring pads, and characterize `sigma_sheet` per die.
+5. **N-shot lock-in integration (invention 7):** NO hardware change at all —
+   the host averages N `RUN_ALL_ODMR` sweeps (or the firmware accumulates N
+   lock-in samples per point). Cost is measurement time ×N, not silicon.
 
 None of these PCB additions exist today; the simulator carries the physics
-until they do.
+until they do. Inventions 6 and 7 need no PCB respin — only sheet-resistance
+tuning (6) and a host-side averaging protocol (7).

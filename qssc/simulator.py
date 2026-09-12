@@ -136,11 +136,23 @@ class SimulatedFPGA:
 
     def __init__(self, profile: DefectProfile | str = "NV",
                  temperature_k: float = 300.0, noise: float = 0.1,
-                 seed: Optional[int] = None):
+                 seed: Optional[int] = None,
+                 sub_pixel=None,
+                 integration_shots: int = 1):
         self.profile = get_profile(profile) if isinstance(profile, str) else profile
         self.temperature_k = temperature_k
         self.noise = noise
         self.rng = np.random.default_rng(seed)
+        # Invention 6: optional charge-sharing centroiding model. When set,
+        # _run_all_odmr spreads each pixel's ODMR dip to neighbouring pads via
+        # the sheet's charge-share kernel (a real spatial image per frequency
+        # point, instead of 64 independent channels). Lazy-typed to avoid a
+        # circular import with qssc.detector_centroid (which imports simulator
+        # constants). See qssc.detector_centroid.SubPixelModel.
+        self.sub_pixel = sub_pixel
+        # Invention 7: N-shot lock-in averaging -> per-point noise drops by
+        # sqrt(N) (uncorrelated thermal/Johnson readout noise). 1 = no averaging.
+        self.integration_shots = max(1, int(integration_shots))
         # per-channel 12-bit grayscale (TLC5947 gs register); 0 = off. A channel
         # "pumps" its coupled detector when gs > 0 (DRIVE_EMITTER sets full,
         # SET_EMITTER arms an arbitrary level, DRIVE_PATTERN fires all armed).
@@ -464,6 +476,15 @@ class SimulatedFPGA:
         codes, then a final ``OK`` -- the same shape the RTL
         ``RUN_ALL_ODMR`` handler emits, so the host parser is identical for sim
         and real hardware.
+
+        Invention 6 (``self.sub_pixel`` set): each pixel's dip spreads to its
+        neighbours via the graphene/MoS2 sheet charge-share kernel, so the 64
+        codes per point are a real spatial image (charge-sharing centroiding
+        input) instead of 64 independent channels.
+
+        Invention 7 (``self.integration_shots > 1``): per-point readout noise
+        drops by ``sqrt(N)`` (N-shot lock-in averaging of uncorrelated
+        thermal/Johnson noise).
         """
         f0 = self.sim_freq                     # D, Hz
         lw = self.profile.odmr_linewidth_hz    # FWHM, Hz
@@ -474,18 +495,47 @@ class SimulatedFPGA:
             self._pixel_detun_hz = self.rng.normal(
                 0.0, max(lw * 2.0, 1.0), self.N_SITES)
         detun = self._pixel_detun_hz
+        # Invention 7: averaged noise is 1/sqrt(N) of the single-shot noise.
+        noise = READOUT_NOISE / math.sqrt(self.integration_shots)
+        # Invention 6: precompute the 64x64 charge-share weight matrix (spot q's
+        # footprint across pads p) so a pixel's dip spills to its neighbours.
+        W = None
+        if self.sub_pixel is not None:
+            from .detector_centroid import charge_share_weights, pad_grid_centers
+            centers = pad_grid_centers(self.sub_pixel.pad_pitch_mm)
+            W = np.vstack([charge_share_weights(tuple(centers[q]), centers,
+                                                self.sub_pixel.sigma_sheet_mm)
+                           for q in range(self.N_SITES)])  # (64, 64): W[q, p]
         lines = []
         for fi in fs:
-            codes = []
-            for q in range(self.N_SITES):
-                if self.emitter_gs.get(q, 0) <= 0:
-                    c = BG_CODE + self.rng.normal(0, READOUT_NOISE)
-                else:
+            if W is None:
+                codes = []
+                for q in range(self.N_SITES):
+                    if self.emitter_gs.get(q, 0) <= 0:
+                        c = BG_CODE + self.rng.normal(0, noise)
+                    else:
+                        f_center = f0 + detun[q]
+                        lor = (lw / 2.0) ** 2 / ((fi - f_center) ** 2 + (lw / 2.0) ** 2)
+                        c = BRIGHT_CODE * (1.0 - ODMR_CONTRAST * lor) \
+                            + self.rng.normal(0, noise)
+                    codes.append(int(min(max(int(c), 0), ADC_MAX)))
+            else:
+                # forward-model: each pixel q's dip depth, then spread to pads.
+                # dip_q = BRIGHT*ODMR_CONTRAST*lor_q for pumped pixels, else 0.
+                dip_q = np.zeros(self.N_SITES)
+                for q in range(self.N_SITES):
+                    if self.emitter_gs.get(q, 0) <= 0:
+                        continue
                     f_center = f0 + detun[q]
                     lor = (lw / 2.0) ** 2 / ((fi - f_center) ** 2 + (lw / 2.0) ** 2)
-                    c = BRIGHT_CODE * (1.0 - ODMR_CONTRAST * lor) \
-                        + self.rng.normal(0, READOUT_NOISE)
-                codes.append(int(min(max(int(c), 0), ADC_MAX)))
+                    dip_q[q] = BRIGHT_CODE * ODMR_CONTRAST * lor
+                # pad p collects the sum of its neighbours' spread dips
+                pad_dip = W.T @ dip_q            # (64,) pad-space dip
+                base = np.where(
+                    [self.emitter_gs.get(q, 0) > 0 for q in range(self.N_SITES)],
+                    float(BRIGHT_CODE), float(BG_CODE))
+                codes = base - pad_dip + self.rng.normal(0, noise, self.N_SITES)
+                codes = [int(min(max(int(c), 0), ADC_MAX)) for c in codes]
             lines.append(" ".join(str(c) for c in codes))
         return "\n".join(lines) + "\nOK"
 

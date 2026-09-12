@@ -179,6 +179,16 @@ class CalibrateArrayRequest(BaseModel):
     source: str = "sim"          # sim | real
     max_nv_per_microdiamond: int = Field(100, ge=1, le=1000)
     n_points: int = Field(400, ge=32, le=4096)  # real path sweep points
+    # Invention 6: charge-sharing centroiding (sub-pixel detector resolution).
+    # When true, build a SubPixelModel (sigma_sheet_mm sheet spreading length)
+    # and report spatial_channels = 64*S + per-pixel sub_pixel_position. This is
+    # detector imaging metadata; it does NOT change register_width.
+    sub_pixel: bool = False
+    sigma_sheet_mm: float = Field(1.0, gt=0.0, le=10.0)
+    # Invention 7: N-shot lock-in averaging raises per-line SNR by sqrt(N), so
+    # dimmer lone-NV ODMR lines clear the detection bar -> the MEASURED
+    # register_width rises toward min(resolvable, nv_present). 1 = no averaging.
+    integration_shots: int = Field(1, ge=1, le=10000)
 
 
 # ---------------------------------------------------------------------------
@@ -789,8 +799,12 @@ def calibrate_array_endpoint(req: CalibrateArrayRequest, request: Request = None
         calibrate_array, calibrate_array_from_codes, best_uniform_width,
     )
     from qssc.defects import get_profile
+    from qssc.detector_centroid import SubPixelModel
     prof = get_profile(req.profile)
     source = str(req.source).lower()
+    # Invention 6: build the sub-pixel centroiding model if requested.
+    sub_pixel = (SubPixelModel(sigma_sheet_mm=req.sigma_sheet_mm)
+                 if req.sub_pixel else None)
     try:
         if source == "real":
             fpga = _fpga()
@@ -812,7 +826,8 @@ def calibrate_array_endpoint(req: CalibrateArrayRequest, request: Request = None
                 matrix, freqs_ghz, prof,
                 gradient_mhz_per_um=req.gradient_mhz_per_um,
                 pixel_size_um=req.pixel_size_um,
-                seed=req.seed, temperature_k=req.temperature_k)
+                seed=req.seed, temperature_k=req.temperature_k,
+                integration_shots=req.integration_shots, sub_pixel=sub_pixel)
             io_label = "real"
         else:
             calib = calibrate_array(
@@ -821,7 +836,8 @@ def calibrate_array_endpoint(req: CalibrateArrayRequest, request: Request = None
                 pixel_size_um=req.pixel_size_um,
                 seed=req.seed,
                 temperature_k=req.temperature_k,
-                max_nv_per_microdiamond=req.max_nv_per_microdiamond)
+                max_nv_per_microdiamond=req.max_nv_per_microdiamond,
+                integration_shots=req.integration_shots, sub_pixel=sub_pixel)
             io_label = "simulated"
     except NoFPGADetected as exc:
         return {"error": "no-fpga-detected",
@@ -852,10 +868,17 @@ def calibrate_array_endpoint(req: CalibrateArrayRequest, request: Request = None
         "best_uniform_width": bw[0],
         "best_uniform_pixels": bw[1],
         "total_working_qubits": bw[0] * bw[1],
+        # Invention 7: N-shot lock-in integration (raises measured width).
+        "integration_shots": calib.integration_shots,
+        # Invention 6: sub-pixel detector imaging resolution (does NOT change
+        # register_width -- within-pad spots merge; centroiding localizes one).
+        "sub_pixel_factor": calib.sub_pixel_factor,
+        "spatial_channels": calib.spatial_channels,
         "pixels": [
             {"pixel_id": p.pixel_id, "nv_present": p.nv_present,
              "microdiamonds": p.microdiamonds, "register_width": p.register_width,
-             "odmr_lines": p.odmr_lines}
+             "odmr_lines": p.odmr_lines,
+             "sub_pixel_position": p.sub_pixel_position}
             for p in calib.pixels
         ],
     }

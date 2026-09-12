@@ -187,3 +187,45 @@ def test_best_uniform_width_helper():
     # N=4: 8 pixels -> 32 (winner); N=6: 5 -> 30; N=10: 2 -> 20
     n, k = best_uniform_width([4, 6, 6, 10, 10, 6, 4, 4])
     assert (n, k) == (4, 8)
+
+
+# -- Invention 6+7: calibrate-array sub_pixel + integration -------------------
+def test_calibrate_array_endpoint_integration_raises_width():
+    """The /api/circuit/calibrate-array endpoint with integration_shots>=16
+    returns >= total working qubits than the 1-shot baseline (Invention 7)."""
+    from fastapi.testclient import TestClient
+    from api.main import app
+    c = TestClient(app)
+    base = {
+        "gradient_mhz_per_um": 2.0, "seed": 42, "source": "sim",
+    }
+    r1 = c.post("/api/circuit/calibrate-array", json={**base, "integration_shots": 1})
+    r16 = c.post("/api/circuit/calibrate-array", json={**base, "integration_shots": 16})
+    assert r1.status_code == 200 and r16.status_code == 200
+    j1, j16 = r1.json(), r16.json()
+    assert j16["integration_shots"] == 16
+    # integration can only add detected lines (lower noise), never remove
+    assert sum(j16["per_pixel_widths"]) >= sum(j1["per_pixel_widths"])
+    assert j16["max_width"] >= j1["max_width"]
+
+
+def test_calibrate_array_endpoint_sub_pixel_reports_channels():
+    """The endpoint with sub_pixel=true reports spatial_channels = 64*S and
+    per-pixel sub_pixel_position, but does NOT change register_width (Invention 6
+    is imaging metadata, not a qubit gain)."""
+    from fastapi.testclient import TestClient
+    from api.main import app
+    c = TestClient(app)
+    base = {"gradient_mhz_per_um": 1.0, "seed": 42, "source": "sim"}
+    r_plain = c.post("/api/circuit/calibrate-array", json=base)
+    r_sp = c.post("/api/circuit/calibrate-array",
+                  json={**base, "sub_pixel": True, "sigma_sheet_mm": 1.0})
+    assert r_plain.status_code == 200 and r_sp.status_code == 200
+    jp, js = r_plain.json(), r_sp.json()
+    assert js["sub_pixel_factor"] == 8
+    assert js["spatial_channels"] == 64 * 8
+    assert jp["sub_pixel_factor"] == 0 and jp["spatial_channels"] == 0
+    # centroiding does NOT change the per-pixel qubit register width
+    assert jp["per_pixel_widths"] == js["per_pixel_widths"]
+    # per-pixel sub-pixel positions are populated in the sim path
+    assert sum(1 for p in js["pixels"] if p["sub_pixel_position"] is not None) == 64
