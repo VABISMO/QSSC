@@ -132,6 +132,7 @@ class RunRequest(BaseModel):
     pixel_size_um: float = Field(200.0, gt=0)
     register_line_freqs_hz: Optional[List[int]] = None
     prime_readout: bool = False
+    n_noise_bins: int = Field(64, ge=1, le=4096)
 
 
 class CustomCircuitRequest(BaseModel):
@@ -156,6 +157,7 @@ class CustomCircuitRequest(BaseModel):
     pixel_size_um: float = Field(200.0, gt=0)
     register_line_freqs_hz: Optional[List[int]] = None
     prime_readout: bool = False
+    n_noise_bins: int = Field(64, ge=1, le=4096)
 
 
 class ParallelRunRequest(BaseModel):
@@ -186,6 +188,7 @@ class ParallelRunRequest(BaseModel):
     pixel_size_um: float = Field(200.0, gt=0)
     register_line_freqs_hz: Optional[list] = None
     prime_readout: bool = False
+    n_noise_bins: int = Field(64, ge=1, le=4096)
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +201,9 @@ def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
              register_nv_spacing_nm: float = 2.75,
              gradient_mhz_per_um: float = 0.0,
              pixel_size_um: float = 200.0,
-             register_line_freqs_hz: Optional[list] = None) -> QSSCBackend:
+             register_line_freqs_hz: Optional[list] = None,
+             prime_readout: bool = False,
+             n_noise_bins: int = 64) -> QSSCBackend:
     # pixel_mode selects the circuit-qubit model: register (one pixel's N-NV
     # register, within-pixel all-to-all dipole 2q) or ensemble (64 chip pixels,
     # no within-pixel 2q). N is the MEASURED resolvable ODMR line count when
@@ -206,7 +211,9 @@ def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
     # else the nominal default. gradient_mhz_per_um + register_line_freqs_hz
     # close the calibration -> circuit loop: the register sits on the real
     # addressed frequencies at the applied gradient, not the synthetic 6 MHz
-    # grid. See QSSCBackend.
+    # grid. prime_readout toggles the coprime matched-filter denoiser
+    # (Invention 2+): when on, the effective readout error is reduced by the
+    # prime SNR factor (n_noise_bins / n_symbols). See QSSCBackend.
     from qssc.backend import N_NV_PER_PIXEL
     return QSSCBackend(profile=profile, seed=seed,
                        temperature_k=temperature_k, noise_mode=noise_mode,
@@ -216,7 +223,9 @@ def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
                        register_nv_spacing_nm=register_nv_spacing_nm,
                        gradient_mhz_per_um=gradient_mhz_per_um,
                        pixel_size_um=pixel_size_um,
-                       register_line_freqs_hz=register_line_freqs_hz)
+                       register_line_freqs_hz=register_line_freqs_hz,
+                       prime_readout=prime_readout,
+                       n_noise_bins=n_noise_bins)
 
 
 def _req_dict(model) -> dict:

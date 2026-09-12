@@ -3,7 +3,7 @@ import { api } from './api.js'
 import { deriveMeasurement } from './derive.js'
 import {
   QubitGrid, OdmrChart, BarCounts, MeasurementHelp,
-  SignalChart, CalibrationPanel, Verdict,
+  SignalChart, CalibrationPanel, Verdict, NoiseBudget,
   OpticalChainDiagram, RunPhysics,
   CompassRose, GyroPanel, MagnetoImage, SensorField,
 } from './components.jsx'
@@ -1627,6 +1627,7 @@ export default function App() {
               )}
               {info.loading && <div className="muted"><span className="spinner" /> loading backend target…</div>}
               {runAssessment && <div style={{ marginTop: 12 }}><Verdict assessment={runAssessment} /></div>}
+              {result && result.noise && <NoiseBudget noise={result.noise} />}
             </div>
 
             <RunPhysics result={result} profile={profile} temperature={temperature} infoData={info.data} />

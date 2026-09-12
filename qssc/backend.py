@@ -674,7 +674,9 @@ class QSSCBackend(BackendV2):
                  gradient_mhz_per_um: float = 0.0,
                  pixel_size_um: float = 200.0,
                  nuclear_memory: bool = False,
-                 register_line_freqs_hz: Optional[Sequence[float]] = None):
+                 register_line_freqs_hz: Optional[Sequence[float]] = None,
+                 prime_readout: bool = False,
+                 n_noise_bins: int = 64):
         """noise_mode: 'real' (default, full Aer thermal+depolarizing+readout
         noise from the defect physics) | 'phenomenological' (fast analytic
         approximation) | 'none' (ideal). 'aer' is accepted as an alias of 'real'.
@@ -736,6 +738,31 @@ class QSSCBackend(BackendV2):
             else None)
         if self._register_line_freqs_hz is not None:
             self.n_nv_per_pixel = len(self._register_line_freqs_hz)
+        # Prime-coprime readout denoiser (Invention 2+): when on, the lock-in
+        # matched-filter rejects the OUT-of-band noise fraction (the energy
+        # outside the prime frequency bins), improving the readout SNR by the
+        # factor prime_noise_rejection = n_noise_bins / n_symbols. The EFFECTIVE
+        # per-site readout error is the base optical-fluorescence misassignment
+        # rate divided by that factor (clamped to [0, base]) -- this is the
+        # band-rejection gain only; in-band noise inside a prime channel's
+        # linewidth still passes, so it is a lower bound on the improvement, not
+        # a free lunch. n_symbols = the number of prime address channels in use
+        # (min of the register width and the 16 prime symbols); n_noise_bins is
+        # the analysis-window bin count (default 64). Stored here so the real
+        # Aer noise model, the phenomenological readout path, and the
+        # noise_summary() report all agree on one effective readout error.
+        from qssc.prime_readout import prime_noise_rejection, PRIME_SYMBOLS
+        self._prime_readout = bool(prime_readout)
+        self._n_noise_bins = max(1, int(n_noise_bins))
+        self._n_prime_symbols = 1
+        if self._register_line_freqs_hz is not None:
+            self._n_prime_symbols = max(1, len(self._register_line_freqs_hz))
+        else:
+            self._n_prime_symbols = max(1, min(self.n_nv_per_pixel,
+                                               len(PRIME_SYMBOLS)))
+        self._prime_snr = (
+            prime_noise_rejection(self._n_prime_symbols, self._n_noise_bins)
+            if self._prime_readout else 1.0)
         if sites is None:
             if pixel_mode == "ensemble":
                 # Ensemble mode: the 64 chip pixels ARE the circuit qubits (one
@@ -1039,6 +1066,51 @@ class QSSCBackend(BackendV2):
                          if instr.operation.name not in ("barrier",)})
         return [q for q in active if q < self._n_qubits]
 
+    def _effective_readout_err(self, q: int) -> float:
+        """Per-site optical readout error AFTER the prime-coprime denoiser.
+
+        The base rate is the site's fluorescence misassignment probability
+        (``site.readout_err``). With prime readout on, the coprime matched
+        filter rejects the out-of-band noise fraction, so the effective error
+        is the base rate divided by the prime SNR factor (clamped to [0,
+        base]). With prime readout off (or SNR == 1) this is just the base
+        rate -- every existing noise realization is bit-identical.
+        """
+        if q < len(self.sites):
+            base = float(self.sites[q].readout_err)
+        else:
+            base = float(self.profile.readout_error)
+        if self._prime_readout and self._prime_snr > 1.0:
+            return float(np.clip(base / self._prime_snr, 0.0, base))
+        return base
+
+    def noise_summary(self) -> dict:
+        """Per-run noise budget for the frontend's prime-on vs prime-off
+        comparison. Reports the mean base readout error, the prime SNR
+        improvement factor, and the EFFECTIVE readout error after the prime
+        denoiser (equal to the base when prime readout is off). Also carries
+        the 1q/2q depolarizing probabilities and the spin T2 so the panel
+        shows the full error budget of the run that just executed.
+        """
+        ros = [float(s.readout_err) for s in self.sites]
+        base_ro = (float(np.mean(ros)) if ros
+                   else float(self.profile.readout_error))
+        eff_ro = (float(np.clip(base_ro / self._prime_snr, 0.0, base_ro))
+                  if self._prime_readout and self._prime_snr > 1.0
+                  else base_ro)
+        return {
+            "readout_error": round(base_ro, 6),
+            "effective_readout_error": round(eff_ro, 6),
+            "depol_1q": float(self._depol_1q),
+            "depol_2q": float(self._depol_2q),
+            "t2_us": round(self._t2 * 1e6, 4),
+            "prime_readout": bool(self._prime_readout),
+            "prime_snr_factor": round(float(self._prime_snr), 4),
+            "n_symbols": int(self._n_prime_symbols),
+            "n_noise_bins": int(self._n_noise_bins),
+            "pixel_mode": self.pixel_mode,
+        }
+
     def _build_real_noise_model(self, circuit: QuantumCircuit) -> NoiseModel:
         """Full physics noise model scoped to the circuit's active qubits.
 
@@ -1064,7 +1136,7 @@ class QSSCBackend(BackendV2):
             s = self.sites[q]
             t1 = s.t1 or self._t1
             t2 = s.t2 or self._t2
-            ro = float(s.readout_err)
+            ro = self._effective_readout_err(q)
             try:
                 therm1 = thermal_relaxation_error(t1, t2, g1q)
                 dep1err = depolarizing_error(dep1, 1)
@@ -1549,7 +1621,7 @@ class QSSCBackend(BackendV2):
         asym = float(self.profile.readout_asymmetry)
         err_per_cl = np.zeros(nbits)
         for cl, pq in meas_map.items():
-            err_per_cl[cl] = float(self.sites[pq].readout_err) if pq < len(self.sites) else self.profile.readout_error
+            err_per_cl[cl] = self._effective_readout_err(pq)
         # Two execution paths. The int-packed path (nbits < 64) preserves the
         # exact rng stream every existing test anchors against (e.g. SiC
         # symmetric mul==12). The bit-matrix path (nbits >= 64) is width-
@@ -1569,7 +1641,7 @@ class QSSCBackend(BackendV2):
                 p0to1 = np.zeros(nbits)   # true 0 (bright) -> read 1 (dark)
                 p1to0 = np.zeros(nbits)   # true 1 (dark)   -> read 0 (bright)
                 for cl, pq in meas_map.items():
-                    ro = float(self.sites[pq].readout_err) if pq < len(self.sites) else self.profile.readout_error
+                    ro = self._effective_readout_err(pq)
                     p0to1[cl] = float(np.clip(ro * (1.0 - asym), 0.0, 1.0))
                     p1to0[cl] = float(np.clip(ro * (1.0 + asym), 0.0, 1.0))
                 p0to1_ord = p0to1[::-1]   # bit i (LSB) <-> cl = nbits-1-i
@@ -1606,7 +1678,7 @@ class QSSCBackend(BackendV2):
             p0to1 = np.zeros(nbits)
             p1to0 = np.zeros(nbits)
             for cl, pq in meas_map.items():
-                ro = float(self.sites[pq].readout_err) if pq < len(self.sites) else self.profile.readout_error
+                ro = self._effective_readout_err(pq)
                 p0to1[cl] = float(np.clip(ro * (1.0 - asym), 0.0, 1.0))
                 p1to0[cl] = float(np.clip(ro * (1.0 + asym), 0.0, 1.0))
             p0to1_ord = p0to1[::-1]

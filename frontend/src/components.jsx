@@ -857,6 +857,41 @@ export function Verdict({ assessment }) {
   )
 }
 // ---------------------------------------------------------------------------
+// NoiseBudget — the per-run noise budget (base readout error, prime SNR
+// factor, effective readout error after the coprime denoiser). Lets the user
+// compare prime readout ON vs OFF on the same circuit: with prime on the
+// effective readout error is the base error divided by the SNR factor.
+// ---------------------------------------------------------------------------
+export function NoiseBudget({ noise }) {
+  if (!noise) return null
+  const pct = v => (v * 100).toFixed(2) + '%'
+  const on = noise.prime_readout
+  return (
+    <div className={`verdict ${on ? 'ok' : ''}`} style={{ marginTop: 12 }}>
+      <div className="verdict-h">
+        <span className="verdict-tag">Noise budget</span>
+        {on
+          ? `Prime denoise ON — ${noise.prime_snr_factor}× readout SNR`
+          : 'Prime denoise OFF'}
+      </div>
+      <div className="verdict-body">
+        Effective readout error <b className="mono" style={{ color: 'var(--brand)' }}>{pct(noise.effective_readout_error)}</b>
+        {on && <> (base {pct(noise.readout_error)} ÷ {noise.prime_snr_factor}×)</>}
+        {' — '}1q depol <b className="mono">{noise.depol_1q}</b>{' · '}
+        2q depol <b className="mono">{noise.depol_2q}</b>{' · '}
+        T₂ <b className="mono">{noise.t2_us} µs</b>
+      </div>
+      <div className="verdict-meta">
+        <span>base readout <b className="mono">{pct(noise.readout_error)}</b></span>
+        <span>effective readout <b className="mono">{pct(noise.effective_readout_error)}</b></span>
+        <span>prime channels <b className="mono">{noise.n_symbols}</b> / {noise.n_noise_bins} bins</span>
+        <span>SNR factor <b className="mono">{noise.prime_snr_factor}×</b></span>
+        <span>mode <b className="mono">{noise.pixel_mode}</b></span>
+      </div>
+    </div>
+  )
+}
+// ---------------------------------------------------------------------------
 // CompassRose — ODMR compass: heading + elevation needle on a rose, with the
 // 4 NV <111> axis doublet splits around it.  physics from /api/compass.
 // ---------------------------------------------------------------------------
