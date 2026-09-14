@@ -158,14 +158,17 @@ MEASURED quantity: `resolvable = floor(gradient · pixel_size / linewidth)`
   resolvable count; `qssc/backend.py` `__init__(gradient_mhz_per_um=,
   pixel_size_um=)`.
 - **Tests** — `tests/test_field_gradient_register.py` (5 tests).
-- **needs-HW** ❗ — a **field-gradient coil + DAC** (a small pair of
-  anti-Helmholtz coils or a shaped pole piece + a DAC channel the FPGA
-  drives). The current PCB has NO gradient coil. To run this on hardware:
-  - add the **gradient coil + DAC** to the PCB, and
-  - an RTL verb that sets the DAC current per sweep (then `ODMR_SWEEP`
-    measures the line count → the register width).
-  The simulator models the physics today; the PCB needs the coil.
-- **Commit** — `8428f96`.
+- **needs-HW** ✅ **DONE** — the **field-gradient coil + DAC is now on the
+  PCB** (the `qssc-grad` variant: net-tie coil + `Rgrad_feed` + V-row grad
+  pins + `dac_ctrl.v` RTL, fully routed DRC 0/0/0, **merged to main via PR
+  #79** `d422a2b`). The `SET_GRADIENT` / `dac_ctrl` verb sets the DAC current
+  per sweep, then `ODMR_SWEEP` measures the per-pixel line count = the
+  register width. No further PCB work; the simulator + the on-board coil
+  agree. This is the single biggest 300 K qubit-count lever (0.5 → 2.0 MHz/µm
+  lifts a pixel from ~19 to ~55 measured qubits; see Invention 13/14 for
+  pushing past the noise-bound ~70 toward the 300-NV cap).
+- **Commit** — `8428f96` (sim); `402541e`/`235cba8`/`b0b8fc0` (PCB+RTL,
+  merged `d422a2b`).
 
 ---
 
@@ -254,6 +257,224 @@ lever; integration adds ~30% on top. Shor bits ≈ (w−1)//3 → +1–2 bits.
 
 ---
 
+## 8. Magnon inter-pixel entanglement bus (YIG) — CRYO
+
+A shared YIG (yttrium iron garnet) magnon mode mediates **cross-pixel** 2-qubit
+entanglement: NV spins in different pixels couple to the same magnon mode,
+turning the 64 independent ~10-NV pixels into ONE entangled register. This is
+the only route past the per-pixel qubit ceiling at room temperature — and it
+does NOT work at 300 K.
+
+- **Why not 300 K:** the magnon thermal occupation `n_th = 1/(exp(hf/kT)−1) ≈
+  2 200` at 2.87 GHz / 300 K. `n_th` occupies the *same* mode as the signal, so
+  it is inseparable from it; the second law forbids passively filtering it out
+  (a passive filter would have to be colder than the bath, i.e. a refrigerator).
+  Only cooling changes `n_th`: at ~150 mK, `n_th → 0` and the bus becomes
+  usable. This is **temperature-bound, not material-bound** — no superconducting
+  magnetic material avoids it (all candidates `T_c < 300 K`).
+- **SIM** — not modelled (cryo invention, out of scope for the 300 K stack).
+- **needs-cryo** ❗ — a dilution refrigerator (~150 mK) + the YIG resonator +
+  couplers. No PCB respin helps; the whole chip must be cold.
+- **Status** — documented only; not built. Do NOT pair with Invention 9 (the
+  anti-noise stack is classical and 300 K; it does NOT touch `n_th`).
+
+---
+
+## 9. Classical anti-noise filter stack (300 K, SNR-protective)
+
+The buildable, room-temperature version of "treat temperature/pressure as a
+signal and filter it out." Models the **separable classical** environmental
+noise channels (temperature drift, vibration ~30 Hz, EMI ~1 kHz, pressure) and
+the filters that attenuate each (thermal servo, vibration isolation, EMI shield,
+sensor feed-forward, common-mode rejection, dynamical decoupling). Stacks on
+the Invention 7 `1/√N` floor; lower effective noise → more dim lone-NV ODMR
+lines clear `min_snr` → the MEASURED per-pixel width rises (~55 → ~70 at
+gradient 2.0 MHz/µm with N=16 + the full stack).
+
+- **SIM ✅** — `qssc/noise_filters.py` (`NoiseEnvironment` lab/quiet/noisy
+  presets, `AntiNoiseConfig` all-OFF default = back-compat, `effective_noise_sigma`
+  composes on the 1/√N floor — fast channels vib/EMI average down by 1/√N, slow
+  channels temp/pressure do NOT because correlated, so servo + feed-forward are
+  the levers; `effective_t2` DD hahn ~2× / cpmg ~2·n / xy8 ~2ⁿ hard-capped at
+  2·T₁; `filter_gain_breakdown`). Wired into `simulator.py`, `array_calibration.py`,
+  `backend.py` (`QSSCBackend.anti_noise` applies DD to `self._t2` → deeper
+  circuits survive), `api/main.py`+`api/runner.py` (4 request models +
+  calibrate-array response), frontend `AntiNoisePanel`+`NoiseBudget`.
+- **Tests** — `tests/test_noise_filters.py` (28).
+- **HW-fits** ✅ — all filters are host-side or passive enclosure/servo (no new
+  RTL, no PCB respin). DD is a pulse-sequence choice on the existing
+  `RUN_SEQUENCE` verb.
+- **needs-HW** — none.
+- **Grounding** — channel sigmas (`temp_drift_counts` etc.) are MODEL INPUTS
+  (enclosure characterization), NOT datasheet constants. DD T₁ cap uses
+  `coherence_at_temperature` T₁ from `defects.py`. Does NOT touch the magnon
+  `n_th` (that is Invention 8, cryo).
+- **Commit** — `236d155` (branch `features/anti-noise`, NOT pushed).
+
+---
+
+## 10. ¹³C nuclear cluster register — CANDIDATE (needs-HW)
+
+Beyond Invention 3's single ¹³C, use **N weakly-coupled ¹³C** nuclear spins per
+pixel as a multi-qubit memory sub-register. ¹³C T₂ ~ 1 s (NOT QUOTED BY THE
+SUPPLIER; Reimer/Taminiau/Cramer literature anchor); RF-addressed at each ¹³C's
+hyperfine shift. Adds N memory qubits per pixel **without more NVs or optical
+addressing** — the nuclear spins are dark, addressed by RF, read out through the
+NV electron spin.
+
+- **SIM** — to do (extends `qssc/nuclear.py`).
+- **needs-HW** ❗ — the same RF channel as Invention 3 (DDS ~2 MHz + RF coil),
+  broadband enough to address several ¹³C lines. Stacks on Inv 3's PCB addition.
+
+---
+
+## 11. NV nitrogen nuclear-spin (¹⁴N/¹⁵N) register — CANDIDATE (needs-HW)
+
+The NV's own nitrogen nuclear spin is a **free extra qubit per NV** (¹⁴N I=1 =
+qutrit; ¹⁵N I=½ = qubit), RF-addressed at a few MHz, long T₂. Distinct from ¹³C
+(Inv 3/10): it is on-site, always present, no isotope engineering beyond ¹⁵N
+enrichment. One extra memory qubit per NV.
+
+- **SIM** — to do (extends `qssc/nuclear.py`).
+- **needs-HW** ❗ — RF channel at the N hyperfine splitting (~2.2 MHz for ¹⁴N),
+  shares Inv 3's RF DAC + coil.
+
+---
+
+## 12. Single-shot resonant spin-to-charge-conversion readout — CANDIDATE (needs-HW)
+
+Instead of fluorescence contrast (SNR-limited by photon shot noise), use
+resonant spin-to-charge conversion: a resonant laser flips the NV into a
+long-lived charge state conditional on the spin, read out by a subsequent probe.
+Single-shot readout fidelity → 90%+; the effective readout noise drops sharply,
+so far more lone-NV lines clear `min_snr` → the measured width rises toward the
+resolvable cap (stacks with Inv 7/9/13/14).
+
+- **SIM** — to do (a readout-fidelity model in `simulator.py`).
+- **needs-HW** ❗ — an extra resonant laser line + switching optics. PCB respin
+  (optical path). The biggest resolution lever but the most invasive.
+
+---
+
+## 13. Compressed-sensing / sparse super-resolution ODMR — SIM ✅
+
+The ODMR spectrum is **sparse**: at a wide gradient most gradient bins are empty
+(a few NVs spread across many bins), so the line vector is k-sparse with
+`k ≪ n_bins`. A hard SNR threshold misses dim lone-NV lines, but a sparse-
+recovery estimator (orthogonal matching pursuit) over the known gradient-bin
+Gaussian dictionary recovers them: joint least-squares over the selected support
+**deconvolves overlapping lines** (two NVs in adjacent bins smear into one broad
+dip and are resolved as two), and the sparsity prior lowers the per-atom
+acceptance bar from `min_snr` (~4) to `superres_factor · min_snr` (~2.4) at a
+controlled false-positive rate. Host-side, no HW.
+
+- **SIM** ✅ — `qssc/superres_odmr.py`: `superres_decompose` (OMP),
+  `superres_measured_width`. Verified: adjacent-bin overlaps deconvolve to two
+  lines; the lowered bar accepts at least as many lines as the hard path.
+- **HW-fits** ✅ — runs host-side on the existing `RUN_ALL_ODMR` matrix; no new
+  RTL, no PCB respin. Stacks with Inv 7 (averaging) and Inv 9 (anti-noise).
+
+---
+
+## 14. Bayesian / quantum-limited readout — SIM ✅
+
+Replace the hard two-sided `min_snr=4` bar with a **one-sided Bayesian
+credible-interval detector** over the same gradient-bin dictionary. For each bin
+the matched-filter amplitude estimate and its posterior std
+(`σ_j = noise_sigma / ‖A_j‖`, the noise averaged over the line profile) give a
+one-sided test `â_j / σ_j > z(confidence)`; a Bonferroni correction over
+`n_bins` holds the family-wise false-positive rate at `1 − confidence`. The
+matched filter + one-sided test accept marginal lone-NV lines the hard bar
+misses (z₀.₉₉ ≈ 2.33 vs min_snr = 4) — the quantum-limited readout. Stacks with
+Inv 7/9; complementary to Inv 13 (independent per-bin vs joint OMP).
+
+- **SIM** ✅ — `qssc/bayesian_readout.py`: `bayesian_decompose`,
+  `bayesian_measured_width`. Verified: recovers ~2× the hard-threshold width on
+  the same spectrum (24–28 vs 9–12 lines); higher confidence → fewer lines
+  (monotone).
+- **HW-fits** ✅ — host-side statistical estimator on the existing readout; no
+  new RTL, no PCB respin.
+
+---
+
+## 15. Parallel VQE / QAOA (classical-quantum loop) — CANDIDATE (host-side)
+
+Run a small variational ansatz on each of the 64 pixels in parallel, aggregate
+the expectation values host-side, and close a classical optimizer loop
+(parameter update → re-run). Application: chemistry ground-state energy,
+combinatorial optimisation. Builds on Invention 4's 64-parallel runner.
+
+- **SIM** — to do (an orchestration layer on `run_parallel`).
+- **HW-fits** ✅ — host-side classical-quantum loop on the existing parallel
+  runner; no new hardware.
+
+---
+
+## 16. Quantum kernel estimation (QSVM) — CANDIDATE (host-side)
+
+Compute quantum kernel entries `K(x_i, x_j) = |<ψ(x_i)|ψ(x_j)>|` on the 64-pixel
+array in parallel (each pixel evaluates one kernel entry), then train a
+classical SVM on the kernel matrix. Application: quantum machine learning.
+
+- **SIM** — to do (kernel-evaluation circuits + aggregation).
+- **HW-fits** ✅ — host-side; builds on Invention 4.
+
+---
+
+## 17. Distributed / Heisenberg-limited sensing — CANDIDATE (needs-cryo)
+
+Use cross-pixel entanglement (Invention 8 magnon bus) to beat the standard
+quantum limit for the 64-pixel sensor array: independent pixels give 1/√N
+(√64 = 8× SQL); an entangled GHZ-like state across pixels gives 1/N (Heisenberg,
+64×). Application: magnetometry beyond SQL.
+
+- **SIM** — to do (needs the Inv 8 cryo entanglement model).
+- **needs-cryo** ❗ — requires Invention 8 (the magnon bus at ~150 mK). At 300 K
+  the 64 pixels are independent → standard 1/√N only.
+
+---
+
+## 18. Small QEC code on the register — CANDIDATE (needs-HW + host-side)
+
+Run a small quantum error-correcting code (repetition code, or [[7,1,3]] Steane)
+on a pixel's ~10-NV register, using the ¹³C nuclear memory (Inv 3) as the
+ancilla/data store. Application: fault-tolerance demonstration. 300 K T₂ and
+gate fidelity are marginal, but the nuclear memory's long T₂ helps the slow
+syndrome-extraction cycles.
+
+- **SIM** — to do (QEC circuits + syndrome model).
+- **needs-HW** ❗ — needs Inv 3's RF channel for nuclear-memory ancilla.
+
+---
+
+## 19. Tensor-gradient magnetic imaging — SIM ✅
+
+Extend Invention 1 (4-axis NV⟨111⟩ vector magnetometer) with the on-PCB gradient
+coil (Invention 5) to recover the **B-gradient tensor** (the 3×2 in-plane
+Jacobian ``G_ij = ∂B_i/∂x_j`` of the field across the 8×8 array, by finite
+differences at the 2.5 mm pitch), not just |B| at each pixel. The tensor
+signature localizes and classifies a magnetic source: a point dipole has a
+characteristic tensor pattern, so a **dipole localizer** (nonlinear least-squares
+fit of the analytic dipole field) recovers the source position and moment — a
+richer magnetic image (anomaly / current-source imaging) than the scalar map.
+
+- **SIM** ✅ — `qssc/tensor_gradiometry.py`: `tensor_gradient_map` (per-pixel
+  Jacobian), `localize_dipole` (fit to the reconstructed B-vectors),
+  `localize_dipole_from_splits` (robust fit to the **raw doublet splits** — the
+  sign-ambiguity-free observables — in differential mode, where the DC
+  background fixes the split polarity), `tensor_gradient_sweep` (64-pixel image
+  + dipole reconstruction). On a noise-free field the localizer recovers the
+  source exactly; with shot noise it recovers the position to ~0.4 mm and the
+  moment to ~7 % (limited by the 2.5 mm pitch + the 4-axis linewidth floor, not
+  the fitter). The per-pixel linewidth floor (~45 µT) sets the minimum resolvable
+  source strength — a weaker dipole images as zero, which is the physics, not a
+  bug. Stacks with Inv 7 (1/√N averaging lowers the split noise).
+- **HW-fits** ✅ — uses the existing 4-axis ODMR readout (Inv 1) + the on-board
+  gradient coil (Inv 5, merged PR #79). No new hardware.
+- **needs-HW** — none (Inv 5 coil is already on the PCB).
+
+---
+
 ## Supporting modules (already implemented, used by the inventions)
 
 - `qssc/odmr_decompose.py` — ODMR spectral decomposition into NV lines
@@ -273,25 +494,40 @@ lever; integration adds ~30% on top. Shor bits ≈ (w−1)//3 → +1–2 bits.
 
 ## Summary table
 
-| # | Invention | SIM | HW-fits (RTL to do) | needs-HW (PCB add) |
-|---|---|---|---|---|
-| 1 | 64-pixel vector magnetometer | ✅ | ODMR_SWEEP → B (existing verb) | — |
-| 2+ | Prime-coprime readout + denoiser | ✅ | prime-period `READ_LOCKIN` mode | — |
-| 3 | Nuclear-spin memory (NV+¹³C) | ✅ | — | RF DAC channel at ~2 MHz + RF coil + RTL kind 3 |
-| 4 | 64-parallel distributed computing | ✅ | `RUN_ALL` 64-detector sweep | per-pixel MW (freq-mux or 64 coils) for independent circuits |
-| 5 | Gradient register width | ✅ | — | gradient coil + DAC + RTL verb |
-| 6 | Sub-pixel detector (charge-sharing centroiding) | ✅ | host-side centroid on `RUN_ALL` (no new RTL) | engineer graphene/MoS₂ sheet resistance (no new pads/ADC) |
-| 7 | N-shot lock-in integration | ✅ | host-side averaging on `RUN_ALL` (no new RTL) | — |
+| # | Invention | SIM | HW-fits (RTL to do) | needs-HW (PCB add) | needs-cryo |
+|---|---|---|---|---|---|
+| 1 | 64-pixel vector magnetometer (4-axis NV⟨111⟩) | ✅ | ODMR_SWEEP → B (existing verb) | — | — |
+| 2+ | Prime-coprime readout + denoiser | ✅ | prime-period `READ_LOCKIN` mode | — | — |
+| 3 | Nuclear-spin memory (NV+¹³C) | ✅ | — | RF DAC ~2 MHz + RF coil + RTL kind 3 | — |
+| 4 | 64-parallel distributed computing | ✅ | `RUN_ALL` 64-detector sweep | per-pixel MW for independent circuits | — |
+| 5 | Gradient register width | ✅ | ✅ coil+DAC ON PCB (PR #79 `d422a2b`) | — (done) | — |
+| 6 | Sub-pixel detector (charge-sharing centroiding) | ✅ | host-side centroid on `RUN_ALL` | engineer sheet resistance (no new pads/ADC) | — |
+| 7 | N-shot lock-in integration | ✅ | host-side averaging on `RUN_ALL` | — | — |
+| 8 | Magnon inter-pixel bus (YIG) | — | — | — | ❗ ~150 mK + YIG |
+| 9 | Classical anti-noise filter stack | ✅ | host-side/passive + DD on `RUN_SEQUENCE` | — | — |
+| 10 | ¹³C nuclear cluster register | to do | — | RF channel (shares Inv 3) | — |
+| 11 | NV nitrogen nuclear-spin (¹⁴N/¹⁵N) register | to do | — | RF channel (shares Inv 3) | — |
+| 12 | Resonant spin-to-charge readout | to do | — | extra laser line + optics (respin) | — |
+| 13 | Compressed-sensing super-res ODMR | building | host-side on `RUN_ALL` | — | — |
+| 14 | Bayesian quantum-limited readout | building | host-side on existing readout | — | — |
+| 15 | Parallel VQE / QAOA | to do | host-side on `run_parallel` | — | — |
+| 16 | Quantum kernel estimation (QSVM) | to do | host-side on `run_parallel` | — | — |
+| 17 | Distributed / Heisenberg-limited sensing | to do | — | — | ❗ needs Inv 8 |
+| 18 | Small QEC code on the register | to do | — | RF channel (shares Inv 3) | — |
+| 19 | Tensor-gradient magnetic imaging | building | host-side + Inv 5 coil (on PCB) | — | — |
 
 ## What to touch on the PCB for the needs-HW inventions
 
-1. **RF channel for ¹³C SWAP (invention 3):** add a DDS/synthesizer at
+1. **RF channel for ¹³C SWAP (invention 3, also 10/11/18):** add a DDS/synthesizer at
    ~2 MHz + a small RF coil near the diamond die + an FPGA SPI/DAC port
    (mirror the ADF4351 control path). Then add `RUN_SEQUENCE` kind 3
-   (MW+RF SWAP timing) in `fpga/rtl/command_parser.v`.
-2. **Gradient coil (invention 5):** add a gradient coil pair + a DAC
-   channel the FPGA drives + a `SET_GRADIENT` verb. Then `ODMR_SWEEP`
-   measures the per-pixel line count = the register width.
+   (MW+RF SWAP timing) in `fpga/rtl/command_parser.v`. The same RF channel
+   addresses the ¹³C cluster (Inv 10), the nitrogen nuclear spin (Inv 11),
+   and the QEC ancilla (Inv 18).
+2. **Gradient coil (invention 5):** ✅ **DONE** — on the PCB (`qssc-grad`,
+   merged PR #79 `d422a2b`). `dac_ctrl.v` + the `SET_GRADIENT` verb drive the
+   coil; `ODMR_SWEEP` measures the per-pixel line count = the register width.
+   Also enables Invention 19 (tensor-gradient imaging).
 3. **Per-pixel MW (invention 4, independent circuits):** either fast
    ADF4351 hopping for frequency-multiplexed per-pixel gates, or 64 small
    per-pixel loop antennas. Then a `RUN_PARALLEL` verb that loads 64
@@ -302,10 +538,10 @@ lever; integration adds ~30% on top. Shor bits ≈ (w−1)//3 → +1–2 bits.
    sheet's lateral charge-spreading length (`sigma_sheet` ~ pad_pitch/2): tune
    the graphene/MoS₂+PEDOT sheet resistance so a fluorescence spot spills to
    ≥2 neighbouring pads, and characterize `sigma_sheet` per die.
-5. **N-shot lock-in integration (invention 7):** NO hardware change at all —
-   the host averages N `RUN_ALL_ODMR` sweeps (or the firmware accumulates N
-   lock-in samples per point). Cost is measurement time ×N, not silicon.
+5. **Resonant spin-to-charge readout (invention 12):** an extra resonant laser
+   line + switching optics — the most invasive addition (optical path respin),
+   and the biggest single-shot readout-fidelity lever.
 
-None of these PCB additions exist today; the simulator carries the physics
-until they do. Inventions 6 and 7 need no PCB respin — only sheet-resistance
-tuning (6) and a host-side averaging protocol (7).
+Inventions 7, 9, 13, 14, 15, 16, 19 need **no PCB respin** — they are host-side
+or use hardware already on the board (the Inv 5 gradient coil, the existing
+`RUN_ALL_ODMR` / `RUN_SEQUENCE` verbs). Inventions 8 and 17 are cryo-only.

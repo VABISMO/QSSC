@@ -44,6 +44,8 @@ import numpy as np
 from .defects import DefectProfile, get_profile
 from .odmr_decompose import decompose_odmr
 from .simulator import resolvable_register_width, BRIGHT_CODE, READOUT_NOISE
+from .superres_odmr import superres_measured_width
+from .bayesian_readout import bayesian_measured_width
 from .detector_centroid import SubPixelModel, localize_spots, pad_grid_centers
 from .noise_filters import (
     AntiNoiseConfig,
@@ -228,7 +230,7 @@ def _pixel_odmr_spectrum(prof: DefectProfile, nv_present: int,
                          integration_shots: int = 1,
                          noise_env: Optional[NoiseEnvironment] = None,
                          anti_noise: Optional[AntiNoiseConfig] = None,
-                         ) -> tuple[np.ndarray, np.ndarray]:
+                         ) -> tuple[np.ndarray, np.ndarray, float]:
     """Synthesize one pixel's multi-line ODMR spectrum under the gradient.
 
     The gradient spreads NV resonances across the pixel by
@@ -298,7 +300,7 @@ def _pixel_odmr_spectrum(prof: DefectProfile, nv_present: int,
         eff_noise = noise_sigma / math.sqrt(max(1, int(integration_shots)))
     contrast = contrast + rng.normal(0.0, eff_noise, size=freqs.size)
     contrast = np.clip(contrast, 0.0, 1.0)
-    return freqs, contrast
+    return freqs, contrast, float(eff_noise)
 
 
 def calibrate_array(profile: DefectProfile | str = "NV",
@@ -315,6 +317,8 @@ def calibrate_array(profile: DefectProfile | str = "NV",
                     sub_pixel: Optional[SubPixelModel] = None,
                     noise_env: Optional[NoiseEnvironment] = None,
                     anti_noise: Optional[AntiNoiseConfig] = None,
+                    superres: Optional[float] = None,
+                    bayesian: Optional[float] = None,
                     ) -> ArrayCalibration:
     """Calibrate all 64 pixels: measure each pixel's usable qubit register width.
 
@@ -340,6 +344,24 @@ def calibrate_array(profile: DefectProfile | str = "NV",
     the pad grid). This is imaging metadata only -- it does NOT change
     ``register_width`` (within-pad spots merge; centroiding localizes one spot,
     not multiple). See :mod:`qssc.detector_centroid`.
+
+    ``superres`` (Invention 13): when set (a float ``0 < factor ≤ 1``, the
+    super-resolution acceptance fraction), the line counter uses sparse OMP
+    recovery (:mod:`qssc.superres_odmr`) over the known gradient-bin dictionary
+    instead of the hard ``min_snr`` threshold, recovering marginal lone-NV lines
+    down to ``factor · min_snr`` SNR + deconvolving overlapping lines → the
+    MEASURED width rises toward ``min(resolvable, nv_present)``. ``None`` = the
+    hard-threshold path (back-compat). Stacks with ``integration_shots`` /
+    ``noise_env`` / ``anti_noise`` (all lower the noise floor).
+
+    ``bayesian`` (Invention 14): when set (a float ``0 < confidence < 1``, the
+    per-family credible level), the line counter uses the Bayesian one-sided
+    credible-interval detector (:mod:`qssc.bayesian_readout`) instead of the
+    hard ``min_snr`` threshold — the one-sided matched-filter test at the same
+    false-positive rate accepts lines at a lower SNR → more marginal lone-NV
+    lines counted. ``None`` = the hard-threshold path (back-compat). An
+    alternative estimator to ``superres`` (pick one; if both are set,
+    ``superres`` takes precedence).
     """
     prof = get_profile(profile) if isinstance(profile, str) else profile
     if rng is None:
@@ -367,17 +389,36 @@ def calibrate_array(profile: DefectProfile | str = "NV",
         # the usable register width, capped by both the bin count and the NVs
         # present.
         n_bins = max(1, min(nv_present, resolvable)) if nv_present > 0 else 1
-        freqs, contrast = _pixel_odmr_spectrum(
+        freqs, contrast, eff_noise = _pixel_odmr_spectrum(
             prof, nv_present, n_bins, gradient_mhz_per_um, pixel_size_um, rng,
             integration_shots=integration_shots,
             noise_env=noise_env, anti_noise=anti_noise)
-        comps = decompose_odmr(
-            freqs, contrast,
-            min_snr=4.0,
-            linewidth_guess_mhz=linewidth_mhz,
-            min_separation_mhz=linewidth_mhz * 0.8,
-        )
-        measured = max(1, len(comps))
+        if superres is not None and superres > 0.0:
+            # Invention 13: sparse OMP recovery over the gradient-bin dictionary.
+            measured, comps = superres_measured_width(
+                freqs, contrast, n_bins=n_bins,
+                linewidth_hz=prof.odmr_linewidth_hz,
+                gradient_mhz_per_um=gradient_mhz_per_um,
+                pixel_size_um=pixel_size_um, d_ghz=prof.d_ghz,
+                noise_sigma=max(eff_noise, 1e-6), min_snr=4.0,
+                superres_factor=float(superres))
+        elif bayesian is not None and 0.0 < bayesian < 1.0:
+            # Invention 14: Bayesian one-sided credible-interval detector.
+            measured, comps = bayesian_measured_width(
+                freqs, contrast, n_bins=n_bins,
+                linewidth_hz=prof.odmr_linewidth_hz,
+                gradient_mhz_per_um=gradient_mhz_per_um,
+                pixel_size_um=pixel_size_um, d_ghz=prof.d_ghz,
+                noise_sigma=max(eff_noise, 1e-6),
+                confidence=float(bayesian))
+        else:
+            comps = decompose_odmr(
+                freqs, contrast,
+                min_snr=4.0,
+                linewidth_guess_mhz=linewidth_mhz,
+                min_separation_mhz=linewidth_mhz * 0.8,
+            )
+            measured = max(1, len(comps))
         register_width = min(measured, n_bins)
         odmr_lines = [round(c.freq_ghz, 6) for c in comps]
         # Invention 6: a sub-pixel (x, y) offset for this pixel's microdiamond on
@@ -427,6 +468,8 @@ def calibrate_array_from_codes(
     sub_pixel: Optional[SubPixelModel] = None,
     noise_env: Optional[NoiseEnvironment] = None,
     anti_noise: Optional[AntiNoiseConfig] = None,
+    superres: Optional[float] = None,
+    bayesian: Optional[float] = None,
 ) -> ArrayCalibration:
     """Build an :class:`ArrayCalibration` from a MEASURED ``(n_points, 64)`` code
     matrix — the real-hardware path.
@@ -501,13 +544,38 @@ def calibrate_array_from_codes(
         col = codes[:, j]
         bright = float(np.mean(np.concatenate([col[:edge], col[-edge:]]))) or 1.0
         contrast = col / bright  # 1 = bright, dips toward 0
-        comps = decompose_odmr(
-            freqs, contrast,
-            min_snr=min_snr,
-            linewidth_guess_mhz=linewidth_mhz,
-            min_separation_mhz=linewidth_mhz * 0.8,
-        )
-        register_width = max(1, min(len(comps), resolvable))
+        if superres is not None and superres > 0.0:
+            # Invention 13: estimate the per-column noise from the off-resonance
+            # edge (no dip there, just the bright floor) and run sparse OMP.
+            edge_std = float(np.std(np.concatenate([col[:edge], col[-edge:]])))
+            noise_sigma = max(edge_std / bright, 1e-6)
+            measured, comps = superres_measured_width(
+                freqs, contrast, n_bins=resolvable,
+                linewidth_hz=prof.odmr_linewidth_hz,
+                gradient_mhz_per_um=gradient_mhz_per_um,
+                pixel_size_um=pixel_size_um, d_ghz=prof.d_ghz,
+                noise_sigma=noise_sigma, min_snr=min_snr,
+                superres_factor=float(superres))
+            register_width = max(1, min(measured, resolvable))
+        elif bayesian is not None and 0.0 < bayesian < 1.0:
+            # Invention 14: Bayesian one-sided credible-interval detector.
+            edge_std = float(np.std(np.concatenate([col[:edge], col[-edge:]])))
+            noise_sigma = max(edge_std / bright, 1e-6)
+            measured, comps = bayesian_measured_width(
+                freqs, contrast, n_bins=resolvable,
+                linewidth_hz=prof.odmr_linewidth_hz,
+                gradient_mhz_per_um=gradient_mhz_per_um,
+                pixel_size_um=pixel_size_um, d_ghz=prof.d_ghz,
+                noise_sigma=noise_sigma, confidence=float(bayesian))
+            register_width = max(1, min(measured, resolvable))
+        else:
+            comps = decompose_odmr(
+                freqs, contrast,
+                min_snr=min_snr,
+                linewidth_guess_mhz=linewidth_mhz,
+                min_separation_mhz=linewidth_mhz * 0.8,
+            )
+            register_width = max(1, min(len(comps), resolvable))
         odmr_lines = [round(c.freq_ghz, 6) for c in comps]
         pixels.append(PixelCalibration(
             pixel_id=j,

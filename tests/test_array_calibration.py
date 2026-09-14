@@ -220,11 +220,11 @@ def test_clean_closes_measured_to_occupied_gap():
         picks = rng.integers(0, n_bins, size=nv)
         n_occ = int(np.bincount(picks, minlength=n_bins).astype(bool).sum())
         rng_state = rng.bit_generator.state  # keep the two shots in sync
-        f1, c1 = _pixel_odmr_spectrum(prof, nv, n_bins, g, psz, rng,
-                                      integration_shots=1)
+        f1, c1, _n1 = _pixel_odmr_spectrum(prof, nv, n_bins, g, psz, rng,
+                                           integration_shots=1)
         rng.bit_generator.state = rng_state
-        f16, c16 = _pixel_odmr_spectrum(prof, nv, n_bins, g, psz, rng,
-                                        integration_shots=16)
+        f16, c16, _n16 = _pixel_odmr_spectrum(prof, nv, n_bins, g, psz, rng,
+                                              integration_shots=16)
         m1 = min(len(decompose_odmr(f1, c1, min_snr=4.0,
                                     linewidth_guess_mhz=lw,
                                     min_separation_mhz=lw * 0.8)), n_bins)

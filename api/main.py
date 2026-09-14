@@ -209,6 +209,16 @@ class CalibrateArrayRequest(BaseModel):
     # dd_sequence, dd_n_blocks); empty/None -> all-off -> back-compat.
     noise_env: str = "none"
     anti_noise: Optional[dict] = None
+    # Invention 13: compressed-sensing super-resolution ODMR. When > 0, recover
+    # each pixel's line set by OMP sparse recovery over the gradient-bin
+    # dictionary with superres_factor = this value (0.6 typical; 1.0 = hard-
+    # threshold behaviour). Deconvolves overlapping lines + lowers the SNR bar.
+    superres: Optional[float] = Field(None, ge=0.0, le=1.0)
+    # Invention 14: Bayesian quantum-limited readout. When 0 < value < 1, recover
+    # lines by the one-sided Bonferroni-corrected matched-filter detector at this
+    # confidence (0.99 typical). Extracts marginal lone-NV lines the hard bar
+    # misses. Mutually exclusive with superres (superres takes precedence).
+    bayesian: Optional[float] = Field(None, gt=0.0, lt=1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -871,7 +881,8 @@ def calibrate_array_endpoint(req: CalibrateArrayRequest, request: Request = None
                 pixel_size_um=req.pixel_size_um,
                 seed=req.seed, temperature_k=req.temperature_k,
                 integration_shots=req.integration_shots, sub_pixel=sub_pixel,
-                noise_env=noise_env, anti_noise=anti_noise)
+                noise_env=noise_env, anti_noise=anti_noise,
+                superres=req.superres, bayesian=req.bayesian)
             io_label = "real"
         else:
             calib = calibrate_array(
@@ -882,7 +893,8 @@ def calibrate_array_endpoint(req: CalibrateArrayRequest, request: Request = None
                 temperature_k=req.temperature_k,
                 max_nv_per_microdiamond=req.max_nv_per_microdiamond,
                 integration_shots=req.integration_shots, sub_pixel=sub_pixel,
-                noise_env=noise_env, anti_noise=anti_noise)
+                noise_env=noise_env, anti_noise=anti_noise,
+                superres=req.superres, bayesian=req.bayesian)
             io_label = "simulated"
     except NoFPGADetected as exc:
         return {"error": "no-fpga-detected",
@@ -899,6 +911,13 @@ def calibrate_array_endpoint(req: CalibrateArrayRequest, request: Request = None
     except Exception:  # noqa: BLE001 - a cache write failure must not break the reply
         pass
     bw = best_uniform_width(calib.widths)
+    # Invention 13/14: which line-recovery mode produced the widths.
+    if req.superres is not None and req.superres > 0.0:
+        readout_mode = f"superres({req.superres})"
+    elif req.bayesian is not None and 0.0 < req.bayesian < 1.0:
+        readout_mode = f"bayesian({req.bayesian})"
+    else:
+        readout_mode = "hard-threshold"
     # Invention 9: report the effective noise + per-filter gain breakdown so the
     # frontend can show what each filter bought. Collapses to the prior values
     # when the stack is unset (noise_env="none", anti_noise empty).
@@ -922,6 +941,9 @@ def calibrate_array_endpoint(req: CalibrateArrayRequest, request: Request = None
         "total_working_qubits": bw[0] * bw[1],
         # Invention 7: N-shot lock-in integration (raises measured width).
         "integration_shots": calib.integration_shots,
+        # Invention 13/14: the per-pixel line-recovery mode that produced the
+        # widths (hard-threshold / superres(factor) / bayesian(confidence)).
+        "readout_mode": readout_mode,
         # Invention 6: sub-pixel detector imaging resolution (does NOT change
         # register_width -- within-pad spots merge; centroiding localizes one).
         "sub_pixel_factor": calib.sub_pixel_factor,
