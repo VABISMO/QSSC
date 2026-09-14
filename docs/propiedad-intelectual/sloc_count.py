@@ -81,6 +81,84 @@ FRONTEND_FILES = {
 
 BACKEND_SLOC = 7825  # native SLOCCount on api/ + qssc/ (Python, no rename)
 
+PCB_FILES = {
+    # native SLOCCount on tools/ (Python, no rename); the 23-file KiCad EDA toolchain
+    "tools/_audit_pins.py": 17,
+    "tools/_chip_map.py": 58,
+    "tools/_grep_ep.py": 12,
+    "tools/_kicad_compat.py": 36,
+    "tools/add_grad_fanout.py": 46,
+    "tools/audit_connections.py": 121,
+    "tools/audit_netlist.py": 58,
+    "tools/clear_net.py": 20,
+    "tools/close_residuals.py": 626,
+    "tools/copy_zones.py": 60,
+    "tools/fill_zones.py": 16,
+    "tools/freeroute.py": 196,
+    "tools/gen_bom.py": 149,
+    "tools/gen_qssc_kicad.py": 1671,
+    "tools/inject_base_routing.py": 118,
+    "tools/maze_bridge_2d.py": 280,
+    "tools/maze_bridge_3d.py": 439,
+    "tools/route_grad_nets.py": 167,
+    "tools/route_qssc_pcb.py": 645,
+    "tools/route_signals.py": 984,
+    "tools/sync_placement.py": 59,
+    "tools/usb_c_reversible_tie.py": 103,
+    "tools/widen_tracks.py": 37,
+}
+
+CI_TESTS_FILES = {
+    # 4 GitHub Actions workflows (.yml -> .py rename, # counter — same as .xdc)
+    ".github/workflows/ci.yml": 125,
+    ".github/workflows/deploy.yml": 109,
+    ".github/workflows/pcb.yml": 59,
+    ".github/workflows/release.yml": 73,
+    # 33 pytest test files (native SLOCCount on .py)
+    "tests/test_algorithms_platforms.py": 127,
+    "tests/test_api.py": 294,
+    "tests/test_array_calibration.py": 220,
+    "tests/test_circuit_histogram.py": 127,
+    "tests/test_circuit_physics_audit.py": 179,
+    "tests/test_core.py": 592,
+    "tests/test_detector_centroid.py": 96,
+    "tests/test_field_gradient_register.py": 87,
+    "tests/test_fpga_sim.py": 67,
+    "tests/test_gcode.py": 267,
+    "tests/test_hardware_real.py": 294,
+    "tests/test_magnetometer.py": 62,
+    "tests/test_noise_filters.py": 222,
+    "tests/test_noise_summary.py": 53,
+    "tests/test_nuclear_memory.py": 83,
+    "tests/test_parallel_computing.py": 287,
+    "tests/test_pcb_component_audit.py": 173,
+    "tests/test_pcb_connectivity.py": 235,
+    "tests/test_pcb_die_fpga_audit.py": 143,
+    "tests/test_pcb_drc.py": 38,
+    "tests/test_pcb_head.py": 129,
+    "tests/test_pcb_pin_audit.py": 121,
+    "tests/test_pcb_route.py": 62,
+    "tests/test_pcb_route_full.py": 55,
+    "tests/test_pcb_route_signals.py": 78,
+    "tests/test_pcb_stackup.py": 39,
+    "tests/test_pixel_mode.py": 109,
+    "tests/test_prime_readout.py": 101,
+    "tests/test_qrng.py": 135,
+    "tests/test_render_p0_svg.py": 29,
+    "tests/test_render_p1_svg.py": 23,
+    "tests/test_spincoater_gcode.py": 50,
+    "tests/test_superres_bayesian_tensor.py": 266,
+}
+
+# cloc 2.11 cross-check (code lines, excludes blank+comment) — per unit
+CLOC_CODE = {
+    "FPGA": 4524,
+    "Frontend": 4328,
+    "Backend": 8013,
+    "PCB": 5937,
+    "CI+Tests": 5181,
+}
+
 
 # ---------------------------------------------------------------------------
 # COCOMO basic model
@@ -132,8 +210,41 @@ def main() -> int:
     print(f"  -> {c['person_years']:.2f} PY ({c['person_months']:.1f} PM), "
           f"${c['cost_usd']:,.0f}")
     print()
-    grand = fpga + frontend + BACKEND_SLOC
-    print(f"=== GRAND TOTAL === {grand} SLOC")
+    pcb = _print_area("PCB (KiCad EDA toolchain)", PCB_FILES)
+    ci = _print_area("CI + Tests (workflows + pytest)", CI_TESTS_FILES)
+    grand = fpga + frontend + BACKEND_SLOC + pcb + ci
+    gc = cocomo(grand)
+    print(f"=== GRAND TOTAL (5 units) === {grand} SLOC")
+    print(f"  -> {gc['person_years']:.2f} PY ({gc['person_months']:.1f} PM), "
+          f"${gc['cost_usd']:,.0f}")
+    print()
+
+    # ---- cloc 2.11 cross-check ----
+    sloc_by_unit = {
+        "FPGA": fpga,
+        "Frontend": frontend,
+        "Backend": BACKEND_SLOC,
+        "PCB": pcb,
+        "CI+Tests": ci,
+    }
+    print("=== SLOCCount vs cloc 2.11 (cross-check) ===")
+    print(f"  {'Unit':<11}{'SLOCCount':>10}{'cloc':>8}{'diff':>7}")
+    stot = ctot = 0
+    for name in CLOC_CODE:
+        s = sloc_by_unit[name]
+        cl = CLOC_CODE[name]
+        stot += s
+        ctot += cl
+        print(f"  {name:<11}{s:>10}{cl:>8}{cl - s:>+7d}")
+    print(f"  {'TOTAL':<11}{stot:>10}{ctot:>8}{ctot - stot:>+7d}")
+    sc = cocomo(stot)
+    cc = cocomo(ctot)
+    print(f"  SLOCCount {stot} -> {sc['person_years']:.2f} PY  "
+          f"${sc['cost_usd']:,.0f}")
+    print(f"  cloc      {ctot} -> {cc['person_years']:.2f} PY  "
+          f"${cc['cost_usd']:,.0f}")
+    print(f"  cost delta: ${cc['cost_usd'] - sc['cost_usd']:,.0f} "
+          f"({(cc['cost_usd'] / sc['cost_usd'] - 1) * 100:+.1f}%)")
     return 0
 
 

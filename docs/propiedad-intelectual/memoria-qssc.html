@@ -80,7 +80,7 @@ header.hero .brandmark .wm .grad{background:var(--grad);-webkit-background-clip:
 header.hero .brandmark .tag{font-family:var(--font-mono);font-size:11px;color:var(--dim);letter-spacing:.14em;text-transform:uppercase;margin-top:2px}
 
 /* ---- summary dashboard ---- */
-.dashboard{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:34px}
+.dashboard{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:34px}
 .tile{
   background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
   padding:18px 18px 16px;position:relative;overflow:hidden;
@@ -89,6 +89,8 @@ header.hero .brandmark .tag{font-family:var(--font-mono);font-size:11px;color:va
 .tile.fpga{--u-grad:linear-gradient(180deg,#22d3ee,#6366f1)}
 .tile.frontend{--u-grad:linear-gradient(180deg,#6366f1,#8b5cf6)}
 .tile.backend{--u-grad:linear-gradient(180deg,#f472b6,#ec4899)}
+.tile.pcb{--u-grad:linear-gradient(180deg,#34d399,#10b981)}
+.tile.ci{--u-grad:linear-gradient(180deg,#f59e0b,#d97706)}
 .tile.total{--u-grad:var(--grad);background:linear-gradient(135deg,rgba(34,211,238,.10),rgba(99,102,241,.10)),var(--panel)}
 .tile .k{font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
 .tile .v{font-family:var(--font-head);font-size:30px;font-weight:700;margin-top:6px;font-variant-numeric:tabular-nums}
@@ -104,6 +106,8 @@ section.unidad{
 section.unidad.fpga{--u:#22d3ee;--u-grad:linear-gradient(135deg,#22d3ee,#3b82f6)}
 section.unidad.frontend{--u:#8b5cf6;--u-grad:linear-gradient(135deg,#6366f1,#8b5cf6)}
 section.unidad.backend{--u:#f472b6;--u-grad:linear-gradient(135deg,#f472b6,#ec4899)}
+section.unidad.pcb{--u:#34d399;--u-grad:linear-gradient(135deg,#34d399,#10b981)}
+section.unidad.ci{--u:#f59e0b;--u-grad:linear-gradient(135deg,#f59e0b,#d97706)}
 
 .uhead{display:flex;align-items:center;gap:16px;margin-bottom:8px}
 .uhead .num{
@@ -198,7 +202,7 @@ section.catalog .lgnd .ck{display:inline-grid;place-items:center;width:18px;heig
 .matxwrap{overflow-x:auto;border:1px solid var(--border);border-radius:12px}
 table.matx{width:100%;border-collapse:collapse;font-size:13px;min-width:720px}
 table.matx th,table.matx td{padding:9px 12px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
-table.matx thead th{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);background:var(--bg-soft);position:sticky;top:60px;z-index:2}
+table.matx thead th{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);background:var(--bg-soft)}
 table.matx th.m{width:32%}
 table.matx td.mn{font-weight:600;color:var(--text);font-size:13.5px}
 table.matx td.mn code{font-size:11.5px;color:var(--brand);font-weight:500}
@@ -260,6 +264,9 @@ footer.ipfoot .meta b{color:var(--text);font-weight:600}
       <a href="#fpga"><span class="dot" style="background:#22d3ee"></span>FPGA</a>
       <a href="#frontend"><span class="dot" style="background:#8b5cf6"></span>Frontend</a>
       <a href="#backend"><span class="dot" style="background:#f472b6"></span>Backend</a>
+      <a href="#pcb"><span class="dot" style="background:#34d399"></span>Scripts PCB</a>
+      <a href="#ci"><span class="dot" style="background:#f59e0b"></span>CI + Tests</a>
+      <a href="#comparativa"><span class="dot" style="background:#22d3ee"></span>SLOCCount vs cloc</a>
     </div>
   </div>
 </nav>
@@ -282,8 +289,8 @@ footer.ipfoot .meta b{color:var(--text);font-weight:600}
     </div>
     <div class="eyebrow">Memoria descriptiva · Depósito de software</div>
     <h1>Registro de la <span class="grad">Propiedad Intelectual</span></h1>
-    <p class="sub">Memoria descriptiva de las tres unidades de software del Proyecto QSSC — firmware FPGA, frontend web y backend — para su inscripción en el Registro de la Propiedad Intelectual de España.</p>
-    <p class="cite">Art. 96.1 del Texto Refundido de la Ley de Propiedad Intelectual (RDLeg 1/1996) · Valoración SLOCCount 2.26 / COCOMO básico</p>
+    <p class="sub">Memoria descriptiva de las cinco unidades de software del Proyecto QSSC — firmware FPGA, frontend web, backend, toolchain EDA PCB y sistema de integración continua + suite de tests — para su inscripción en el Registro de la Propiedad Intelectual de España.</p>
+    <p class="cite">Art. 96.1 del Texto Refundido de la Ley de Propiedad Intelectual (RDLeg 1/1996) · Valoración SLOCCount 2.26 / cloc 2.11 · COCOMO básico</p>
 
     <div class="dashboard">
       <div class="tile fpga">
@@ -304,11 +311,23 @@ footer.ipfoot .meta b{color:var(--text);font-weight:600}
         <div class="m">Python · FastAPI · Qiskit</div>
         <div class="cost">$234.315 · 1,73 PY</div>
       </div>
+      <div class="tile pcb">
+        <div class="k">Scripts PCB KiCad</div>
+        <div class="v">5.918<span class="unit"> SLOC</span></div>
+        <div class="m">Python · EDA toolchain</div>
+        <div class="cost">$174.753 · 1,29 PY</div>
+      </div>
+      <div class="tile ci">
+        <div class="k">CI + suite de tests</div>
+        <div class="v">5.209<span class="unit"> SLOC</span></div>
+        <div class="m">pytest · GitHub Actions</div>
+        <div class="cost">$152.839 · 1,13 PY</div>
+      </div>
       <div class="tile total">
         <div class="k">Total depositado</div>
-        <div class="v">16.652<span class="unit"> SLOC</span></div>
-        <div class="m">3 unidades · 3,64 PY</div>
-        <div class="cost">$491.176 re-desarrollo</div>
+        <div class="v">27.779<span class="unit"> SLOC</span></div>
+        <div class="m">5 unidades · 6,56 PY</div>
+        <div class="cost">$886.225 re-desarrollo</div>
       </div>
     </div>
   </div>
@@ -838,14 +857,353 @@ qssc/tensor_gradiometry.py</pre>
   </div>
 </section>
 
+<!-- =========================== UNIDAD 4 · SCRIPTS PCB =========================== -->
+<section class="unidad pcb" id="pcb">
+  <div class="wrap">
+    <div class="uhead">
+      <div class="num">4</div>
+      <h2><span class="uname">Unidad IV</span>Scripts de automatización PCB — Toolchain EDA KiCad</h2>
+      <div class="sloc-pill">5.918 SLOC · $174.753</div>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§1</span> Datos de la obra</h3>
+      <table class="kv">
+        <tr><th>Título</th><td>QSSC — Toolchain EDA headless para la generación, enrutado y verificación de las placas PCB KiCad de la plataforma cuántica</td></tr>
+        <tr><th>Tipo de obra</th><td>Programa de ordenador (Art. 96.1 del Texto Refundido de la Ley de Propiedad Intelectual, RDLeg 1/1996)</td></tr>
+        <tr><th>Titular / Autor</th><td><em>[A completar por el titular: nombre/apellidos o razón social, NIF/CIF, domicilio]</em></td></tr>
+        <tr><th>Fecha de creación (inicio)</th><td>2026-08-07</td></tr>
+        <tr><th>Fecha de finalización</th><td>2026-09-14</td></tr>
+        <tr><th>Lugar de elaboración</th><td>España</td></tr>
+        <tr><th>Lenguaje</th><td>Python 3.12 (manipulación programática de ficheros KiCad <code>.kicad_pcb</code> / <code>.kicad_sch</code> / <code>.kicad_pro</code> / <code>.kicad_sym</code>)</td></tr>
+        <tr><th>Plataforma objetivo</th><td>Linux; <code>kicad-cli</code> (KiCad 8.0) para DRC/ERC; FreeRouting 2.4.1 para el enrutado automático</td></tr>
+      </table>
+      <div class="valrow">
+        <div class="st"><div class="k">Tamaño</div><div class="v">5.918 SLOC</div></div>
+        <div class="st"><div class="k">Esfuerzo</div><div class="v">1,29 PY</div></div>
+        <div class="st"><div class="k">Coste re-desarrollo</div><div class="v">$174.753</div></div>
+      </div>
+      <div class="callout">
+        Métricas generadas con <b>SLOCCount 2.26</b> (David A. Wheeler, GPL), contaje nativo sobre los 23 ficheros Python del toolchain (SLOCCount reconoce <code>.py</code> nativamente, sin renombrado). Fórmula COCOMO básica <code>PM = 2,4 · KSLOC^1,05</code>. Estimación de coste de re-desarrollo, no precio de mercado. El script reproducible <code>docs/propiedad-intelectual/sloc_count.py</code> contiene el conteo por fichero y la valoración de las cuatro áreas.
+      </div>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§2</span> Descripción general</h3>
+      <p class="lead">Esta unidad es el toolchain EDA headless que genera, enruta y verifica las dos placas PCB del QSSC (placa principal 6 capas 150×118 mm y placa cabezal 6 capas) sin abrir la GUI de KiCad.</p>
+      <p>El toolchain produce los ficheros <code>.kicad_pcb</code>, <code>.kicad_sch</code>, <code>.kicad_pro</code> y <code>.kicad_sym</code> por código —netlist, footprintes, apilado de capas, posicionado, fanout de bus del dado, planos de masa— y luego ejecuta el enrutado de señales, el vuelcado/reebarbado de zonas, el enrutador automático FreeRouting y el cierre de split-nets residuales, todo de forma programática y reproducible. La verificación (DRC/ERC, auditoría de conectividad y netlist) se ejecuta con <code>kicad-cli</code> y scripts de auditoría propios, de modo que las dos placas alcanzan DRC 0/0/0 de extremo a extremo sin intervención manual en la GUI.</p>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§3</span> Arquitectura y módulos</h3>
+      <p>23 scripts Python en <code>tools/</code>, organizados en cinco grupos funcionales:</p>
+
+      <div class="sub">Generación del diseño (netlist + footprintes + capas)</div>
+      <div class="mod"><code>gen_qssc_kicad.py</code> <span class="sloc">(1.671 SLOC)</span> — <span class="desc">generador principal: construye ambas placas (principal + cabezal), netlist por datasheet, footprintes, apilado de 6 capas, posicionado, zócalo SBT Ironwood del dado, bus del dado a 2,5 mm de pitch.</span></div>
+      <div class="mod"><code>gen_bom.py</code> <span class="sloc">(149 SLOC)</span> — <span class="desc">extrae la lista de materiales (BOM) desde los componentes reales de la placa generada.</span></div>
+
+      <div class="sub">Enrutado de señales y fanout</div>
+      <div class="mod"><code>route_signals.py</code> <span class="sloc">(984 SLOC)</span> — <span class="desc">enrutado de las señales de 1ª pasada: fanout del dado derivado de la capa de pads (<code>_chip_fanout</code>) con 0,80 mm de clearance, bus de escape despejado del campo de 0,30 mm para FreeRouting.</span></div>
+      <div class="mod"><code>route_qssc_pcb.py</code> <span class="sloc">(645 SLOC)</span> — <span class="desc">orquestador del enrutado: sync → inject → copy_zones → fill → maze3d, pipeline por placa.</span></div>
+      <div class="mod"><code>route_grad_nets.py</code> <span class="sloc">(167 SLOC)</span> — <span class="desc">enrutado dedicado de las redes de la bobina de gradiente (cobre DRC-clean, net-tie).</span></div>
+      <div class="mod"><code>freeroute.py</code> <span class="sloc">(196 SLOC)</span> — <span class="desc">envoltura de FreeRouting 2.4.1 vía la API DSN/SES de pcbnew; <code>-mt 1</code> (no <code>-mt 0</code>, SES vacío); <code>unconnected_items:ignore</code>.</span></div>
+      <div class="mod"><code>maze_bridge_3d.py</code> <span class="sloc">(439 SLOC)</span> — <span class="desc">puente A* 3D multi-capa (B.Cu + In3) para cerrar split-nets difíciles; distancia métrica real.</span></div>
+      <div class="mod"><code>maze_bridge_2d.py</code> <span class="sloc">(280 SLOC)</span> — <span class="desc">puente A* 2D dentro de una capa.</span></div>
+
+      <div class="sub">Zonas, pistas y residuales</div>
+      <div class="mod"><code>close_residuals.py</code> <span class="sloc">(626 SLOC)</span> — <span class="desc">cierra split-nets residuales tras FreeRouting; el que más SLOC aporta al cierre de conectividad.</span></div>
+      <div class="mod"><code>inject_base_routing.py</code> <span class="sloc">(118 SLOC)</span> — <span class="desc">inyecta el enrutado base (fanout + buses) antes del autoruter.</span></div>
+      <div class="mod"><code>copy_zones.py</code> <span class="sloc">(60 SLOC)</span> — <span class="desc">copia zonas entre placas/plantillas.</span></div>
+      <div class="mod"><code>fill_zones.py</code> <span class="sloc">(16 SLOC)</span> — <span class="desc">vuelca (pour) las zonas de masa.</span></div>
+      <div class="mod"><code>widen_tracks.py</code> <span class="sloc">(37 SLOC)</span> — <span class="desc">ensancha pistas de potencia.</span></div>
+      <div class="mod"><code>sync_placement.py</code> <span class="sloc">(59 SLOC)</span> — <span class="desc">sincroniza el posicionado entre esquemático y PCB.</span></div>
+      <div class="mod"><code>clear_net.py</code> <span class="sloc">(20 SLOC)</span> — <span class="desc">limpia una red concreta antes de re-enrutar.</span></div>
+      <div class="mod"><code>add_grad_fanout.py</code> <span class="sloc">(46 SLOC)</span> — <span class="desc">añade el fanout del gradiente.</span></div>
+      <div class="mod"><code>usb_c_reversible_tie.py</code> <span class="sloc">(103 SLOC)</span> — <span class="desc">resolución reversible del USB-C.</span></div>
+
+      <div class="sub">Auditoría y verificación</div>
+      <div class="mod"><code>audit_connections.py</code> <span class="sloc">(121 SLOC)</span> — <span class="desc">auditoría de conectividad: split-nets, pines colgantes, por placa.</span></div>
+      <div class="mod"><code>audit_netlist.py</code> <span class="sloc">(58 SLOC)</span> — <span class="desc">auditoría del netlist contra el datasheet.</span></div>
+
+      <div class="sub">Helpers internos de compatibilidad KiCad</div>
+      <div class="mod"><code>_kicad_compat.py</code> <span class="sloc">(36)</span>, <code>_chip_map.py</code> <span class="sloc">(58)</span>, <code>_audit_pins.py</code> <span class="sloc">(17)</span>, <code>_grep_ep.py</code> <span class="sloc">(12)</span> — <span class="desc">utilidades de parsing/escrituraKiCad y mapeo del dado compartidas por los scripts anteriores.</span></div>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§4</span> Tecnologías y lenguajes</h3>
+      <table class="lang">
+        <tr><th>Lenguaje</th><th>SLOC</th><th>%</th></tr>
+        <tr><td><span class="bar" style="width:140px"></span>Python 3.12</td><td>5.918</td><td>100 %</td></tr>
+        <tr><td>Total</td><td>5.918</td><td>100 %</td></tr>
+      </table>
+      <p style="margin-top:12px;color:var(--muted);font-size:13.5px">Herramientas externas invocadas: <code>kicad-cli</code> (KiCad 8.0, DRC/ERC headless), FreeRouting 2.4.1 (autoruter, vía DSN/SES), pcbnew Python API (swig). Sin GUI: todo el flujo es reproducible desde línea de comandos.</p>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§5</span> Funcionalidades destacadas — metodologías EDA implementadas</h3>
+      <div class="feats">
+        <div class="feat"><div class="ft"><span class="n">01</span><b>Generación headless del diseño completo</b> <code>gen_qssc_kicad.py</code></div><p>Construye ambas placas (principal 150×118 mm 6 capas + cabezal 6 capas) por código: netlist por datasheet, footprintes, apilado de capas, posicionado, zócalo SBT Ironwood del dado de 130 pads a 2,5 mm de pitch, bus del dado. Sin abrir la GUI de KiCad — reproducible.</p></div>
+        <div class="feat"><div class="ft"><span class="n">02</span><b>Fanout del dado derivado de la capa de pads</b> <code>_chip_fanout</code></div><p>El fanout del bus del dado se deriva automáticamente de la capa de pads, con 0,80 mm de clearance, despejando el campo de 0,30 mm para que el autoruter no lo bloquee. HDI via floors 0,20/0,05.</p></div>
+        <div class="feat"><div class="ft"><span class="n">03</span><b>Enrutado por etapas (sync → inject → copy_zones → fill → maze3d)</b> <code>route_qssc_pcb.py</code></div><p>Pipeline orquestado por placa: sincroniza posicionado, inyecta el enrutado base, copia zonas, vuelca masas y cierra los split-nets difíciles con el puente A* 3D. Cada etapa es inspeccionable y reversible.</p></div>
+        <div class="feat"><div class="ft"><span class="n">04</span><b>FreeRouting 2.4.1 vía API DSN/SES de pcbnew</b> <code>freeroute.py</code></div><p>Envoltura del autoruter con <code>-mt 1</code> (no <code>-mt 0</code>: el SES queda vacío y cuelga), <code>unconnected_items:ignore</code>, y la API DSN/SES de pcbnew en lugar del CLI. Ciclos incrementales cortos (MP=4-6) que guardan el board cada ciclo, nunca una pasada larga <code>-mp 64</code>.</p></div>
+        <div class="feat"><div class="ft"><span class="n">05</span><b>Puente A* 3D multi-capa</b> <code>maze_bridge_3d.py</code></div><p>Cierra split-nets que el autoruter no resuelve buscando un camino A* 3D a través de B.Cu + In3 con distancia métrica real; distingue las 3 violaciones reales de KiCad de los 704 internal-violations de FreeRouting.</p></div>
+        <div class="feat"><div class="ft"><span class="n">06</span><b>Cierre de split-nets residuales</b> <code>close_residuals.py</code></div><p>Tras FreeRouting, cierra los split-nets restantes uno a uno hasta llegar a 0 split / 0 dangling; el módulo de mayor SLOC del grupo de cierre.</p></div>
+        <div class="feat"><div class="ft"><span class="n">07</span><b>Cobre del gradiente DRC-clean (net-tie)</b> <code>route_grad_nets.py</code></div><p>Enrutado dedicado de la bobina de gradiente con aproximación net-tie para obtener cobre real que pasa el DRC, en lugar de un shape suelto.</p></div>
+        <div class="feat"><div class="ft"><span class="n">08</span><b>Auditoría de conectividad + netlist por datasheet</b> <code>audit_connections.py / audit_netlist.py</code></div><p>Verifica split-nets, pines colgantes y la correspondencia del netlist con el datasheet, por placa; base de las barras de conectividad y pin-audit del CI.</p></div>
+        <div class="feat"><div class="ft"><span class="n">09</span><b>BOM desde los componentes reales</b> <code>gen_bom.py</code></div><p>Extrae la lista de materiales desde los componentes efectivamente colocados en la placa generada, no de una lista manual.</p></div>
+      </div>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§6</span> Originalidad y características distintivas</h3>
+      <ul>
+        <li>Toolchain EDA <b>100 % headless y reproducible</b>: las dos placas se generan, enrutan y verifican a DRC 0/0/0 sin abrir la GUI de KiCad, de extremo a extremo por código.</li>
+        <li><b>Generación por código del netlist + footprintes + apilado</b> de un instrumento cuántico de matriz 64-píxel con dado de 130 pads a 2,5 mm y zócalo SBT, no captura manual de un esquema.</li>
+        <li><b>Integración del autoruter FreeRouting vía la API DSN/SES</b> de pcbnew con ciclos incrementales que guardan el board, evitando el cuelgue del SES vacío de <code>-mt 0</code>.</li>
+        <li><b>Cierre determinista de split-nets</b> con puente A* 3D multi-capa, distinguiendo las violaciones reales de KiCad de las internas de FreeRouting.</li>
+      </ul>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§7</span> Estado de verificación</h3>
+      <ul>
+        <li>Ambas placas alcanzan <b>DRC 0/0/0</b> (0 errores, 0 avisos, 0 split-nets) verificadas con <code>kicad-cli</code> headless.</li>
+        <li>Auditoría de conectividad y pin-audit (scripts propios) en verde; integradas en el CI (<code>pcb.yml</code>).</li>
+        <li>Reproducible: regenerar ambas placas + enrutar + DRC desde línea de comandos sin intervención GUI.</li>
+      </ul>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§8</span> Entorno de ejecución</h3>
+      <ul>
+        <li><b>Python</b>: 3.12 con el mismo entorno virtual del proyecto (<code>.venv</code>).</li>
+        <li><b>KiCad</b>: 8.0 (PPA <code>kicad/kicad-8.0-releases</code>); <code>kicad-cli</code> para DRC/ERC headless.</li>
+        <li><b>Autoruter</b>: FreeRouting 2.4.1 (vía API DSN/SES de pcbnew, <code>-mt 1</code>).</li>
+        <li><b>Salida</b>: ficheros <code>.kicad_pcb / .kicad_sch / .kicad_pro / .kicad_sym</code> + BOM para fabricación.</li>
+      </ul>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§9</span> Lista de ficheros fuente depositados</h3>
+<pre class="files">tools/_audit_pins.py
+tools/_chip_map.py
+tools/_grep_ep.py
+tools/_kicad_compat.py
+tools/add_grad_fanout.py
+tools/audit_connections.py
+tools/audit_netlist.py
+tools/clear_net.py
+tools/close_residuals.py
+tools/copy_zones.py
+tools/fill_zones.py
+tools/freeroute.py
+tools/gen_bom.py
+tools/gen_qssc_kicad.py
+tools/inject_base_routing.py
+tools/maze_bridge_2d.py
+tools/maze_bridge_3d.py
+tools/route_grad_nets.py
+tools/route_qssc_pcb.py
+tools/route_signals.py
+tools/sync_placement.py
+tools/usb_c_reversible_tie.py
+tools/widen_tracks.py</pre>
+    </div>
+  </div>
+</section>
+
+<!-- =========================== UNIDAD 5 · CI + TESTS =========================== -->
+<section class="unidad ci" id="ci">
+  <div class="wrap">
+    <div class="uhead">
+      <div class="num">5</div>
+      <h2><span class="uname">Unidad V</span>Sistema de integración continua (CI) y suite de tests</h2>
+      <div class="sloc-pill">5.209 SLOC · $152.839</div>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§1</span> Datos de la obra</h3>
+      <table class="kv">
+        <tr><th>Título</th><td>QSSC — Pipelines de integración continua (GitHub Actions) y suite de verificación automatizada</td></tr>
+        <tr><th>Tipo de obra</th><td>Programa de ordenador (Art. 96.1 del Texto Refundido de la Ley de Propiedad Intelectual, RDLeg 1/1996)</td></tr>
+        <tr><th>Titular / Autor</th><td><em>[A completar por el titular: nombre/apellidos o razón social, NIF/CIF, domicilio]</em></td></tr>
+        <tr><th>Fecha de creación (inicio)</th><td>2026-08-07</td></tr>
+        <tr><th>Fecha de finalización</th><td>2026-09-14</td></tr>
+        <tr><th>Lugar de elaboración</th><td>España</td></tr>
+        <tr><th>Lenguaje</th><td>Python 3.12 (tests, <code>pytest</code>) + YAML (workflows de GitHub Actions)</td></tr>
+        <tr><th>Plataforma objetivo</th><td>GitHub Actions (<code>ubuntu-latest</code>); <code>pytest</code> + <code>iverilog</code> + <code>kicad-cli</code> + <code>ruff</code></td></tr>
+      </table>
+      <div class="valrow">
+        <div class="st"><div class="k">Tamaño (SLOCCount)</div><div class="v">5.209 SLOC</div></div>
+        <div class="st"><div class="k">Esfuerzo</div><div class="v">1,13 PY</div></div>
+        <div class="st"><div class="k">Coste re-desarrollo</div><div class="v">$152.839</div></div>
+      </div>
+      <div class="callout">
+        <b>Composición:</b> 4 workflows de GitHub Actions (366 SLOC) + 33 ficheros de test Python (4.843 SLOC). Métricas con <b>SLOCCount 2.26</b> (contaje nativo de <code>.py</code>; YAML renombrado <code>.yml</code>→<code>.py</code>, contador de <code>#</code>, misma técnica ya usada para <code>.xdc</code>). Verificación cruzada con <b>cloc 2.11</b>: 5.181 líneas de código (tests 4.815 + workflows 366), diferencia −28 (−0,5 %). El script reproducible <code>docs/propiedad-intelectual/sloc_count.py</code> contiene el conteo por fichero y la comparación SLOCCount/cloc de las cinco áreas.
+      </div>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§2</span> Descripción general</h3>
+      <p class="lead">Esta unidad es el sistema de calidad que verifica automáticamente las otras cuatro en cada push y pull request: una suite de tests <code>pytest</code> que ejercita la física, la API, el modo hardware real, la readout avanzada, la sensórica y la PCB, y cuatro pipelines de GitHub Actions que orquestan tests, lint, simulación RTL, DRC de PCB, build y despliegue.</p>
+      <p>El sistema garantiza que ningún cambio llega a <code>main</code> sin pasar los tests de software/física, el lint <code>ruff</code>, la simulación funcional <code>iverilog</code> del RTL, el DRC <code>kicad-cli</code> de ambas placas y el gate verde-de-CI antes del despliegue. Es la capa que hace reproducible y auditable el depósito completo.</p>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§3</span> Arquitectura y módulos</h3>
+
+      <div class="sub">Pipelines de GitHub Actions (4 workflows, 9 jobs)</div>
+      <div class="mod"><code>.github/workflows/ci.yml</code> <span class="sloc">(125 SLOC)</span> — <span class="desc">pipeline principal, 3 jobs en matriz Python: (1) <b>Tests</b> — <code>pytest --cov=qssc --cov=api</code> con cobertura + smoke test del CLI + subida de artefacto de cobertura; (2) <b>Lint</b> — <code>ruff check --select=E9,F63,F7,F82,F401,F841</code>; (3) <b>FPGA RTL</b> — parse pyverilog de todos los módulos + consistencia XDC↔top_level (<code>tools/check_xdc_ports.py</code>) + simulación funcional <code>iverilog -g2012 -DFAST_SIM</code> del testbench auto-verificable.</span></div>
+      <div class="mod"><code>.github/workflows/pcb.yml</code> <span class="sloc">(59 SLOC)</span> — <span class="desc">verificación de PCB, 1 job: instala KiCad 8.0 del PPA oficial (<code>kicad-cli</code> + binding pcbnew), sanity-check del binding, y ejecuta <code>pytest tests/test_pcb_*.py</code> (DRC real + conectividad + pin-audit + stackup de ambas placas) + <code>ruff</code> sobre los tools de PCB.</span></div>
+      <div class="mod"><code>.github/workflows/deploy.yml</code> <span class="sloc">(109 SLOC)</span> — <span class="desc">despliegue, 3 jobs: (1) <b>Require green CI on main</b> — verifica que la última ejecución de CI en main esté verde antes de desplegar; (2) <b>Frontend → GitHub Pages</b> — build del dashboard con Vite y despliegue a Pages; (3) <b>API → Render</b> — dispara el deploy hook (test-gated).</span></div>
+      <div class="mod"><code>.github/workflows/release.yml</code> <span class="sloc">(73 SLOC)</span> — <span class="desc">release, 2 jobs: (1) <b>Build artifacts</b> — sdist+wheel Python + build del dashboard frontend; (2) <b>Publish GitHub Release</b> — crea el release con los artefactos.</span></div>
+
+      <div class="sub">Suite de tests pytest (33 ficheros, 4.843 SLOC, 354 funciones de test)</div>
+      <div class="mod"><b>Núcleo y algoritmos</b> <span class="sloc">(4 ficheros)</span> — <span class="desc"><code>test_core.py</code> (592), <code>test_algorithms_platforms.py</code>, <code>test_circuit_histogram.py</code>, <code>test_circuit_physics_audit.py</code> — backend Qiskit, Bell/Shor/Grover/QFT, auditoría física (dipolo-dipolo, canales de error, corrección Qiskit).</span></div>
+      <div class="mod"><b>API y vía hardware real</b> <span class="sloc">(2 ficheros)</span> — <span class="desc"><code>test_api.py</code> (294), <code>test_hardware_real.py</code> (294) — endpoints REST con TestClient sobre la app real; detección de FPGA y degradación veraz <code>no-fpga-detected</code>.</span></div>
+      <div class="mod"><b>Calibración y readout avanzado</b> <span class="sloc">(7 ficheros)</span> — <span class="desc"><code>test_array_calibration.py</code>, <code>test_superres_bayesian_tensor.py</code> (266), <code>test_noise_filters.py</code> (222), <code>test_pixel_mode.py</code>, <code>test_prime_readout.py</code>, <code>test_detector_centroid.py</code>, <code>test_noise_summary.py</code> — ancho de registro medido, super-res OMP, lectura Bayesiana, centroiding, denoise por primas, pila anti-ruido, modos registro/ensamble.</span></div>
+      <div class="mod"><b>Sensórica y computación paralela</b> <span class="sloc">(2 ficheros)</span> — <span class="desc"><code>test_parallel_computing.py</code> (287), <code>test_magnetometer.py</code> — magnetómetro vectorial, gradiometría tensorial, cómputo 64-píxel.</span></div>
+      <div class="mod"><b>Memoria nuclear + QRNG + FPGA sim</b> <span class="sloc">(4 ficheros)</span> — <span class="desc"><code>test_nuclear_memory.py</code>, <code>test_field_gradient_register.py</code>, <code>test_qrng.py</code> (135), <code>test_fpga_sim.py</code> — memoria ¹³C, gradiente, entropía cuántica, emulación de la FPGA.</span></div>
+      <div class="mod"><b>PCB (10 ficheros)</b> <span class="sloc">(≈1.030 SLOC)</span> — <span class="desc"><code>test_pcb_connectivity.py</code> (235), <code>test_pcb_component_audit.py</code>, <code>test_pcb_die_fpga_audit.py</code>, <code>test_pcb_pin_audit.py</code>, <code>test_pcb_head.py</code>, <code>test_pcb_route.py</code>, <code>test_pcb_route_signals.py</code>, <code>test_pcb_route_full.py</code>, <code>test_pcb_drc.py</code>, <code>test_pcb_stackup.py</code> — DRC real, conectividad, pin-audit por datasheet, stackup de ambas placas.</span></div>
+      <div class="mod"><b>Fabricación gcode/SVG</b> <span class="sloc">(4 ficheros)</span> — <span class="desc"><code>test_gcode.py</code> (267), <code>test_render_p0_svg.py</code>, <code>test_render_p1_svg.py</code>, <code>test_spincoater_gcode.py</code> — protocolos de fabricación P0/P1 (CNC 3018), render SVG verificado con <code>xmllint</code>.</span></div>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§4</span> Tecnologías y lenguajes</h3>
+      <table class="lang">
+        <tr><th>Lenguaje</th><th>SLOC</th><th>%</th></tr>
+        <tr><td><span class="bar" style="width:140px"></span>Python 3.12 (tests)</td><td>4.843</td><td>93,0 %</td></tr>
+        <tr><td><span class="bar" style="width:11px"></span>YAML (workflows)</td><td>366</td><td>7,0 %</td></tr>
+        <tr><td>Total</td><td>5.209</td><td>100 %</td></tr>
+      </table>
+      <p style="margin-top:12px;color:var(--muted);font-size:13.5px">Herramientas: <code>pytest</code> + <code>pytest-cov</code> (tests/cobertura), <code>ruff</code> (lint), <code>iverilog</code> (simulación RTL), <code>pyverilog</code> (parse RTL), <code>kicad-cli</code> + binding pcbnew (DRC PCB), GitHub Actions (orquestación).</p>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§5</span> Funcionalidades destacadas — gates de calidad automatizados</h3>
+      <div class="feats">
+        <div class="feat"><div class="ft"><span class="n">01</span><b>Gate de tests con cobertura</b> <code>ci.yml · Tests</code></div><p><code>pytest --cov=qssc --cov=api</code> en matriz de versiones de Python; smoke test del CLI (<code>qssc info</code>, <code>qssc shor 15</code>); subida del informe de cobertura como artefacto.</p></div>
+        <div class="feat"><div class="ft"><span class="n">02</span><b>Lint estricto anti-errores en tiempo de ejecución</b> <code>ci.yml · Lint</code></div><p><code>ruff check --select=E9,F63,F7,F82,F401,F841</code> — captura errores de sintaxis, imports no usados y variables no usadas antes de llegar a main.</p></div>
+        <div class="feat"><div class="ft"><span class="n">03</span><b>Verificación RTL: parse + consistencia + simulación</b> <code>ci.yml · FPGA RTL</code></div><p>pyverilog parsea todos los módulos, <code>check_xdc_ports.py</code> verifica la consistencia entre el XDC y <code>top_level.v</code>, e <code>iverilog -g2012 -DFAST_SIM</code> ejecuta el testbench auto-verificable (los 18 escenarios de verbos).</p></div>
+        <div class="feat"><div class="ft"><span class="n">04</span><b>DRC de PCB real en CI</b> <code>pcb.yml</code></div><p>Instala KiCad 8.0 del PPA oficial y ejecuta <code>pytest tests/test_pcb_*.py</code> — DRC 0/0/0, conectividad, pin-audit por datasheet y stackup de ambas placas, sobre <code>kicad-cli</code> real, no un mock.</p></div>
+        <div class="feat"><div class="ft"><span class="n">05</span><b>Gate verde-de-CI antes de desplegar</b> <code>deploy.yml</code></div><p>El despliegue (frontend → GitHub Pages, API → Render) sólo se dispara si la última ejecución de CI en main está verde — nada llega a producción sin pasar los gates.</p></div>
+        <div class="feat"><div class="ft"><span class="n">06</span><b>Build + release de artefactos</b> <code>release.yml</code></div><p>Construye el sdist+wheel Python y el dashboard frontend, y publica un GitHub Release con los artefactos.</p></div>
+        <div class="feat"><div class="ft"><span class="n">07</span><b>Suite de tests de física auditoriable</b> <code>tests/</code></div><p>354 funciones de test en 33 ficheros que ejercitan el modelo físico (dipolo 1/r³, canales de error, corrección Qiskit), la readout avanzada (super-res, Bayesiano, primas, anti-ruido), la sensórica tensorial y la PCB — la base empírica de las afirmaciones de física del depósito.</p></div>
+      </div>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§6</span> Originalidad y características distintivas</h3>
+      <ul>
+        <li>CI que verifica <b>las cuatro capas</b> del instrumento (backend, RTL, PCB, frontend) en cada push, no sólo los tests de software: simulación RTL + DRC de PCB real + lint + despliegue gateado.</li>
+        <li><b>DRC de PCB real en CI</b> con <code>kicad-cli</code> + binding pcbnew instalado del PPA oficial — el mismo DRC que un ingeniero abriría en la GUI, ejecutado headless en cada cambio.</li>
+        <li><b>Suite de tests de física</b> que audita las afirmaciones del simulador (dipolo, canales de error, corrección Qiskit) — los claims de física están respaldados por tests ejecutables, no por afirmaciones.</li>
+        <li>Despliegue <b>gateado por CI verde</b>: ningún commit llega a producción sin pasar todos los gates.</li>
+      </ul>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§7</span> Estado de verificación</h3>
+      <ul>
+        <li>Suite <code>pytest</code> en verde (software/física): 354 funciones de test en 33 ficheros, salida 0 fallos.</li>
+        <li>Simulación RTL <code>iverilog</code>: 18/18 escenarios del testbench pasan.</li>
+        <li>DRC PCB <code>kicad-cli</code>: ambas placas 0/0/0.</li>
+        <li>Lint <code>ruff</code> limpio (reglas CI E9/F63/F7/F82/F401/F841) antes de cada push.</li>
+        <li>Cobertura de código recogida en cada ejecución de CI (<code>--cov-report=xml</code>).</li>
+      </ul>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§8</span> Entorno de ejecución</h3>
+      <ul>
+        <li><b>Tests locales</b>: <code>python -m pytest</code> (suite software/física); los tests PCB requieren <code>kicad-cli</code>.</li>
+        <li><b>CI</b>: GitHub Actions sobre <code>ubuntu-latest</code>; KiCad 8.0 del PPA <code>kicad/kicad-8.0-releases</code>.</li>
+        <li><b>Instrucciones de instalación y uso</b>: el fichero <code>README.md</code> del repositorio (sección <i>Quick start</i>) contiene la guía canónica de instalación del entorno (<code>python -m venv .venv && pip install -e ".[api,dev]"</code>), ejecución de la suite (<code>python -m pytest</code>), arranque de la API (<code>uvicorn api.main:app --port 8000</code>) y del dashboard (<code>npm install && npm run dev</code>).</li>
+      </ul>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§9</span> Lista de ficheros fuente depositados</h3>
+<pre class="files">.github/workflows/ci.yml
+.github/workflows/deploy.yml
+.github/workflows/pcb.yml
+.github/workflows/release.yml
+tests/test_algorithms_platforms.py
+tests/test_api.py
+tests/test_array_calibration.py
+tests/test_circuit_histogram.py
+tests/test_circuit_physics_audit.py
+tests/test_core.py
+tests/test_detector_centroid.py
+tests/test_field_gradient_register.py
+tests/test_fpga_sim.py
+tests/test_gcode.py
+tests/test_hardware_real.py
+tests/test_magnetometer.py
+tests/test_noise_filters.py
+tests/test_noise_summary.py
+tests/test_nuclear_memory.py
+tests/test_parallel_computing.py
+tests/test_pcb_component_audit.py
+tests/test_pcb_connectivity.py
+tests/test_pcb_die_fpga_audit.py
+tests/test_pcb_drc.py
+tests/test_pcb_head.py
+tests/test_pcb_pin_audit.py
+tests/test_pcb_route.py
+tests/test_pcb_route_full.py
+tests/test_pcb_route_signals.py
+tests/test_pcb_stackup.py
+tests/test_pixel_mode.py
+tests/test_prime_readout.py
+tests/test_qrng.py
+tests/test_render_p0_svg.py
+tests/test_render_p1_svg.py
+tests/test_spincoater_gcode.py
+tests/test_superres_bayesian_tensor.py</pre>
+    </div>
+  </div>
+</section>
+
+<!-- =========================== COMPARATIVA SLOCCOUNT vs CLOC =========================== -->
+<section class="unidad ci" id="comparativa" style="--u:#22d3ee;--u-grad:linear-gradient(135deg,#22d3ee,#6366f1)">
+  <div class="wrap">
+    <div class="uhead">
+      <div class="num">Δ</div>
+      <h2><span class="uname">Anexo</span>Comparativa de herramientas de conteo — SLOCCount vs cloc</h2>
+      <div class="sloc-pill">doble valoración · +0,8 %</div>
+    </div>
+    <div class="block">
+      <p class="lead">El depósito se valora con <b>SLOCCount 2.26</b> (David A. Wheeler, GPL), herramienta de registro, y de forma cruzada con <b>cloc 2.11</b> (Al Danial, GPL) para verificar la robustez del conteo. Ambas herramientas cuentan líneas de código físicas con reglas ligeramente distintas (SLOCCount y cloc difieren en el tratamiento de comentarios multilínea y líneas en blanco); la concordancia entre ambas valida el orden de magnitud del depósito.</p>
+      <table class="lang" style="margin-top:18px">
+        <tr><th>Unidad</th><th>SLOCCount (SLOC)</th><th>cloc (code)</th><th>Δ</th></tr>
+        <tr><td>Firmware FPGA</td><td>4.483</td><td>4.524</td><td>+41</td></tr>
+        <tr><td>Frontend web</td><td>4.344</td><td>4.328</td><td>−16</td></tr>
+        <tr><td>Backend + física</td><td>7.825</td><td>8.013</td><td>+188</td></tr>
+        <tr><td>Scripts PCB KiCad</td><td>5.918</td><td>5.937</td><td>+19</td></tr>
+        <tr><td>CI + suite de tests</td><td>5.209</td><td>5.181</td><td>−28</td></tr>
+        <tr><td><b>Total</b></td><td><b>27.779</b></td><td><b>27.983</b></td><td><b>+204</b></td></tr>
+      </table>
+      <div class="valrow" style="margin-top:18px">
+        <div class="st"><div class="k">Valoración SLOCCount</div><div class="v">6,56 PY · $886.225</div></div>
+        <div class="st"><div class="k">Valoración cloc</div><div class="v">6,61 PY · $893.060</div></div>
+        <div class="st"><div class="k">Diferencia</div><div class="v">+0,8 % · $6.835</div></div>
+      </div>
+      <div class="callout">
+        Ambas herramientas coinciden en el orden de magnitud (diferencia +0,8 % en el total). La valoración de registro que encabeza cada unidad se basa en SLOCCount; la valoración cruzada con cloc la confirma. El script reproducible <code>docs/propiedad-intelectual/sloc_count.py</code> emite ambas tablas. Fórmula COCOMO básica <code>PM = 2,4 · KSLOC^1,05</code>; coste = <code>PY · 56.286 · 2,40</code>. Estimación de coste de re-desarrollo, no precio de mercado.
+      </div>
+    </div>
+  </div>
+</section>
+
 <footer class="ipfoot">
   <div class="wrap">
     <p class="disclaim">Fecha de la memoria: 2026-09-14. Esta memoria descriptiva acompaña al depósito del código fuente en el Repositorio Oficial del Proyecto QSSC y se destina a su inscripción en el Registro de la Propiedad Intelectual. Las valoraciones SLOCCount/COCOMO son estimaciones de coste de re-desarrollo y no constituyen un precio de mercado. Titular: <em>[A completar por el titular]</em>.</p>
     <div class="meta">
       <span><b>Obra:</b> QSSC — Quantum Solid State Chip</span>
       <span><b>Ley:</b> RDLeg 1/1996, Art. 96.1</span>
-      <span><b>Tool:</b> SLOCCount 2.26 · COCOMO básico</span>
-      <span><b>Total:</b> 16.652 SLOC · 3,64 PY · $491.176</span>
+      <span><b>Tools:</b> SLOCCount 2.26 · cloc 2.11 · COCOMO básico</span>
+      <span><b>Total:</b> 27.779 SLOC · 5 unidades · 6,56 PY · $886.225</span>
     </div>
   </div>
 </footer>
