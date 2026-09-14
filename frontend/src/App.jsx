@@ -1236,12 +1236,16 @@ export default function App() {
         <>
           {/* ============================= GLOBAL CONTROLS ============================= */}
           <div className="card" style={{ marginBottom: 18 }}>
+            {/* Two top-level switches in one row, two columns: the 64-parallel
+                ON/OFF toggle (which Run + Calibrate set is shown below) and the
+                Simulator / Hardware-real environment. */}
+            <div className="row" style={{ marginBottom: 12, alignItems: 'flex-start', gap: 18 }}>
             {/* The single "64-parallel ON/OFF" switch. OFF = single-pixel path
                 (Circuit Runner + per-pixel ODMR calibration); ON = 64-pixel
                 array path (array calibration + run-parallel). The bottom half
                 of this tab swaps accordingly, so there is exactly one Run and
                 one Calibrate visible at any time — no duplicated panels. */}
-            <div className="seg-toggle" role="group" aria-label="64-parallel mode" style={{ marginBottom: 12 }}>
+            <div className="seg-toggle" role="group" aria-label="64-parallel mode" style={{ flex: 1, marginBottom: 0 }}>
               <span className="seg-label">64-parallel</span>
               <button className={`seg ${!parallelMode ? 'on' : ''}`} onClick={() => setParallelMode(false)}>
                 <span className="seg-ic">◇</span> OFF · single pixel
@@ -1259,7 +1263,7 @@ export default function App() {
                 real is selected. In Hardware-real mode the Aer noise-mode
                 selector is hidden (the real board's physics replace it) and a
                 probe indicator shows whether a board answered the ID handshake. */}
-            <div className="seg-toggle" role="group" aria-label="Execution environment" style={{ marginBottom: 12 }}>
+            <div className="seg-toggle" role="group" aria-label="Execution environment" style={{ flex: 1, marginBottom: 0 }}>
               <span className="seg-label">Environment</span>
               <button className={`seg ${hwMode === 'simulator' ? 'on' : ''}`} onClick={() => setHwMode('simulator')}>
                 <span className="seg-ic">◈</span> Simulator
@@ -1276,6 +1280,7 @@ export default function App() {
                       ? `FPGA connected — ${(probe.data.id || 'QSSC').split('\n')[0]} on ${probe.data.port}`
                       : 'No FPGA detected — connect the board and set QSSC_FPGA_PORT, or switch to Simulator'}
               </span>
+            </div>
             </div>
             <div className="row" style={{ marginBottom: 0 }}>
               <div className="field">
