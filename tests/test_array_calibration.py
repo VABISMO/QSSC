@@ -96,9 +96,12 @@ def test_calibrate_array_from_codes():
     D = prof.d_ghz
     n_points = 200
     freqs = np.linspace(D - 0.05, D + 0.05, n_points)
-    # a single bright baseline with one dip at D on every column -> width 1
+    # a single bright baseline with one NV-linewidth dip at D on every column.
+    # The dip FWHM = the NV inhomogeneous linewidth (5 MHz) so it matches the
+    # CLEAN PSF and resolves as exactly one qubit line.
+    sigma_ghz = (prof.odmr_linewidth_hz * 1e-9) / 2.355  # FWHM -> sigma
     codes = np.full((n_points, 64), 40000, dtype=np.int32)
-    dip = np.exp(-((freqs - D) ** 2) / (2 * (5e-3) ** 2))
+    dip = np.exp(-((freqs - D) ** 2) / (2 * sigma_ghz ** 2))
     codes = codes - (30000 * dip).astype(np.int32)[..., None]
     cal = calibrate_array_from_codes(
         codes, freqs, "NV", gradient_mhz_per_um=1.0, seed=42)
@@ -170,6 +173,75 @@ def test_integration_width_capped_by_resolvable_and_nv():
     for p in cal.pixels:
         assert p.register_width <= p.nv_present
         assert p.register_width <= resolvable
+
+
+# -- Few-NV compute regime + CLEAN resolver (fixes 1+2+3) ---------------------
+def test_one_stone_per_pixel_compute_regime():
+    """Fix 1+2: each pixel holds ONE few-NV compute stone (100-300 NVs), and the
+    measured width is the number of DISTINCT frequency-addressed ODMR lines the
+    gradient resolves -- NOT one ensemble qubit. With a strong gradient (g=2.0,
+    80 resolvable bins) and ~100-300 NVs, most bins hold 1-2 NVs -> the occupied-
+    bin count (the 2009 Neumann/Taminiau multi-qubit-per-stone regime) is well
+    above 1 on every pixel."""
+    from qssc.array_calibration import calibrate_array, MAX_MICRODIAMONDS_PER_PIXEL
+    assert MAX_MICRODIAMONDS_PER_PIXEL == 1  # fab reality: one stone per site
+    cal = calibrate_array("NV", gradient_mhz_per_um=2.0, seed=42)
+    for p in cal.pixels:
+        assert p.microdiamonds == 1            # exactly one stone per pixel
+        assert 100 <= p.nv_present <= 300      # compute-regime NV count
+        assert p.register_width >= 1
+        # the few-NV compute regime gives several frequency-addressed qubits,
+        # not the single ensemble qubit of the 10^12-NV sensing stone
+        assert p.register_width > 1
+
+
+def test_clean_closes_measured_to_occupied_gap():
+    """Fix 3 (CLEAN resolver): with a strong gradient the few-NV compute stone's
+    NVs spread into ~80 resolvable bins. The TRUE qubit count is the number of
+    occupied bins; the MEASURED count (decompose_odmr) approaches it as
+    integration raises per-line SNR (dim lone-NV bins clear the 4-sigma bar).
+    At 1 shot lone-NV bins (SNR ~2.4) are below the bar; at 16 shots (SNR ~9.6)
+    they are recovered -> the measured->true gap closes (monotonic, upward)."""
+    import numpy as np
+    from qssc.array_calibration import _draw_nv_present, _pixel_odmr_spectrum
+    from qssc.odmr_decompose import decompose_odmr
+    from qssc.defects import get_profile
+    from qssc.simulator import resolvable_register_width
+    prof = get_profile("NV")
+    lw = prof.odmr_linewidth_hz * 1e-6
+    g, psz = 2.0, 200.0
+    resolvable = resolvable_register_width(g, psz, lw)
+    rng = np.random.default_rng(42)
+    measured1 = measured16 = occupied = 0
+    for pix in range(16):
+        _n_stones, nv = _draw_nv_present(rng, pix, 300, 1)
+        n_bins = max(1, min(nv, resolvable))
+        # TRUE occupied-bin count (what the gradient makes resolvable)
+        picks = rng.integers(0, n_bins, size=nv)
+        n_occ = int(np.bincount(picks, minlength=n_bins).astype(bool).sum())
+        rng_state = rng.bit_generator.state  # keep the two shots in sync
+        f1, c1 = _pixel_odmr_spectrum(prof, nv, n_bins, g, psz, rng,
+                                      integration_shots=1)
+        rng.bit_generator.state = rng_state
+        f16, c16 = _pixel_odmr_spectrum(prof, nv, n_bins, g, psz, rng,
+                                        integration_shots=16)
+        m1 = min(len(decompose_odmr(f1, c1, min_snr=4.0,
+                                    linewidth_guess_mhz=lw,
+                                    min_separation_mhz=lw * 0.8)), n_bins)
+        m16 = min(len(decompose_odmr(f16, c16, min_snr=4.0,
+                                     linewidth_guess_mhz=lw,
+                                     min_separation_mhz=lw * 0.8)), n_bins)
+        measured1 += m1
+        measured16 += m16
+        occupied += n_occ
+    # integration is monotonic (reveals dim lone-NV lines, never hides them)
+    assert measured16 >= measured1
+    # the 16-shot measured count is within ~25% of the true occupied-bin count
+    # (CLEAN closes the gap; the residual is overlap + the 4-sigma bar, not a
+    # find_peaks under-count)
+    assert measured16 >= 0.75 * occupied, (measured16, occupied)
+    # and strictly better than the 1-shot measurement
+    assert (occupied - measured16) <= (occupied - measured1)
 
 
 # -- Invention 6: sub-pixel centroiding (spatial reporting, NOT qubit gain) ---
@@ -245,10 +317,11 @@ def test_calibrate_array_from_codes_with_sub_pixel():
     # (a uniform all-pixel dip has no spatial structure to centroid).
     rng = np.random.default_rng(0)
     detun_ghz = rng.uniform(-0.03, 0.03, size=64)
+    sigma_ghz = (prof.odmr_linewidth_hz * 1e-9) / 2.355  # NV-linewidth dip
     base = np.full((n_points, 64), 40000.0, dtype=float)
     for j in range(64):
         w = charge_share_weights(tuple(centers[j]), centers, sigma)
-        dip_j = np.exp(-((freqs - (D + detun_ghz[j])) ** 2) / (2 * (5e-3) ** 2))
+        dip_j = np.exp(-((freqs - (D + detun_ghz[j])) ** 2) / (2 * sigma_ghz ** 2))
         # pixel j's dip spills to its neighbours via the charge-share footprint
         base[:, :] = base[:, :] - (30000.0 * dip_j)[:, None] * w[None, :]
     codes = np.clip(base, 0, None).astype(np.int32)

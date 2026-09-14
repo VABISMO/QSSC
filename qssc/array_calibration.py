@@ -59,15 +59,27 @@ READOUT_NOISE_REL: float = READOUT_NOISE / BRIGHT_CODE
 # with the backend just for the constant.
 N_PIXELS_DEFAULT = 64
 
-# User-supplied product spec: a microdiamond can carry up to ~100 NVs. This is a
-# MODEL INPUT (the chip's microdiamond product), NOT a datasheet physics
-# constant. It bounds the per-pixel NV draw; the MEASURED register width is what
-# is used and is capped by the gradient resolution regardless.
-MAX_NV_PER_MICRODIAMOND = 100
-# A pixel holds a small number of microdiamonds ("several per pixel" per the
-# per-pixel register model); the draw places 1..MAX_MICRODIAMONDS_PER_PIXEL of
-# them, each with up to MAX_NV_PER_MICRODIAMOND NVs.
-MAX_MICRODIAMONDS_PER_PIXEL = 3
+# Two NV-count regimes, kept explicit so the model never conflates them:
+#
+# (a) FEW-NV COMPUTE stone -- the per-pixel microdiamond the QSSC compute path
+#     uses. It carries O(100-300) NV centres (user-supplied product spec, a
+#     MODEL INPUT not a datasheet physics constant). Under the Invention-5 field
+#     gradient these NVs sit at DISTINCT, frequency-addressed resonances (one
+#     per gradient bin, ~5 MHz / linewidth apart) -- the 2009 Neumann/Taminiau
+#     regime: several frequency-tuned qubits + 2q gates from ONE stone, NOT one
+#     ensemble qubit. ``MAX_NV_PER_MICRODIAMOND`` bounds this draw; the MEASURED
+#     register width is the number of resolvable lines (capped by the gradient
+#     resolution), not the raw NV count.
+# (b) ENSEMBLE SENSING stone -- the 200 um bulk Adamas stone
+#     (``count_nv_centers(200, 10) ~= 7.4e12`` NVs). There the lines pile into a
+#     saturated continuum -> ONE ensemble qubit (magnetometry/sensing), NOT
+#     compute. That regime is ``count_nv_centers`` in odmr_decompose; it is NOT
+#     what ``calibrate_array`` draws below.
+MAX_NV_PER_MICRODIAMOND = 300            # compute-stone upper NV count (100-300 range)
+# Fab reality: ONE microdiamond per pixel site (the die seat holds one stone;
+# "several per pixel" was the earlier bulk-ensemble sketch, superseded by the
+# one-stone-per-site compute geometry). The draw places exactly one stone.
+MAX_MICRODIAMONDS_PER_PIXEL = 1
 
 
 @dataclass
@@ -172,19 +184,22 @@ def _draw_nv_present(rng: np.random.Generator, pixel_id: int,
                      max_microdiamonds_per_pixel: int) -> tuple[int, int]:
     """Draw (microdiamonds, nv_present) for one pixel.
 
-    The number of microdiamonds in the pixel is drawn first (1..max), then each
-    carries up to ``max_nv_per_microdiamond`` NVs. The total ``nv_present`` is
-    what the gradient must resolve. A per-pixel offset decorrelates neighbouring
-    pixels so the 64 widths genuinely vary (not all equal).
+    One compute stone per pixel (``max_microdiamonds_per_pixel`` is 1 for the
+    as-built die; kept as a parameter so the bulk-ensemble sketch can still be
+    exercised). The stone carries a few-NV COMPUTE register: NVs drawn in the
+    ``[max_nv_per_microdiamond/3, max_nv_per_microdiamond]`` range (100-300 at
+    the default 300 cap) -- enough that, spread across the gradient bins, most
+    bins hold 1-2 NVs (distinct frequency-addressed lines), not the 10^12 of the
+    ensemble sensing stone. A per-pixel offset decorrelates neighbouring pixels
+    so the 64 widths genuinely vary (not all equal).
     """
     n_stones = int(rng.integers(1, max_microdiamonds_per_pixel + 1))
-    # NVs per microdiamond: log-normal-ish, median ~40% of the cap, heavy tail
-    # toward the cap for a few stones. Rounded, >= 1.
+    lo = max(1, max_nv_per_microdiamond // 3)
     nv_per_stone = []
     for _ in range(n_stones):
-        frac = float(rng.lognormal(mean=-0.8, sigma=0.6))
-        frac = min(max(frac, 0.02), 1.0)
-        nv_per_stone.append(max(1, int(round(frac * max_nv_per_microdiamond))))
+        # uniform in [lo, max] -- a stone's NV count anywhere in the compute range
+        nv = int(rng.integers(lo, max_nv_per_microdiamond + 1))
+        nv_per_stone.append(nv)
     return n_stones, sum(nv_per_stone)
 
 
@@ -329,7 +344,7 @@ def calibrate_array(profile: DefectProfile | str = "NV",
             integration_shots=integration_shots)
         comps = decompose_odmr(
             freqs, contrast,
-            min_snr=3.0,
+            min_snr=4.0,
             linewidth_guess_mhz=linewidth_mhz,
             min_separation_mhz=linewidth_mhz * 0.8,
         )
@@ -376,7 +391,7 @@ def calibrate_array_from_codes(
     pixel_size_um: float = 200.0,
     seed: int = 42,
     temperature_k: float = 300.0,
-    min_snr: float = 3.0,
+    min_snr: float = 4.0,
     integration_shots: int = 1,
     sub_pixel: Optional[SubPixelModel] = None,
 ) -> ArrayCalibration:
@@ -412,6 +427,14 @@ def calibrate_array_from_codes(
     freqs = np.asarray(freqs_ghz, dtype=float)
     n_points, n_pixels = codes.shape
     linewidth_mhz = prof.odmr_linewidth_hz * 1e-6
+    # The gradient resolvable cap is a real hardware constraint (how many
+    # linewidth-spaced bins fit in the pixel's gradient spread) and IS
+    # measurable from gradient/pixel/linewidth -- unlike nv_present, which is
+    # not readable from photocurrent codes. The real-path width is capped by it,
+    # same as the sim path, so noise false-positives above the cap cannot inflate
+    # the reported register width.
+    resolvable = resolvable_register_width(
+        gradient_mhz_per_um, pixel_size_um, linewidth_mhz)
     # Invention 6: per-frequency-point centroiding on the 64-pad rows. Each row
     # is one MW frequency; the dips across the 64 pads are the resonant pixels,
     # localized to sub-pixel (x, y) by charge-sharing centroiding.
@@ -433,17 +456,25 @@ def calibrate_array_from_codes(
                     (pad_centers[:, 1] - sp.y_mm) ** 2))
                 spot_pos.setdefault(idx, (sp.x_mm, sp.y_mm))
     pixels: list[PixelCalibration] = []
+    # The bright baseline (no ODMR dip) is the fluorescence at the sweep edges:
+    # the endpoint span = gradient_spread + 4*linewidth margin, so the first/last
+    # ~10% of points are guaranteed off-resonance. Averaging those edges gives a
+    # noise-robust brightness reference. Using the raw column MAX instead would
+    # let a single +noise spike inflate the peak and depress the whole baseline
+    # into a fake ~3% "pedestal" that the resolver traces as dozens of false
+    # lines -- the edges are immune to that (no dip, just the bright floor).
+    edge = max(5, n_points // 10)
     for j in range(n_pixels):
         col = codes[:, j]
-        peak = float(col.max()) or 1.0
-        contrast = col / peak  # 1 = bright, dips toward 0
+        bright = float(np.mean(np.concatenate([col[:edge], col[-edge:]]))) or 1.0
+        contrast = col / bright  # 1 = bright, dips toward 0
         comps = decompose_odmr(
             freqs, contrast,
             min_snr=min_snr,
             linewidth_guess_mhz=linewidth_mhz,
             min_separation_mhz=linewidth_mhz * 0.8,
         )
-        register_width = max(1, len(comps))
+        register_width = max(1, min(len(comps), resolvable))
         odmr_lines = [round(c.freq_ghz, 6) for c in comps]
         pixels.append(PixelCalibration(
             pixel_id=j,

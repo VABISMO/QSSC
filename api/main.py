@@ -177,7 +177,7 @@ class CalibrateArrayRequest(BaseModel):
     seed: int = Field(42, ge=0, le=2_147_483_647)
     temperature_k: float = Field(300.0, ge=0.001, le=600)
     source: str = "sim"          # sim | real
-    max_nv_per_microdiamond: int = Field(100, ge=1, le=1000)
+    max_nv_per_microdiamond: int = Field(300, ge=1, le=1000)  # compute-stone NVs (100-300)
     n_points: int = Field(400, ge=32, le=4096)  # real path sweep points
     # Invention 6: charge-sharing centroiding (sub-pixel detector resolution).
     # When true, build a SubPixelModel (sigma_sheet_mm sheet spreading length)

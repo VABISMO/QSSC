@@ -138,7 +138,11 @@ class SimulatedFPGA:
                  temperature_k: float = 300.0, noise: float = 0.1,
                  seed: Optional[int] = None,
                  sub_pixel=None,
-                 integration_shots: int = 1):
+                 integration_shots: int = 1,
+                 gradient_mhz_per_um: float = 1.0,
+                 pixel_size_um: float = 200.0,
+                 max_nv_per_microdiamond: int = 300,
+                 contrast_single: float = 0.03):
         self.profile = get_profile(profile) if isinstance(profile, str) else profile
         self.temperature_k = temperature_k
         self.noise = noise
@@ -178,6 +182,21 @@ class SimulatedFPGA:
         # per-pixel ODMR resonance detuning (drawn lazily by _run_all_odmr to
         # model the gradient spreading the 64 pixel resonances).
         self._pixel_detun_hz: Optional[np.ndarray] = None
+        # Few-NV COMPUTE regime (Invention 5 + the per-pixel register model):
+        # each pixel holds one microdiamond of ~100-300 NVs whose resonances the
+        # field gradient spreads across the pixel into resolvable, linewidth-
+        # spaced bins -- DISTINCT frequency-addressed lines (the 2009
+        # Neumann/Taminiau regime), NOT one ensemble dip. Drawn lazily and held
+        # so repeated sweeps see a consistent spectrum. ``_pixel_lines[q]`` is a
+        # (n_lines,) array of dip fractions (codes fraction of BRIGHT) and
+        # ``_pixel_line_freqs[q]`` the matching (n_lines,) resonance offsets (Hz
+        # from D). A bin holding k NVs saturates: contrast = 1-(1-c)^k.
+        self.gradient_mhz_per_um = float(gradient_mhz_per_um)
+        self.pixel_size_um = float(pixel_size_um)
+        self.max_nv_per_microdiamond = int(max_nv_per_microdiamond)
+        self.contrast_single = float(contrast_single)
+        self._pixel_line_freqs: Optional[list[np.ndarray]] = None
+        self._pixel_line_contrasts: Optional[list[np.ndarray]] = None
 
     # -- command interface -------------------------------------------------
     def send_command(self, command: str) -> str:
@@ -464,6 +483,43 @@ class SimulatedFPGA:
             flat.append(str(int(ck)))
         return " ".join(flat)
 
+    def _draw_pixel_lines(self) -> None:
+        """Draw each pixel's few-NV COMPUTE register (lazily, once).
+
+        One microdiamond per pixel carries ``[max_nv/3, max_nv]`` NVs (100-300 at
+        the default 300 cap). The field gradient spreads their resonances across
+        the within-pixel spread (``gradient * pixel_size``) into resolvable,
+        linewidth-spaced bins; a bin holding ``k`` NVs is one ODMR line of
+        contrast ``1-(1-c)**k`` (NV contrasts add and saturate). These are
+        DISTINCT frequency-addressed lines -- the 2009 Neumann/Taminiau regime
+        (several qubits + 2q gates from one stone), NOT the 10^12-NV ensemble
+        sensing stone that collapses to one line. Held across sweeps so the
+        spectrum is consistent (the calibration decomposes it into lines).
+        """
+        prof = self.profile
+        lw = prof.odmr_linewidth_hz                       # FWHM, Hz
+        spread_hz = self.gradient_mhz_per_um * 1e6 * self.pixel_size_um
+        n_bins = max(1, int(round(spread_hz / lw))) if self.gradient_mhz_per_um > 0 else 1
+        c = self.contrast_single
+        if self.gradient_mhz_per_um <= 0.0 or n_bins <= 1:
+            # no gradient -> every NV piles onto one ensemble line at the pixel
+            # centre (one resolvable qubit, the sensing/ensemble regime).
+            self._pixel_line_freqs = [np.array([0.0]) for _ in range(self.N_SITES)]
+            self._pixel_line_contrasts = [np.array([c]) for _ in range(self.N_SITES)]
+            return
+        start = -spread_hz / 2.0 + lw / 2.0
+        bin_centres = start + np.arange(n_bins) * lw      # Hz, relative to pixel centre
+        lo = max(1, self.max_nv_per_microdiamond // 3)
+        self._pixel_line_freqs = []
+        self._pixel_line_contrasts = []
+        for _ in range(self.N_SITES):
+            n_nv = int(self.rng.integers(lo, self.max_nv_per_microdiamond + 1))
+            picks = self.rng.integers(0, n_bins, size=n_nv)
+            occ = np.bincount(picks, minlength=n_bins)
+            mask = occ > 0
+            self._pixel_line_freqs.append(bin_centres[mask].copy())
+            self._pixel_line_contrasts.append(1.0 - (1.0 - c) ** occ[mask])
+
     def _run_all_odmr(self, f_start_khz: int, f_stop_khz: int,
                       n_points: int) -> str:
         """Sweep the ADF4351 and sample all 64 detectors per point (Invention 4+5).
@@ -489,12 +545,18 @@ class SimulatedFPGA:
         f0 = self.sim_freq                     # D, Hz
         lw = self.profile.odmr_linewidth_hz    # FWHM, Hz
         fs = np.linspace(f_start_khz * 1e3, f_stop_khz * 1e3, n_points)
-        # per-pixel resonance detuning (the gradient resolve): drawn once, held
-        # so repeated sweeps are consistent. Spread ~ a few linewidths.
+        # per-pixel centre detuning (cross-pixel gradient offset): drawn once,
+        # held so repeated sweeps are consistent. Spread ~ a few linewidths.
         if self._pixel_detun_hz is None:
             self._pixel_detun_hz = self.rng.normal(
                 0.0, max(lw * 2.0, 1.0), self.N_SITES)
         detun = self._pixel_detun_hz
+        # per-pixel few-NV line set (the within-pixel gradient spread -> distinct
+        # frequency-addressed NV lines). Drawn once, held across sweeps.
+        if self._pixel_line_freqs is None:
+            self._draw_pixel_lines()
+        line_freqs = self._pixel_line_freqs       # list of (n_lines,) Hz rel. centre
+        line_contrasts = self._pixel_line_contrasts  # list of (n_lines,) dip frac
         # Invention 7: averaged noise is 1/sqrt(N) of the single-shot noise.
         noise = READOUT_NOISE / math.sqrt(self.integration_shots)
         # Invention 6: precompute the 64x64 charge-share weight matrix (spot q's
@@ -506,6 +568,15 @@ class SimulatedFPGA:
             W = np.vstack([charge_share_weights(tuple(centers[q]), centers,
                                                 self.sub_pixel.sigma_sheet_mm)
                            for q in range(self.N_SITES)])  # (64, 64): W[q, p]
+        hw2 = (lw / 2.0) ** 2
+
+        def _pixel_dip_frac(q: int, fi: float) -> float:
+            """Total ODMR dip fraction (of BRIGHT) for pixel q at frequency fi:
+            sum of its NV-line Lorentzians, each weighted by its bin contrast."""
+            lf = f0 + detun[q] + line_freqs[q]      # absolute line freqs (Hz)
+            lor = hw2 / ((fi - lf) ** 2 + hw2)      # (n_lines,) peak-1 Lorentzian
+            return float(np.sum(line_contrasts[q] * lor))
+
         lines = []
         for fi in fs:
             if W is None:
@@ -514,21 +585,16 @@ class SimulatedFPGA:
                     if self.emitter_gs.get(q, 0) <= 0:
                         c = BG_CODE + self.rng.normal(0, noise)
                     else:
-                        f_center = f0 + detun[q]
-                        lor = (lw / 2.0) ** 2 / ((fi - f_center) ** 2 + (lw / 2.0) ** 2)
-                        c = BRIGHT_CODE * (1.0 - ODMR_CONTRAST * lor) \
-                            + self.rng.normal(0, noise)
+                        dip_frac = min(_pixel_dip_frac(q, fi), 1.0)
+                        c = BRIGHT_CODE * (1.0 - dip_frac) + self.rng.normal(0, noise)
                     codes.append(int(min(max(int(c), 0), ADC_MAX)))
             else:
                 # forward-model: each pixel q's dip depth, then spread to pads.
-                # dip_q = BRIGHT*ODMR_CONTRAST*lor_q for pumped pixels, else 0.
                 dip_q = np.zeros(self.N_SITES)
                 for q in range(self.N_SITES):
                     if self.emitter_gs.get(q, 0) <= 0:
                         continue
-                    f_center = f0 + detun[q]
-                    lor = (lw / 2.0) ** 2 / ((fi - f_center) ** 2 + (lw / 2.0) ** 2)
-                    dip_q[q] = BRIGHT_CODE * ODMR_CONTRAST * lor
+                    dip_q[q] = BRIGHT_CODE * min(_pixel_dip_frac(q, fi), 1.0)
                 # pad p collects the sum of its neighbours' spread dips
                 pad_dip = W.T @ dip_q            # (64,) pad-space dip
                 base = np.where(
