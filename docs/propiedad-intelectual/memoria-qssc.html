@@ -70,24 +70,20 @@ header.hero .brandmark .wm{font-family:var(--font-head);font-weight:700;font-siz
 header.hero .brandmark .wm .grad{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
 header.hero .brandmark .tag{font-family:var(--font-mono);font-size:11px;color:var(--dim);letter-spacing:.14em;text-transform:uppercase;margin-top:2px}
 
-/* ---- summary dashboard ---- */
-.dashboard{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:34px}
-.tile{
+/* ---- portada: ficha de datos de la obra ---- */
+dl.ficha{
+  display:grid;grid-template-columns:auto 1fr;gap:10px 24px;
+  margin:30px 0 0;padding:24px 28px;
   background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
-  padding:18px 18px 16px;position:relative;overflow:hidden;
+  font-size:14px;
 }
-.tile::before{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:var(--u-grad)}
-.tile.fpga{--u-grad:linear-gradient(180deg,#22d3ee,#6366f1)}
-.tile.frontend{--u-grad:linear-gradient(180deg,#6366f1,#8b5cf6)}
-.tile.backend{--u-grad:linear-gradient(180deg,#f472b6,#ec4899)}
-.tile.pcb{--u-grad:linear-gradient(180deg,#34d399,#10b981)}
-.tile.ci{--u-grad:linear-gradient(180deg,#f59e0b,#d97706)}
-.tile.total{--u-grad:var(--grad);background:linear-gradient(135deg,rgba(34,211,238,.10),rgba(99,102,241,.10)),var(--panel)}
-.tile .k{font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
-.tile .v{font-family:var(--font-head);font-size:30px;font-weight:700;margin-top:6px;font-variant-numeric:tabular-nums}
-.tile .v .unit{font-size:14px;color:var(--muted);font-weight:500;margin-left:4px}
-.tile .m{font-size:12.5px;color:var(--dim);margin-top:6px}
-.tile .cost{font-family:var(--font-mono);font-size:13px;color:var(--ok);margin-top:8px;font-variant-numeric:tabular-nums}
+@media (min-width:780px){dl.ficha{grid-template-columns:auto 1fr auto 1fr}}
+dl.ficha dt{
+  font-family:var(--font-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--muted);align-self:center;
+}
+dl.ficha dd{margin:0;color:var(--text);font-variant-numeric:tabular-nums;align-self:center}
+dl.ficha dd code{font-family:var(--font-mono);font-size:13px;color:var(--brand)}
 
 /* ---- unidad section ---- */
 section.unidad{
@@ -290,50 +286,22 @@ ol.toc ol.sub .sn{font-family:var(--font-mono);font-size:11px;color:var(--dim);m
         <div class="tag">Quantum Solid State Chip</div>
       </div>
     </div>
-    <div class="eyebrow">Memoria descriptiva · Depósito de software</div>
-    <h1>Registro de la <span class="grad">Propiedad Intelectual</span></h1>
-    <p class="sub">Memoria descriptiva de las cinco unidades de software del Proyecto QSSC — firmware FPGA, frontend web, backend, toolchain EDA PCB y sistema de integración continua + suite de tests — para su inscripción en el Registro de la Propiedad Intelectual de España.</p>
-    <p class="cite">Art. 96.1 del Texto Refundido de la Ley de Propiedad Intelectual (RDLeg 1/1996) · Valoración SLOCCount 2.26 / cloc 2.11 · COCOMO básico</p>
-    <p class="cite" style="margin-top:8px">Guía de instalación, uso y despliegue: <code style="font-family:var(--font-mono);font-size:11.5px">README.md</code> del repositorio (sección <em>Quick start</em>). Referencias académicas de los algoritmos: <a href="#bibliografia" style="color:var(--text);border-bottom:1px dotted var(--border);text-decoration:none">bibliografía</a>; algoritmos propios: <a href="#algoritmos" style="color:var(--text);border-bottom:1px dotted var(--border);text-decoration:none">algoritmos implementados</a>.</p>
+    <div class="eyebrow">Memoria descriptiva · Registro de la Propiedad Intelectual</div>
+    <h1><span class="grad">QSSC</span> — Quantum Solid State Chip</h1>
+    <p class="sub">Instrumento cuántico de estado sólido basado en una matriz de 64 píxeles de centros nitrógeno-vacante (NV) en diamante, operativo a temperatura ambiente (300 K) — firmware FPGA, frontend web, backend, toolchain EDA PCB y sistema de integración continua + suite de tests.</p>
 
-    <div class="dashboard">
-      <div class="tile fpga">
-        <div class="k">Firmware FPGA</div>
-        <div class="v">4.483<span class="unit"> SLOC</span></div>
-        <div class="m">Verilog HDL · Artix-7</div>
-        <div class="cost">$130.554 · 0,97 PY</div>
-      </div>
-      <div class="tile frontend">
-        <div class="k">Frontend web</div>
-        <div class="v">4.344<span class="unit"> SLOC</span></div>
-        <div class="m">React 18 · Vite</div>
-        <div class="cost">$126.307 · 0,94 PY</div>
-      </div>
-      <div class="tile backend">
-        <div class="k">Backend + física</div>
-        <div class="v">7.825<span class="unit"> SLOC</span></div>
-        <div class="m">Python · FastAPI · Qiskit</div>
-        <div class="cost">$234.315 · 1,73 PY</div>
-      </div>
-      <div class="tile pcb">
-        <div class="k">Scripts PCB KiCad</div>
-        <div class="v">5.918<span class="unit"> SLOC</span></div>
-        <div class="m">Python · EDA toolchain</div>
-        <div class="cost">$174.753 · 1,29 PY</div>
-      </div>
-      <div class="tile ci">
-        <div class="k">CI + suite de tests</div>
-        <div class="v">5.209<span class="unit"> SLOC</span></div>
-        <div class="m">pytest · GitHub Actions</div>
-        <div class="cost">$152.839 · 1,13 PY</div>
-      </div>
-      <div class="tile total">
-        <div class="k">Total depositado</div>
-        <div class="v">27.779<span class="unit"> SLOC</span></div>
-        <div class="m">5 unidades · 6,56 PY</div>
-        <div class="cost">$886.225 desarrollo</div>
-      </div>
-    </div>
+    <dl class="ficha">
+      <dt>Denominación</dt><dd>QSSC (Quantum Solid State Chip)</dd>
+      <dt>Identificador interno</dt><dd><code>qssc-quantum-solid-state-chip v2.0.0</code></dd>
+      <dt>Naturaleza</dt><dd>Programa de ordenador (obra software) — Art. 96.1 RDLeg 1/1996</dd>
+      <dt>Lenguaje principal</dt><dd>Python · Verilog HDL · JavaScript (React)</dd>
+      <dt>SLOC contados</dt><dd>27.779 líneas físicas</dd>
+      <dt>Autores</dt><dd>Vicent Nos Ripolles y Pablo Lopez</dd>
+      <dt>Porcentaje de autoría</dt><dd>50 % / 50 %</dd>
+      <dt>Fecha de la memoria</dt><dd>14 de septiembre de 2026</dd>
+    </dl>
+
+    <p class="cite" style="margin-top:18px">Guía de instalación, uso y despliegue: <code>README.md</code> del repositorio (sección <em>Quick start</em>). Referencias académicas: <a href="#bibliografia" style="color:var(--text);border-bottom:1px dotted var(--border);text-decoration:none">bibliografía</a>; algoritmos propios: <a href="#algoritmos" style="color:var(--text);border-bottom:1px dotted var(--border);text-decoration:none">algoritmos implementados</a>.</p>
   </div>
 </header>
 
