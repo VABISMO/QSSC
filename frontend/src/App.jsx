@@ -5,7 +5,7 @@ import {
   QubitGrid, OdmrChart, BarCounts,
   SignalChart, CalibrationPanel, Verdict, NoiseBudget,
   OpticalChainDiagram, RunPhysics, MeasurementHelp,
-  CompassRose, GyroPanel, MagnetoImage, SensorField,
+  CompassRose, GyroPanel, MagnetoImage, SensorField, TensorPanel,
   ParallelCalibCard,
 } from './components.jsx'
 
@@ -53,6 +53,21 @@ const NOISE_MODES = [
   { id: 'phenomenological', label: 'Simulator (fast approx.)' },
   { id: 'none', label: 'Simulator (ideal, no noise)' },
 ]
+// Anti-noise filter-stack presets (classical, 300 K, host-side / passive — no
+// cryo, no new RTL, no PCB respin). "off" sends no dict (bit-identical back-
+// compat). passive = vibration isolation + EMI shield + common-mode; active =
+// + thermal servo + feed-forward; full = + XY8 dynamical decoupling (extends
+// T2, capped at 2·T1). The stack attenuates the channels modelled by noise_env,
+// so it restores the readout error a noisy lab raises.
+const ANTI_NOISE_PRESETS = {
+  passive: { vibration_iso_residual: 0.1, emi_shield_residual: 0.05, common_mode_reject: true },
+  active: { thermal_servo_gain: 10.0, vibration_iso_residual: 0.1, emi_shield_residual: 0.05,
+            feed_forward_rejection: 0.9, common_mode_reject: true,
+            feed_forward_channels: ['thermal', 'current'] },
+  full: { thermal_servo_gain: 10.0, vibration_iso_residual: 0.1, emi_shield_residual: 0.05,
+          feed_forward_rejection: 0.9, common_mode_reject: true, dd_sequence: 'xy8',
+          dd_n_blocks: 4, feed_forward_channels: ['thermal', 'current'] },
+}
 const SEQS = [
   { id: 'ramsey', label: 'Ramsey fringes' },
   { id: 'odmr', label: 'CW ODMR dip' },
@@ -302,11 +317,19 @@ export default function App() {
   // `nNvPerPixel` is null until the calibration measures the register width
   // (decompose_odmr → line count); `registerLineFreqsHz` carries the measured
   //   line centres so the backend places NVs on the measured frequency grid.
-  // `primeReadout` toggles the prime-coprime denoiser (READ_LOCKINP, default on).
+  // `primeReadout` toggles the prime-coprime readout denoiser (READ_LOCKINP,
+  //   default on). `noiseEnv` + `antiNoisePreset` are the environmental noise
+  //   model + the classical anti-noise filter stack (thermal servo / vibration
+  //   isolation / EMI shield / feed-forward / common-mode / dynamical
+  //   decoupling). A noisy lab raises the readout error; the filter stack
+  //   attenuates the environmental channels back down. Both run on existing
+  //   firmware (RUN_SEQUENCE pulse engine) — no PCB change.
   const [pixelMode, setPixelMode] = useState('register')
   const [nNvPerPixel, setNNvPerPixel] = useState(null)
   const [registerLineFreqsHz, setRegisterLineFreqsHz] = useState(null)
   const [primeReadout, setPrimeReadout] = useState(true)
+  const [noiseEnv, setNoiseEnv] = useState('none')
+  const [antiNoisePreset, setAntiNoisePreset] = useState('off')
   // `parallelMode` is the single "64-parallel ON/OFF" switch. OFF → the
   // single-pixel path (Circuit Runner + per-pixel ODMR calibration). ON → the
   // 64-pixel array path (array calibration + run-parallel). Exactly one Run
@@ -358,6 +381,11 @@ export default function App() {
   const [currentI, setCurrentI] = useState(0.5); const [currentDepth, setCurrentDepth] = useState(3); const [currentOff, setCurrentOff] = useState(0)
   // shared averages for the four field-imaging sensors
   const [fieldAvg, setFieldAvg] = useState(500)
+  // tensor gradiometer (Invention 19) — 64-pixel B-vector map -> 3x2 Jacobian + dipole fit
+  const [tensor, setTensor] = useState(null); const [tensorLoading, setTensorLoading] = useState(false); const [tensorErr, setTensorErr] = useState(null)
+  const [tensorMoment, setTensorMoment] = useState(0.002)
+  const [tensorX, setTensorX] = useState(2); const [tensorY, setTensorY] = useState(-1); const [tensorZ, setTensorZ] = useState(10)
+  const [tensorBg, setTensorBg] = useState(50); const [tensorAvg, setTensorAvg] = useState(500)
 
   const runCompass = useCallback(() => {
     setCompassLoading(true); setCompassErr(null)
@@ -401,6 +429,13 @@ export default function App() {
       depth_mm: currentDepth, n_avg: fieldAvg, seed })
       .then(setCurrent).catch(e => setCurrentErr(e.message)).finally(() => setCurrentLoading(false))
   }, [profile, fpgaMode, currentI, currentOff, currentDepth, fieldAvg, seed])
+  const runTensor = useCallback(() => {
+    setTensorLoading(true); setTensorErr(null)
+    api.tensor({ profile, source: fpgaMode, n_avg: tensorAvg,
+      base_bz_ut: tensorBg, dipole_moment_am2: tensorMoment,
+      dipole_x_mm: tensorX, dipole_y_mm: tensorY, dipole_z_mm: tensorZ, seed })
+      .then(setTensor).catch(e => setTensorErr(e.message)).finally(() => setTensorLoading(false))
+  }, [profile, fpgaMode, tensorAvg, tensorBg, tensorMoment, tensorX, tensorY, tensorZ, seed])
 
   // Probe the real FPGA whenever Hardware-real mode is entered, so the
   // indicator shows a green "FPGA connected — QSSC v1 on /dev/ttyUSB0" or a
@@ -488,7 +523,9 @@ export default function App() {
   // card — now placed in the Circuit Runner + Spectroscopy slots — stay in
   // sync: the run body carries gradient/pixel-size, and useCalib gates the run
   // on the cached calibration).
-  const [parGrad, setParGrad] = useState(0.5)
+  // 1.75 MHz/µm → ≈70 addressable lines/pixel at 200 µm (within the on-board
+  // coil's 2.23 MHz/µm full-scale; the gradient is the lever for per-pixel N).
+  const [parGrad, setParGrad] = useState(1.75)
   const [parPixelSize, setParPixelSize] = useState(200)
   const [parNPixels, setParNPixels] = useState(64)
   const [parUseCalib, setParUseCalib] = useState(true)
@@ -568,9 +605,15 @@ export default function App() {
     // ensemble: 64 chip pixels, no within-pixel 2q). nNvPerPixel is null until
     // the calibration measures the ODMR line count, so the backend uses its
     // nominal default when unset.
-    const pixel = { pixel_mode: pixelMode, prime_readout: primeReadout }
+    const pixel = { pixel_mode: pixelMode, prime_readout: primeReadout,
+                    noise_env: noiseEnv }
     if (nNvPerPixel != null) pixel.n_nv_per_pixel = nNvPerPixel
     if (registerLineFreqsHz) pixel.register_line_freqs_hz = registerLineFreqsHz
+    // Anti-noise filter stack preset (off = no filter dict sent -> back-compat).
+    // The stack attenuates the environmental channels modelled by noise_env; it
+    // only has something to filter when noise_env is lab/quiet/noisy, so the
+    // visible effect is largest in a noisy lab (filter restores the readout).
+    if (antiNoisePreset !== 'off') pixel.anti_noise = ANTI_NOISE_PRESETS[antiNoisePreset]
     if (algo === 'custom') {
       return { code: customCode, profile, temperature_k: temperature, seed, shots, noise_mode: noiseMode, hardware, ...pixel }
     }
@@ -1297,12 +1340,26 @@ export default function App() {
 
           {/* =================== CONTACTLESS FIELD IMAGING =================== */}
           {sensorsSub === 'field' && (<>
-          <div className="section-title">Contactless field imaging — ferromagnetic · geomagnetic nav · temperature · current</div>
+          <div className="section-title">Contactless field imaging — tensor gradiometer · ferromagnetic · geomagnetic nav · temperature · current</div>
           <div className="hint" style={{ marginBottom: 14, color: 'var(--dim)', fontSize: 12.5 }}>
             Magnetic fields penetrate fog, smoke, water, tissue, packaging and non-magnetic walls — so the same
             64-pixel array images the source through whatever is in the way. Each card models a different source:
-            a ferromagnetic dipole (object detection), the crustal anomaly field (GPS-denied navigation), a
-            temperature field (NV D-shift thermometry), or a current (Ampère).
+            a tensor-gradient dipole fit, a ferromagnetic dipole (object detection), the crustal
+            anomaly field (GPS-denied navigation), a temperature field (NV D-shift thermometry), or a current (Ampère).
+          </div>
+          <div className="card">
+            <h2><span className="dot" />Tensor gradiometer + dipole localization</h2>
+            <div className="hint">Each pixel recovers the full B-VECTOR from its 4 NV ⟨111⟩ Zeeman doublets; the 8×8 map's per-pixel 3×2 gradient tensor (Jacobian) is the tensor image. A baseline sweep is subtracted (differential mode) so a weak dipole surfaces against the DC background, and the source is fit to the raw doublet splits — sign-ambiguity-free. ● fitted source.</div>
+            <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
+              <div className="field"><label>Moment (A·m²)</label><input type="number" step="any" value={tensorMoment} onChange={e => setTensorMoment(+e.target.value)} /></div>
+              <div className="field"><label>Source X (mm)</label><input type="number" step="any" value={tensorX} onChange={e => setTensorX(+e.target.value)} /></div>
+              <div className="field"><label>Source Y (mm)</label><input type="number" step="any" value={tensorY} onChange={e => setTensorY(+e.target.value)} /></div>
+              <div className="field"><label>Depth Z (mm)</label><input type="number" step="any" value={tensorZ} onChange={e => setTensorZ(+e.target.value)} /></div>
+              <div className="field"><label>Bz bias (µT)</label><input type="number" step="any" value={tensorBg} onChange={e => setTensorBg(+e.target.value)} /></div>
+              <div className="field"><label>Averages</label><input type="number" value={tensorAvg} onChange={e => setTensorAvg(+e.target.value)} /></div>
+              <button className="btn" onClick={runTensor} disabled={tensorLoading} style={{ alignSelf: 'flex-end' }}>{tensorLoading ? 'Sweeping…' : 'Image tensor'}</button>
+            </div>
+            <TensorPanel data={tensor} error={tensorErr} loading={tensorLoading} />
           </div>
           <div className="sensor-grid">
             <div className="card">
@@ -1587,7 +1644,34 @@ export default function App() {
                   {primeReadout ? '✓ ON' : 'OFF'}
                 </button>
               </div>
+              <div className="field">
+                <label>Noise environment <span className="muted">· lab model</span></label>
+                <select value={noiseEnv} onChange={e => setNoiseEnv(e.target.value)}>
+                  <option value="none">none</option>
+                  <option value="quiet">quiet lab</option>
+                  <option value="lab">lab</option>
+                  <option value="noisy">noisy lab</option>
+                </select>
+              </div>
+              <div className="field">
+                <label>Anti-noise filter <span className="muted">· denoise stack</span></label>
+                <select value={antiNoisePreset} onChange={e => setAntiNoisePreset(e.target.value)}>
+                  <option value="off">off</option>
+                  <option value="passive">passive (iso + shield)</option>
+                  <option value="active">active (+ servo + feed-forward)</option>
+                  <option value="full">full (+ XY8 decoupling)</option>
+                </select>
+              </div>
             </div>
+            {noiseEnv !== 'none' && (
+              <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
+                Noise environment <b>{noiseEnv}</b>: environmental drift (temperature,
+                vibration, EMI) raises the readout error. Turn the <b>anti-noise filter</b>{' '}
+                on to attenuate those channels back down — the filter only has something
+                to remove when an environment is selected, so its effect is largest in a
+                noisy lab. Prime denoise stacks on top (coprime matched filter).
+              </div>
+            )}
             {pixelMode === 'ensemble' && (
               <div className="muted" style={{ fontSize: 11.5, marginTop: 8,
                 color: 'var(--warn, #b8860b)' }}>

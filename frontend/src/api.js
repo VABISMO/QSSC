@@ -70,4 +70,6 @@ export const api = {
   nav: (o) => get(`/api/nav?${q(o)}`),
   thermal: (o) => get(`/api/thermal?${q(o)}`),
   current: (o) => get(`/api/current?${q(o)}`),
+  // tensor gradiometer (Invention 19) + dipole source localization
+  tensor: (o) => get(`/api/sensor/tensor?${q(o)}`),
 }

@@ -17,7 +17,7 @@ from typing import List, Optional
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from qssc import (
     get_profile, coherence_at_temperature,
@@ -28,8 +28,10 @@ from qssc import (
     FPGAConnection, NoFPGADetected, make_connection,
     DetectorInterface, MicrowaveController, EmitterController,
     decompose_odmr, resolvable_register_width,
+    tensor_gradient_sweep,
 )
 from qssc.simulator import DETECT_THRESHOLD, BRIGHT_CODE
+from qssc.array_calibration import nv_ceiling_for_size, PIXEL_SIZE_MAX_UM
 from qssc.backend import _fit_t2_from_codes
 from qssc.protocol import (
     protocol_as_dict, protocol_summary, protocol_platforms,
@@ -74,6 +76,33 @@ app.add_middleware(
     CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ---------------------------------------------------------------------------
+# Field-gradient coil driver (MCP4921 DAC -> coil current)
+# ---------------------------------------------------------------------------
+# The gradient-coil current is set by a 12-bit MCP4921 SPI DAC. Vout = Vdd *
+# code/4096 with Vdd = +5V; the LM358 + IRLML2502 servo drives I_coil = Vdac /
+# Rsense with Rsense = 1 ohm, so I_coil[A] = 5.0 * code/4096. The field gradient
+# across the pixel is anchored at the verified addressing point: I = 2.2 A ->
+# 7 mT across 200 um. NV gyromagnetic ratio gamma = 28 MHz/mT, so 7 mT/200 um
+# -> 0.98 MHz/um of line spread. The gradient scales linearly with the current:
+#   gradient_mhz_per_um = (I_coil / 2.2) * 0.98
+# At code 0 the gradient is off (ensemble collapses to one line); at the
+# addressing code (~1803, I=2.2A) the spread is ~196 MHz; at full code 4095 the
+# spread is ~445 MHz (the DAC range exceeds the addressing gradient by design).
+GRAD_COIL_VDD = 5.0          # MCP4921 Vdd / Vref [V] (board rail)
+GRAD_SENSE_OHM = 1.0         # Rsense [ohm] (board)
+GRAD_ADDRESSING_A = 2.2      # I_coil for the 7 mT addressing gradient [A]
+GRAD_ADDRESSING_MHZ_PER_UM = 0.98  # 7 mT/200um * 28 MHz/mT [MHz/um]
+GRAD_PIXEL_UM = 200.0        # pixel size [um]
+ODMR_LINEWIDTH_MHZ = 5.0     # intrinsic single-line ODMR linewidth (simulate_odmr)
+# Full-scale coil gradient (DAC code 4095): 5 V * 4095/4096 / 2.2 A * 0.98 MHz/µm.
+# The on-board MCP4921 + gradient coil cannot exceed this, so the API caps the
+# requested gradient here — the per-pixel register width tops out at ~89 lines
+# (gradient × pixel ÷ linewidth) at full coil current.
+GRAD_COIL_MAX_MHZ_PER_UM = round(
+    GRAD_COIL_VDD * (4095 / 4096.0) / GRAD_ADDRESSING_A * GRAD_ADDRESSING_MHZ_PER_UM, 2)
 
 
 # ---------------------------------------------------------------------------
@@ -128,11 +157,17 @@ class RunRequest(BaseModel):
     pixel_mode: str = "register"          # register | ensemble
     n_nv_per_pixel: Optional[int] = Field(None, ge=1, le=64)
     register_nv_spacing_nm: float = Field(2.75, gt=0)
-    gradient_mhz_per_um: float = Field(0.0, ge=0.0, le=100.0)
+    gradient_mhz_per_um: float = Field(0.0, ge=0.0, le=GRAD_COIL_MAX_MHZ_PER_UM)
     pixel_size_um: float = Field(200.0, gt=0)
     register_line_freqs_hz: Optional[List[int]] = None
     prime_readout: bool = False
     n_noise_bins: int = Field(64, ge=1, le=4096)
+    # Invention 9: classical anti-noise filter stack (300 K, SNR-protective).
+    # noise_env presets the environmental noise channels ("none"=off -> back-
+    # compat); anti_noise is the filter config dict (empty/None -> back-compat).
+    # A DD sequence extends the spin T2 used for coherence survival.
+    noise_env: str = "none"
+    anti_noise: Optional[dict] = None
 
 
 class CustomCircuitRequest(BaseModel):
@@ -153,11 +188,14 @@ class CustomCircuitRequest(BaseModel):
     pixel_mode: str = "register"
     n_nv_per_pixel: Optional[int] = Field(None, ge=1, le=64)
     register_nv_spacing_nm: float = Field(2.75, gt=0)
-    gradient_mhz_per_um: float = Field(0.0, ge=0.0, le=100.0)
+    gradient_mhz_per_um: float = Field(0.0, ge=0.0, le=GRAD_COIL_MAX_MHZ_PER_UM)
     pixel_size_um: float = Field(200.0, gt=0)
     register_line_freqs_hz: Optional[List[int]] = None
     prime_readout: bool = False
     n_noise_bins: int = Field(64, ge=1, le=4096)
+    # Invention 9: classical anti-noise filter stack (see RunRequest).
+    noise_env: str = "none"
+    anti_noise: Optional[dict] = None
 
 
 class ParallelRunRequest(BaseModel):
@@ -193,7 +231,7 @@ class ParallelRunRequest(BaseModel):
     pixel_mode: str = "register"
     n_nv_per_pixel: Optional[int] = Field(None, ge=1, le=64)
     register_nv_spacing_nm: float = Field(2.75, gt=0)
-    gradient_mhz_per_um: float = Field(0.0, ge=0.0, le=100.0)
+    gradient_mhz_per_um: float = Field(0.0, ge=0.0, le=GRAD_COIL_MAX_MHZ_PER_UM)
     pixel_size_um: float = Field(200.0, gt=0)
     register_line_freqs_hz: Optional[list] = None
     prime_readout: bool = False
@@ -203,6 +241,9 @@ class ParallelRunRequest(BaseModel):
     # the uniform-register back-compat path. Calibrate first via
     # /api/circuit/calibrate-array, then set use_calibration=true here.
     use_calibration: bool = False
+    # Invention 9: classical anti-noise filter stack (see RunRequest).
+    noise_env: str = "none"
+    anti_noise: Optional[dict] = None
 
 
 class CalibrateArrayRequest(BaseModel):
@@ -218,13 +259,53 @@ class CalibrateArrayRequest(BaseModel):
     ``hardware/calibration/array_calibration.json`` so subsequent
     ``run-parallel`` calls run each pixel at its own calibrated width."""
     profile: str = "NV"
-    gradient_mhz_per_um: float = Field(0.5, ge=0.0, le=100.0)
-    pixel_size_um: float = Field(200.0, ge=1.0, le=5000.0)
+    gradient_mhz_per_um: float = Field(1.75, ge=0.0, le=GRAD_COIL_MAX_MHZ_PER_UM)
+    pixel_size_um: float = Field(200.0, ge=1.0, le=PIXEL_SIZE_MAX_UM)
     seed: int = Field(42, ge=0, le=2_147_483_647)
     temperature_k: float = Field(300.0, ge=0.001, le=600)
     source: str = "sim"          # sim | real
-    max_nv_per_microdiamond: int = Field(100, ge=1, le=1000)
+    max_nv_per_microdiamond: int = Field(300, ge=1, le=1000)  # compute-stone NVs (100-300)
     n_points: int = Field(400, ge=32, le=4096)  # real path sweep points
+    # Invention 6: charge-sharing centroiding (sub-pixel detector resolution).
+    # When true, build a SubPixelModel (sigma_sheet_mm sheet spreading length)
+    # and report spatial_channels = 64*S + per-pixel sub_pixel_position. This is
+    # detector imaging metadata; it does NOT change register_width.
+    sub_pixel: bool = False
+    sigma_sheet_mm: float = Field(1.0, gt=0.0, le=10.0)
+    # Invention 7: N-shot lock-in averaging raises per-line SNR by sqrt(N), so
+    # dimmer lone-NV ODMR lines clear the detection bar -> the MEASURED
+    # register_width rises toward min(resolvable, nv_present). 1 = no averaging.
+    integration_shots: int = Field(1, ge=1, le=10000)
+    # Invention 9: classical anti-noise filter stack (300 K, SNR-protective).
+    # noise_env presets the environmental channels: "lab"/"quiet"/"noisy"/"none"
+    # (none = off -> bit-identical to the prior model). anti_noise is the filter
+    # config dict (thermal_servo_gain, vibration_iso_residual, emi_shield_residual,
+    # feed_forward_channels, feed_forward_rejection, common_mode_reject,
+    # dd_sequence, dd_n_blocks); empty/None -> all-off -> back-compat.
+    noise_env: str = "none"
+    anti_noise: Optional[dict] = None
+    # Invention 13: compressed-sensing super-resolution ODMR. When > 0, recover
+    # each pixel's line set by OMP sparse recovery over the gradient-bin
+    # dictionary with superres_factor = this value (0.6 typical; 1.0 = hard-
+    # threshold behaviour). Deconvolves overlapping lines + lowers the SNR bar.
+    superres: Optional[float] = Field(None, ge=0.0, le=1.0)
+    # Invention 14: Bayesian quantum-limited readout. When 0 < value < 1, recover
+    # lines by the one-sided Bonferroni-corrected matched-filter detector at this
+    # confidence (0.99 typical). Extracts marginal lone-NV lines the hard bar
+    # misses. Mutually exclusive with superres (superres takes precedence).
+    bayesian: Optional[float] = Field(None, gt=0.0, lt=1.0)
+
+    @model_validator(mode="after")
+    def _clamp_nv_to_stone_volume(self):
+        # A microdiamond can only hold as many NVs as its volume allows (300 NV
+        # @ 200 um, scaling as size^3 at <10 ppm). Clamp the requested cap to
+        # that physical ceiling so a raw-JSON request can never ask for more NVs
+        # than the stone can carry. The frontend mirrors this; calibrate_array
+        # re-clamps as defense-in-depth.
+        ceil = nv_ceiling_for_size(self.pixel_size_um)
+        if self.max_nv_per_microdiamond > ceil:
+            self.max_nv_per_microdiamond = ceil
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -335,24 +416,8 @@ def _clamp_points(points: int, lo: int = 1, hi: int = 2000) -> int:
     return max(lo, min(n, hi))
 
 
-# --- Invention 5 field-gradient coil driver (MCP4921 DAC -> coil current) ---
-# The gradient-coil current is set by a 12-bit MCP4921 SPI DAC. Vout = Vdd *
-# code/4096 with Vdd = +5V; the LM358 + IRLML2502 servo drives I_coil = Vdac /
-# Rsense with Rsense = 1 ohm, so I_coil[A] = 5.0 * code/4096. The field gradient
-# across the 200 um pixel is anchored at the verified addressing point
-# (Invention 5): I = 2.2 A -> 7 mT across 200 um. NV gyromagnetic ratio
-# gamma = 28 MHz/mT, so 7 mT/200 um -> 0.98 MHz/um of line spread. The gradient
-# scales linearly with the current, so:
-#   gradient_mhz_per_um = (I_coil / 2.2) * 0.98
-# At code 0 the gradient is off (ensemble collapses to one line); at the
-# addressing code (~1803, I=2.2A) the spread is ~196 MHz; at full code 4095 the
-# spread is ~445 MHz (the DAC range exceeds the addressing gradient by design).
-GRAD_COIL_VDD = 5.0          # MCP4921 Vdd / Vref [V] (board rail)
-GRAD_SENSE_OHM = 1.0         # Rsense [ohm] (board)
-GRAD_ADDRESSING_A = 2.2      # I_coil for the 7 mT addressing gradient [A]
-GRAD_ADDRESSING_MHZ_PER_UM = 0.98  # 7 mT/200um * 28 MHz/mT [MHz/um]
-GRAD_PIXEL_UM = 200.0        # pixel size [um]
-ODMR_LINEWIDTH_MHZ = 5.0     # intrinsic single-line ODMR linewidth (simulate_odmr)
+# --- Field-gradient coil driver: see GRAD_COIL_* constants defined above the
+# --- Models section (the request Fields reference GRAD_COIL_MAX_MHZ_PER_UM).
 
 
 def _gradient_from_code(code: Optional[int]) -> tuple[float, float, int]:
@@ -425,11 +490,11 @@ def profiles():
 
 @app.get("/api/modes")
 def modes():
-    """Pixel modes + invention toggles the panel can render, each with its
-    hardware-readiness badge. Only inventions that run on the CURRENT PCB
-    (no hardware change) are listed here -- the needs-HW inventions (nuclear
-    memory, gradient register, per-pixel independent MW) are tracked as
-    GitHub issues, not surfaced as panel switches. See docs/INVENTIONS.md."""
+    """Pixel modes + feature toggles the panel can render, each with its
+    hardware-readiness badge. Only features that run on the CURRENT PCB
+    (no hardware change) are listed here -- features needing a PCB change
+    (nuclear memory, per-pixel independent MW) are tracked as GitHub issues,
+    not surfaced as panel switches. See docs/INVENTIONS.md."""
     return {
         "pixel_modes": [
             {"key": "register", "label": "Register",
@@ -446,17 +511,16 @@ def modes():
             {"key": "prime_readout", "label": "Prime denoise",
              "hw": True, "badge": "RTL done (READ_LOCKINP)", "default": True,
              "description": "Prime-coprime frequency-multiplexed readout + "
-                            "lock-in denoiser (Invention 2+)."},
+                            "lock-in denoiser."},
             {"key": "magnetometer", "label": "Vector magnetometer",
              "hw": True, "badge": "fits current PCB (ODMR_SWEEP)", "default": True,
-             "description": "64-pixel vector magnetometer (Invention 1), in the "
-                            "Sensors tab."},
+             "description": "64-pixel vector magnetometer, in the Sensors tab."},
             {"key": "parallel", "label": "64-parallel readout",
              "hw": True, "badge": "fits current PCB (READ_DETECTORS)",
              "default": True,
-             "description": "64-parallel readout (Invention 4) via the run-parallel "
-                            "endpoint; independent per-pixel circuits need per-"
-                            "pixel MW (GitHub issue)."},
+             "description": "64-parallel readout via the run-parallel endpoint; "
+                            "independent per-pixel circuits need per-pixel MW "
+                            "(GitHub issue)."},
         ],
     }
 
@@ -796,8 +860,19 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
     # resolvable_register_width gives the physics prediction (gradient*pixel /
     # linewidth) to cross-check the measured decomposition.
     components = decompose_odmr(f, c)
-    register_width = max(1, len(components))
-    line_freqs_hz = [round(cmp.freq_ghz * 1e9) for cmp in components]
+    # Cap the measured line count by the gradient's resolvability limit: a line
+    # the gradient cannot separate (separation < linewidth) is NOT an
+    # independent qubit -- it is envelope structure the CLEAN resolver fits
+    # inside one broad ensemble dip. At zero gradient the cap is 1 (one
+    # ensemble line -> 1 qubit/pixel); the raw CLEAN count would otherwise
+    # resolve the hyperfine/transition envelope into spurious sub-lines. With a
+    # gradient the cap is gradient*pixel/linewidth and the measured count sits
+    # below it (the SNR bar rejects weak lines), so the cap is only binding in
+    # the no-gradient ensemble collapse.
+    predicted_width = resolvable_register_width(grad_mhz_per_um, GRAD_PIXEL_UM,
+                                                ODMR_LINEWIDTH_MHZ)
+    register_width = max(1, min(len(components), predicted_width))
+    line_freqs_hz = [round(cmp.freq_ghz * 1e9) for cmp in components][:register_width]
     pixel_mode_recommendation = "ensemble" if register_width <= 1 else "register"
     # resolvable_register_width gives the physics prediction: how many lines the
     # gradient *can* separate at the intrinsic single-line linewidth (5 MHz, the
@@ -805,8 +880,6 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
     # the whole spread and would always predict ~1). The measured count is
     # usually below this theoretical max because decompose_odmr's SNR bar
     # rejects weak / closely-spaced lines.
-    predicted_width = resolvable_register_width(grad_mhz_per_um, GRAD_PIXEL_UM,
-                                                ODMR_LINEWIDTH_MHZ)
 
     t1, t2 = coherence_at_temperature(prof, temperature_k)
 
@@ -1745,6 +1818,116 @@ def api_sensor_magneto(
         "image_min_ut": res.image_min_ut, "image_max_ut": res.image_max_ut,
         "mean_b_mag_ut": res.mean_b_mag_ut, "mean_b_vector_ut": res.mean_b_vector_ut,
         "std_b_mag_ut": res.std_b_mag_ut, "stats": res.stats, "note": res.note,
+    }
+
+
+@app.get("/api/sensor/tensor")
+def api_sensor_tensor(
+    profile: str = "NV",
+    source: str = "real",
+    pitch_mm: float = 2.5,
+    z_guess_mm: float = 15.0,
+    n_avg: int = 500,
+    gradient_ut_mm: float = 0.0,
+    base_bx_ut: float = 0.0,
+    base_by_ut: float = 0.0,
+    base_bz_ut: float = 50.0,
+    dipole_moment_am2: float = 0.002,
+    dipole_x_mm: float = 2.0,
+    dipole_y_mm: float = -1.0,
+    dipole_z_mm: float = 10.0,
+    differential: bool = True,
+    seed: Optional[int] = None,
+):
+    """64-pixel TENSOR gradiometer (Invention 19) + dipole localization.
+
+    The per-pixel 3x2 B-gradient Jacobian (µT/mm) of the 8x8 B-VECTOR map,
+    plus a point-dipole source fit. The B-vector map is the RECOVERED field
+    each pixel measures from its 4 NV <111> Zeeman doublets (the same 4-axis
+    reconstruction as the vector magnetometer, Invention 1):
+
+    * ``source='real'`` (default): the 4-axis doublet reconstruction is
+      shot-noise-limited at the linewidth floor for ``n_avg`` averages -- the
+      real-hardware noise model (the actual board runs ``RUN_ALL_ODMR`` under a
+      uniform B-field and the host inverts each pixel's resolved doublets to a
+      B-vector via :func:`qssc.b_vector_from_odmr_lines`; the simulator models
+      the same doublets with the linewidth-limited shot noise here).
+    * ``source='sim'``: averages freely (n_avg x8, cleaner readout) -- the
+      ideal-noise demo mode.
+
+    ``differential`` (default) is the physically correct mode for imaging a
+    small anomaly against a large background: a baseline map is measured first,
+    each pixel's signal is reconstructed locked to the baseline's sign branch
+    and the two subtracted, so the per-pixel 4-axis sign ambiguity cancels and
+    the dipole perturbation surfaces as a smooth tensor image. The dipole
+    source is fit to the raw doublet SPLITS (the sign-ambiguity-free
+    observables), not the reconstructed vectors -- the robust localizer
+    (:func:`qssc.localize_dipole_from_splits`).
+    """
+    grid = 8
+    prof = get_profile(profile)
+    # sim mode averages freely (n_avg x8); real is shot-noise-limited (n_avg).
+    n_eff = int(n_avg) * (8 if source == "sim" else 1)
+    fmap = synthetic_field_map(
+        gradient_ut_mm=gradient_ut_mm, base_bx_ut=base_bx_ut,
+        base_by_ut=base_by_ut, base_bz_ut=base_bz_ut,
+        dipole_moment_am2=dipole_moment_am2,
+        dipole_x_mm=dipole_x_mm, dipole_y_mm=dipole_y_mm,
+        dipole_z_mm=dipole_z_mm)
+    baseline = (synthetic_field_map(
+        gradient_ut_mm=gradient_ut_mm, base_bx_ut=base_bx_ut,
+        base_by_ut=base_by_ut, base_bz_ut=base_bz_ut,
+        dipole_moment_am2=0.0) if differential else None)
+    res = tensor_gradient_sweep(
+        profile=profile, b_field_map_ut=fmap, baseline_map_ut=baseline,
+        pitch_mm=pitch_mm, n_avg=n_eff, seed=(seed if seed is not None else 42),
+        fit_dipole=True, differential=differential)
+    # rebuild the (grid,grid,3) recovered B-vector map + |B| image from the
+    # tensor pixels (the field the gradiometer differentiates + images).
+    fmap_ut = np.zeros((grid, grid, 3))
+    for p in res.pixels:
+        fmap_ut[p.y, p.x] = np.array(p.b_vector_ut, dtype=float)
+    bmag = np.linalg.norm(fmap_ut, axis=2)
+    lw = prof.odmr_linewidth_hz / 1e6
+    sens_ut = (lw * 1e6) / (2.0 * prof.gyromagnetic_ratio) * 1e6 / math.sqrt(
+        max(1, n_eff))
+    n_resolved = int(np.count_nonzero(bmag > sens_ut))
+    dipole = None
+    if res.dipole_moment_am2 is not None:
+        dipole = {
+            "dipole_x_mm": res.dipole_x_mm, "dipole_y_mm": res.dipole_y_mm,
+            "dipole_z_mm": res.dipole_z_mm,
+            "dipole_moment_am2": res.dipole_moment_am2,
+            "fit_residual_ut": res.fit_residual_ut,
+            "fit_residual_mhz": res.fit_residual_mhz,
+        }
+    mode = "sim" if source == "sim" else "real"
+    return {
+        "profile": res.profile, "source": source, "grid": res.grid,
+        "n_pixels": res.n_pixels, "pitch_mm": res.pitch_mm,
+        "mode": mode, "n_avg": n_eff, "differential": differential,
+        "linewidth_mhz": float(lw), "sensitivity_ut": round(sens_ut, 4),
+        "n_resolved_pixels": n_resolved,
+        "note": (f"64-pixel tensor gradiometer: each pixel's 4 NV <111> "
+                 f"doublets -> B-vector (linewidth {lw:g} MHz, {n_eff} avg -> "
+                 f"{sens_ut:.3f} µT). "
+                 + ("Differential: baseline subtracted, dipole fit on raw "
+                    "splits (sign-ambiguity-free). " if differential else "")
+                 + f"{n_resolved}/{grid*grid} pixels above the noise floor."),
+        "b_vector_map_ut": [[round(float(v), 6) for v in fmap_ut[iy, ix]]
+                            for iy in range(grid) for ix in range(grid)],
+        "b_mag_image_ut": [round(float(v), 6) for v in bmag.ravel()],
+        "b_mag_min_ut": round(float(bmag.min()), 6),
+        "b_mag_max_ut": round(float(bmag.max()), 6),
+        "tensor_pixels": [
+            {"pixel": p.pixel, "x": p.x, "y": p.y,
+             "b_vector_ut": p.b_vector_ut,
+             "jacobian_ut_mm": p.jacobian_ut_mm}
+            for p in res.pixels],
+        "dipole": dipole,
+        "mean_b_vector_ut": [round(float(v), 3) for v in
+                             np.mean(fmap_ut.reshape(-1, 3), axis=0)],
+        "std_b_mag_ut": round(float(np.std(bmag)), 3),
     }
 
 

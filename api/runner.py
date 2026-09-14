@@ -28,11 +28,14 @@ from qssc import (
 )
 from qssc.array_calibration import (
     ArrayCalibration, best_uniform_width,
+    nv_ceiling_for_size, GRAD_COIL_MAX_MHZ_PER_UM,
+    PIXEL_SIZE_MIN_UM, PIXEL_SIZE_MAX_UM, _linewidth_mhz_for,
 )
 from qssc.crypto import (
     derive_keypair, von_neumann_extract, bits_to_bytes, entropy_health,
 )
 from qssc.qkd import simulate_bb84
+from qssc.noise_filters import AntiNoiseConfig, noise_environment_preset
 
 # Path to the cached per-pixel array calibration (Invention 4). The API's
 # /api/circuit/calibrate-array endpoint writes it; run_parallel reads it so
@@ -52,6 +55,16 @@ def _load_cached_calibration() -> ArrayCalibration | None:
     return None
 
 
+def _anti_noise_from_req(req: dict) -> AntiNoiseConfig | None:
+    """Build an :class:`AntiNoiseConfig` from the request's ``anti_noise`` dict.
+
+    Returns ``None`` (-> back-compat, no DD / no filters) when the field is
+    absent, empty, or resolves to the all-off default config.
+    """
+    cfg = AntiNoiseConfig.from_dict(req.get("anti_noise"))
+    return None if cfg.is_default() else cfg
+
+
 def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
              hardware: bool = False,
              n_nv_per_pixel: Optional[int] = None,
@@ -62,7 +75,11 @@ def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
              register_line_freqs_hz: Optional[list] = None,
              prime_readout: bool = False,
              n_noise_bins: int = 64,
-             register_widths_per_pixel=None) -> QSSCBackend:
+             register_widths_per_pixel=None,
+             register_line_freqs_per_pixel=None,
+             anti_noise=None,
+             noise_env=None,
+             integration_shots: int = 1) -> QSSCBackend:
     # pixel_mode selects the circuit-qubit model: register (one pixel's N-NV
     # register, within-pixel all-to-all dipole 2q) or ensemble (64 chip pixels,
     # no within-pixel 2q). N is the MEASURED resolvable ODMR line count when
@@ -92,7 +109,11 @@ def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
                        register_line_freqs_hz=register_line_freqs_hz,
                        prime_readout=prime_readout,
                        n_noise_bins=n_noise_bins,
-                       register_widths_per_pixel=register_widths_per_pixel)
+                       register_widths_per_pixel=register_widths_per_pixel,
+                       register_line_freqs_per_pixel=register_line_freqs_per_pixel,
+                       anti_noise=anti_noise,
+                       noise_env=noise_env,
+                       integration_shots=integration_shots)
 
 
 def _pixel_kwargs(req: dict) -> dict:
@@ -110,6 +131,8 @@ def _pixel_kwargs(req: dict) -> dict:
         "register_line_freqs_hz": req.get("register_line_freqs_hz"),
         "prime_readout": bool(req.get("prime_readout", False)),
         "n_noise_bins": int(req.get("n_noise_bins", 64)),
+        "noise_env": noise_environment_preset(str(req.get("noise_env", "none"))),
+        "integration_shots": int(req.get("integration_shots", 1)),
     }
 
 
@@ -188,10 +211,12 @@ def run_circuit(req: dict) -> dict:
     shots = int(req.get("shots", 2048))
     noise_mode = req.get("noise_mode", "real")
     hardware = bool(req.get("hardware", False))
+    anti_noise = _anti_noise_from_req(req)
     algo = str(req.get("algorithm", "shor")).lower()
     try:
         b = _backend(profile, temperature_k, seed, noise_mode,
-                     hardware=hardware, **_pixel_kwargs(req))
+                     hardware=hardware, anti_noise=anti_noise,
+                     **_pixel_kwargs(req))
     except NoFPGADetected as exc:
         return _no_fpga_result(exc)
     src = _source_label(b.hardware)
@@ -504,7 +529,8 @@ def run_circuit(req: dict) -> dict:
         # connection, so reuse the existing backend.
         if qrng_seed != seed and not hardware:
             b = _backend(profile, temperature_k, qrng_seed, noise_mode,
-                         hardware=hardware, **_pixel_kwargs(req))
+                         hardware=hardware, anti_noise=anti_noise,
+                         **_pixel_kwargs(req))
         res = b.run(qc, shots=raw_shots).result()
         counts = res.get_counts()
         # expand the measured outcomes into a flat list and shuffle so that
@@ -864,6 +890,7 @@ def run_parallel(req: dict) -> dict:
     noise_mode = req.get("noise_mode", "real")
     mode = str(req.get("mode", "sample")).lower()
     n_pixels = max(1, min(64, int(req.get("n_pixels", 64))))
+    anti_noise = _anti_noise_from_req(req)
     # Invention 4: when the caller opts in (use_calibration=true), load the
     # cached per-pixel calibration so each pixel runs at its MEASURED register
     # width (skip-narrow). Default False = the uniform-register back-compat
@@ -872,14 +899,26 @@ def run_parallel(req: dict) -> dict:
     use_cal = bool(req.get("use_calibration", False))
     calib = _load_cached_calibration() if use_cal else None
     reg_widths = None
+    reg_freqs_per_pixel = None
     grad = 0.0
     psz = 200.0
     if calib is not None and calib.profile.lower() == str(profile).lower():
         reg_widths = calib.widths
         grad = calib.gradient_mhz_per_um
         psz = calib.pixel_size_um
+        # Close the calibration -> circuit loop (Invention 4): feed each pixel's
+        # MEASURED ODMR line centres (GHz -> Hz) back so the register sits on the
+        # real addressed frequency grid, not auto_align's synthetic 6 MHz grid.
+        # The frontend's per-pixel qubits+freqs modal then shows the measured
+        # frequencies. Pixels with empty odmr_lines fall back to the synthetic
+        # grid (auto_align with register_line_freqs_hz=None).
+        reg_freqs_per_pixel = [
+            ([round(g * 1e9) for g in p.odmr_lines] if p.odmr_lines else None)
+            for p in calib.pixels
+        ]
     try:
         kw = _pixel_kwargs(req)
+        kw["anti_noise"] = anti_noise
         if reg_widths is not None:
             # The calibration's gradient + pixel_size are the truth for the
             # per-pixel registers; override the request's defaults so each
@@ -895,6 +934,8 @@ def run_parallel(req: dict) -> dict:
             # histogram). So do NOT gate the shor race by the per-pixel width.
             if mode != "shor":
                 kw["register_widths_per_pixel"] = reg_widths
+                if reg_freqs_per_pixel is not None:
+                    kw["register_line_freqs_per_pixel"] = reg_freqs_per_pixel
         b = _backend(profile, temperature_k, seed, noise_mode,
                      hardware=False, **kw)
     except NoFPGADetected as exc:
@@ -1040,6 +1081,8 @@ def run_parallel(req: dict) -> dict:
             out["skipped_pixels"] = res["skipped_pixels"]
             out["min_width"] = res["min_width"]
             out["max_width"] = res["max_width"]
+        if "per_pixel_odmr_lines" in res:
+            out["per_pixel_odmr_lines"] = res["per_pixel_odmr_lines"]
 
     elif mode == "custom":
         qasms = req.get("circuits", [])
@@ -1070,6 +1113,8 @@ def run_parallel(req: dict) -> dict:
             out["skipped_pixels"] = res["skipped_pixels"]
             out["min_width"] = res["min_width"]
             out["max_width"] = res["max_width"]
+        if "per_pixel_odmr_lines" in res:
+            out["per_pixel_odmr_lines"] = res["per_pixel_odmr_lines"]
     else:
         return {"error": f"unknown parallel mode '{mode}' "
                         f"(use shor | sample | custom)"}
@@ -1093,10 +1138,31 @@ def run_calibrate_array(req: dict) -> dict:
         calibrate_array, calibrate_array_from_codes,
     )
     from qssc.defects import get_profile
+    from qssc.detector_centroid import SubPixelModel
+    from qssc.noise_filters import (
+        noise_environment_preset, effective_noise_sigma, filter_gain_breakdown,
+    )
+    from qssc.simulator import READOUT_NOISE, BRIGHT_CODE
     import numpy as _np
     profile = req.get("profile", "NV")
     prof = get_profile(profile)
     source = str(req.get("source", "sim")).lower()
+    # Invention 9: build the anti-noise stack from the request. noise_env="none"
+    # -> None (no environmental channels, back-compat); anti_noise empty -> the
+    # all-off default config (back-compat).
+    noise_env = noise_environment_preset(str(req.get("noise_env", "none")))
+    anti_noise = AntiNoiseConfig.from_dict(req.get("anti_noise"))
+    # Invention 6: build the sub-pixel centroiding model if requested.
+    sub_pixel = (SubPixelModel(sigma_sheet_mm=float(req.get("sigma_sheet_mm", 1.0)))
+                 if bool(req.get("sub_pixel", False)) else None)
+    # Invention 13/14: line-recovery mode (superres takes precedence over bayesian).
+    superres = req.get("superres")
+    bayesian = req.get("bayesian")
+    if superres is not None:
+        superres = float(superres)
+    if bayesian is not None:
+        bayesian = float(bayesian)
+    n_shots = max(1, int(req.get("integration_shots", 1)))
     try:
         if source == "real":
             fpga = _make_fpga(profile, float(req.get("temperature_k", 300.0)),
@@ -1112,14 +1178,31 @@ def run_calibrate_array(req: dict) -> dict:
             f_start = d_khz - span_khz
             f_stop = d_khz + span_khz
             n = int(req.get("n_points", 400))
-            matrix = fpga.run_all_odmr(f_start, f_stop, n)
+            # Invention 7: N-shot lock-in integration. Average N independent
+            # RUN_ALL_ODMR sweeps -> per-point readout noise drops by sqrt(N)
+            # (uncorrelated thermal/Johnson noise), so dimmer lone-NV ODMR bins
+            # clear the min_snr bar and the MEASURED width rises. Cost is
+            # measurement time xN, not silicon. integration_shots=1 -> one sweep
+            # (unchanged). Each sweep is a single-shot (n,64) matrix.
+            if n_shots > 1:
+                acc = None
+                for _ in range(n_shots):
+                    m = _np.asarray(fpga.run_all_odmr(f_start, f_stop, n),
+                                    dtype=float)
+                    acc = m if acc is None else acc + m
+                matrix = (acc / n_shots).astype(_np.int32)
+            else:
+                matrix = fpga.run_all_odmr(f_start, f_stop, n)
             freqs_ghz = _np.linspace(f_start * 1e3, f_stop * 1e3, n) / 1e9
             calib = calibrate_array_from_codes(
                 matrix, freqs_ghz, prof,
                 gradient_mhz_per_um=float(req.get("gradient_mhz_per_um", 0.5)),
                 pixel_size_um=float(req.get("pixel_size_um", 200.0)),
                 seed=int(req.get("seed", 42)),
-                temperature_k=float(req.get("temperature_k", 300.0)))
+                temperature_k=float(req.get("temperature_k", 300.0)),
+                integration_shots=n_shots, sub_pixel=sub_pixel,
+                noise_env=noise_env, anti_noise=anti_noise,
+                superres=superres, bayesian=bayesian)
             io_label = "real"
         else:
             calib = calibrate_array(
@@ -1128,7 +1211,10 @@ def run_calibrate_array(req: dict) -> dict:
                 pixel_size_um=float(req.get("pixel_size_um", 200.0)),
                 seed=int(req.get("seed", 42)),
                 temperature_k=float(req.get("temperature_k", 300.0)),
-                max_nv_per_microdiamond=int(req.get("max_nv_per_microdiamond", 100)))
+                max_nv_per_microdiamond=int(req.get("max_nv_per_microdiamond", 300)),
+                integration_shots=n_shots, sub_pixel=sub_pixel,
+                noise_env=noise_env, anti_noise=anti_noise,
+                superres=superres, bayesian=bayesian)
             io_label = "simulated"
     except NoFPGADetected as exc:
         return {"error": "no-fpga-detected",
@@ -1143,6 +1229,19 @@ def run_calibrate_array(req: dict) -> dict:
     except Exception:  # noqa: BLE001 - a cache write failure must not break the reply
         pass
     bw = best_uniform_width(calib.widths)
+    # Invention 13/14: which line-recovery mode produced the widths.
+    if superres is not None and superres > 0.0:
+        readout_mode = f"superres({superres})"
+    elif bayesian is not None and 0.0 < bayesian < 1.0:
+        readout_mode = f"bayesian({bayesian})"
+    else:
+        readout_mode = "hard-threshold"
+    # Invention 9: report the effective noise + per-filter gain breakdown so the
+    # frontend can show what each filter bought. Collapses to the prior values
+    # when the stack is unset (noise_env="none", anti_noise empty).
+    eff_noise = effective_noise_sigma(
+        READOUT_NOISE, noise_env, anti_noise, calib.integration_shots)
+    filter_gain = filter_gain_breakdown(noise_env, anti_noise)
     return {
         "profile": calib.profile,
         "source": io_label,
@@ -1158,12 +1257,42 @@ def run_calibrate_array(req: dict) -> dict:
         "best_uniform_width": bw[0],
         "best_uniform_pixels": bw[1],
         "total_working_qubits": bw[0] * bw[1],
+        # Invention 7: N-shot lock-in integration (raises measured width).
+        "integration_shots": calib.integration_shots,
+        # Invention 13/14: the per-pixel line-recovery mode that produced the
+        # widths (hard-threshold / superres(factor) / bayesian(confidence)).
+        "readout_mode": readout_mode,
+        # Invention 6: sub-pixel detector imaging resolution (does NOT change
+        # register_width -- within-pad spots merge; centroiding localizes one).
+        "sub_pixel_factor": calib.sub_pixel_factor,
+        "spatial_channels": calib.spatial_channels,
+        # Invention 9: classical anti-noise filter stack. effective_noise_rel is
+        # the post-filter readout noise as a fraction of BRIGHT_CODE; filter_gain
+        # is the per-channel residual breakdown; noise_env/anti_noise echo the
+        # config. All collapse to back-compat values when the stack is unset.
+        "noise_env": str(req.get("noise_env", "none")),
+        "anti_noise": (anti_noise.to_dict()
+                       if not anti_noise.is_default() else None),
+        "effective_noise_counts": round(eff_noise, 2),
+        "effective_noise_rel": round(eff_noise / BRIGHT_CODE, 6),
+        "filter_gain": filter_gain,
         "pixels": [
             {"pixel_id": p.pixel_id, "nv_present": p.nv_present,
              "microdiamonds": p.microdiamonds, "register_width": p.register_width,
-             "odmr_lines": p.odmr_lines}
+             "odmr_lines": p.odmr_lines,
+             "sub_pixel_position": p.sub_pixel_position}
             for p in calib.pixels
         ],
+        # Physically-possible caps the inputs were clamped to (mirror the
+        # frontend limits). Lets the UI show the achievable ceiling, not an
+        # impossible request.
+        "physics_limits": {
+            "gradient_max_mhz_per_um": GRAD_COIL_MAX_MHZ_PER_UM,
+            "pixel_size_min_um": PIXEL_SIZE_MIN_UM,
+            "pixel_size_max_um": PIXEL_SIZE_MAX_UM,
+            "nv_ceiling": nv_ceiling_for_size(calib.pixel_size_um),
+            "linewidth_mhz": _linewidth_mhz_for(calib.profile),
+        },
     }
 
 
@@ -1180,7 +1309,8 @@ def run_custom(req: dict) -> dict:
     try:
         b = _backend(profile, float(req.get("temperature_k", 300.0)),
                      int(req.get("seed", 42)), req.get("noise_mode", "real"),
-                     hardware=hardware, **_pixel_kwargs(req))
+                     hardware=hardware, anti_noise=_anti_noise_from_req(req),
+                     **_pixel_kwargs(req))
     except NoFPGADetected as exc:
         return _no_fpga_result(exc)
     try:

@@ -94,7 +94,7 @@ export function QubitFrequencyTable({ sites, dGhz, loading, error }) {
       <div className="hint" style={{ marginBottom: 8 }}>
         Per-pin ODMR + coherence sweep — each pin's dip is fit individually (measured D{dGhz ? `≈${dGhz}` : ''} GHz
         ± a per-site detuning; a narrow MW pulse at f<sub>i</sub> addresses only pin i). The <b>Qubits</b> column
-        is the per-pixel register width N resolved by the field gradient (Invention 5: the ODMR line count at the
+        is the per-pixel register width N resolved by the field gradient (the ODMR line count at the
         applied gradient). T₂ = Hahn-echo coherence (µs), T₂* = Ramsey inhomogeneous dephasing (µs).
         Measured detuning spread: <b>{spread.toFixed(2)} MHz</b>.
       </div>
@@ -157,8 +157,8 @@ export function ParallelPixelFreqTable({ pixels, dGhz }) {
         Per-pixel ODMR decomposition — each of the {pixels.length} die pixels is swept and
         <b> decompose_odmr</b> fits its resolvable lines (measured D{dGhz ? `≈${dGhz}` : ''} GHz
         ± a per-pixel strain / local-B / gradient detuning). The <b>Qubits</b> column is the
-        pixel's measured register width N (the ODMR line count at the applied gradient,
-        Invention 5). {working}/{pixels.length} pixels resolved ≥1 line; aggregate detuning
+        pixel's measured register width N (the ODMR line count at the applied gradient).
+        {working}/{pixels.length} pixels resolved ≥1 line; aggregate detuning
         spread <b>{spread.toFixed(2)} MHz</b>. A narrow MW pulse at any f<sub>i</sub> addresses
         only that pixel's i-th NV.
       </div>
@@ -1257,7 +1257,83 @@ export function SensorField({ data, error, loading, promptText }) {
 }
 
 // ---------------------------------------------------------------------------
-// MeasurementHelp — "?" button + modal that shows, for the algorithm that just
+// TensorPanel — 64-pixel tensor gradiometer. Shows the recovered
+// |B| image (the dipole perturbation after baseline subtraction) with the
+// FITTED dipole position marker, plus the 3x2 per-pixel Jacobian summary and
+// the point-dipole source fit (position + moment + residual).
+// ---------------------------------------------------------------------------
+export function TensorPanel({ data, error, loading }) {
+  if (error) return <div className="error">{error}</div>
+  if (loading) return <div className="muted"><span className="spinner" /> sweeping tensor…</div>
+  if (!data) return <div className="muted">Press “Image tensor” to run the 64-pixel tensor gradiometer + dipole fit.</div>
+  const grid = data.grid || 8
+  const img = data.b_mag_image_ut || []
+  const vmin = data.b_mag_min_ut ?? 0, vmax = Math.max(data.b_mag_max_ut ?? 1, 1e-6)
+  const span = Math.max(1e-9, vmax - vmin)
+  const heat = v => {
+    const f = Math.min(1, Math.max(0, (v - vmin) / span))
+    if (f < 0.5) { const t = f / 0.5
+      return `rgb(${Math.round(99 + (34 - 99) * t)},${Math.round(102 + (211 - 102) * t)},${Math.round(241 + (238 - 241) * t)})` }
+    const t = (f - 0.5) / 0.5
+    return `rgb(${Math.round(34 + (244 - 34) * t)},${Math.round(211 + (114 - 211) * t)},${Math.round(238 + (182 - 238) * t)})`
+  }
+  const pitch = data.pitch_mm || 2.5
+  const d = data.dipole
+  let mx = null, my = null
+  if (d) {
+    mx = (d.dipole_x_mm / pitch + (grid - 1) / 2.0 + 0.5) / grid
+    my = (d.dipole_y_mm / pitch + (grid - 1) / 2.0 + 0.5) / grid
+  }
+  const fmt = v => (v == null ? '—' : (Math.abs(v) >= 100 ? v.toFixed(1) : v.toFixed(3)))
+  const stats = [
+    { k: 'Pixels > floor', v: `${data.n_resolved_pixels}/${grid * grid}` },
+    { k: 'Sensitivity', v: fmt(data.sensitivity_ut), unit: 'µT' },
+    { k: 'Mode', v: `${data.mode}${data.differential ? '+diff' : ''}` },
+    { k: 'Averages', v: String(data.n_avg) },
+    { k: 'Linewidth', v: fmt(data.linewidth_mhz), unit: 'MHz' },
+    { k: '|B| peak', v: fmt(data.b_mag_max_ut), unit: 'µT' },
+  ]
+  return (
+    <div>
+      <div className="row" style={{ gap: 12, alignItems: 'flex-start' }}>
+        <div style={{ flex: '0 0 auto' }}>
+          <div style={{ position: 'relative', width: 188, height: 188 }}>
+            <div className="field-grid" style={{ gridTemplateColumns: `repeat(${grid}, 1fr)`, width: '100%', height: '100%' }}>
+              {img.map((v, i) => {
+                const x = i % grid, y = Math.floor(i / grid)
+                return <div key={i} className="field-cell" style={{ background: heat(v) }}
+                  title={`(${x},${y}) · ${v.toFixed(2)} µT`} />
+              })}
+            </div>
+            {d && mx > 0 && mx < 1 && my > 0 && my < 1 && (
+              <div className="field-marker true" title={`fitted dipole (${fmt(d.dipole_x_mm)},${fmt(d.dipole_y_mm)},${fmt(d.dipole_z_mm)}) mm`}
+                style={{ left: `${mx * 100}%`, top: `${my * 100}%` }} />
+            )}
+          </div>
+          <div className="magneto-bar">
+            <span>{vmin.toFixed(2)}</span>
+            <div className="magneto-bar-fill" />
+            <span>{vmax.toFixed(2)} µT</span>
+          </div>
+        </div>
+        <div className="muted" style={{ fontSize: 11.5, lineHeight: 1.7 }}>
+          <span className="field-marker-legend true" /> fitted dipole source<br />
+          {d ? (<>pos <b>{fmt(d.dipole_x_mm)}, {fmt(d.dipole_y_mm)}, {fmt(d.dipole_z_mm)}</b> mm<br />
+            moment <b>[{d.dipole_moment_am2.map(fmt).join(', ')}]</b> A·m²<br />
+            residual <b>{fmt(d.fit_residual_mhz)}</b> MHz</>)
+            : 'no dipole above the noise floor'}
+        </div>
+      </div>
+      <div className="stats" style={{ marginTop: 8 }}>
+        {stats.map((s, i) => (
+          <div className="stat" key={i}><div className="k">{s.k}</div>
+            <div className="v">{s.v}{s.unit ? <small> {s.unit}</small> : null}</div></div>
+        ))}
+      </div>
+      <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>{data.note}</div>
+    </div>
+  )
+}
 // ran, exactly how the measured binary becomes the result (the per-algorithm
 // derivation chain with the CONCRETE numbers from this run). Pure client-side
 // via deriveMeasurement(algo, result, counts). Marked bar(s) in BarCounts share
@@ -1358,6 +1434,28 @@ function _ParPixelGrid({ widths, cols = 8 }) {
 // Shared state (gradient, pixel size, mode, pixel count …) is lifted to
 // App.jsx and passed to both cards so a calibrate + a run stay consistent.
 
+// A labelled range slider with a live numeric readout and min/max end labels.
+// Used for every physically-bounded calibration parameter so the user drags
+// within the possible range instead of typing a number the hardware can't
+// deliver. `fmt` controls how the value + the two end labels render.
+function RangeSlider({ label, value, min, max, step, onChange, disabled, unit, fmt }) {
+  const f = fmt || ((v) => v)
+  return (
+    <div className="adv-slider" style={disabled ? { opacity: .45 } : undefined}>
+      <div className="adv-slider-head">
+        <span className="adv-slider-label">{label}</span>
+        <span className="adv-slider-val">{f(value)}{unit ? ` ${unit}` : ''}</span>
+      </div>
+      <input className="adv-slider-bar" type="range" min={min} max={max} step={step}
+        value={value} disabled={disabled}
+        onChange={(e) => onChange(+e.target.value)} />
+      <div className="adv-slider-mm">
+        <span>{f(min)}</span><span>{f(max)}</span>
+      </div>
+    </div>
+  )
+}
+
 export function ParallelCalibCard({
   grad, setGrad, pixelSize, setPixelSize, source,
   profile, temperature, seed,
@@ -1366,29 +1464,182 @@ export function ParallelCalibCard({
   const calib = calibResult && !calibResult.error ? calibResult : null
   const calibErrTxt = calibResult && calibResult.error ? calibResult.error : (calibErr || null)
   const [resOpen, setResOpen] = useState(false)
+  // Resolution + readout knobs that change the per-pixel qubit count and the
+  // frequencies the calibration measures. Local state (only this card sends
+  // them). Defaults reproduce the prior 1-shot / no-resolution behaviour so
+  // nothing changes until the user opens the Advanced section and turns one on.
+  const [advOpen, setAdvOpen] = useState(false)
+  const [integrationShots, setIntegrationShots] = useState(1)        // lock-in averaging
+  const [subPixel, setSubPixel] = useState(false)                   // sub-pixel centroiding
+  const [sigmaSheet, setSigmaSheet] = useState(1.0)                 // charge-sharing sheet spread
+  const [superresOn, setSuperresOn] = useState(false)               // super-resolution ODMR
+  const [superresFactor, setSuperresFactor] = useState(0.6)         // OMP acceptance fraction
+  const [bayesianOn, setBayesianOn] = useState(false)               // Bayesian readout
+  const [bayesianConf, setBayesianConf] = useState(0.95)            // credible level
+  const [noiseEnv, setNoiseEnv] = useState('none')                  // environmental noise model
+  const [maxNv, setMaxNv] = useState(300)                           // NVs per microdiamond
+  const [nPoints, setNPoints] = useState(400)                       // sweep points (real path)
+  // On-board gradient coil: MCP4921 12-bit DAC, I_coil = 5 V * code/4096 / 1 Ω,
+  // gradient = (I/2.2 A) * 0.98 MHz/µm. Full-scale code 4095 → 2.23 MHz/µm.
+  const GRAD_COIL_MAX = 2.23
+  const LW_MHZ = 5                       // NV ODMR linewidth (intrinsic)
+  // Physically-possible input limits (mirror qssc/array_calibration.py so the
+  // UI can never offer a value the hardware/physics cannot deliver):
+  //   gradient ≤ coil max (2.23 MHz/µm)
+  //   microdiamond 10–1000 µm (must fit the 2.5 mm die pixel pitch)
+  //   NV count ≤ volume ceiling (300 NV @ 200 µm, scales as size³)
+  const PIXEL_SIZE_MIN = 10
+  const PIXEL_SIZE_MAX = 1000
+  const NV_ANCHOR_COUNT = 300            // NV ...
+  const NV_ANCHOR_SIZE = 200             // ...at a 200 µm microdiamond (<10 ppm)
+  const nvCeiling = (d) => Math.max(1, Math.round(NV_ANCHOR_COUNT * Math.pow(Math.max(1, d) / NV_ANCHOR_SIZE, 3)))
+  const resolvableCap = Math.max(1, Math.floor(grad * pixelSize / LW_MHZ))
+  const achievableCap = Math.min(resolvableCap, maxNv)   // what the calibration can actually reach
+  const dacCode = Math.min(4095, Math.round(grad * 1838))
+  // One-click qubit presets: fill every parameter to a physically-possible,
+  // sensible combination so a user who doesn't know the limits can just pick a
+  // target. Inputs stay editable afterwards.
+  const QUBIT_PRESETS = {
+    low:    { grad: 0.5,  pixelSize: 100, maxNv: 38,  shots: 1,  sr: false, label: 'Low · ≈ 8 qubits/pixel' },
+    medium: { grad: 1.0,  pixelSize: 200, maxNv: 300, shots: 16, sr: false, label: 'Medium · ≈ 30 qubits/pixel' },
+    high:   { grad: 2.23, pixelSize: 200, maxNv: 300, shots: 64, sr: true,  label: 'High · ≈ 70 qubits/pixel (coil max)' },
+  }
+  const applyPreset = (p) => {
+    setGrad(p.grad); setPixelSize(p.pixelSize); setMaxNv(p.maxNv)
+    setIntegrationShots(p.shots); setSuperresOn(p.sr)
+  }
+  const body = () => {
+    const b = {
+      profile, gradient_mhz_per_um: grad, pixel_size_um: pixelSize,
+      seed, temperature_k: temperature, source,
+      integration_shots: integrationShots,
+      max_nv_per_microdiamond: maxNv, n_points: nPoints,
+      noise_env: noiseEnv,
+    }
+    if (subPixel) { b.sub_pixel = true; b.sigma_sheet_mm = sigmaSheet }
+    if (superresOn) b.superres = superresFactor
+    if (bayesianOn) b.bayesian = bayesianConf
+    return b
+  }
   return (
     <div className="card">
       <h2><span className="dot" />Calibrate the 64-pixel array</h2>
       <div className="hint">Measure each pixel's register width N from the ODMR line count.</div>
-      <div className="row" style={{ alignItems: 'flex-end', marginTop: 10 }}>
-        <div className="field">
-          <label>Gradient (MHz/µm)</label>
-          <input type="number" min="0" max="100" step="0.05" value={grad}
-            onChange={e => setGrad(+e.target.value)} />
+      {/* One-click qubit target presets — fill every parameter to a physically
+          possible combination so a user who doesn't know the limits can just
+          pick a target. Inputs stay editable afterwards. */}
+      <div style={{ marginTop: 10 }}>
+        <div className="hint" style={{ marginBottom: 6 }}>Qubit target preset — fills the parameters, then stay editable:</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {Object.entries(QUBIT_PRESETS).map(([k, p]) => (
+            <button key={k} type="button" className="ghost"
+              onClick={() => applyPreset(p)}
+              style={{ padding: '6px 12px', fontSize: 12.5, borderRadius: 7,
+                border: '1px solid var(--border, rgba(255,255,255,0.16))' }}>
+              {p.label}
+            </button>
+          ))}
         </div>
-        <div className="field">
-          <label>Pixel size (µm)</label>
-          <input type="number" min="1" max="5000" step="1" value={pixelSize}
-            onChange={e => setPixelSize(+e.target.value)} />
+      </div>
+      <div className="row" style={{ alignItems: 'flex-start', marginTop: 10, gap: 16, flexWrap: 'wrap' }}>
+        <div className="field" style={{ minWidth: 220, flex: '1 1 240px' }}>
+          <RangeSlider label="Gradient (MHz/µm) · coil max" value={grad}
+            min={0} max={GRAD_COIL_MAX} step={0.01}
+            fmt={(v) => v.toFixed(2)}
+            onChange={(v) => setGrad(v)} />
         </div>
-        <button onClick={() => onCalibrate({
-            profile, gradient_mhz_per_um: grad, pixel_size_um: pixelSize,
-            seed, temperature_k: temperature, source,
-          })}
-          disabled={calibRunning} className="ghost" type="button" style={{ height: 36 }}>
+        <div className="field" style={{ minWidth: 220, flex: '1 1 240px' }}>
+          <RangeSlider label="Microdiamond size (µm)" value={pixelSize}
+            min={PIXEL_SIZE_MIN} max={PIXEL_SIZE_MAX} step={1}
+            onChange={(v) => {
+              setPixelSize(v)
+              if (maxNv > nvCeiling(v)) setMaxNv(nvCeiling(v))   // can't exceed the stone's NV capacity
+            }} />
+        </div>
+        <button onClick={() => onCalibrate(body())}
+          disabled={calibRunning} className="ghost" type="button" style={{ height: 36, marginTop: 4 }}>
           {calibRunning ? <><span className="spinner" /> Calibrating…</> : 'Calibrate array'}
         </button>
       </div>
+      <div className="hint" style={{ marginTop: 6, fontSize: 11.5 }}>
+        Field gradient spreads each pixel's NV resonances across{' '}
+        <b>{(grad * pixelSize).toFixed(0)} MHz</b> →{' '}
+        <b>≈ {achievableCap} addressable lines/pixel</b>{' '}
+        (gradient resolution {resolvableCap} ÷ 5 MHz linewidth, capped by{' '}
+        {maxNv} NV present; stone holds ≤ {nvCeiling(pixelSize)} NV at this size).{' '}
+        Coil DAC code ≈ {dacCode} / 4095 — the on-board MCP4921 driver tops out at{' '}
+        {GRAD_COIL_MAX} MHz/µm. All inputs are clamped to physically possible values.
+      </div>
+      <button type="button" className="ghost" aria-expanded={advOpen}
+        onClick={() => setAdvOpen(o => !o)}
+        style={{ marginTop: 8, fontSize: 12.5, padding: '4px 10px' }}>
+        {advOpen ? '▾' : '▸'} Advanced readout &amp; resolution
+      </button>
+      {advOpen && (
+        <div className="adv-panel" style={{ marginTop: 8 }}>
+          <div className="hint" style={{ marginBottom: 10 }}>
+            These options change the per-pixel qubit count the calibration measures
+            (and the frequencies shown in the resonance map). Defaults reproduce the
+            standard single-shot measurement. Every value is clamped to its physical limit.
+          </div>
+          <div className="adv-grid">
+            <div className="adv-group">
+              <div className="adv-group-title">Readout &amp; averaging</div>
+              <RangeSlider label="Lock-in shots" value={integrationShots}
+                min={1} max={10000} step={1}
+                onChange={(v) => setIntegrationShots(v)} />
+              <div className="field">
+                <label>Noise environment</label>
+                <select value={noiseEnv} onChange={e => setNoiseEnv(e.target.value)}>
+                  <option value="none">none</option>
+                  <option value="lab">lab</option>
+                  <option value="quiet">quiet</option>
+                  <option value="noisy">noisy</option>
+                </select>
+              </div>
+            </div>
+            <div className="adv-group">
+              <div className="adv-group-title">Microdiamond model</div>
+              <RangeSlider label={`Max NV / microdiamond · ≤ ${nvCeiling(pixelSize)}`} value={maxNv}
+                min={1} max={nvCeiling(pixelSize)} step={1}
+                onChange={(v) => setMaxNv(v)} />
+              <RangeSlider label="Sweep points (real)" value={nPoints}
+                min={32} max={4096} step={16}
+                onChange={(v) => setNPoints(v)} />
+            </div>
+            <div className="adv-group">
+              <div className="adv-group-title">Resolution enhancement</div>
+              <div className="adv-toggle">
+                <label className="adv-switch">
+                  <input type="checkbox" id="sp" checked={subPixel} onChange={e => setSubPixel(e.target.checked)} />
+                  <span>Sub-pixel detector imaging</span>
+                </label>
+                <RangeSlider label="Charge sheet σ" value={sigmaSheet}
+                  min={0.01} max={10} step={0.1} unit="mm" fmt={(v) => v.toFixed(2)}
+                  disabled={!subPixel} onChange={(v) => setSigmaSheet(v)} />
+              </div>
+              <div className="adv-toggle">
+                <label className="adv-switch">
+                  <input type="checkbox" id="sr" checked={superresOn} onChange={e => setSuperresOn(e.target.checked)} />
+                  <span>Super-resolution ODMR</span>
+                </label>
+                <RangeSlider label="Recovery factor" value={superresFactor}
+                  min={0} max={1} step={0.05} fmt={(v) => v.toFixed(2)}
+                  disabled={!superresOn} onChange={(v) => setSuperresFactor(v)} />
+              </div>
+              <div className="adv-toggle">
+                <label className="adv-switch">
+                  <input type="checkbox" id="by" checked={bayesianOn} onChange={e => setBayesianOn(e.target.checked)} />
+                  <span>Statistical readout</span>
+                </label>
+                <RangeSlider label="Confidence" value={bayesianConf}
+                  min={0} max={1} step={0.01} fmt={(v) => v.toFixed(2)}
+                  disabled={!bayesianOn} onChange={(v) => setBayesianConf(v)} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {calibErrTxt && <div className="error" style={{ marginTop: 10 }}>{calibErrTxt}</div>}
       {calib && (
         <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 8,
@@ -1396,6 +1647,9 @@ export function ParallelCalibCard({
           border: '1px solid var(--border, rgba(255,255,255,0.1))' }}>
           <div style={{ fontSize: 13, marginBottom: 8, color: 'var(--brand)' }}>
             Array calibration · <span className="mono">{calib.source}</span> · {calib.n_pixels} pixels
+            {calib.integration_shots && calib.integration_shots > 1 ? ` · ${calib.integration_shots} shots` : ''}
+            {calib.sub_pixel_factor ? ` · sub-pixel ×${calib.sub_pixel_factor}` : ''}
+            {calib.readout_mode ? ` · ${calib.readout_mode}` : ''}
           </div>
           <div className="stats" style={{ marginBottom: 10 }}>
             <div className="stat"><div className="k">Best uniform N</div><div className="v">{calib.best_uniform_width}</div></div>
@@ -1448,7 +1702,7 @@ export function ParallelRunCard({
   return (
     <div className="card">
       <h2><span className="dot" />Run 64-parallel</h2>
-      <div className="hint">Invention 4 — 64 INDEPENDENT ~10-NV processors at 300 K (1/r³ → 0 at the 2.5 mm pitch); chip throughput is 64× a single pixel, not one 640-qubit circuit. With calibration on, each pixel runs at its measured width and narrow pixels are skipped (never truncated — a truncated Shor gives wrong factors).</div>
+      <div className="hint">64 independent pixel processors at 300 K (cross-pixel coupling falls as 1/r³ and is negligible at the 2.5 mm pitch). Chip throughput is 64× a single pixel, not one 640-qubit circuit. With calibration on, each pixel runs at its measured register width and narrow pixels are skipped — never truncated, since a truncated Shor returns wrong factors.</div>
       <div className="row" style={{ alignItems: 'flex-end', marginTop: 10 }}>
         <div className="field">
           <label>Mode</label>

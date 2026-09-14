@@ -398,6 +398,58 @@ Nanotechnol.* 2008; Coleman *Science* 2011; Kianinia *ACS Photonics* 2020) and
 is explicit about what is established versus aspirational (e.g. the CQD source
 is described as amplified spontaneous emission, **not** a laser).
 
+## Features & inventions
+
+The chip + stack carry a set of hardware and software features we catalog as
+"inventions" (full status in [`docs/INVENTIONS.md`](docs/INVENTIONS.md)). Each is
+marked **SIM ✅** (implemented + tested in the simulator), **HW-fits** (runs on
+the current PCB with a firmware verb), **needs-HW** (needs a PCB addition), or
+**needs-cryo** (only works cold).
+
+**Implemented in the simulator + API (SIM ✅):**
+
+| # | Feature | What it does |
+|---|---|---|
+| 1 | 64-pixel vector magnetometer | 4-axis NV⟨111⟩ doublet splits → B-vector per pixel, gradiometric sign-locking |
+| 2+ | Prime-coprime readout + denoiser | 16 prime-period lock-in channels, exactly orthogonal, zero cross-talk |
+| 3 | Nuclear-spin memory (NV+¹³C) | ¹³C memory qubit doubles the register via SWAP (needs RF channel for HW) |
+| 4 | 64-parallel distributed computing | 64 independent ~10-NV pixels = 64× throughput (not one big circuit) |
+| 5 | Gradient register width | Field gradient makes per-pixel width a MEASURED quantity; **coil+DAC now on the PCB** (PR #79) |
+| 6 | Sub-pixel detector centroiding | Charge-sharing on the graphene sheet → 64·S spatial channels (no qubit gain) |
+| 7 | N-shot lock-in integration | 1/√N averaging raises measured width (no HW) |
+| 9 | Classical anti-noise filter stack | 300 K filter stack (servo/iso/shield/feed-forward/CM/DD) protects SNR + extends T₂ |
+| 13 | Compressed-sensing super-res ODMR | OMP sparse recovery over the gradient-bin dictionary; deconvolves overlapping lines, lowers the SNR bar → more measured qubits |
+| 14 | Bayesian quantum-limited readout | One-sided Bonferroni-corrected matched-filter detector extracts marginal lone-NV lines the hard bar misses (~2× width) |
+| 19 | Tensor-gradient magnetic imaging | 4-axis readout + on-board gradient coil → per-pixel B-gradient tensor + dipole source localizer (position + moment) |
+
+**Application features (SIM ✅, merged):** quantum RNG (Ed25519 keypair + cert),
+BB84 QKD (intercept-resend Eve), 4-stage ODMR calibration (per-pin Ramsey T₂*/Hahn
+T₂ map), on-chip sensors (compass / gyro / magneto-optic image / ferro / nav /
+thermal / current).
+
+**Documented candidates (not yet built):** ¹³C nuclear cluster register (Inv 10),
+NV nitrogen nuclear-spin register (Inv 11), resonant spin-to-charge readout
+(Inv 12), parallel VQE/QAOA (Inv 15), quantum kernel estimation / QSVM (Inv 16),
+distributed Heisenberg-limited sensing (Inv 17), small QEC code (Inv 18).
+
+**Cryo-only (not at 300 K):** magnon inter-pixel entanglement bus (Inv 8) — the
+magnon thermal occupation n_th ≈ 2 200 at 300 K is inseparable from the signal;
+only cooling (~150 mK) changes it. This is the only route to cross-pixel
+entanglement (one big register instead of 64 independent pixels).
+
+**Qubit-count picture:** 64 pixels × one compute microdiamond (≤300 NVs) each.
+The per-pixel width is `min(resolvable lines, NVs present)`, measured by counting
+ODMR lines that clear SNR=4. With the on-board gradient (Inv 5) + the anti-noise
+stack (Inv 7+9) the measured width peaks at **~70 qubits/pixel** (gradient
+2–3 MHz/µm); the theoretical cap is **300 qubits/microdiamond** (one per NV,
+needs gradient ≥ 7.5 MHz/µm), today noise-bound. Inventions 13 (sparse
+super-res) + 14 (Bayesian readout) close that 70 → 300 gap by recovering dim
+lone-NV lines from the noise — the Bayesian detector alone roughly doubles the
+measured width on the same spectrum. Cross-pixel entanglement (Inv 8, cryo) is
+the only way to pool pixels into one register.
+
+---
+
 ## Scope note
 
 This is an **engineering design + simulator**, not a claim of a working

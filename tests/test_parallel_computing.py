@@ -191,3 +191,158 @@ def test_best_uniform_width_helper():
     # N=4: 8 pixels -> 32 (winner); N=6: 5 -> 30; N=10: 2 -> 20
     n, k = best_uniform_width([4, 6, 6, 10, 10, 6, 4, 4])
     assert (n, k) == (4, 8)
+
+
+# -- Invention 6+7: calibrate-array sub_pixel + integration -------------------
+def test_calibrate_array_endpoint_integration_raises_width():
+    """The /api/circuit/calibrate-array endpoint with integration_shots>=16
+    returns >= total working qubits than the 1-shot baseline (Invention 7)."""
+    from fastapi.testclient import TestClient
+    from api.main import app
+    c = TestClient(app)
+    base = {
+        "gradient_mhz_per_um": 2.0, "seed": 42, "source": "sim",
+    }
+    r1 = c.post("/api/circuit/calibrate-array?sync=true", json={**base, "integration_shots": 1})
+    r16 = c.post("/api/circuit/calibrate-array?sync=true", json={**base, "integration_shots": 16})
+    assert r1.status_code == 200 and r16.status_code == 200
+    j1, j16 = r1.json()["result"], r16.json()["result"]
+    assert j16["integration_shots"] == 16
+    # integration can only add detected lines (lower noise), never remove
+    assert sum(j16["per_pixel_widths"]) >= sum(j1["per_pixel_widths"])
+    assert j16["max_width"] >= j1["max_width"]
+
+
+def test_calibrate_array_endpoint_sub_pixel_reports_channels():
+    """The endpoint with sub_pixel=true reports spatial_channels = 64*S and
+    per-pixel sub_pixel_position, but does NOT change register_width (Invention 6
+    is imaging metadata, not a qubit gain)."""
+    from fastapi.testclient import TestClient
+    from api.main import app
+    c = TestClient(app)
+    base = {"gradient_mhz_per_um": 1.0, "seed": 42, "source": "sim"}
+    r_plain = c.post("/api/circuit/calibrate-array?sync=true", json=base)
+    r_sp = c.post("/api/circuit/calibrate-array?sync=true",
+                  json={**base, "sub_pixel": True, "sigma_sheet_mm": 1.0})
+    assert r_plain.status_code == 200 and r_sp.status_code == 200
+    jp, js = r_plain.json()["result"], r_sp.json()["result"]
+    assert js["sub_pixel_factor"] == 8
+    assert js["spatial_channels"] == 64 * 8
+    assert jp["sub_pixel_factor"] == 0 and jp["spatial_channels"] == 0
+    # centroiding does NOT change the per-pixel qubit register width
+    assert jp["per_pixel_widths"] == js["per_pixel_widths"]
+    # per-pixel sub-pixel positions are populated in the sim path
+    assert sum(1 for p in js["pixels"] if p["sub_pixel_position"] is not None) == 64
+
+
+def test_calibrate_array_endpoint_real_path_averages_n_sweeps():
+    """Invention 7 real-hardware path: with source=real and integration_shots=N,
+    the endpoint must call run_all_odmr N times and average (noise/sqrt(N)), not
+    call it once while recording integration_shots=N. A spy FPGA counts calls and
+    returns single-shot SimulatedFPGA-style matrices so the averaging is observable."""
+    from fastapi.testclient import TestClient
+    import api.runner as api_runner
+    from api.main import app
+    from qssc.simulator import SimulatedFPGA
+
+    # A spy that wraps a real SimulatedFPGA (single-shot, integration_shots=1 so
+    # each call is an independent noisy sweep) and counts run_all_odmr calls.
+    base_fpga = SimulatedFPGA("NV", seed=7)
+    for q in range(64):
+        base_fpga.emitter_gs[q] = 4095
+    calls = {"n": 0}
+
+    class _SpyFPGA:
+        def __getattr__(self, name):
+            return getattr(base_fpga, name)
+
+        def run_all_odmr(self, f_start, f_stop, n):
+            calls["n"] += 1
+            return base_fpga.run_all_odmr(f_start, f_stop, n)
+
+    # The async endpoint's real path builds its FPGA via runner._make_fpga
+    # (not the api.main _FPGA cache the sync endpoint used). Patch _make_fpga
+    # so the spy is used on the real path and the run_all_odmr calls are counted.
+    spy = _SpyFPGA()
+    saved_make = api_runner._make_fpga
+    api_runner._make_fpga = lambda *a, **k: spy
+    try:
+        c = TestClient(app)
+        r = c.post("/api/circuit/calibrate-array?sync=true", json={
+            "source": "real", "integration_shots": 4, "seed": 42,
+            "gradient_mhz_per_um": 1.0, "n_points": 32,
+        })
+    finally:
+        api_runner._make_fpga = saved_make
+    assert r.status_code == 200, r.text
+    j = r.json()["result"]
+    # the endpoint actually ran 4 sweeps and averaged them (Invention 7 real path)
+    assert calls["n"] == 4
+    assert j["integration_shots"] == 4
+    assert j["source"] == "real"
+
+    # Averaging lowers noise: the 4-shot real path should detect >= as many lines
+    # as a single-shot real path (same seed/gradient), never fewer.
+    calls["n"] = 0
+    api_runner._make_fpga = lambda *a, **k: spy
+    try:
+        r1 = c.post("/api/circuit/calibrate-array?sync=true", json={
+            "source": "real", "integration_shots": 1, "seed": 42,
+            "gradient_mhz_per_um": 1.0, "n_points": 32,
+        })
+    finally:
+        api_runner._make_fpga = saved_make
+    assert r1.status_code == 200 and calls["n"] == 1
+    assert sum(j["per_pixel_widths"]) >= sum(r1.json()["result"]["per_pixel_widths"])
+
+
+def test_calibration_odmr_lines_length_equals_register_width():
+    """The cached calibration's per-pixel odmr_lines (the qubit frequencies)
+    are truncated to register_width: a line beyond the gradient's resolvable
+    cap is NOT an independent qubit, so len(odmr_lines) == register_width for
+    every pixel. This invariant is what lets run_parallel feed the measured
+    frequencies back as the register's frequency grid."""
+    from qssc.array_calibration import calibrate_array
+    cal = calibrate_array(profile="NV", gradient_mhz_per_um=2.0,
+                          pixel_size_um=200.0, seed=42,
+                          max_nv_per_microdiamond=12)
+    assert len(cal.pixels) == 64
+    for p in cal.pixels:
+        assert len(p.odmr_lines) == p.register_width, (
+            f"pixel {p.pixel_id}: {len(p.odmr_lines)} lines != width "
+            f"{p.register_width}")
+        # the lines are real ODMR frequencies near the NV D (~2.87 GHz)
+        for f in p.odmr_lines:
+            assert 2.0 < f < 4.0
+
+
+def test_run_parallel_use_calibration_feeds_measured_frequencies():
+    """Closing the calibration -> circuit loop: with use_calibration=true,
+    run_parallel loads the cached per-pixel odmr_lines and the result's
+    per_pixel_odmr_lines matches the calibration exactly -- the qubits per
+    pixel sit on the MEASURED frequency grid, not auto_align's synthetic 6 MHz
+    grid. This is the 'qubits por pixel y sus frecuencias' the frontend modal
+    shows."""
+    from qssc.array_calibration import calibrate_array
+    from api.runner import run_parallel, _CALIB_FILE
+    import os
+    cal = calibrate_array(profile="NV", gradient_mhz_per_um=2.0,
+                          pixel_size_um=200.0, seed=42,
+                          max_nv_per_microdiamond=12)
+    os.makedirs(_CALIB_FILE.parent, exist_ok=True)
+    cal.to_json(_CALIB_FILE)
+    try:
+        res = run_parallel({"mode": "sample", "n_pixels": 4, "num_qubits": 2,
+                            "shots": 64, "noise_mode": "ideal", "seed": 42,
+                            "use_calibration": True})
+        assert res["calibrated"] is True
+        got = res["per_pixel_odmr_lines"]
+        assert len(got) == 4
+        for i in range(4):
+            assert got[i] is not None, f"pixel {i} had no measured lines"
+            assert got[i] == cal.pixels[i].odmr_lines, (
+                f"pixel {i}: run_parallel freqs != calibration freqs")
+            assert len(got[i]) == res["per_pixel_widths"][i]
+    finally:
+        if _CALIB_FILE.exists():
+            _CALIB_FILE.unlink()

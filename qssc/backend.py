@@ -52,6 +52,8 @@ from .simulator import (
     ADC_BITS, ADC_MAX, DETECT_THRESHOLD, N_SITES,
     N_NV_PER_PIXEL,
 )
+from .noise_filters import (AntiNoiseConfig, NoiseEnvironment,
+                            effective_t2, effective_noise_sigma)
 
 logger = logging.getLogger(__name__)
 
@@ -707,7 +709,11 @@ class QSSCBackend(BackendV2):
                  register_line_freqs_hz: Optional[Sequence[float]] = None,
                  prime_readout: bool = False,
                  n_noise_bins: int = 64,
-                 register_widths_per_pixel: Optional[Sequence[int]] = None):
+                 register_widths_per_pixel: Optional[Sequence[int]] = None,
+                 register_line_freqs_per_pixel: Optional[Sequence[Sequence[float]]] = None,
+                 anti_noise: Optional[AntiNoiseConfig] = None,
+                 noise_env: Optional[NoiseEnvironment] = None,
+                 integration_shots: int = 1):
         """noise_mode: 'real' (default, full Aer thermal+depolarizing+readout
         noise from the defect physics) | 'phenomenological' (fast analytic
         approximation) | 'none' (ideal). 'aer' is accepted as an alias of 'real'.
@@ -755,6 +761,16 @@ class QSSCBackend(BackendV2):
         never run with a too-wide circuit — it is skipped and reported). When
         ``None`` (default) the backend uses the single uniform ``n_nv_per_pixel``
         register for every pixel — full back-compat with the existing path.
+
+        ``register_line_freqs_per_pixel`` closes the calibration -> circuit loop
+        for the 64-parallel path: a per-pixel list of the MEASURED ODMR line
+        centres (Hz, from the cached array calibration's ``odmr_lines``). When
+        provided alongside ``register_widths_per_pixel``, each pixel's register
+        sits on its own MEASURED frequency grid (pixel i's NVs at
+        ``register_line_freqs_per_pixel[i]``) instead of ``auto_align``'s
+        synthetic 6 MHz grid — so the qubits per pixel and their frequencies the
+        frontend shows are the measured ones, not a synthetic guess. ``None``
+        (default) keeps the synthetic-grid fallback (back-compat).
         """
         if pixel_mode not in ("register", "ensemble"):
             raise ValueError(
@@ -889,19 +905,56 @@ class QSSCBackend(BackendV2):
         # the single uniform register above (full back-compat).
         self._pixel_registers: Optional[dict[int, list[QubitSite]]] = None
         self._pixel_widths: Optional[list[int]] = None
+        self._pixel_line_freqs: Optional[list[Optional[List[float]]]] = None
         if register_widths_per_pixel is not None and self._register_mode:
             widths = [max(1, int(w)) for w in register_widths_per_pixel]
             self._pixel_widths = widths
             self._pixel_registers = {}
+            # Per-pixel MEASURED ODMR line centres (Hz), one list per pixel from
+            # the cached array calibration. When present, each pixel's register
+            # sits on its measured frequency grid (closing the calibration ->
+            # circuit loop); the synthetic 6 MHz grid is the fallback.
+            self._pixel_line_freqs = (
+                [list(f) if f else None for f in register_line_freqs_per_pixel]
+                if register_line_freqs_per_pixel is not None else None)
             for i, w in enumerate(widths):
+                pf = (self._pixel_line_freqs[i]
+                      if self._pixel_line_freqs is not None
+                      and i < len(self._pixel_line_freqs) else None)
+                # auto_align uses len(register_line_freqs_hz) as N when present
+                # (the measured line count IS the width); w is the fallback when
+                # this pixel has no measured lines (synthetic 6 MHz grid).
                 self._pixel_registers[i] = auto_align(
                     prof, n_nv_per_pixel=w, register=True,
                     temperature_k=temperature_k,
                     rng=np.random.default_rng(seed + 1000 + i),
                     gradient_mhz_per_um=gradient_mhz_per_um,
-                    pixel_size_um=pixel_size_um)
+                    pixel_size_um=pixel_size_um,
+                    register_line_freqs_hz=pf)
         t1, t2 = coherence_at_temperature(prof, temperature_k)
         self._t1, self._t2 = t1, t2
+        # Invention 9 — classical anti-noise stack: when a dynamical-decoupling
+        # sequence is configured, extend the spin T2 used for coherence survival
+        # and the dipole/thermal error models. DD refocuses low-frequency
+        # dephasing (T2*->T2) but is hard-capped at 2*T1 (energy relaxation is
+        # irreversible). anti_noise=None -> no change (back-compat).
+        self.anti_noise = anti_noise
+        if anti_noise is not None and (anti_noise.dd_sequence or "none") != "none":
+            self._t2 = effective_t2(self._t2, anti_noise.dd_sequence,
+                                    anti_noise.dd_n_blocks, self._t1)
+        # Invention 9 — environmental noise + filter stack on the readout floor.
+        # noise_env models the lab environment (temperature drift, vibration,
+        # EMI, pressure); the anti_noise filter stack attenuates each channel.
+        # Both enter the EFFECTIVE readout error (see _effective_readout_err):
+        # a noisy lab worsens the fluorescence misassignment rate, and the
+        # filter stack (thermal servo / vibration isolation / EMI shield /
+        # feed-forward / common-mode) restores it. noise_env=None and the
+        # all-off filter -> eff_noise == READOUT_NOISE -> bit-identical readout.
+        self._noise_env = noise_env
+        self._integration_shots = max(1, int(integration_shots))
+        eff = effective_noise_sigma(READOUT_NOISE, noise_env, anti_noise,
+                                    self._integration_shots)
+        self._readout_noise_factor = eff / READOUT_NOISE
         # Optical-coherence material property (photon indistinguishability):
         # T2,opt + HOM visibility V at this temperature, reported descriptively by
         # assess_circuit. V=1.0 (no optical model) when optical_t1_ns<=0. At 300 K
@@ -1143,22 +1196,35 @@ class QSSCBackend(BackendV2):
         return [q for q in active if q < self._n_qubits]
 
     def _effective_readout_err(self, q: int) -> float:
-        """Per-site optical readout error AFTER the prime-coprime denoiser.
+        """Per-site optical readout error AFTER the anti-noise stack and the
+        prime-coprime denoiser.
 
         The base rate is the site's fluorescence misassignment probability
-        (``site.readout_err``). With prime readout on, the coprime matched
-        filter rejects the out-of-band noise fraction, so the effective error
-        is the base rate divided by the prime SNR factor (clamped to [0,
-        base]). With prime readout off (or SNR == 1) this is just the base
-        rate -- every existing noise realization is bit-identical.
+        (``site.readout_err``). Two denoise layers compose on it:
+
+        1. **Environmental noise factor** (``_readout_noise_factor``): a noisy
+           lab raises the readout noise floor above READOUT_NOISE, which raises
+           the misassignment rate by that factor; the anti-noise filter stack
+           (thermal servo / vibration isolation / EMI shield / feed-forward /
+           common-mode / DD) attenuates the environmental channels back down.
+           Factor == 1.0 (noise_env=None, filters off) -> bit-identical.
+        2. **Prime-coprime denoiser**: with prime readout on, the coprime
+           matched filter rejects the out-of-band noise fraction, so the
+           effective error is then divided by the prime SNR factor.
+
+        The result is clamped to ``[0, base * 4]`` (a noisy unfiltered lab can
+        worsen readout, but not beyond 4x the base rate). With both layers off
+        this collapses to ``base`` -- every existing noise realization is
+        bit-identical.
         """
         if q < len(self.sites):
             base = float(self.sites[q].readout_err)
         else:
             base = float(self.profile.readout_error)
+        err = base * self._readout_noise_factor
         if self._prime_readout and self._prime_snr > 1.0:
-            return float(np.clip(base / self._prime_snr, 0.0, base))
-        return base
+            err = err / self._prime_snr
+        return float(np.clip(err, 0.0, base * 4.0))
 
     def noise_summary(self) -> dict:
         """Per-run noise budget for the frontend's prime-on vs prime-off
@@ -1171,9 +1237,11 @@ class QSSCBackend(BackendV2):
         ros = [float(s.readout_err) for s in self.sites]
         base_ro = (float(np.mean(ros)) if ros
                    else float(self.profile.readout_error))
-        eff_ro = (float(np.clip(base_ro / self._prime_snr, 0.0, base_ro))
+        env_ro = float(np.clip(base_ro * self._readout_noise_factor, 0.0,
+                               base_ro * 4.0))
+        eff_ro = (float(np.clip(env_ro / self._prime_snr, 0.0, env_ro))
                   if self._prime_readout and self._prime_snr > 1.0
-                  else base_ro)
+                  else env_ro)
         return {
             "readout_error": round(base_ro, 6),
             "effective_readout_error": round(eff_ro, 6),
@@ -1184,6 +1252,9 @@ class QSSCBackend(BackendV2):
             "prime_snr_factor": round(float(self._prime_snr), 4),
             "n_symbols": int(self._n_prime_symbols),
             "n_noise_bins": int(self._n_noise_bins),
+            "noise_env_factor": round(float(self._readout_noise_factor), 4),
+            "anti_noise": (self.anti_noise.to_dict()
+                           if self.anti_noise is not None else None),
             "pixel_mode": self.pixel_mode,
         }
 
@@ -1400,6 +1471,16 @@ class QSSCBackend(BackendV2):
             out["skipped_pixels"] = skipped
             out["min_width"] = min(pw) if pw else 0
             out["max_width"] = max(pw) if pw else 0
+            # Per-pixel MEASURED ODMR line centres (GHz) -- the qubit frequencies
+            # each pixel's register sits on (None = synthetic 6 MHz grid
+            # fallback). Surfaced so the frontend's per-pixel qubits+freqs modal
+            # shows the measured frequencies the circuit was run on.
+            lf = self._pixel_line_freqs or []
+            out["per_pixel_odmr_lines"] = [
+                ([round(f / 1e9, 6) for f in lf[i]] if i < len(lf) and lf[i]
+                 else None)
+                for i in range(n)
+            ]
         return out
 
     # -- execution ---------------------------------------------------------
@@ -1697,6 +1778,9 @@ class QSSCBackend(BackendV2):
             "within_coherence": within,
             "within_optical_coherence": within_optical,
             "verdict": verdict,
+            # Invention 9 anti-noise stack echo (None when unset -> back-compat).
+            "anti_noise": (self.anti_noise.to_dict()
+                           if self.anti_noise is not None else None),
         }
 
     def _apply_phenomenological_noise(self, circuit: QuantumCircuit,
