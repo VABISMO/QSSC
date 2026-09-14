@@ -1,0 +1,702 @@
+<title>QSSC — Memoria descriptiva · Registro de la Propiedad Intelectual</title>
+<style>
+/* =========================================================================
+   QSSC corporate design system — Quantum Solid State Chip
+   (lifted verbatim from frontend/src/styles.css :root tokens)
+   ========================================================================= */
+:root{
+  --bg:#0b1020; --bg-soft:#121931; --panel:#141c38; --panel-2:#1a2444;
+  --border:#263056; --text:#e6ecff; --muted:#94a3c4; --dim:#808db0;
+  --brand:#22d3ee; --brand-2:#6366f1; --accent:#f472b6;
+  --ok:#34d399; --warn:#fbbf24; --err:#f87171;
+  --grad:linear-gradient(135deg,#22d3ee,#6366f1);
+  --shadow:0 10px 30px rgba(0,0,0,.35);
+  --radius:14px;
+  --font-head:"Space Grotesk",system-ui,sans-serif;
+  --font-body:"Inter",system-ui,sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,monospace;
+  /* per-unit accent (set on each .unidad) */
+  --u:#22d3ee;
+  --u-grad:linear-gradient(135deg,#22d3ee,#6366f1);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:78px}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:var(--font-body); font-size:15px; line-height:1.65;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+a{color:var(--brand);text-decoration:none}
+h1,h2,h3,h4{font-family:var(--font-head);font-weight:600;line-height:1.2;letter-spacing:-.01em}
+code,pre,.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+
+/* ---- top nav ---- */
+nav.top{
+  position:sticky;top:0;z-index:50;
+  background:rgba(11,16,32,.86);backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--border);
+}
+nav.top .row{display:flex;align-items:center;gap:18px;height:60px}
+nav.top .logo{display:flex;align-items:center;gap:10px;font-family:var(--font-head);font-weight:700;font-size:17px;letter-spacing:.02em}
+nav.top .logo svg{width:30px;height:30px;flex:0 0 auto}
+nav.top .logo .grad{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+nav.top .links{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
+nav.top .links a{
+  padding:7px 13px;border-radius:9px;font-size:13px;font-weight:500;
+  color:var(--muted);border:1px solid transparent;transition:.2s;
+}
+nav.top .links a:hover{color:var(--text);background:var(--panel);border-color:var(--border)}
+nav.top .links a .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px;vertical-align:1px}
+
+/* ---- hero ---- */
+header.hero{
+  position:relative;overflow:hidden;
+  padding:64px 0 48px; border-bottom:1px solid var(--border);
+  background:
+    radial-gradient(900px 380px at 78% -8%, rgba(99,102,241,.22), transparent 70%),
+    radial-gradient(700px 320px at 12% 4%, rgba(34,211,238,.16), transparent 70%),
+    var(--bg);
+}
+header.hero .eyebrow{
+  font-family:var(--font-mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--brand);margin-bottom:18px;
+}
+header.hero h1{
+  font-size:clamp(34px,5.4vw,56px);margin:0 0 14px;font-weight:700;
+}
+header.hero h1 .grad{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+header.hero .sub{font-size:clamp(16px,2vw,21px);color:var(--muted);max-width:62ch;margin:0 0 10px}
+header.hero .cite{font-family:var(--font-mono);font-size:12.5px;color:var(--dim);margin-top:14px}
+header.hero .brandmark{display:flex;align-items:center;gap:16px;margin-bottom:26px}
+header.hero .brandmark svg{width:54px;height:54px;flex:0 0 auto;filter:drop-shadow(0 6px 18px rgba(34,211,238,.25))}
+header.hero .brandmark .wm{font-family:var(--font-head);font-weight:700;font-size:30px;letter-spacing:.04em}
+header.hero .brandmark .wm .grad{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+header.hero .brandmark .tag{font-family:var(--font-mono);font-size:11px;color:var(--dim);letter-spacing:.14em;text-transform:uppercase;margin-top:2px}
+
+/* ---- summary dashboard ---- */
+.dashboard{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:34px}
+.tile{
+  background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+  padding:18px 18px 16px;position:relative;overflow:hidden;
+}
+.tile::before{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:var(--u-grad)}
+.tile.fpga{--u-grad:linear-gradient(180deg,#22d3ee,#6366f1)}
+.tile.frontend{--u-grad:linear-gradient(180deg,#6366f1,#8b5cf6)}
+.tile.backend{--u-grad:linear-gradient(180deg,#f472b6,#ec4899)}
+.tile.total{--u-grad:var(--grad);background:linear-gradient(135deg,rgba(34,211,238,.10),rgba(99,102,241,.10)),var(--panel)}
+.tile .k{font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.tile .v{font-family:var(--font-head);font-size:30px;font-weight:700;margin-top:6px;font-variant-numeric:tabular-nums}
+.tile .v .unit{font-size:14px;color:var(--muted);font-weight:500;margin-left:4px}
+.tile .m{font-size:12.5px;color:var(--dim);margin-top:6px}
+.tile .cost{font-family:var(--font-mono);font-size:13px;color:var(--ok);margin-top:8px;font-variant-numeric:tabular-nums}
+
+/* ---- unidad section ---- */
+section.unidad{
+  --u-grad:linear-gradient(135deg,#22d3ee,#6366f1);
+  padding:54px 0 18px; border-top:1px solid var(--border);
+}
+section.unidad.fpga{--u:#22d3ee;--u-grad:linear-gradient(135deg,#22d3ee,#3b82f6)}
+section.unidad.frontend{--u:#8b5cf6;--u-grad:linear-gradient(135deg,#6366f1,#8b5cf6)}
+section.unidad.backend{--u:#f472b6;--u-grad:linear-gradient(135deg,#f472b6,#ec4899)}
+
+.uhead{display:flex;align-items:center;gap:16px;margin-bottom:8px}
+.uhead .num{
+  flex:0 0 auto;width:46px;height:46px;border-radius:12px;
+  display:grid;place-items:center;font-family:var(--font-head);font-weight:700;font-size:19px;
+  color:#04122e;background:var(--u-grad);
+}
+.uhead h2{font-size:clamp(24px,3.4vw,32px);margin:0}
+.uhead h2 .uname{display:block;font-size:14px;font-weight:500;color:var(--u);font-family:var(--font-mono);letter-spacing:.04em;margin-bottom:2px}
+.uhead .sloc-pill{
+  margin-left:auto;flex:0 0 auto;font-family:var(--font-mono);font-size:13px;
+  padding:7px 13px;border-radius:999px;color:var(--u);
+  border:1px solid color-mix(in srgb,var(--u) 38%,transparent);background:color-mix(in srgb,var(--u) 10%,transparent);
+  font-variant-numeric:tabular-nums;
+}
+
+.block{margin:30px 0}
+.block > h3{
+  font-size:18px;margin:0 0 14px;display:flex;align-items:center;gap:10px;
+}
+.block > h3::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--u-grad);flex:0 0 auto}
+.block > h3 .sn{font-family:var(--font-mono);font-size:12px;color:var(--dim);font-weight:500}
+
+p.lead{color:var(--muted);max-width:70ch}
+.block p{max-width:72ch}
+.block ul{padding-left:20px;margin:10px 0}
+.block ul li{margin:7px 0}
+.block ul li b, .block ul li strong{color:var(--text)}
+.block ol{padding-left:22px;margin:10px 0}
+.block ol li{margin:9px 0}
+.block ol li b, .block ol li strong{color:var(--text)}
+
+/* key-value table (datos de la obra) */
+table.kv{width:100%;border-collapse:collapse;font-size:14px}
+table.kv th,table.kv td{padding:11px 14px;text-align:left;border-bottom:1px solid var(--border);vertical-align:top}
+table.kv th{width:34%;font-weight:500;color:var(--muted);font-family:var(--font-body)}
+table.kv td{color:var(--text)}
+table.kv tr:last-child th,table.kv tr:last-child td{border-bottom:none}
+table.kv td code{font-size:12.5px;color:var(--brand)}
+
+/* SLOC valuation stat row */
+.valrow{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:16px 0}
+.valrow .st{background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:12px 14px}
+.valrow .st .k{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+.valrow .st .v{font-family:var(--font-head);font-size:21px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums}
+
+/* language table */
+table.lang{width:100%;border-collapse:collapse;font-size:13.5px;font-variant-numeric:tabular-nums}
+table.lang th,table.lang td{padding:9px 14px;text-align:left;border-bottom:1px solid var(--border)}
+table.lang th{font-weight:500;color:var(--muted);font-family:var(--font-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase}
+table.lang td:last-child,table.lang th:last-child{text-align:right}
+table.lang tr:last-child td{border-bottom:none;font-weight:700;color:var(--text)}
+table.lang .bar{display:inline-block;height:6px;border-radius:3px;background:var(--u-grad);vertical-align:-1px;margin-right:8px;min-width:6px}
+
+/* callout (methodology footnote) */
+.callout{
+  background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--u);
+  border-radius:0 10px 10px 0;padding:14px 18px;font-size:13px;color:var(--muted);
+  margin:14px 0;line-height:1.7;
+}
+.callout code{color:var(--brand);font-size:12px}
+
+/* module list (arquitectura) */
+.sub{margin:22px 0 10px;font-family:var(--font-mono);font-size:12px;color:var(--u);letter-spacing:.06em;text-transform:uppercase;font-weight:600}
+.mod{margin:8px 0;padding-left:22px;position:relative}
+.mod code{color:var(--brand);font-size:13px}
+.mod .sloc{color:var(--dim);font-size:12px;font-family:var(--font-mono)}
+.mod .desc{color:var(--muted);font-size:14px}
+
+/* code block (file list) */
+pre.files{
+  background:#0a1128;border:1px solid var(--border);border-radius:10px;
+  padding:16px 18px;font-size:13px;line-height:1.85;color:#9ab4e6;
+  overflow-x:auto;font-family:var(--font-mono);
+}
+
+/* features / originalidad cards */
+.feats{display:grid;grid-template-columns:1fr;gap:10px;margin:12px 0}
+.feat{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
+.feat .ft{display:flex;align-items:baseline;gap:10px;margin-bottom:5px}
+.feat .ft .n{font-family:var(--font-mono);font-size:12px;color:var(--u);font-weight:600;flex:0 0 auto}
+.feat .ft b{color:var(--text);font-size:14.5px}
+.feat p{margin:0;color:var(--muted);font-size:13.5px;max-width:none}
+
+footer.ipfoot{
+  margin-top:48px;padding:34px 0 46px;border-top:1px solid var(--border);
+  background:var(--bg-soft);
+}
+footer.ipfoot .disclaim{font-size:13px;color:var(--dim);max-width:70ch;line-height:1.7}
+footer.ipfoot .meta{display:flex;gap:22px;flex-wrap:wrap;margin-top:16px;font-family:var(--font-mono);font-size:11.5px;color:var(--muted);letter-spacing:.04em}
+footer.ipfoot .meta b{color:var(--text);font-weight:600}
+
+/* print: clean light for paper submission */
+@media print{
+  :root{--bg:#fff;--bg-soft:#f7f8fc;--panel:#fff;--panel-2:#f3f5fb;--border:#dde2ee;--text:#121826;--muted:#445;--dim:#667;--brand:#0aa;--brand-2:#55a;--ok:#076}
+  body{background:#fff;color:#121826;font-size:11pt}
+  nav.top{position:static;background:#fff;border-bottom:2px solid #121826;backdrop-filter:none}
+  nav.top .links{display:none}
+  header.hero{background:#fff;border-bottom:1px solid #dde2ee;padding:30px 0 24px}
+  header.hero h1 .grad,header.hero .brandmark .wm .grad,nav.top .logo .grad{background:none;-webkit-text-fill-color:initial;color:#0aa}
+  .tile,section.unidad,footer.ipfoot{break-inside:avoid;box-shadow:none}
+  .tile{border:1px solid #dde2ee}
+  .callout,pre.files,.feat{break-inside:avoid}
+  pre.files{background:#f7f8fc;color:#334}
+  a{color:#0aa}
+  .block > h3::before{background:#0aa}
+}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+
+<nav class="top">
+  <div class="wrap row">
+    <a class="logo" href="#top">
+      <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs><linearGradient id="ng" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#6366f1"/></linearGradient></defs>
+        <rect width="64" height="64" rx="14" fill="#0b1020" stroke="#263056"/>
+        <polygon points="32,8 52,20 52,44 32,56 12,44 12,20" stroke="url(#ng)" stroke-width="2.4" fill="none" stroke-linejoin="round"/>
+        <g fill="url(#ng)"><circle cx="32" cy="8" r="3.2"/><circle cx="52" cy="20" r="3.2"/><circle cx="52" cy="44" r="3.2"/><circle cx="32" cy="56" r="3.2"/><circle cx="12" cy="44" r="3.2"/><circle cx="12" cy="20" r="3.2"/></g>
+        <circle cx="32" cy="32" r="9" fill="none" stroke="#e0e7ff" stroke-width="1.4" opacity="0.7"/>
+        <circle cx="32" cy="32" r="4" fill="#f472b6"/>
+      </svg>
+      <span><span class="grad">QSSC</span></span>
+    </a>
+    <div class="links">
+      <a href="#fpga"><span class="dot" style="background:#22d3ee"></span>FPGA</a>
+      <a href="#frontend"><span class="dot" style="background:#8b5cf6"></span>Frontend</a>
+      <a href="#backend"><span class="dot" style="background:#f472b6"></span>Backend</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <div class="brandmark">
+      <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs><linearGradient id="hg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#6366f1"/></linearGradient></defs>
+        <rect width="64" height="64" rx="14" fill="#0b1020" stroke="#263056"/>
+        <polygon points="32,8 52,20 52,44 32,56 12,44 12,20" stroke="url(#hg)" stroke-width="2.4" fill="none" stroke-linejoin="round"/>
+        <g fill="url(#hg)"><circle cx="32" cy="8" r="3.2"/><circle cx="52" cy="20" r="3.2"/><circle cx="52" cy="44" r="3.2"/><circle cx="32" cy="56" r="3.2"/><circle cx="12" cy="44" r="3.2"/><circle cx="12" cy="20" r="3.2"/></g>
+        <circle cx="32" cy="32" r="9" fill="none" stroke="#e0e7ff" stroke-width="1.4" opacity="0.7"/>
+        <circle cx="32" cy="32" r="4" fill="#f472b6"/>
+      </svg>
+      <div>
+        <div class="wm"><span class="grad">QSSC</span></div>
+        <div class="tag">Quantum Solid State Chip</div>
+      </div>
+    </div>
+    <div class="eyebrow">Memoria descriptiva · Depósito de software</div>
+    <h1>Registro de la <span class="grad">Propiedad Intelectual</span></h1>
+    <p class="sub">Memoria descriptiva de las tres unidades de software del Proyecto QSSC — firmware FPGA, frontend web y backend — para su inscripción en el Registro de la Propiedad Intelectual de España.</p>
+    <p class="cite">Art. 96.1 del Texto Refundido de la Ley de Propiedad Intelectual (RDLeg 1/1996) · Valoración SLOCCount 2.26 / COCOMO básico</p>
+
+    <div class="dashboard">
+      <div class="tile fpga">
+        <div class="k">Firmware FPGA</div>
+        <div class="v">4.483<span class="unit"> SLOC</span></div>
+        <div class="m">Verilog HDL · Artix-7</div>
+        <div class="cost">$130.554 · 0,97 PY</div>
+      </div>
+      <div class="tile frontend">
+        <div class="k">Frontend web</div>
+        <div class="v">4.344<span class="unit"> SLOC</span></div>
+        <div class="m">React 18 · Vite</div>
+        <div class="cost">$126.307 · 0,94 PY</div>
+      </div>
+      <div class="tile backend">
+        <div class="k">Backend + física</div>
+        <div class="v">7.825<span class="unit"> SLOC</span></div>
+        <div class="m">Python · FastAPI · Qiskit</div>
+        <div class="cost">$234.315 · 1,73 PY</div>
+      </div>
+      <div class="tile total">
+        <div class="k">Total depositado</div>
+        <div class="v">16.652<span class="unit"> SLOC</span></div>
+        <div class="m">3 unidades · 3,64 PY</div>
+        <div class="cost">$491.176 re-desarrollo</div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- =========================== UNIDAD 1 · FPGA =========================== -->
+<section class="unidad fpga" id="fpga">
+  <div class="wrap">
+    <div class="uhead">
+      <div class="num">1</div>
+      <h2><span class="uname">Unidad I</span>Firmware FPGA — Controlador de placa cuántica</h2>
+      <div class="sloc-pill">4.483 SLOC · $130.554</div>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§1</span> Datos de la obra</h3>
+      <table class="kv">
+        <tr><th>Título</th><td>QSSC — Firmware FPGA de control y readout para plataforma cuántica de 64 píxeles NV</td></tr>
+        <tr><th>Tipo de obra</th><td>Programa de ordenador (Art. 96.1 del Texto Refundido de la Ley de Propiedad Intelectual, RDLeg 1/1996)</td></tr>
+        <tr><th>Titular / Autor</th><td><em>[A completar por el titular: nombre/apellidos o razón social, NIF/CIF, domicilio]</em></td></tr>
+        <tr><th>Fecha de creación (inicio)</th><td>2026-08-07</td></tr>
+        <tr><th>Fecha de finalización</th><td>2026-09-14</td></tr>
+        <tr><th>Lugar de elaboración</th><td>España</td></tr>
+        <tr><th>Lenguaje</th><td>Verilog HDL (RTL), Tcl (flujo de síntesis), Python y Shell (automatización)</td></tr>
+        <tr><th>Plataforma objetivo</th><td>FPGA Xilinx Artix-7 (XC7A15T-1CSG325C), placa QMTECH</td></tr>
+      </table>
+      <div class="valrow">
+        <div class="st"><div class="k">Tamaño</div><div class="v">4.483 SLOC</div></div>
+        <div class="st"><div class="k">Esfuerzo</div><div class="v">0,97 PY</div></div>
+        <div class="st"><div class="k">Coste re-desarrollo</div><div class="v">$130.554</div></div>
+      </div>
+      <div class="callout">
+        Métricas generadas con <b>SLOCCount 2.26</b> (David A. Wheeler, GPL). SLOCCount no incluye contador de Verilog ni reconoce <code>.xdc</code>; los ficheros Verilog y XDC se han contado con SLOCCount nativo tras renombrar la extensión a <code>.c</code> (contador ANSI-C, misma sintaxis de comentarios <code>//</code> y <code>/* */</code>) para <code>.v</code> y a <code>.py</code> (contador de <code>#</code>) para <code>.xdc</code>. Anclaje de validación: los ficheros <code>.js</code> contados nativamente dan el mismo resultado al renombrarlos a <code>.c</code> (336 = 336 SLOC). Fórmula COCOMO básica <code>PM = 2,4 · KSLOC^1,05</code>. Estimación de coste de re-desarrollo, no precio de mercado. Script reproducible: <code>docs/propiedad-intelectual/sloc_count.py</code>.
+      </div>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§2</span> Descripción general</h3>
+      <p class="lead">El firmware FPGA constituye la capa de control en tiempo real de la plataforma QSSC, un instrumento de computación y sensórica cuántica basado en una matriz de 64 píxeles, cada uno conteniendo microdiamantes con centros de nitrógeno-vacante (NV) de diamante, operando a temperatura ambiente (300 K).</p>
+      <p>El firmware reside en una FPGA Xilinx Artix-7 y gobierna de forma determinista:</p>
+      <ul>
+        <li>la generación de microondas para el direccionamiento espectral de los qubits spin (oscilador ADF4351 controlado por SPI);</li>
+        <li>la conmutación del banco de emisores ópticos (64 LEDs CQD excitados a través de drivers TLC5947 de corriente constante);</li>
+        <li>la adquisición paralela de la fotocorriente de los 64 detectores mediante cuatro ADCs AD7616 muestreados simultáneamente;</li>
+        <li>la ejecución de secuencias de pulsos con detección síncrona (lock-in digital) para la lectura integrada de ODMR;</li>
+        <li>la comunicación con el host por UART con un protocolo de verbos ASCII.</li>
+      </ul>
+      <p>El programa transforma la FPGA en un periférico de medida cuántica: el host envía verbos de alto nivel (barridos ODMR, secuencias de Ramsey, lectura de detectores, programación de la bobina de gradiente) y la FPGA devuelve matrices de códigos ADC, acumuladores de lock-in o estados, con sincronización a nivel de ciclo de reloj que un procesador de propósito general no puede garantizar.</p>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§3</span> Arquitectura y módulos</h3>
+      <p>El código se organiza en tres subdirectorios: <code>rtl/</code> (lógica síncrona sintetizable), <code>sim/</code> (banco de pruebas) y <code>synth/</code> (flujo de implementación).</p>
+      <div class="sub">rtl/ — lógica sintetizable (12 módulos Verilog)</div>
+      <div class="mod"><code>top_level.v</code> — <span class="desc">entidad de integración. Instancia todos los módulos, gestiona el reset asíncrono y el reloj único (50 MHz escalado a 100 MHz vía MMCM), y enruta el bus de comandos hacia los controladores de periféricos. Punto único de entrada/salida hacia el host y los dispositivos analógicos.</span></div>
+      <div class="mod"><code>command_parser.v</code> — <span class="desc">analizador del protocolo de verbos ASCII por UART. Decodifica <code>ID, STATUS, RESET, ODMR_SWEEP, READ_DETECTORS, READ_LOCKIN, READ_LOCKINP, RUN_SEQUENCE, SET_GRADIENT, RUN_ALL_ODMR, APPLY_PULSE</code> y despacha el control. Contiene la FSM principal de comandos y los watchdogs anti-bloqueo.</span></div>
+      <div class="mod"><code>uart_rx.v</code> / <code>uart_tx.v</code> — <span class="desc">transceptor UART 115200-8N1 con sobremuestreo 8× en recepción y generador de baudios por división de reloj.</span></div>
+      <div class="mod"><code>spi_master.v</code> — <span class="desc">maestro SPI para el ADF4351 y los DACs de gradiente/emisor. Reloj SPI 12,5 MHz, modo 0, escritura de 32 bits con bit de habilitación.</span></div>
+      <div class="mod"><code>adf4351_ctrl.v</code> — <span class="desc">controlador del ADF4351. Programa R0/R1/R2/R4 para 2,80–2,94 GHz (transición ms=0 del NV, D≈2,87 GHz), con escritura de fase R1-only que evita el re-lock del lazo durante los cambios rápidos de un barrido ODMR.</span></div>
+      <div class="mod"><code>dac_ctrl.v</code> — <span class="desc">controlador del DAC MCP4921 (12 bits) que programa la bobina de gradiente magnético; código 0–4095 lineal con el campo.</span></div>
+      <div class="mod"><code>emitter_array.v</code> — <span class="desc">generador de las señales PWM/serie para los drivers TLC5947 que excitán los 64 emisores CQD, con habilitación por píxel y apagado global de seguridad.</span></div>
+      <div class="mod"><code>tlc5947_ctrl.v</code> — <span class="desc">controlador del bus serie (GSCLK + BLANK + XLAT) del driver LED TLC5947, con corrección de corriente por canal.</span></div>
+      <div class="mod"><code>adc_reader.v</code> — <span class="desc">lector de los cuatro ADCs AD7616 en modo bus paralelo. Muestreo simultáneo de 64 canales (16 por AD7616) con espera de dato fresco (<code>wait-for-fresh</code>) y sincronizador de 2 FF (CDC) para <code>adc_busy</code>.</span></div>
+      <div class="mod"><code>qrng_entropy.v</code> — <span class="desc">generador de entropía cuántica derivado del ruido de lectura de los detectores, con condicionamiento y tests de salud por lotes.</span></div>
+      <div class="sub">sim/ — verificación</div>
+      <div class="mod"><code>tb_top_level.v</code> <span class="sloc">(926 SLOC)</span> — <span class="desc">banco de pruebas exhaustivo que inyecta los verbos por UART modelo, modela la respuesta analógica de los ADCs y verifica 18 escenarios: ID, barrido ODMR, lectura de detectores, lock-in, Ramsey con fase de readout, gradiente, watchdogs y reinicios. Pasa en iverilog 18/18.</span></div>
+      <div class="sub">synth/ — flujo de implementación</div>
+      <div class="mod"><code>build_bitstream.tcl</code> — <span class="desc">script Tcl para Vivado: lista explícita de ficheros (no glob), constraints, síntesis → implementación → bitstream → reporte.</span></div>
+      <div class="mod"><code>run_synth.sh</code> — <span class="desc">envoltura de shell que lanza el flujo headless.</span></div>
+      <div class="mod"><code>make_report.py</code> — <span class="desc">parsea los reportes de Vivado y emite un resumen de utilización LUT/FF/BRAM/DSP y timing (WNS/TNS).</span></div>
+      <div class="sub">constraints.xdc — restricciones físicas</div>
+      <p>Asignación de pines para la placa QMTECH XC7A15T-1CSG325C: reloj 50 MHz (R2), reset activo-bajo (H18, invertido), LEDs (C8/D8), JTAG (TCK=F8, TDI=T9, TDO=T8, TMS=R8), UART host, y los buses SPI/paralelo hacia ADF4351, MCP4921, TLC5947 y AD7616.</p>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§4</span> Tecnologías y lenguajes</h3>
+      <table class="lang">
+        <tr><th>Lenguaje</th><th>SLOC</th><th>%</th></tr>
+        <tr><td><span class="bar" style="width:120px"></span>Verilog HDL</td><td>4.230</td><td>94,4 %</td></tr>
+        <tr><td><span class="bar" style="width:9px"></span>Python (automatización síntesis)</td><td>136</td><td>3,0 %</td></tr>
+        <tr><td><span class="bar" style="width:6px"></span>XDC (constraints)</td><td>75</td><td>1,7 %</td></tr>
+        <tr><td><span class="bar" style="width:4px"></span>Shell</td><td>29</td><td>0,6 %</td></tr>
+        <tr><td><span class="bar" style="width:3px"></span>Tcl</td><td>13</td><td>0,3 %</td></tr>
+        <tr><td>Total</td><td>4.483</td><td>100 %</td></tr>
+      </table>
+      <p style="margin-top:12px;color:var(--muted);font-size:13.5px">Herramientas: Yosys / Vivado (síntesis), iverilog (simulación), pyverilog (verificación estructural en CI), formato de bitstream Artix-7.</p>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§5</span> Funcionalidades destacadas</h3>
+      <div class="feats">
+        <div class="feat"><div class="ft"><span class="n">01</span><b>Barrido ODMR paralelo de 64 píxeles</b> <code>RUN_ALL_ODMR</code></div><p>Un único barrido serial de frecuencia muestrea simultáneamente los 64 detectores y devuelve una matriz (n_puntos × 64) de códigos ADC; el host descompone cada columna en las líneas ODMR resueltas = número de qubits por píxel.</p></div>
+        <div class="feat"><div class="ft"><span class="n">02</span><b>Secuencia de pulsos con detección síncrona</b> <code>RUN_SEQUENCE + READ_LOCKIN</code></div><p>Motor de secuencias con puerta de microondas temporizada, acumulador lock-in simétrico (media-ventana, tope 10 000) y readout de Ramsey con fase aplicada — habilita medidas de T2* / Hahn a 300 K.</p></div>
+        <div class="feat"><div class="ft"><span class="n">03</span><b>Programación de bobina de gradiente</b> <code>SET_GRADIENT</code></div><p>Escribe el DAC de gradiente antes del barrido para separar espectralmente los NV dentro de un píxel (registro direccionable por gradiente).</p></div>
+        <div class="feat"><div class="ft"><span class="n">04</span><b>Lectura cuántica prima</b> <code>READ_LOCKINP</code></div><p>Lectura de lock-in integrada con denoiser por primas-coprimas para mejorar la relación señal/ruido del readout.</p></div>
+        <div class="feat"><div class="ft"><span class="n">05</span><b>Generador de entropía cuántica</b> <code>qrng_entropy</code></div><p>RNG derivado del ruido de detección cuántica con tests de salud y re-intento de 64× sobre la entropía del SO.</p></div>
+        <div class="feat"><div class="ft"><span class="n">06</span><b>Seguridad determinista</b></div><p>Watchdogs anti-bloqueo en todas las FSMs, sincronizadores CDC de 2 FF para señales entre dominios de reloj, y read-one-with-wait-for-fresh en el lector ADC para evitar datos rezagados.</p></div>
+      </div>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§6</span> Originalidad y características distintivas</h3>
+      <ul>
+        <li>Firmware diseñado específicamente para <b>computación y sensórica cuántica a temperatura ambiente</b> sobre centros NV de diamante, no un controlador de instrumento genérico.</li>
+        <li><b>Readout paralelo de 64 canales</b> con ADCs simultáneos (AD7616) en lugar del muxeo serial habitual, para no perder la sincronía óptica entre píxeles.</li>
+        <li><b>Verbos de alto nivel</b> que exponen primitivas cuánticas (barrido ODMR, secuencia de Ramsey, lock-in) directamente en la FPGA, de modo que el host opera sobre medidas cuánticas y no sobre registros crudos.</li>
+        <li><b>Alineación espectral por gradiente</b> integrada en el flujo de firmware (SET_GRADIENT), posibilitando un registro de qubits de ancho medible dentro de cada microdiamante.</li>
+      </ul>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§7</span> Estado de verificación</h3>
+      <ul>
+        <li>18/18 escenarios de simulación iverilog pasan (<code>sim/tb_top_level.v</code>).</li>
+        <li>Verificación estructural pyverilog y validación de constraints XDC en CI.</li>
+        <li>El bitstream sintetiza para XC7A15T-1CSG325C (informe de utilización y timing generado por <code>synth/make_report.py</code>).</li>
+      </ul>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§8</span> Entorno de ejecución</h3>
+      <ul>
+        <li><b>Hardware</b>: placa QMTECH XC7A15T-1CSG325C; oscilador 50 MHz; programador JTAG/FT2232H.</li>
+        <li><b>Dependencias externas</b>: sintetizador RF ADF4351, DAC MCP4921, driver LED TLC5947, ADC AD7616 ×4 — todos en la placa cabezal del QSSC.</li>
+        <li><b>Interfaz host</b>: UART 115200-8N1, protocolo de verbos ASCII documentado en <code>docs/</code>.</li>
+      </ul>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§9</span> Lista de ficheros fuente depositados</h3>
+<pre class="files">fpga/constraints.xdc
+fpga/rtl/adc_reader.v
+fpga/rtl/adf4351_ctrl.v
+fpga/rtl/command_parser.v
+fpga/rtl/dac_ctrl.v
+fpga/rtl/emitter_array.v
+fpga/rtl/qrng_entropy.v
+fpga/rtl/spi_master.v
+fpga/rtl/tlc5947_ctrl.v
+fpga/rtl/top_level.v
+fpga/rtl/uart_rx.v
+fpga/rtl/uart_tx.v
+fpga/sim/tb_top_level.v
+fpga/synth/build_bitstream.tcl
+fpga/synth/make_report.py
+fpga/synth/run_synth.sh</pre>
+    </div>
+  </div>
+</section>
+
+<!-- =========================== UNIDAD 2 · FRONTEND =========================== -->
+<section class="unidad frontend" id="frontend">
+  <div class="wrap">
+    <div class="uhead">
+      <div class="num">2</div>
+      <h2><span class="uname">Unidad II</span>Frontend web — Interfaz de operación del instrumento</h2>
+      <div class="sloc-pill">4.344 SLOC · $126.307</div>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§1</span> Datos de la obra</h3>
+      <table class="kv">
+        <tr><th>Título</th><td>QSSC — Interfaz web de operación, calibración y sensórica para plataforma cuántica de 64 píxeles NV</td></tr>
+        <tr><th>Tipo de obra</th><td>Programa de ordenador (Art. 96.1 RDLeg 1/1996)</td></tr>
+        <tr><th>Titular / Autor</th><td><em>[A completar por el titular: nombre/apellidos o razón social, NIF/CIF, domicilio]</em></td></tr>
+        <tr><th>Fecha de creación (inicio)</th><td>2026-08-07</td></tr>
+        <tr><th>Fecha de finalización</th><td>2026-09-14</td></tr>
+        <tr><th>Lugar de elaboración</th><td>España</td></tr>
+        <tr><th>Lenguaje</th><td>JavaScript (JSX / React 18), CSS</td></tr>
+        <tr><th>Plataforma objetivo</th><td>Navegador web moderno (SPA); construcción con Vite</td></tr>
+      </table>
+      <div class="valrow">
+        <div class="st"><div class="k">Tamaño</div><div class="v">4.344 SLOC</div></div>
+        <div class="st"><div class="k">Esfuerzo</div><div class="v">0,94 PY</div></div>
+        <div class="st"><div class="k">Coste re-desarrollo</div><div class="v">$126.307</div></div>
+      </div>
+      <div class="callout">
+        Métricas generadas con <b>SLOCCount 2.26</b> (David A. Wheeler, GPL). SLOCCount no reconoce <code>.jsx</code> ni <code>.css</code>; los ficheros JSX/CSS se han contado con SLOCCount nativo tras renombrar la extensión a <code>.c</code> (contador ANSI-C, misma sintaxis <code>//</code> y <code>/* */</code>). Anclaje de validación: los <code>.js</code> nativos dan el mismo resultado al renombrarlos a <code>.c</code> (336 = 336 SLOC). COCOMO básico <code>PM = 2,4 · KSLOC^1,05</code>. Script reproducible: <code>docs/propiedad-intelectual/sloc_count.py</code>.
+      </div>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§2</span> Descripción general</h3>
+      <p class="lead">El frontend es una aplicación web de página única (SPA) que constituye la interfaz de usuario del instrumento cuántico QSSC. Permite a un operador:</p>
+      <ul>
+        <li>configurar y ejecutar circuitos cuánticos (Bell, Shor, Grover, QFT, caminos personalizados) sobre la matriz de 64 píxeles, en modo simulador o hardware real;</li>
+        <li>calibrar la matriz píxel a píxel (barrido ODMR, conteo de qubits resueltos por píxel, anchura de registro, frecuencias medidas);</li>
+        <li>visualizar los resultados (histogramas con marcado del resultado, tablas por píxel, derivaciones modales) y los parámetros físicos;</li>
+        <li>operar la sensórica (magnetómetro vectorial de 64 píxeles, gradiometría tensorial, compás cuántico, giro, sensores ferro/nav/thermal/current);</li>
+        <li>gestionar el estado del hardware real (detección de FPGA, verbos de control, panel de estado, parámetros de ejecución).</li>
+      </ul>
+      <p>La aplicación consume una API REST (backend) y se sirve como ficheros estáticos construidos por Vite, comunicándose con el backend por una pasarela proxy en desarrollo y por el mismo origen en producción.</p>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§3</span> Arquitectura y módulos</h3>
+      <p>El código fuente reside en <code>frontend/src/</code> y consta de seis ficheros:</p>
+      <div class="mod"><code>App.jsx</code> <span class="sloc">(1.833 SLOC)</span> — <span class="desc">componente raíz y orquestador de estado. Mantiene el estado global: plataforma de defecto (NV/SiC/hBN), temperatura, modo de ejecución (sim/real), modo de píxel (registro/ensamble), qubits por píxel, modos de lectura (super-resolución, Bayesiano, denoise por primas, anti-ruido) y los parámetros de los algoritmos. Construye los cuerpos de petición (<code>buildBody</code>) y renderiza el panel de controles globales y las pestañas.</span></div>
+      <div class="mod"><code>components.jsx</code> <span class="sloc">(1.628 SLOC)</span> — <span class="desc">biblioteca de componentes: panel de calibración (flujo de etapas, marcado de qubits escaneados, modal de frecuencias por píxel), tarjeta de calibración paralela de 64 píxeles (selector de modo de lectura, preset anti-ruido, estadísticas de canales espaciales), panel de sensores, panel FPGA (botón de flasheo, auto-curación, referencia de verbos), histograma con marcado del resultado y modal de derivación.</span></div>
+      <div class="mod"><code>derive.js</code> <span class="sloc">(281 SLOC)</span> — <span class="desc">utilidades de derivación: explica cómo se obtiene cada resultado (factorización, período, suma, amplitud) a partir de los conteos, con renderizado modal paso a paso.</span></div>
+      <div class="mod"><code>api.js</code> <span class="sloc">(55 SLOC)</span> — <span class="desc">capa de acceso a la API REST: funciones <code>get</code>/<code>post</code> con manejo de errores y los puntos finales (<code>run, runCustom, runParallel, calibrate, calibrateArray, modes, profiles</code>, sensores, FPGA).</span></div>
+      <div class="mod"><code>styles.css</code> <span class="sloc">(538 SLOC)</span> — <span class="desc">estilos de la aplicación, con soporte de tema claro/oscuro y diseño responsivo.</span></div>
+      <div class="mod"><code>main.jsx</code> <span class="sloc">(9 SLOC)</span> — <span class="desc">punto de entrada que monta el componente raíz en el DOM.</span></div>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§4</span> Tecnologías y lenguajes</h3>
+      <table class="lang">
+        <tr><th>Lenguaje</th><th>SLOC</th><th>%</th></tr>
+        <tr><td><span class="bar" style="width:110px"></span>JavaScript / JSX</td><td>3.806</td><td>87,6 %</td></tr>
+        <tr><td><span class="bar" style="width:16px"></span>CSS</td><td>538</td><td>12,4 %</td></tr>
+        <tr><td>Total</td><td>4.344</td><td>100 %</td></tr>
+      </table>
+      <p style="margin-top:12px;color:var(--muted);font-size:13.5px">Stack: React 18 (hooks), Vite 5 (bundler y dev-server), JSX, CSS nativo con variables de tema. Sin dependencias de UI pesadas: la interfaz se construye con componentes propios.</p>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§5</span> Funcionalidades destacadas</h3>
+      <div class="feats">
+        <div class="feat"><div class="ft"><span class="n">01</span><b>Conmutador simulador / hardware real</b></div><p>El operador selecciona la fuente de ejecución; en modo real la interfaz detecta la FPGA y ofrece los verbos de control, sin enmascarar un resultado sintético como real.</p></div>
+        <div class="feat"><div class="ft"><span class="n">02</span><b>Calibración paralela de 64 píxeles</b></div><p>Lanza el barrido ODMR del array, muestra la anchura de registro medida por píxel, el número de qubits escaneados, las frecuencias ODMR y un modal de pines/frecuencias.</p></div>
+        <div class="feat"><div class="ft"><span class="n">03</span><b>Modos de lectura avanzados</b></div><p>Super-resolución ODMR (factor ajustable), lectura Bayesiana (intervalo creíble 0,01–0,99), denoise por primas y pila anti-ruido (pasivo/activo/completo) — todos conmutables desde el panel.</p></div>
+        <div class="feat"><div class="ft"><span class="n">04</span><b>Marcado de resultados y derivación</b></div><p>El histograma marca el resultado (factor, período, estado suma) y un modal explica paso a paso su derivación desde los conteos cuánticos.</p></div>
+        <div class="feat"><div class="ft"><span class="n">05</span><b>Panel de sensórica</b></div><p>Magnetómetro vectorial, gradiometría tensorial con ajuste de dipolo, compás cuántico, giro y sensores auxiliares.</p></div>
+        <div class="feat"><div class="ft"><span class="n">06</span><b>Modo de píxel registro/ensamble</b></div><p>Selector que refleja el modelo físico (registro de N qubits dentro del píxel vs. ensamble de 1 qubit por píxel a 300 K), con el N medido por la calibración.</p></div>
+      </div>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§6</span> Originalidad y características distintivas</h3>
+      <ul>
+        <li>Interfaz diseñada específicamente para <b>operar un instrumento cuántico de matriz de 64 píxeles a temperatura ambiente</b>, no un dashboard genérico.</li>
+        <li><b>Integración de primitivas cuánticas de alto nivel</b> (calibración ODMR, modos super-resolución/Bayesiana, sensórica tensorial) en la interfaz de operación, exponiendo la física del dispositivo al operador.</li>
+        <li><b>Transparencia simulador/hardware</b>: la UI distingue y comunica explícitamente la fuente de cada resultado, evitando relabel silencioso.</li>
+        <li><b>Derivación explicada</b>: cada resultado cuántico muestra su cadena de derivación, destinado a la reproducibilidad experimental.</li>
+      </ul>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§7</span> Estado de verificación</h3>
+      <ul>
+        <li>La construcción de producción (<code>vite build</code>) compila sin errores (bundle ~311 KB / 92 KB gzip).</li>
+        <li>Verificación local API + frontend antes de cada entrega.</li>
+        <li>La lógica de derivación y los constructores de petición se ejercitan vía la suite de tests del backend (TestClient sobre la API real).</li>
+      </ul>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§8</span> Entorno de ejecución</h3>
+      <ul>
+        <li><b>Navegador</b>: navegador web moderno con soporte ES2020.</li>
+        <li><b>Construcción</b>: <code>npm install</code> + <code>npm run build</code> (Vite) → <code>dist/</code> estático.</li>
+        <li><b>Desarrollo</b>: <code>npm run dev</code> (Vite, puerto 5173) con proxy a la API (puerto 8011).</li>
+        <li><b>Backend</b>: requiere el backend QSSC (API REST) sirviendo los endpoints consumidos por <code>api.js</code>.</li>
+      </ul>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§9</span> Lista de ficheros fuente depositados</h3>
+<pre class="files">frontend/src/App.jsx
+frontend/src/api.js
+frontend/src/components.jsx
+frontend/src/derive.js
+frontend/src/main.jsx
+frontend/src/styles.css</pre>
+    </div>
+  </div>
+</section>
+
+<!-- =========================== UNIDAD 3 · BACKEND =========================== -->
+<section class="unidad backend" id="backend">
+  <div class="wrap">
+    <div class="uhead">
+      <div class="num">3</div>
+      <h2><span class="uname">Unidad III</span>Backend — API, simulador cuántico y librería de física</h2>
+      <div class="sloc-pill">7.825 SLOC · $234.315</div>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§1</span> Datos de la obra</h3>
+      <table class="kv">
+        <tr><th>Título</th><td>QSSC — API REST, simulador cuántico realista y librería de física para plataforma de 64 píxeles NV</td></tr>
+        <tr><th>Tipo de obra</th><td>Programa de ordenador (Art. 96.1 RDLeg 1/1996)</td></tr>
+        <tr><th>Titular / Autor</th><td><em>[A completar por el titular: nombre/apellidos o razón social, NIF/CIF, domicilio]</em></td></tr>
+        <tr><th>Fecha de creación (inicio)</th><td>2026-08-07</td></tr>
+        <tr><th>Fecha de finalización</th><td>2026-09-14</td></tr>
+        <tr><th>Lugar de elaboración</th><td>España</td></tr>
+        <tr><th>Lenguaje</th><td>Python 3.12</td></tr>
+        <tr><th>Plataforma objetivo</th><td>Servidor Linux; API FastAPI (uvicorn); worker RQ para tareas asíncronas</td></tr>
+      </table>
+      <div class="valrow">
+        <div class="st"><div class="k">Tamaño</div><div class="v">7.825 SLOC</div></div>
+        <div class="st"><div class="k">Esfuerzo</div><div class="v">1,73 PY</div></div>
+        <div class="st"><div class="k">Coste re-desarrollo</div><div class="v">$234.315</div></div>
+      </div>
+      <div class="callout">
+        Métricas generadas con <b>SLOCCount 2.26</b> (David A. Wheeler, GPL), contaje nativo sobre ficheros Python (SLOCCount sí reconoce <code>.py</code>). Fórmula COCOMO básica <code>PM = 2,4 · KSLOC^1,05</code>. La valoración es una estimación de coste de re-desarrollo, no un precio de mercado. El script reproducible <code>docs/propiedad-intelectual/sloc_count.py</code> contiene el conteo por fichero y la valoración de las tres áreas.
+      </div>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§2</span> Descripción general</h3>
+      <p class="lead">El backend es la capa de software que (i) implementa un simulador cuántico realista de la plataforma QSSC, (ii) expone una API REST para que el frontend y clientes externos ejecuten circuitos, calibren la matriz y operen la sensórica, y (iii) contiene la librería de física (modelos de defecto, descomposición ODMR, magnetometría, gradiometría tensorial, readout super-res y Bayesiano, filtros anti-ruido) que comparten el simulador y la vía de hardware real.</p>
+      <p>Se estructura en dos paquetes: <code>qssc/</code> (librería de física + simulador + backend cuántico Qiskit) y <code>api/</code> (servicio FastAPI + runner + cola de tareas). La vía de hardware real conecta con la FPGA por el mismo firmware depositado en la unidad FPGA, de modo que el backend opera sobre medidas reales cuando la placa está presente y sobre el simulador cuando no lo está, sin enmascarar una vía por otra.</p>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§3</span> Arquitectura y módulos</h3>
+      <div class="sub">qssc/ — librería de física + simulador (5.100 SLOC)</div>
+      <div class="mod"><code>backend.py</code> <span class="sloc">(1.753)</span> — <span class="desc"><code>QSSCBackend</code>: backend de Qiskit. Modela los 64 píxeles como procesadores independientes a 300 K, acoplamiento dipolo-dipolo dentro del píxel (1/r³, <code>dipole.py</code>), detuning por qubit, readout asimétrico y modos <code>pixel_mode</code> (registro/ensamble). Soporta <code>run_array</code> (un circuito por píxel, agregación 64×) con saltado de píxeles de ancho insuficiente.</span></div>
+      <div class="mod"><code>simulator.py</code> <span class="sloc">(843)</span> — <span class="desc"><code>SimulatedFPGA</code>: emulación fiel de la FPGA (barrido ODMR con ruido de lectura, detectores, lock-in, secuencias de pulsos). <code>auto_align</code> coloca los NV sobre una rejilla de frecuencias ODMR medidas, no sintética.</span></div>
+      <div class="mod"><code>circuits.py</code> <span class="sloc">(531)</span> — <span class="desc">construcción de circuitos: Bell, Shor (factorización de potencias primas vía <code>perfect_power</code>, QFT, aritmética eficiente), Grover, QFT, caminos personalizados y postproceso con corte por anchura de registro.</span></div>
+      <div class="mod"><code>array_calibration.py</code> <span class="sloc">(529)</span> — <span class="desc">calibración de la matriz de 64 píxeles: <code>calibrate_array</code> (sim) y <code>calibrate_array_from_codes</code> (real, desde códigos ADC medidos). Cuenta las líneas ODMR resueltas = anchura de registro; integra sub-píxel, integración N-shot, super-resolución y Bayesiano. <code>gradient_dac_code_from_mhz</code> = inverso del driver DAC (MCP4921, 4095 → 2,23 MHz/µm).</span></div>
+      <div class="mod"><code>protocol.py</code> <span class="sloc">(439)</span> — <span class="desc">protocolo experimental (etapas: ODMR, linewidth, T2*/Hahn, tabla de frecuencias por pin).</span></div>
+      <div class="mod"><code>magnetometry.py</code> <span class="sloc">(364)</span> — <span class="desc">magnetómetro vectorial de 4 ejes ⟨111⟩: <code>b_vector_from_odmr_lines</code> reconstruye el vector B desde los dobletes (≥3 splits), <code>b_vector_map_from_array_calibration</code> construye el mapa 8×8×3.</span></div>
+      <div class="mod"><code>tensor_gradiometry.py</code> <span class="sloc">(344)</span> — <span class="desc">gradiometría tensorial: Jacobiano por píxel, localización de dipolo, <code>tensor_gradient_sweep</code>.</span></div>
+      <div class="mod"><code>defects.py</code> <span class="sloc">(298)</span> — <span class="desc">perfiles de defectos (NV, SiC, hBN) con constantes ancladas a datos del proveedor (D, ratio giromagnético, linewidth, T1/T2 cuando aplica).</span></div>
+      <div class="mod"><code>sensors.py</code> <span class="sloc">(269)</span> — <span class="desc">ejes NV tetraédricos ⟨111⟩ y sensórica auxiliar (compás, giro, ferro, nav, thermal, current).</span></div>
+      <div class="mod"><code>prime_readout.py</code> <span class="sloc">(231)</span> — <span class="desc">denoiser de readout por primas-coprimas.</span></div>
+      <div class="mod"><code>odmr_decompose.py</code> <span class="sloc">(219)</span> — <span class="desc">descomposición espectral ODMR (CLEAN / matching pursuit): resuelve líneas individuales, SNR mínimo, separación mínima &gt; linewidth. Es el contador de qubits por píxel.</span></div>
+      <div class="mod"><code>noise_filters.py</code> <span class="sloc">(212)</span> — <span class="desc">pila de filtros anti-ruido clásicos a 300 K (SNR-protectiva, canales lentos no 1/√N).</span></div>
+      <div class="mod"><code>cli.py</code> <span class="sloc">(206)</span> — <span class="desc">interfaz de línea de comandos.</span></div>
+      <div class="mod"><code>detector_centroid.py</code> <span class="sloc">(197)</span> — <span class="desc">centroiding sub-píxel por charge-sharing (imagen 64→64·S; no incrementa qubits).</span></div>
+      <div class="mod"><code>crypto.py</code> <span class="sloc">(154)</span> · <code>superres_odmr.py</code> <span class="sloc">(140)</span> · <code>bayesian_readout.py</code> <span class="sloc">(104)</span> · <code>qkd.py</code> <span class="sloc">(103)</span> · <code>dipole.py</code> <span class="sloc">(68)</span> · <code>nuclear.py</code> <span class="sloc">(64)</span></div>
+      <div class="sub">api/ — servicio REST + runner (2.725 SLOC)</div>
+      <div class="mod"><code>main.py</code> <span class="sloc">(1.725)</span> — <span class="desc">aplicación FastAPI: endpoints de circuito, calibración, sensórica, modos, perfiles y control FPGA. Cada endpoint conmuta <code>sim</code>/<code>real</code>; la vía real detecta la placa y devuelve <code>no-fpga-detected</code> cuando no está presente. El endpoint tensorial ejecuta la cadena real: <code>RUN_ALL_ODMR</code> → descomposición → B-vector 4 ejes → gradiente tensorial + ajuste de dipolo.</span></div>
+      <div class="mod"><code>runner.py</code> <span class="sloc">(1.062)</span> — <span class="desc">lógica de ejecución: <code>run_circuit</code>, <code>run_parallel</code> (Shor coprimo por píxeles), <code>run_calibrate_array</code> (vía real: envía <code>SET_GRADIENT</code> antes del barrido, acumula N shots, descompone, cachea). Cierra el lazo calibración → circuito alimentando las frecuencias medidas como rejilla del registro.</span></div>
+      <div class="mod"><code>jobs.py</code> <span class="sloc">(300)</span> — <span class="desc">cola RQ para tareas asíncronas, con modo <code>?sync=true</code> en proceso.</span></div>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§4</span> Tecnologías y lenguajes</h3>
+      <table class="lang">
+        <tr><th>Lenguaje</th><th>SLOC</th><th>%</th></tr>
+        <tr><td><span class="bar" style="width:140px"></span>Python</td><td>7.825</td><td>100 %</td></tr>
+        <tr><td>Total</td><td>7.825</td><td>100 %</td></tr>
+      </table>
+      <p style="margin-top:12px;color:var(--muted);font-size:13.5px">Stack: Python 3.12, FastAPI + uvicorn, Qiskit (backend cuántico con Aer), NumPy/SciPy (física y descomposición espectral), RQ + Redis (tareas asíncronas), Pydantic (modelos de petición), pytest (tests).</p>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§5</span> Funcionalidades destacadas</h3>
+      <div class="feats">
+        <div class="feat"><div class="ft"><span class="n">01</span><b>Simulador cuántico realista</b></div><p>Acoplamiento dipolo vecino-más-cercano dentro del píxel, detuning por qubit, readout asimétrico, canales de error por defecto (depol, T1, T2, readout) anclados a datos del proveedor.</p></div>
+        <div class="feat"><div class="ft"><span class="n">02</span><b>Computación paralela de 64 píxeles</b></div><p><code>run_array</code> ejecuta un circuito por píxel con semillas independientes y agrega (64× los shots); saltado de píxeles de ancho insuficiente; Shor coprimo distribuido.</p></div>
+        <div class="feat"><div class="ft"><span class="n">03</span><b>Calibración medida del ancho de registro</b></div><p>El número de qubits por píxel es el conteo de líneas ODMR resueltas por <code>decompose_odmr</code>, no una constante dura; el lazo calibración → circuito alimenta las frecuencias medidas como rejilla del registro.</p></div>
+        <div class="feat"><div class="ft"><span class="n">04</span><b>Vía de hardware real completa</b></div><p>Detección de FPGA, verbos de control, barrido ODMR paralelo, programación de gradiente, integración N-shot y reconstrucción del mapa B-vector 4 ejes — todo sobre medidas reales, con degradación veraz a <code>no-fpga-detected</code>.</p></div>
+        <div class="feat"><div class="ft"><span class="n">05</span><b>Sensórica cuántica</b></div><p>Magnetómetro vectorial de 64 píxeles (4 ejes ⟨111⟩), gradiometría tensorial con localización de dipolo, compás, giro y sensores auxiliares.</p></div>
+        <div class="feat"><div class="ft"><span class="n">06</span><b>Readout avanzado</b></div><p>Super-resolución ODMR (sparse OMP), lectura Bayesiana cuántico-limitada, denoise por primas y pila anti-ruido clásica a 300 K.</p></div>
+        <div class="feat"><div class="ft"><span class="n">07</span><b>Tareas asíncronas</b></div><p>Calibración y ejecución paralela no bloquean la API (cola RQ), con modo síncrono en proceso para tests.</p></div>
+      </div>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§6</span> Originalidad y características distintivas</h3>
+      <ul>
+        <li>Backend cuántico donde <b>el número de qubits por píxel es una cantidad medida</b> (líneas ODMR resueltas), no un parámetro fijo, cerrando el lazo calibración → circuito sobre la rejilla de frecuencias medida.</li>
+        <li><b>Modelo físico de 64 procesadores independientes a 300 K</b> (acoplamiento cross-píxel nulo a 2,5 mm) frente a una máquina de 640 qubits, con gate de 2 qubits spin por dipolo 1/r³ fundamentado (no penaliza el canal óptico HOM).</li>
+        <li><b>Cadena de hardware real de-extremo-a-extremo</b> para gradiometría tensorial: FPGA → códigos ADC → descomposición → B-vector 4 ejes → gradiente tensorial, sin inyectar campo sintético, con degradación veraz cuando no hay placa.</li>
+        <li><b>Métricas de física ancladas a datos del proveedor</b> (splitting D, linewidth, ratio giromagnético), evitando afirmar constantes (T2/T1) no facilitadas por el proveedor.</li>
+      </ul>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§7</span> Estado de verificación</h3>
+      <ul>
+        <li>Suite pytest completa en verde (salida 0, sin fallos): <b>416 tests superados, 12 omitidos</b>, en 33 ficheros de test.</li>
+        <li>Tests de física (dipolo-dipole, canales de error, corrección Qiskit) + tests de integración API (TestClient sobre la app real) + test de la vía real con FPGA simulada (mock) para gradiometría tensorial y programación de gradiente.</li>
+        <li><code>ruff</code> limpio (reglas CI E9/F63/F7/F82/F401/F841) antes de cada entrega.</li>
+        <li>Verificación local API + frontend antes de cada push.</li>
+      </ul>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§8</span> Entorno de ejecución</h3>
+      <ul>
+        <li><b>Python</b>: 3.12 con entorno virtual.</li>
+        <li><b>Servicio</b>: <code>uvicorn api.main:app --port 8011</code>; worker RQ <code>rq worker qssc</code> desde el mismo árbol que la API.</li>
+        <li><b>Dependencias runtime</b>: FastAPI, uvicorn, Qiskit + Aer, NumPy/SciPy, Pydantic, RQ + Redis.</li>
+        <li><b>Hardware opcional</b>: placa FPGA QSSC (firmware de la Unidad I) vía UART; en su ausencia opera en modo simulador.</li>
+      </ul>
+    </div>
+
+    <div class="block">
+      <h3><span class="sn">§9</span> Lista de ficheros fuente depositados</h3>
+<pre class="files">api/jobs.py
+api/main.py
+api/runner.py
+qssc/__init__.py
+qssc/array_calibration.py
+qssc/backend.py
+qssc/bayesian_readout.py
+qssc/circuits.py
+qssc/cli.py
+qssc/crypto.py
+qssc/defects.py
+qssc/detector_centroid.py
+qssc/dipole.py
+qssc/magnetometry.py
+qssc/noise_filters.py
+qssc/nuclear.py
+qssc/odmr_decompose.py
+qssc/prime_readout.py
+qssc/protocol.py
+qssc/qkd.py
+qssc/sensors.py
+qssc/simulator.py
+qssc/superres_odmr.py
+qssc/tensor_gradiometry.py</pre>
+    </div>
+  </div>
+</section>
+
+<footer class="ipfoot">
+  <div class="wrap">
+    <p class="disclaim">Fecha de la memoria: 2026-09-14. Esta memoria descriptiva acompaña al depósito del código fuente en el Repositorio Oficial del Proyecto QSSC y se destina a su inscripción en el Registro de la Propiedad Intelectual. Las valoraciones SLOCCount/COCOMO son estimaciones de coste de re-desarrollo y no constituyen un precio de mercado. Titular: <em>[A completar por el titular]</em>.</p>
+    <div class="meta">
+      <span><b>Obra:</b> QSSC — Quantum Solid State Chip</span>
+      <span><b>Ley:</b> RDLeg 1/1996, Art. 96.1</span>
+      <span><b>Tool:</b> SLOCCount 2.26 · COCOMO básico</span>
+      <span><b>Total:</b> 16.652 SLOC · 3,64 PY · $491.176</span>
+    </div>
+  </div>
+</footer>
