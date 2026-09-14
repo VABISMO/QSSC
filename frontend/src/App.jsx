@@ -6,6 +6,7 @@ import {
   SignalChart, CalibrationPanel, Verdict, NoiseBudget,
   OpticalChainDiagram, RunPhysics,
   CompassRose, GyroPanel, MagnetoImage, SensorField,
+  ParallelPanel,
 } from './components.jsx'
 
 // Fallback firmware command list (all 17 verbs). Used in the "Reply & readout"
@@ -452,6 +453,18 @@ export default function App() {
   const [calRunning, setCalRunning] = useState(false)
   const [calErr, setCalErr] = useState(null)
 
+  // ---- 64-parallel computing (Invention 4) + per-pixel array calibration ----
+  // Calibrate the array first (measured per-pixel register width), then run
+  // one circuit per pixel with use_calibration on. The calibration cache is
+  // persisted server-side (hardware/calibration/array_calibration.json) so the
+  // run-parallel endpoint loads it automatically when use_calibration=true.
+  const [parRun, setParRun] = useState(null)
+  const [parRunning, setParRunning] = useState(false)
+  const [parErr, setParErr] = useState(null)
+  const [arrCalib, setArrCalib] = useState(null)
+  const [arrCalibRunning, setArrCalibRunning] = useState(false)
+  const [arrCalibErr, setArrCalibErr] = useState(null)
+
   // ---- history ----
   const [history, setHistory] = useState([])
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -620,6 +633,30 @@ export default function App() {
       }
     } catch (e) { setCalErr(e.message) }
     finally { setCalRunning(false) }
+  }
+
+  // 64-parallel: calibrate the array's per-pixel register width, then run one
+  // circuit per pixel. Both are synchronous in-process endpoints (the parallel
+  // path is a tight loop over run_array; no RQ job), so no job polling.
+  const calibrateArray = async (body) => {
+    setArrCalibRunning(true); setArrCalibErr(null); setArrCalib(null)
+    try {
+      const r = await api.calibrateArray(body)
+      setArrCalib(r)
+      // A successful calibration populates the register-width readout above
+      // (best_uniform_width is the widest N at which the most pixels still
+      // resolve) so the user sees the measured array shape before running.
+    } catch (e) { setArrCalibErr(e.message) }
+    finally { setArrCalibRunning(false) }
+  }
+
+  const runParallel = async (body) => {
+    setParRunning(true); setParErr(null); setParRun(null)
+    try {
+      const r = await api.runParallel(body)
+      setParRun(r)
+    } catch (e) { setParErr(e.message) }
+    finally { setParRunning(false) }
   }
 
   const loadFromHistory = (rec) => {
@@ -1604,6 +1641,18 @@ export default function App() {
               </div>
             </div>
           </div>
+
+          {/* ============================= 64-PARALLEL COMPUTING ============================= */}
+          <div className="section-title">64-parallel computing &amp; array calibration</div>
+          <ParallelPanel
+            profile={profile} temperature={temperature} seed={seed}
+            shots={shots} noiseMode={noiseMode}
+            pixelMode={pixelMode} primeReadout={primeReadout}
+            onCalibrate={calibrateArray} calibRunning={arrCalibRunning}
+            calibResult={arrCalib} calibErr={arrCalibErr}
+            onRun={runParallel} runRunning={parRunning}
+            runResult={parRun} runErr={parErr}
+          />
 
           {/* ============================= BACKEND PHYSICS ============================= */}
           <div className="section-title">Backend physics</div>

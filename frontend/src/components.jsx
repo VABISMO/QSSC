@@ -1235,3 +1235,250 @@ export function MeasurementHelp({ algo, result, counts, numClbits, meas }) {
     </>
   )
 }
+
+// ---- 64-parallel computing (Invention 4) + per-pixel array calibration -----
+// Two cards: (1) calibrate the 64-pixel array's measured register width
+// (Invention 4+5 — gradient makes N ODMR lines resolvable per pixel;
+// source=sim synthesizes spectra, source=real drives RUN_ALL_ODMR), and
+// (2) run one circuit per pixel across the array and aggregate. Calibrate
+// first, then Run with use_calibration on so each pixel runs at its own
+// measured width (narrow pixels are SKIPPED, never truncated).
+function _ParPixelGrid({ widths, cols = 8 }) {
+  const max = Math.max(1, ...(widths || []))
+  const n = (widths || []).length
+  if (!n) return null
+  return (
+    <div>
+      <div style={{ fontSize: 12.5, marginBottom: 6, color: 'var(--brand)' }}>
+        Per-pixel register width ({n} pixels · {cols}×{Math.ceil(n / cols)} grid)
+      </div>
+      <div style={{
+        display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`,
+        gap: 3, maxWidth: 360,
+      }}>
+        {(widths || []).map((w, i) => {
+          const f = w / max
+          const empty = w === 0
+          return (
+            <div key={i} title={`pixel ${i}: width ${w}`}
+              style={{
+                aspectRatio: '1 / 1',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 11, fontFamily: 'var(--mono, monospace)',
+                color: empty ? 'var(--muted)' : 'var(--bg, #061018)',
+                background: empty
+                  ? 'var(--surface-2, rgba(255,255,255,0.04))'
+                  : `rgba(34, 211, 238, ${0.22 + 0.78 * f})`,
+                border: '1px solid var(--border, rgba(255,255,255,0.1))',
+                borderRadius: 4,
+              }}>{w}</div>
+          )
+        })}
+      </div>
+      <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>
+        0 = no NV detected · cyan intensity ∝ measured register width
+      </div>
+    </div>
+  )
+}
+
+export function ParallelPanel({
+  // global context (same as CalibrationPanel)
+  profile, temperature, seed, shots, noiseMode, pixelMode, primeReadout,
+  // calibration
+  onCalibrate, calibRunning, calibResult, calibErr,
+  // parallel run
+  onRun, runRunning, runResult, runErr,
+}) {
+  const [grad, setGrad] = useState(0.5)
+  const [pixelSize, setPixelSize] = useState(200)
+  const [source, setSource] = useState('sim')
+  const [mode, setMode] = useState('sample')
+  const [nPixels, setNPixels] = useState(64)
+  const [useCalib, setUseCalib] = useState(true)
+  const [nShor, setNShor] = useState(15)
+  const [numQubits, setNumQubits] = useState(4)
+
+  const calib = calibResult && !calibResult.error ? calibResult : null
+  const calibErrTxt = calibResult && calibResult.error ? calibResult.error : (calibErr || null)
+  const run = runResult && !runResult.error ? runResult : null
+  const runErrTxt = runResult && runResult.error ? runResult.error : (runErr || null)
+
+  const buildBody = () => {
+    const body = {
+      profile, temperature_k: temperature, seed, shots, noise_mode: noiseMode,
+      mode, n_pixels: nPixels, use_calibration: useCalib,
+      pixel_mode: pixelMode, prime_readout: primeReadout,
+      gradient_mhz_per_um: grad, pixel_size_um: pixelSize,
+    }
+    if (mode === 'shor') body.n = nShor
+    if (mode === 'sample') body.num_qubits = numQubits
+    return body
+  }
+
+  // top aggregate counts for the sample-mode histogram preview
+  const aggCounts = run && run.aggregate_counts
+  const topCounts = aggCounts
+    ? Object.entries(aggCounts).sort((a, b) => b[1] - a[1]).slice(0, 8)
+    : null
+
+  return (
+    <div className="grid cols-2">
+      {/* ---- Card 1: calibrate the array ---- */}
+      <div className="card">
+        <h2><span className="dot" />Calibrate the 64-pixel array</h2>
+        <div className="hint">Invention 4+5 — the field gradient makes N ODMR lines resolvable per pixel; the register width N is MEASURED (decompose_odmr line count), not hardcoded. <code className="mono">source=sim</code> synthesizes each pixel's spectrum; <code className="mono">source=real</code> drives the <code className="mono">RUN_ALL_ODMR</code> firmware verb (sweep MW, read all 64 detectors per point).</div>
+        <div className="row" style={{ alignItems: 'flex-end', marginTop: 10 }}>
+          <div className="field">
+            <label>Gradient (MHz/µm)</label>
+            <input type="number" min="0" max="100" step="0.05" value={grad}
+              onChange={e => setGrad(+e.target.value)} />
+          </div>
+          <div className="field">
+            <label>Pixel size (µm)</label>
+            <input type="number" min="1" max="5000" step="1" value={pixelSize}
+              onChange={e => setPixelSize(+e.target.value)} />
+          </div>
+          <div className="field">
+            <label>Source</label>
+            <select value={source} onChange={e => setSource(e.target.value)}>
+              <option value="sim">sim (synthetic spectra)</option>
+              <option value="real">real (RUN_ALL_ODMR — needs FPGA)</option>
+            </select>
+          </div>
+          <button onClick={() => onCalibrate({
+              profile, gradient_mhz_per_um: grad, pixel_size_um: pixelSize,
+              seed, temperature_k: temperature, source,
+            })}
+            disabled={calibRunning} className="ghost" type="button" style={{ height: 36 }}>
+            {calibRunning ? <><span className="spinner" /> Calibrating…</> : 'Calibrate array'}
+          </button>
+        </div>
+        {calibErrTxt && <div className="error" style={{ marginTop: 10 }}>{calibErrTxt}</div>}
+        {calib && (
+          <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 8,
+            background: 'var(--surface-2, rgba(255,255,255,0.04))',
+            border: '1px solid var(--border, rgba(255,255,255,0.1))' }}>
+            <div style={{ fontSize: 13, marginBottom: 8, color: 'var(--brand)' }}>
+              Array calibration · <span className="mono">{calib.source}</span> · {calib.n_pixels} pixels
+            </div>
+            <div className="stats" style={{ marginBottom: 10 }}>
+              <div className="stat"><div className="k">Best uniform N</div><div className="v">{calib.best_uniform_width}</div></div>
+              <div className="stat"><div className="k">Pixels @ N</div><div className="v">{calib.best_uniform_pixels}</div></div>
+              <div className="stat"><div className="k">Total qubits</div><div className="v" style={{ color: 'var(--ok, #2c8a4a)' }}>{calib.total_working_qubits}</div></div>
+              <div className="stat"><div className="k">Width range</div><div className="v">{calib.min_width}–{calib.max_width}</div></div>
+            </div>
+            <_ParPixelGrid widths={calib.per_pixel_widths} />
+          </div>
+        )}
+      </div>
+
+      {/* ---- Card 2: run 64-parallel ---- */}
+      <div className="card">
+        <h2><span className="dot" />Run 64-parallel</h2>
+        <div className="hint">Invention 4 — 64 INDEPENDENT ~10-NV processors at 300 K (1/r³ → 0 at the 2.5 mm pitch); chip throughput is 64× a single pixel, not one 640-qubit circuit. With calibration on, each pixel runs at its measured width and narrow pixels are skipped (never truncated — a truncated Shor gives wrong factors).</div>
+        <div className="row" style={{ alignItems: 'flex-end', marginTop: 10 }}>
+          <div className="field">
+            <label>Mode</label>
+            <select value={mode} onChange={e => setMode(e.target.value)}>
+              <option value="sample">sample — same circuit, 64× shots</option>
+              <option value="shor">shor — coprime bases race to factor N</option>
+            </select>
+          </div>
+          <div className="field">
+            <label>Pixels (1..64)</label>
+            <input type="number" min="1" max="64" step="1" value={nPixels}
+              onChange={e => setNPixels(Math.min(64, Math.max(1, +e.target.value || 1)))} />
+          </div>
+          {mode === 'shor' ? (
+            <div className="field">
+              <label>Integer N</label>
+              <input type="number" min="2" max="63" step="1" value={nShor}
+                onChange={e => setNShor(+e.target.value)} />
+            </div>
+          ) : (
+            <div className="field">
+              <label>Qubits/pixel</label>
+              <input type="number" min="1" max="64" step="1" value={numQubits}
+                onChange={e => setNumQubits(+e.target.value)} />
+            </div>
+          )}
+        </div>
+        <div className="row" style={{ alignItems: 'center', marginTop: 8 }}>
+          <div className="field" style={{ flex: 0 }}>
+            <label>Use calibration</label>
+            <button type="button" className={`seg ${useCalib ? 'on' : ''}`}
+              style={{ minWidth: 86, justifyContent: 'center', height: 36 }}
+              onClick={() => setUseCalib(v => !v)} aria-pressed={useCalib}>
+              {useCalib ? '✓ ON' : 'OFF'}
+            </button>
+          </div>
+          <button onClick={() => onRun(buildBody())} disabled={runRunning}
+            style={{ height: 36, marginLeft: 'auto' }}>
+            {runRunning ? <><span className="spinner" /> Running…</> : 'Run 64-parallel'}
+          </button>
+        </div>
+        {useCalib && !calib && (
+          <div className="muted" style={{ fontSize: 11.5, marginTop: 8, color: 'var(--warn, #b8860b)' }}>
+            Calibration is on but no array calibration is cached — calibrate first, or the run falls back to the uniform register.
+          </div>
+        )}
+        {runErrTxt && <div className="error" style={{ marginTop: 10 }}>{runErrTxt}</div>}
+        {run && (
+          <div style={{ marginTop: 14 }}>
+            <div className="kv">
+              <span className="k">Mode</span><span className="v">{run.mode}</span>
+              <span className="k">Pixels run</span><span className="v">{run.n_run != null ? run.n_run : run.n_pixels}</span>
+              <span className="k">Throughput</span><span className="v">{run.throughput_x}×</span>
+              <span className="k">Calibrated</span><span className="v">{run.calibrated ? 'yes' : 'no'}</span>
+              {run.shots && <><span className="k">Shots</span><span className="v">{run.shots}</span></>}
+              <span className="k">Wall time</span><span className="v">{run.elapsed_ms} ms</span>
+            </div>
+            {run.skipped_pixels != null && (
+              <div className="expected" style={{ marginTop: 10 }}>
+                Skipped {run.skipped_pixels} narrow pixel(s) · width range {run.min_width}–{run.max_width}
+                {run.best_uniform_width != null && ` · best uniform N=${run.best_uniform_width} on ${run.best_uniform_pixels} pixels`}
+              </div>
+            )}
+            {run.mode === 'shor' && (
+              <div className={`expected ${run.success ? '' : 'bad'}`} style={{ marginTop: 10 }}>
+                {run.success
+                  ? `✓ Factors of ${run.n}: ${run.factors[0]} × ${run.factors[1]} (pixel ${run.winner_pixel}, base a=${run.winner_base})`
+                  : `✗ No pixel found the period for N=${run.n} — decoherence at ${run.temperature_k} K (cool the chip or raise shots).`}
+              </div>
+            )}
+            {run.mode === 'shor' && run.per_pixel && (
+              <div style={{ marginTop: 10, maxHeight: 220, overflowY: 'auto',
+                border: '1px solid var(--border, rgba(255,255,255,0.1))', borderRadius: 6, padding: 8 }}>
+                <div className="mono" style={{ fontSize: 11.5, lineHeight: 1.7 }}>
+                  {run.per_pixel.filter(p => !p.skipped).slice(0, 24).map(p => (
+                    <div key={p.pixel}>
+                      <span className="muted">px{String(p.pixel).padStart(2, '0')}</span>{' '}
+                      a={p.a} r={p.period != null ? p.period : '—'}{' '}
+                      {p.factors ? `→ ${p.factors[0]}×${p.factors[1]}` : '—'}{' '}
+                      {p.success ? '✓' : ''}
+                    </div>
+                  ))}
+                  {run.per_pixel.some(p => p.skipped) && (
+                    <div className="muted" style={{ marginTop: 4 }}>
+                      + {run.per_pixel.filter(p => p.skipped).length} skipped (width &lt; circuit)
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            {run.mode === 'sample' && topCounts && (
+              <div style={{ marginTop: 10 }}>
+                <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+                  Aggregate top bitstrings ({run.total_shots} total shots across {run.n_run} pixels)
+                </div>
+                <BarCounts counts={Object.fromEntries(topCounts)} max={8} shots={run.total_shots} />
+              </div>
+            )}
+            {run.noise && <NoiseBudget noise={run.noise} />}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
