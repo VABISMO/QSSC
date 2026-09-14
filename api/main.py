@@ -25,13 +25,17 @@ from qssc import (
     make_detector_response, PROFILES,
     compass_measure, gyro_measure,
     magnetometer_sweep, synthetic_field_map,
+    b_vector_map_from_array_calibration,
     FPGAConnection, NoFPGADetected, make_connection,
     DetectorInterface, MicrowaveController, EmitterController,
     decompose_odmr, resolvable_register_width,
-    tensor_gradient_sweep,
+    tensor_gradient_sweep, tensor_gradient_map, localize_dipole,
 )
 from qssc.simulator import DETECT_THRESHOLD, BRIGHT_CODE
-from qssc.array_calibration import nv_ceiling_for_size, PIXEL_SIZE_MAX_UM
+from qssc.array_calibration import (
+    nv_ceiling_for_size, PIXEL_SIZE_MAX_UM, PIXEL_SIZE_MIN_UM,
+    calibrate_array_from_codes,
+)
 from qssc.backend import _fit_t2_from_codes
 from qssc.protocol import (
     protocol_as_dict, protocol_summary, protocol_platforms,
@@ -158,7 +162,7 @@ class RunRequest(BaseModel):
     n_nv_per_pixel: Optional[int] = Field(None, ge=1, le=64)
     register_nv_spacing_nm: float = Field(2.75, gt=0)
     gradient_mhz_per_um: float = Field(0.0, ge=0.0, le=GRAD_COIL_MAX_MHZ_PER_UM)
-    pixel_size_um: float = Field(200.0, gt=0)
+    pixel_size_um: float = Field(200.0, gt=0, le=PIXEL_SIZE_MAX_UM)
     register_line_freqs_hz: Optional[List[int]] = None
     prime_readout: bool = False
     n_noise_bins: int = Field(64, ge=1, le=4096)
@@ -189,7 +193,7 @@ class CustomCircuitRequest(BaseModel):
     n_nv_per_pixel: Optional[int] = Field(None, ge=1, le=64)
     register_nv_spacing_nm: float = Field(2.75, gt=0)
     gradient_mhz_per_um: float = Field(0.0, ge=0.0, le=GRAD_COIL_MAX_MHZ_PER_UM)
-    pixel_size_um: float = Field(200.0, gt=0)
+    pixel_size_um: float = Field(200.0, gt=0, le=PIXEL_SIZE_MAX_UM)
     register_line_freqs_hz: Optional[List[int]] = None
     prime_readout: bool = False
     n_noise_bins: int = Field(64, ge=1, le=4096)
@@ -232,7 +236,7 @@ class ParallelRunRequest(BaseModel):
     n_nv_per_pixel: Optional[int] = Field(None, ge=1, le=64)
     register_nv_spacing_nm: float = Field(2.75, gt=0)
     gradient_mhz_per_um: float = Field(0.0, ge=0.0, le=GRAD_COIL_MAX_MHZ_PER_UM)
-    pixel_size_um: float = Field(200.0, gt=0)
+    pixel_size_um: float = Field(200.0, gt=0, le=PIXEL_SIZE_MAX_UM)
     register_line_freqs_hz: Optional[list] = None
     prime_readout: bool = False
     n_noise_bins: int = Field(64, ge=1, le=4096)
@@ -260,7 +264,13 @@ class CalibrateArrayRequest(BaseModel):
     ``run-parallel`` calls run each pixel at its own calibrated width."""
     profile: str = "NV"
     gradient_mhz_per_um: float = Field(1.75, ge=0.0, le=GRAD_COIL_MAX_MHZ_PER_UM)
-    pixel_size_um: float = Field(200.0, ge=1.0, le=PIXEL_SIZE_MAX_UM)
+    # Optional explicit MCP4921 DAC code (0..4095) for the real path's
+    # SET_GRADIENT write. When None (default) the code is derived from
+    # gradient_mhz_per_um via gradient_dac_code_from_mhz; supplying it lets an
+    # API caller program the coil directly without going through the MHz->code
+    # rounding (e.g. to reproduce a prior calibration's exact code).
+    gradient_code: Optional[int] = Field(None, ge=0, le=4095)
+    pixel_size_um: float = Field(200.0, ge=PIXEL_SIZE_MIN_UM, le=PIXEL_SIZE_MAX_UM)
     seed: int = Field(42, ge=0, le=2_147_483_647)
     temperature_k: float = Field(300.0, ge=0.001, le=600)
     source: str = "sim"          # sim | real
@@ -1866,54 +1876,127 @@ def api_sensor_tensor(
     """
     grid = 8
     prof = get_profile(profile)
+    lw = prof.odmr_linewidth_hz / 1e6
     # sim mode averages freely (n_avg x8); real is shot-noise-limited (n_avg).
     n_eff = int(n_avg) * (8 if source == "sim" else 1)
-    fmap = synthetic_field_map(
-        gradient_ut_mm=gradient_ut_mm, base_bx_ut=base_bx_ut,
-        base_by_ut=base_by_ut, base_bz_ut=base_bz_ut,
-        dipole_moment_am2=dipole_moment_am2,
-        dipole_x_mm=dipole_x_mm, dipole_y_mm=dipole_y_mm,
-        dipole_z_mm=dipole_z_mm)
-    baseline = (synthetic_field_map(
-        gradient_ut_mm=gradient_ut_mm, base_bx_ut=base_bx_ut,
-        base_by_ut=base_by_ut, base_bz_ut=base_bz_ut,
-        dipole_moment_am2=0.0) if differential else None)
-    res = tensor_gradient_sweep(
-        profile=profile, b_field_map_ut=fmap, baseline_map_ut=baseline,
-        pitch_mm=pitch_mm, n_avg=n_eff, seed=(seed if seed is not None else 42),
-        fit_dipole=True, differential=differential)
-    # rebuild the (grid,grid,3) recovered B-vector map + |B| image from the
-    # tensor pixels (the field the gradiometer differentiates + images).
-    fmap_ut = np.zeros((grid, grid, 3))
-    for p in res.pixels:
-        fmap_ut[p.y, p.x] = np.array(p.b_vector_ut, dtype=float)
-    bmag = np.linalg.norm(fmap_ut, axis=2)
-    lw = prof.odmr_linewidth_hz / 1e6
     sens_ut = (lw * 1e6) / (2.0 * prof.gyromagnetic_ratio) * 1e6 / math.sqrt(
         max(1, n_eff))
+
+    if source == "real":
+        # Real-hardware path: the board runs RUN_ALL_ODMR (one simultaneous-
+        # sampling sweep of all 64 pixels), the host decomposes each pixel's
+        # column into its ODMR lines, inverts the 4 NV <111> doublets to a
+        # per-pixel B-vector (b_vector_map_from_array_calibration), and the
+        # tensor gradient + dipole fit run on the MEASURED map. No synthetic
+        # field is injected -- the dipole_moment_am2/dipole_*_mm scenario knobs
+        # are sim-only; the real path images whatever field is actually on the
+        # bench. The addressing gradient coil is NOT programmed here (it would
+        # add the register-width gradient and swamp the ambient Zeeman split
+        # the vector reconstruction reads); the ambient/Earth field splits the
+        # doublets. differential is honoured via the dipole localizer's
+        # background fit (a second sweep with the anomaly removed is not
+        # possible on a fixed bench), not a baseline subtraction.
+        port = os.getenv("QSSC_FPGA_PORT", "").strip()
+        if not port:
+            return {"error": "no-fpga-detected",
+                    "message": ("No FPGA detected — connect the board and set "
+                                "QSSC_FPGA_PORT, or use source=sim.")}
+        try:
+            fpga = make_connection(port=port, profile=profile,
+                                   temperature_k=300.0,
+                                   seed=int(seed if seed is not None else 42))
+        except NoFPGADetected as exc:
+            return {"error": "no-fpga-detected", "message": str(exc)}
+        if not hasattr(fpga, "run_all_odmr"):
+            return {"error": "real tensor needs a board with run_all_odmr "
+                             "(set QSSC_FPGA_PORT or use source=sim)"}
+        # Sweep span: cover the Zeeman doublet of the ambient + bias field. A
+        # split > linewidth (5 MHz) needs |B.n_i| > ~90 µT; to resolve the 4 NV
+        # <111> axes as DISTINCT doublets (the vector reconstruction needs >= 3
+        # separated splits) a ~1 mT bias is typical, so ±50 MHz around D covers
+        # |B.n_i| up to ~1.8 mT (gamma=28 GHz/T) and keeps the lines clear of the
+        # sweep edges (the bright-baseline estimator samples the outer 10%).
+        d_khz = int(prof.zero_field_splitting / 1e3)
+        span_khz = max(int(prof.odmr_linewidth_hz / 1e3) * 6, 50000)
+        f_start = d_khz - span_khz
+        f_stop = d_khz + span_khz
+        n = 256  # sweep points (one serial RUN_ALL_ODMR round-trip per point)
+        # N-shot lock-in integration: average n_eff independent sweeps so the
+        # per-point readout noise drops by sqrt(n_eff) (dimmer doublets clear
+        # the linewidth floor and more pixels reconstruct a B-vector).
+        n_shots = max(1, int(n_avg))
+        acc = None
+        for _ in range(n_shots):
+            m = np.asarray(fpga.run_all_odmr(f_start, f_stop, n), dtype=float)
+            acc = m if acc is None else acc + m
+        matrix = (acc / n_shots).astype(np.int32)
+        freqs_ghz = np.linspace(f_start * 1e3, f_stop * 1e3, n) / 1e9
+        calib = calibrate_array_from_codes(
+            matrix, freqs_ghz, prof, gradient_mhz_per_um=0.0,
+            pixel_size_um=200.0, seed=int(seed if seed is not None else 42),
+            temperature_k=300.0, integration_shots=n_shots,
+            cap_to_resolvable=False)
+        # (8,8,3) B-vector map in Tesla -> µT (the tensor gradiometer input).
+        fmap_ut = b_vector_map_from_array_calibration(calib, prof) * 1e6
+        pixels = tensor_gradient_map(fmap_ut, pitch_mm)
+        fit = localize_dipole(fmap_ut, pitch_mm=pitch_mm,
+                              z_guess_mm=z_guess_mm, background_ut=None)
+        res_profile = prof.name
+        res_grid = grid
+        res_n_pixels = grid * grid
+        res_pitch_mm = pitch_mm
+        io_note = ("Real: RUN_ALL_ODMR -> decompose per pixel -> 4-axis "
+                   "B-vector -> tensor gradient + dipole fit on the measured "
+                   "map (no synthetic field). Differential via background fit.")
+    else:
+        fmap = synthetic_field_map(
+            gradient_ut_mm=gradient_ut_mm, base_bx_ut=base_bx_ut,
+            base_by_ut=base_by_ut, base_bz_ut=base_bz_ut,
+            dipole_moment_am2=dipole_moment_am2,
+            dipole_x_mm=dipole_x_mm, dipole_y_mm=dipole_y_mm,
+            dipole_z_mm=dipole_z_mm)
+        baseline = (synthetic_field_map(
+            gradient_ut_mm=gradient_ut_mm, base_bx_ut=base_bx_ut,
+            base_by_ut=base_by_ut, base_bz_ut=base_bz_ut,
+            dipole_moment_am2=0.0) if differential else None)
+        res = tensor_gradient_sweep(
+            profile=profile, b_field_map_ut=fmap, baseline_map_ut=baseline,
+            pitch_mm=pitch_mm, n_avg=n_eff, seed=(seed if seed is not None else 42),
+            fit_dipole=True, differential=differential)
+        # rebuild the (grid,grid,3) recovered B-vector map from the tensor pixels.
+        fmap_ut = np.zeros((grid, grid, 3))
+        for p in res.pixels:
+            fmap_ut[p.y, p.x] = np.array(p.b_vector_ut, dtype=float)
+        pixels = res.pixels
+        fit = None
+        if res.dipole_moment_am2 is not None:
+            fit = {"dipole_x_mm": res.dipole_x_mm,
+                   "dipole_y_mm": res.dipole_y_mm,
+                   "dipole_z_mm": res.dipole_z_mm,
+                   "dipole_moment_am2": res.dipole_moment_am2,
+                   "fit_residual_ut": res.fit_residual_ut,
+                   "fit_residual_mhz": res.fit_residual_mhz}
+        res_profile = res.profile
+        res_grid = res.grid
+        res_n_pixels = res.n_pixels
+        res_pitch_mm = res.pitch_mm
+        io_note = (f"Sim: 64-pixel tensor gradiometer, each pixel's 4 NV <111> "
+                   f"doublets -> B-vector (linewidth {lw:g} MHz, {n_eff} avg -> "
+                   f"{sens_ut:.3f} µT). "
+                   + ("Differential: baseline subtracted, dipole fit on raw "
+                      "splits (sign-ambiguity-free). " if differential else ""))
+
+    bmag = np.linalg.norm(fmap_ut, axis=2)
     n_resolved = int(np.count_nonzero(bmag > sens_ut))
-    dipole = None
-    if res.dipole_moment_am2 is not None:
-        dipole = {
-            "dipole_x_mm": res.dipole_x_mm, "dipole_y_mm": res.dipole_y_mm,
-            "dipole_z_mm": res.dipole_z_mm,
-            "dipole_moment_am2": res.dipole_moment_am2,
-            "fit_residual_ut": res.fit_residual_ut,
-            "fit_residual_mhz": res.fit_residual_mhz,
-        }
+    dipole = fit
     mode = "sim" if source == "sim" else "real"
     return {
-        "profile": res.profile, "source": source, "grid": res.grid,
-        "n_pixels": res.n_pixels, "pitch_mm": res.pitch_mm,
+        "profile": res_profile, "source": source, "grid": res_grid,
+        "n_pixels": res_n_pixels, "pitch_mm": res_pitch_mm,
         "mode": mode, "n_avg": n_eff, "differential": differential,
         "linewidth_mhz": float(lw), "sensitivity_ut": round(sens_ut, 4),
         "n_resolved_pixels": n_resolved,
-        "note": (f"64-pixel tensor gradiometer: each pixel's 4 NV <111> "
-                 f"doublets -> B-vector (linewidth {lw:g} MHz, {n_eff} avg -> "
-                 f"{sens_ut:.3f} µT). "
-                 + ("Differential: baseline subtracted, dipole fit on raw "
-                    "splits (sign-ambiguity-free). " if differential else "")
-                 + f"{n_resolved}/{grid*grid} pixels above the noise floor."),
+        "note": io_note + f" {n_resolved}/{grid*grid} pixels above the noise floor.",
         "b_vector_map_ut": [[round(float(v), 6) for v in fmap_ut[iy, ix]]
                             for iy in range(grid) for ix in range(grid)],
         "b_mag_image_ut": [round(float(v), 6) for v in bmag.ravel()],
@@ -1923,7 +2006,7 @@ def api_sensor_tensor(
             {"pixel": p.pixel, "x": p.x, "y": p.y,
              "b_vector_ut": p.b_vector_ut,
              "jacobian_ut_mm": p.jacobian_ut_mm}
-            for p in res.pixels],
+            for p in pixels],
         "dipole": dipole,
         "mean_b_vector_ut": [round(float(v), 3) for v in
                              np.mean(fmap_ut.reshape(-1, 3), axis=0)],

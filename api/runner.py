@@ -30,6 +30,7 @@ from qssc.array_calibration import (
     ArrayCalibration, best_uniform_width,
     nv_ceiling_for_size, GRAD_COIL_MAX_MHZ_PER_UM,
     PIXEL_SIZE_MIN_UM, PIXEL_SIZE_MAX_UM, _linewidth_mhz_for,
+    gradient_dac_code_from_mhz,
 )
 from qssc.crypto import (
     derive_keypair, von_neumann_extract, bits_to_bytes, entropy_health,
@@ -950,6 +951,11 @@ def run_parallel(req: dict) -> dict:
         out["per_pixel_widths"] = reg_widths[:n_pixels]
         out["best_uniform_width"] = bw[0]
         out["best_uniform_pixels"] = bw[1]
+        # Always report the calibrated width range so the frontend can show it
+        # even when no pixel was skipped (the per-mode branches below only set
+        # min/max_width when skipped_pixels is present).
+        out["min_width"] = int(np.min(reg_widths[:n_pixels]))
+        out["max_width"] = int(np.max(reg_widths[:n_pixels]))
 
     if mode == "shor":
         n = int(req.get("n", 15))
@@ -1178,6 +1184,25 @@ def run_calibrate_array(req: dict) -> dict:
             f_start = d_khz - span_khz
             f_stop = d_khz + span_khz
             n = int(req.get("n_points", 400))
+            # Invention 5: program the gradient coil BEFORE the sweep so each
+            # pixel's ODMR lines spread across the pixel by grad*pixel_size,
+            # which is what makes the lines resolvable (-> per-pixel register
+            # width). Without this the 64 pixels all see one collapsed line.
+            # Mirror of the single-pixel calibration path: a failed coil write
+            # must not abort the sweep, but the reply must NOT claim the
+            # gradient was applied when it was not (the width measurement is
+            # only valid at the applied gradient).
+            grad_mhz = float(req.get("gradient_mhz_per_um", 0.5))
+            explicit_code = req.get("gradient_code")
+            grad_code = (int(explicit_code) if explicit_code is not None
+                         else gradient_dac_code_from_mhz(grad_mhz))
+            gradient_applied_ok = False
+            if grad_code > 0:
+                try:
+                    fpga.send_command(f"SET_GRADIENT {grad_code}")
+                    gradient_applied_ok = True
+                except Exception:  # noqa: BLE001 - do not abort the sweep
+                    gradient_applied_ok = False
             # Invention 7: N-shot lock-in integration. Average N independent
             # RUN_ALL_ODMR sweeps -> per-point readout noise drops by sqrt(N)
             # (uncorrelated thermal/Johnson noise), so dimmer lone-NV ODMR bins
@@ -1247,6 +1272,13 @@ def run_calibrate_array(req: dict) -> dict:
         "source": io_label,
         "d_fit_ghz": round(prof.zero_field_splitting / 1e9, 6),
         "gradient_mhz_per_um": calib.gradient_mhz_per_um,
+        # Invention 5: the MCP4921 DAC code programmed into the gradient coil
+        # before the sweep (None for the sim path, which models the gradient
+        # analytically and never touches the coil). gradient_applied_ok is only
+        # meaningful for source=real; it is True when the board acknowledged
+        # SET_GRADIENT (the per-pixel widths are only valid when it is).
+        "gradient_code": (grad_code if source == "real" else None),
+        "gradient_applied_ok": (gradient_applied_ok if source == "real" else None),
         "pixel_size_um": calib.pixel_size_um,
         "seed": calib.seed,
         "temperature_k": calib.temperature_k,

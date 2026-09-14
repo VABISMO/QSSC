@@ -258,33 +258,42 @@ def test_tensor_gradient_sweep_absolute_mode():
 def test_api_sensor_tensor_endpoint_localizes_dipole():
     """The /api/sensor/tensor endpoint runs the 64-pixel tensor gradiometer
     and the dipole fit recovers the source position+moment (Invention 19).
-    Both source modes (sim = clean averages, real = shot-noise-limited) must
-    return a populated B-vector map + a dipole fit close to the true source."""
+
+    source='sim' returns a populated B-vector map + a dipole fit close to the
+    true source. source='real' now genuinely drives the board (RUN_ALL_ODMR ->
+    decompose -> 4-axis B-vector -> tensor fit on the MEASURED map); with no
+    board connected (the CI case) it returns no-fpga-detected instead of
+    silently relabeling a synthetic sweep as real."""
     from fastapi.testclient import TestClient
     from api.main import app
     c = TestClient(app)
     true = dict(dipole_moment_am2=0.002, dipole_x_mm=2.0, dipole_y_mm=-1.0,
                 dipole_z_mm=10.0, base_bz_ut=50.0, seed=42)
-    for src in ("sim", "real"):
-        r = c.get("/api/sensor/tensor", params={"source": src, **true})
-        assert r.status_code == 200, r.text
-        j = r.json()
-        assert j["grid"] == 8 and j["n_pixels"] == 64
-        assert len(j["b_mag_image_ut"]) == 64
-        assert len(j["tensor_pixels"]) == 64
-        assert j["n_resolved_pixels"] > 0
-        assert j["differential"] is True
-        d = j["dipole"]
-        assert d is not None, f"{src}: no dipole fit"
-        # the fit recovers the source within a few mm + the moment to ~30%
-        assert abs(d["dipole_x_mm"] - 2.0) < 3.0
-        assert abs(d["dipole_y_mm"] - (-1.0)) < 3.0
-        assert abs(d["dipole_z_mm"] - 10.0) < 5.0
-        import math
-        m_mag = math.sqrt(sum(x * x for x in d["dipole_moment_am2"]))
-        assert 0.001 < m_mag < 0.004, f"{src}: moment {m_mag} off"
-        # real mode is shot-noise-limited (fewer effective averages than sim)
-        assert j["mode"] == src
+    # --- sim: full dipole-fit round trip ---
+    r = c.get("/api/sensor/tensor", params={"source": "sim", **true})
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["grid"] == 8 and j["n_pixels"] == 64
+    assert len(j["b_mag_image_ut"]) == 64
+    assert len(j["tensor_pixels"]) == 64
+    assert j["n_resolved_pixels"] > 0
+    assert j["differential"] is True
+    assert j["mode"] == "sim"
+    d = j["dipole"]
+    assert d is not None, "sim: no dipole fit"
+    assert abs(d["dipole_x_mm"] - 2.0) < 3.0
+    assert abs(d["dipole_y_mm"] - (-1.0)) < 3.0
+    assert abs(d["dipole_z_mm"] - 10.0) < 5.0
+    import math
+    m_mag = math.sqrt(sum(x * x for x in d["dipole_moment_am2"]))
+    assert 0.001 < m_mag < 0.004, f"sim: moment {m_mag} off"
+    # --- real: with no board the endpoint truthfully reports no-fpga-detected
+    #     (it must NOT silently run a synthetic sweep labelled "real") ---
+    rr = c.get("/api/sensor/tensor", params={"source": "real", **true})
+    assert rr.status_code == 200, rr.text
+    jr = rr.json()
+    assert jr.get("error") == "no-fpga-detected", (
+        f"real source without a board must return no-fpga-detected, got {jr}")
     # no-dipole case: zero moment -> the fit returns no dipole above the floor
     r0 = c.get("/api/sensor/tensor", params={
         "source": "sim", "dipole_moment_am2": 0.0, "base_bz_ut": 50.0, "seed": 1})
@@ -292,6 +301,79 @@ def test_api_sensor_tensor_endpoint_localizes_dipole():
     # with no source the |B| image is at the noise floor (differential cancels)
     j0 = r0.json()
     assert j0["b_mag_max_ut"] < 5.0  # µT, near zero after baseline subtraction
+
+
+def test_api_sensor_tensor_real_path_with_mock_fpga():
+    """source='real' with a mocked FPGA board: RUN_ALL_ODMR is called, the
+    measured codes are decomposed per pixel, the 4-axis B-vector map is built
+    from the resolved lines, and the tensor gradient + dipole fit run on that
+    MEASURED map (no synthetic field is injected). This verifies the real
+    hardware chain end-to-end without a physical board."""
+    import os
+    from unittest.mock import patch
+    import numpy as np
+    from fastapi.testclient import TestClient
+    from api.main import app
+    from qssc.defects import get_profile
+
+    prof = get_profile("NV")
+    d_hz = prof.zero_field_splitting
+    gamma = prof.gyromagnetic_ratio  # Hz/T
+    from qssc.sensors import _NV_AXES
+    # Generic B (not along a symmetry axis) so the 4 NV <111> axes have DISTINCT
+    # |B.n_i| projections whose LINES separate by more than the 5 MHz linewidth
+    # -> decompose resolves 8 lines -> 4 doublets -> b_vector_from_odmr_lines
+    # reconstructs a 3-component B-vector. A ~1 mT bias gives detunings up to
+    # ~27 MHz (well inside the ±35 MHz sweep span) and line spacings > 5 MHz.
+    b_vec_t = np.array([1000.0, 500.0, 200.0]) * 1e-6
+    # the 8 line centres (GHz): for each axis, D +/- gamma*(B.n_i).
+    line_ghz = []
+    for n_i in _NV_AXES:
+        proj = float(b_vec_t @ n_i)
+        line_ghz.append((d_hz + gamma * proj) / 1e9)
+        line_ghz.append((d_hz - gamma * proj) / 1e9)
+
+    class _MockFPGA:
+        def __init__(self, *a, **kw):
+            pass
+        def send_command(self, cmd):
+            return "OK"
+        def run_all_odmr(self, f_start_khz, f_stop_khz, n):
+            # (n, 64) AD7616 code matrix: a dip at each of the 8 line centres
+            # for every pixel (BRIGHT_CODE baseline, dips on resonance) + real
+            # readout noise so decompose's SNR bar behaves as on real data (a
+            # noiseless mock lets CLEAN over-resolve the smooth dip envelope
+            # into spurious lines). The host decomposes each column -> 8 lines
+            # -> 4 doublets -> B-vector.
+            rng = np.random.default_rng(2026)
+            freqs = np.linspace(f_start_khz, f_stop_khz, n)
+            baseline = 30000.0
+            depth = 14000.0
+            sigma_khz = prof.odmr_linewidth_hz / 1e3
+            cols = []
+            for _ in range(64):
+                c = np.full(n, baseline, dtype=float)
+                for fc in line_ghz:
+                    f_khz = fc * 1e6  # GHz -> kHz
+                    c -= depth * np.exp(-((freqs - f_khz) ** 2) / (2 * sigma_khz ** 2))
+                c += rng.normal(0.0, 250.0, n)          # AD7616 readout noise
+                cols.append(np.clip(c, 0, 65535))
+            return np.array(cols).T.astype(np.int32)
+
+    c = TestClient(app)
+    with patch.dict(os.environ, {"QSSC_FPGA_PORT": "/dev/ttyUSB0-mock"}), \
+            patch("api.main.make_connection", _MockFPGA):
+        r = c.get("/api/sensor/tensor", params={
+            "source": "real", "n_avg": 1, "seed": 42})
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j.get("error") is None, j
+    assert j["mode"] == "real"
+    assert j["grid"] == 8 and j["n_pixels"] == 64
+    assert len(j["tensor_pixels"]) == 64
+    # the measured B-vector map is populated (the mock field resolves a vector)
+    assert j["n_resolved_pixels"] > 0
+    assert j["b_mag_max_ut"] > 1.0
 
 
 if __name__ == "__main__":
