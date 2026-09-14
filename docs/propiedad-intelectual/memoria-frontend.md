@@ -16,16 +16,20 @@
 | **Lugar de elaboración** | España |
 | **Lenguaje de programación** | JavaScript (JSX / React 18), CSS |
 | **Plataforma objetivo** | Navegador web moderno (SPA); construcción con Vite |
-| **Tamaño** | 4.347 líneas físicas de código fuente (SLOC) |
-| **Valoración de esfuerzo (COCOMO básico, SLOCCount)** | 0,94 persona-años (11,2 persona-meses); coste estimado de desarrollo 126.398 USD (salario medio 56.286 USD/año, factor 2,40) |
+| **Tamaño** | 4.344 líneas físicas de código fuente (SLOC) |
+| **Valoración de esfuerzo (COCOMO básico, SLOCCount)** | 0,94 persona-años (11,2 persona-meses); coste estimado de desarrollo 126.307 USD (salario medio 56.286 USD/año, factor 2,40) |
 
 > Métricas generadas con SLOCCount 2.26 (David A. Wheeler, GPL). SLOCCount no
-> reconoce la extensión `.jsx`; los ficheros JSX/CSS se han contado con la misma
-> metodología que SLOCCount (líneas físicas menos líneas en blanco y
-> solo-comentario) — sobre los ficheros `.js` que SLOCCount sí reconoce, el
-> conteo coincide exactamente (336 SLOC) — y se ha aplicado la misma fórmula
-> COCOMO básica (`PM = 2,4 · KSLOC^1,05`). La valoración es una estimación de
-> coste de re-desarrollo, no un precio de mercado.
+> reconoce la extensión `.jsx` ni `.css`; los ficheros JSX/CSS se han contado
+> con SLOCCount nativo tras renombrar la extensión a `.c` (contador ANSI-C,
+> misma sintaxis de comentarios `//` y `/* */`). Anclaje de validación: los
+> ficheros `.js` contados nativamente por SLOCCount dan el mismo resultado al
+> renombrarlos a `.c` (336 = 336 SLOC), lo que prueba que el renombrado
+> preserva la semántica de conteo. Fórmula COCOMO básica
+> `PM = 2,4 · KSLOC^1,05`. La valoración es una estimación de coste de
+> re-desarrollo, no un precio de mercado. El script reproducible
+> `docs/propiedad-intelectual/sloc_count.py` contiene el conteo por fichero
+> y la valoración.
 
 ---
 
@@ -56,7 +60,7 @@ desarrollo y por el mismo origen en producción.
 
 El código fuente reside en `frontend/src/` y consta de seis ficheros:
 
-- **`App.jsx`** (1.831 SLOC) — componente raíz y orquestador de estado. Mantiene
+- **`App.jsx`** (1.833 SLOC) — componente raíz y orquestador de estado. Mantiene
   el estado global de la aplicación: plataforma de defecto (NV/SiC/hBN),
   temperatura, modo de ejecución (simulador/hardware), modo de píxel
   (registro/ensamble), número de qubits por píxel, modos de lectura
@@ -64,7 +68,7 @@ El código fuente reside en `frontend/src/` y consta de seis ficheros:
   parámetros de los algoritmos. Construye los cuerpos de petición (`buildBody`)
   hacia los endpoints de circuito, circuito personalizado y ejecución paralela,
   y renderiza el panel de controles globales y la distribución de pestañas.
-- **`components.jsx`** (1.633 SLOC) — biblioteca de componentes de la interfaz:
+- **`components.jsx`** (1.628 SLOC) — biblioteca de componentes de la interfaz:
   panel de calibración (con flujo de etapas, marcado de qubits escaneados y
   modal de frecuencias por píxel), tarjeta de calibración paralela de 64 píxeles
   (con selector de modo de lectura, preset anti-ruido, estadísticas de
@@ -90,9 +94,9 @@ El código fuente reside en `frontend/src/` y consta de seis ficheros:
 
 | Lenguaje | SLOC | Porcentaje |
 |---|---|---|
-| JavaScript / JSX | 3.809 | 87,6 % |
+| JavaScript / JSX | 3.806 | 87,6 % |
 | CSS | 538 | 12,4 % |
-| **Total** | **4.347** | **100 %** |
+| **Total** | **4.344** | **100 %** |
 
 Stack: React 18 (hooks), Vite 5 (bundler y dev-server), JSX, CSS nativo con
 variables de tema. Sin dependencias de UI pesadas: la interfaz se construye con

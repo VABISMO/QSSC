@@ -22,7 +22,9 @@
 > Métricas generadas con SLOCCount 2.26 (David A. Wheeler, GPL), contaje nativo
 > sobre ficheros Python (SLOCCount sí reconoce `.py`). Fórmula COCOMO básica
 > `PM = 2,4 · KSLOC^1,05`. La valoración es una estimación de coste de
-> re-desarrollo, no un precio de mercado.
+> re-desarrollo, no un precio de mercado. El script reproducible
+> `docs/propiedad-intelectual/sloc_count.py` contiene el conteo por fichero
+> y la valoración de las tres áreas.
 
 ---
 

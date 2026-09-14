@@ -16,15 +16,21 @@
 | **Lugar de elaboración** | España |
 | **Lenguaje de programación** | Verilog HDL (RTL), Tcl (flujo de síntesis), Python y Shell (automatización del flujo) |
 | **Plataforma objetivo** | FPGA Xilinx Artix-7 (XC7A15T-1CSG325C), placa de desarrollo QMTECH |
-| **Tamaño** | 4.497 líneas físicas de código fuente (SLOC) |
-| **Valoración de esfuerzo (COCOMO básico, SLOCCount)** | 0,97 persona-años (11,6 persona-meses); coste estimado de desarrollo 130.982 USD (salario medio 56.286 USD/año, factor 2,40) |
+| **Tamaño** | 4.483 líneas físicas de código fuente (SLOC) |
+| **Valoración de esfuerzo (COCOMO básico, SLOCCount)** | 0,97 persona-años (11,6 persona-meses); coste estimado de desarrollo 130.554 USD (salario medio 56.286 USD/año, factor 2,40) |
 
 > Métricas generadas con SLOCCount 2.26 (David A. Wheeler, GPL). SLOCCount no
-> incluye contador de Verilog; las líneas Verilog/XDC se han contado con la
-> misma metodología que SLOCCount (líneas físicas menos líneas en blanco y
-> líneas solo-comentario) y se ha aplicado la misma fórmula COCOMO básica
-> (`PM = 2,4 · KSLOC^1,05`). La valoración es una estimación de coste de
-> re-desarrollo y no un precio de mercado.
+> incluye contador de Verilog ni reconoce `.xdc`; los ficheros Verilog y XDC
+> se han contado con SLOCCount nativo tras renombrar la extensión a `.c`
+> (contador ANSI-C, misma sintaxis de comentarios `//` y `/* */`) para `.v` y
+> a `.py` (contador de `#`) para `.xdc`. El anclaje de validación: los
+> ficheros `.js` contados nativamente por SLOCCount dan el mismo resultado al
+> renombrarlos a `.c` (336 = 336 SLOC), lo que prueba que el renombrado
+> preserva la semántica de conteo. Fórmula COCOMO básica
+> `PM = 2,4 · KSLOC^1,05`. La valoración es una estimación de coste de
+> re-desarrollo y no un precio de mercado. El script reproducible
+> `docs/propiedad-intelectual/sloc_count.py` contiene el conteo por fichero
+> y la valoración.
 
 ---
 
@@ -100,7 +106,7 @@ sintetizable), `sim/` (banco de pruebas) y `synth/` (flujo de implementación).
 
 #### 3.2 `sim/` — verificación
 
-- **`tb_top_level.v`** — banco de pruebas exhaustivo (919 SLOC) que inyecta los
+- **`tb_top_level.v`** — banco de pruebas exhaustivo (926 SLOC) que inyecta los
   verbos por UART modelo, modela la respuesta analógica de los ADCs y verifica
   18 escenarios: identificación, barrido ODMR, lectura de detectores, acumulador
   lock-in, secuencia de Ramsey con fase de readout, programación de gradiente,
@@ -128,12 +134,12 @@ MCP4921, TLC5947 y AD7616.
 
 | Lenguaje | SLOC | Porcentaje |
 |---|---|---|
-| Verilog HDL | 4.231 | 94,1 % |
-| Python (automatización síntesis) | 149 | 3,3 % |
+| Verilog HDL | 4.230 | 94,4 % |
+| Python (automatización síntesis) | 136 | 3,0 % |
 | XDC (constraints) | 75 | 1,7 % |
 | Shell | 29 | 0,6 % |
 | Tcl | 13 | 0,3 % |
-| **Total** | **4.497** | **100 %** |
+| **Total** | **4.483** | **100 %** |
 
 Herramientas: Yosys / Vivado (síntesis), iverilog (simulación), pyverilog
 (verificación estructural en CI), formato de bitstream Artix-7.
