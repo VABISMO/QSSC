@@ -219,7 +219,7 @@ footer.ipfoot .meta b{color:var(--text);font-weight:600}
   html,body{background:var(--bg)}
   body{font-size:11pt;padding:0 12mm}
   html{scroll-behavior:auto}
-  .tile,.callout,pre.files,.feat,.alg{break-inside:avoid}
+  .tile,.callout,pre.files,.feat,.alg,.sign{break-inside:avoid}
   a{color:var(--brand)}
 }
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
@@ -249,6 +249,18 @@ section.bib h3{font-family:var(--font-mono);font-size:12px;font-weight:600;lette
 .alg .ah .ac{font-family:var(--font-mono);font-size:11px;color:var(--u);font-weight:600}
 .alg p{margin:0;color:var(--muted);font-size:13px;line-height:1.55}
 .alg .af{font-family:var(--font-mono);font-size:11px;color:var(--brand-2);margin-top:5px}
+/* ---- firma de los autores ---- */
+section.firmas{padding:54px 0 72px;border-top:1px solid var(--border)}
+section.firmas h2{font-size:clamp(24px,3.4vw,32px);margin:0 0 8px}
+section.firmas p.lead{color:var(--muted);max-width:72ch;margin:0 0 40px}
+.sign-grid{display:grid;grid-template-columns:1fr 1fr;gap:56px;max-width:780px}
+@media (max-width:680px){.sign-grid{grid-template-columns:1fr;gap:44px}}
+.sign .sign-line{height:66px;border-bottom:1.6px solid var(--text)}
+.sign .sign-name{margin-top:14px;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--text)}
+.sign .sign-role{font-family:var(--font-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:4px}
+.sign .sign-meta{margin-top:20px;font-size:13px;color:var(--dim);font-variant-numeric:tabular-nums}
+.sign .sign-loc{margin-top:6px;font-size:13px;color:var(--dim)}
+
 /* ---- indice / table of contents ---- */
 section.indice{padding:54px 0 26px;border-top:1px solid var(--border)}
 section.indice h2{font-size:clamp(24px,3.4vw,32px);margin:0 0 18px}
@@ -383,6 +395,8 @@ ol.toc ol.sub .sn{font-family:var(--font-mono);font-size:11px;color:var(--dim);m
       <li><a href="#comparativa">Anexo · Comparativa SLOCCount vs cloc</a>
       </li>
       <li><a href="#bibliografia">Bibliografía</a>
+      </li>
+      <li><a href="#firmas">Firma de los autores</a>
       </li>
     </ol>
   </div>
@@ -1403,5 +1417,29 @@ tests/test_superres_bayesian_tensor.py</pre>
     </div>
   </div>
 </footer>
+
+<!-- =========================== FIRMA DE LOS AUTORES =========================== -->
+<section class="firmas" id="firmas">
+  <div class="wrap">
+    <h2>Firma de los autores</h2>
+    <p class="lead">En señal de conformidad con el contenido de la presente memoria descriptiva y con el depósito de la obra para su inscripción en el Registro de la Propiedad Intelectual, los titulares firmantes suscriben el documento:</p>
+    <div class="sign-grid">
+      <div class="sign">
+        <div class="sign-line"></div>
+        <div class="sign-name">Vicent Nos Ripolles</div>
+        <div class="sign-role">Autor · Titular de la obra</div>
+        <div class="sign-meta">Fecha: ____ de ____________ de 2026</div>
+        <div class="sign-loc">Lugar: ______________________</div>
+      </div>
+      <div class="sign">
+        <div class="sign-line"></div>
+        <div class="sign-name">Pablo Lopez</div>
+        <div class="sign-role">Autor · Titular de la obra</div>
+        <div class="sign-meta">Fecha: ____ de ____________ de 2026</div>
+        <div class="sign-loc">Lugar: ______________________</div>
+      </div>
+    </div>
+  </div>
+</section>
 </body>
 </html>
