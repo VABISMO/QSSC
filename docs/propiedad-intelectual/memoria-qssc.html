@@ -226,14 +226,14 @@ footer.ipfoot .meta{display:flex;gap:22px;flex-wrap:wrap;margin-top:16px;font-fa
 footer.ipfoot .meta b{color:var(--text);font-weight:600}
 
 /* print: retain the full themed design — backgrounds, gradients, accents */
-@page{margin:14mm}
+@page{margin:0}
 @media print{
   *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   html,body{background:var(--bg)}
-  body{font-size:11pt}
+  body{font-size:11pt;padding:0 12mm}
   html{scroll-behavior:auto}
   nav.top{position:static;backdrop-filter:none;background:#0b1020}
-  .tile,section.unidad,footer.ipfoot,.callout,pre.files,.feat,.alg,.alglist{break-inside:avoid}
+  .tile,.callout,pre.files,.feat,.alg{break-inside:avoid}
   a{color:var(--brand)}
 }
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
@@ -487,7 +487,7 @@ section.bib h3{font-family:var(--font-mono);font-size:12px;font-weight:600;lette
       <table class="kv">
         <tr><th>Título</th><td>QSSC — Firmware FPGA de control y readout para plataforma cuántica de 64 píxeles NV</td></tr>
         <tr><th>Tipo de obra</th><td>Programa de ordenador (Art. 96.1 del Texto Refundido de la Ley de Propiedad Intelectual, RDLeg 1/1996)</td></tr>
-        <tr><th>Titular / Autor</th><td><em>[A completar por el titular: nombre/apellidos o razón social, NIF/CIF, domicilio]</em></td></tr>
+        <tr><th>Titular / Autor</th><td><em>Vicent Nos Ripolles y Pablo Lopez</em></td></tr>
         <tr><th>Fecha de creación (inicio)</th><td>2026-08-07</td></tr>
         <tr><th>Fecha de finalización</th><td>2026-09-14</td></tr>
         <tr><th>Lugar de elaboración</th><td>España</td></tr>
@@ -667,7 +667,7 @@ fpga/synth/run_synth.sh</pre>
       <table class="kv">
         <tr><th>Título</th><td>QSSC — Interfaz web de operación, calibración y sensórica para plataforma cuántica de 64 píxeles NV</td></tr>
         <tr><th>Tipo de obra</th><td>Programa de ordenador (Art. 96.1 RDLeg 1/1996)</td></tr>
-        <tr><th>Titular / Autor</th><td><em>[A completar por el titular: nombre/apellidos o razón social, NIF/CIF, domicilio]</em></td></tr>
+        <tr><th>Titular / Autor</th><td><em>Vicent Nos Ripolles y Pablo Lopez</em></td></tr>
         <tr><th>Fecha de creación (inicio)</th><td>2026-08-07</td></tr>
         <tr><th>Fecha de finalización</th><td>2026-09-14</td></tr>
         <tr><th>Lugar de elaboración</th><td>España</td></tr>
@@ -791,7 +791,7 @@ frontend/src/styles.css</pre>
       <table class="kv">
         <tr><th>Título</th><td>QSSC — API REST, simulador cuántico realista y librería de física para plataforma de 64 píxeles NV</td></tr>
         <tr><th>Tipo de obra</th><td>Programa de ordenador (Art. 96.1 RDLeg 1/1996)</td></tr>
-        <tr><th>Titular / Autor</th><td><em>[A completar por el titular: nombre/apellidos o razón social, NIF/CIF, domicilio]</em></td></tr>
+        <tr><th>Titular / Autor</th><td><em>Vicent Nos Ripolles y Pablo Lopez</em></td></tr>
         <tr><th>Fecha de creación (inicio)</th><td>2026-08-07</td></tr>
         <tr><th>Fecha de finalización</th><td>2026-09-14</td></tr>
         <tr><th>Lugar de elaboración</th><td>España</td></tr>
@@ -944,7 +944,7 @@ qssc/tensor_gradiometry.py</pre>
       <table class="kv">
         <tr><th>Título</th><td>QSSC — Toolchain EDA headless para la generación, enrutado y verificación de las placas PCB KiCad de la plataforma cuántica</td></tr>
         <tr><th>Tipo de obra</th><td>Programa de ordenador (Art. 96.1 del Texto Refundido de la Ley de Propiedad Intelectual, RDLeg 1/1996)</td></tr>
-        <tr><th>Titular / Autor</th><td><em>[A completar por el titular: nombre/apellidos o razón social, NIF/CIF, domicilio]</em></td></tr>
+        <tr><th>Titular / Autor</th><td><em>Vicent Nos Ripolles y Pablo Lopez</em></td></tr>
         <tr><th>Fecha de creación (inicio)</th><td>2026-08-07</td></tr>
         <tr><th>Fecha de finalización</th><td>2026-09-14</td></tr>
         <tr><th>Lugar de elaboración</th><td>España</td></tr>
@@ -1099,7 +1099,7 @@ tools/widen_tracks.py</pre>
       <table class="kv">
         <tr><th>Título</th><td>QSSC — Pipelines de integración continua (GitHub Actions) y suite de verificación automatizada</td></tr>
         <tr><th>Tipo de obra</th><td>Programa de ordenador (Art. 96.1 del Texto Refundido de la Ley de Propiedad Intelectual, RDLeg 1/1996)</td></tr>
-        <tr><th>Titular / Autor</th><td><em>[A completar por el titular: nombre/apellidos o razón social, NIF/CIF, domicilio]</em></td></tr>
+        <tr><th>Titular / Autor</th><td><em>Vicent Nos Ripolles y Pablo Lopez</em></td></tr>
         <tr><th>Fecha de creación (inicio)</th><td>2026-08-07</td></tr>
         <tr><th>Fecha de finalización</th><td>2026-09-14</td></tr>
         <tr><th>Lugar de elaboración</th><td>España</td></tr>
@@ -1352,7 +1352,7 @@ tests/test_superres_bayesian_tensor.py</pre>
 
 <footer class="ipfoot">
   <div class="wrap">
-    <p class="disclaim">Fecha de la memoria: 2026-09-14. Esta memoria descriptiva acompaña al depósito del código fuente en el Repositorio Oficial del Proyecto QSSC y se destina a su inscripción en el Registro de la Propiedad Intelectual. Las valoraciones SLOCCount/COCOMO son estimaciones de coste de desarrollo y no constituyen un precio de mercado. Titular: <em>[A completar por el titular]</em>.</p>
+    <p class="disclaim">Fecha de la memoria: 2026-09-14. Esta memoria descriptiva acompaña al depósito del código fuente en el Repositorio Oficial del Proyecto QSSC y se destina a su inscripción en el Registro de la Propiedad Intelectual. Las valoraciones SLOCCount/COCOMO son estimaciones de coste de desarrollo y no constituyen un precio de mercado. Titular: <em>Vicent Nos Ripolles y Pablo Lopez</em>.</p>
     <div class="meta">
       <span><b>Obra:</b> QSSC — Quantum Solid State Chip</span>
       <span><b>Ley:</b> RDLeg 1/1996, Art. 96.1</span>

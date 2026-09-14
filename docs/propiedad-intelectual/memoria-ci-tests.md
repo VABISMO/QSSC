@@ -10,7 +10,7 @@
 |---|---|
 | **Título** | QSSC — Pipelines de integración continua (GitHub Actions) y suite de verificación automatizada |
 | **Tipo de obra** | Programa de ordenador (Art. 96.1 del Texto Refundido de la Ley de Propiedad Intelectual, RDLeg 1/1996) |
-| **Titular / Autor** | _[A completar por el titular: nombre/apellidos o razón social, NIF/CIF, domicilio]_ |
+| **Titular / Autor** | _Vicent Nos Ripolles y Pablo Lopez_ |
 | **Fecha de creación (inicio)** | 2026-08-07 |
 | **Fecha de finalización (versión depositada)** | 2026-09-14 |
 | **Lugar de elaboración** | España |
