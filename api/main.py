@@ -114,6 +114,12 @@ class RunRequest(BaseModel):
     # bb84 quantum key distribution
     num_bits: int = Field(128, ge=1, le=2048)      # bb84: qubits/rounds to exchange
     eavesdrop: bool = False         # bb84: simulate intercept-resend Eve
+    # Invention 9: classical anti-noise filter stack (300 K, SNR-protective).
+    # noise_env presets the environmental noise channels ("none"=off -> back-
+    # compat); anti_noise is the filter config dict (empty/None -> back-compat).
+    # A DD sequence extends the spin T2 used for coherence survival.
+    noise_env: str = "none"
+    anti_noise: Optional[dict] = None
 
 
 class CustomCircuitRequest(BaseModel):
@@ -130,6 +136,9 @@ class CustomCircuitRequest(BaseModel):
     # circuits wider than the backend's SIM_MAX_QUBITS (28) are rejected with a
     # clear error rather than silently faked. See qssc.backend.SIM_MAX_QUBITS.
     max_qubits: int = Field(20, ge=1, le=20)
+    # Invention 9: classical anti-noise filter stack (see RunRequest).
+    noise_env: str = "none"
+    anti_noise: Optional[dict] = None
 
 
 class ParallelRunRequest(BaseModel):
@@ -157,6 +166,9 @@ class ParallelRunRequest(BaseModel):
     # the uniform-register back-compat path. Calibrate first via
     # /api/circuit/calibrate-array, then set use_calibration=true here.
     use_calibration: bool = False
+    # Invention 9: classical anti-noise filter stack (see RunRequest).
+    noise_env: str = "none"
+    anti_noise: Optional[dict] = None
 
 
 class CalibrateArrayRequest(BaseModel):
@@ -189,6 +201,14 @@ class CalibrateArrayRequest(BaseModel):
     # dimmer lone-NV ODMR lines clear the detection bar -> the MEASURED
     # register_width rises toward min(resolvable, nv_present). 1 = no averaging.
     integration_shots: int = Field(1, ge=1, le=10000)
+    # Invention 9: classical anti-noise filter stack (300 K, SNR-protective).
+    # noise_env presets the environmental channels: "lab"/"quiet"/"noisy"/"none"
+    # (none = off -> bit-identical to the prior model). anti_noise is the filter
+    # config dict (thermal_servo_gain, vibration_iso_residual, emi_shield_residual,
+    # feed_forward_channels, feed_forward_rejection, common_mode_reject,
+    # dd_sequence, dd_n_blocks); empty/None -> all-off -> back-compat.
+    noise_env: str = "none"
+    anti_noise: Optional[dict] = None
 
 
 # ---------------------------------------------------------------------------
@@ -800,8 +820,17 @@ def calibrate_array_endpoint(req: CalibrateArrayRequest, request: Request = None
     )
     from qssc.defects import get_profile
     from qssc.detector_centroid import SubPixelModel
+    from qssc.noise_filters import (
+        AntiNoiseConfig, noise_environment_preset,
+        effective_noise_sigma, filter_gain_breakdown,
+    )
     prof = get_profile(req.profile)
     source = str(req.source).lower()
+    # Invention 9: build the anti-noise stack from the request. noise_env="none"
+    # -> None (no environmental channels, back-compat); anti_noise empty -> the
+    # all-off default config (back-compat).
+    noise_env = noise_environment_preset(req.noise_env)
+    anti_noise = AntiNoiseConfig.from_dict(req.anti_noise)
     # Invention 6: build the sub-pixel centroiding model if requested.
     sub_pixel = (SubPixelModel(sigma_sheet_mm=req.sigma_sheet_mm)
                  if req.sub_pixel else None)
@@ -841,7 +870,8 @@ def calibrate_array_endpoint(req: CalibrateArrayRequest, request: Request = None
                 gradient_mhz_per_um=req.gradient_mhz_per_um,
                 pixel_size_um=req.pixel_size_um,
                 seed=req.seed, temperature_k=req.temperature_k,
-                integration_shots=req.integration_shots, sub_pixel=sub_pixel)
+                integration_shots=req.integration_shots, sub_pixel=sub_pixel,
+                noise_env=noise_env, anti_noise=anti_noise)
             io_label = "real"
         else:
             calib = calibrate_array(
@@ -851,7 +881,8 @@ def calibrate_array_endpoint(req: CalibrateArrayRequest, request: Request = None
                 seed=req.seed,
                 temperature_k=req.temperature_k,
                 max_nv_per_microdiamond=req.max_nv_per_microdiamond,
-                integration_shots=req.integration_shots, sub_pixel=sub_pixel)
+                integration_shots=req.integration_shots, sub_pixel=sub_pixel,
+                noise_env=noise_env, anti_noise=anti_noise)
             io_label = "simulated"
     except NoFPGADetected as exc:
         return {"error": "no-fpga-detected",
@@ -868,6 +899,13 @@ def calibrate_array_endpoint(req: CalibrateArrayRequest, request: Request = None
     except Exception:  # noqa: BLE001 - a cache write failure must not break the reply
         pass
     bw = best_uniform_width(calib.widths)
+    # Invention 9: report the effective noise + per-filter gain breakdown so the
+    # frontend can show what each filter bought. Collapses to the prior values
+    # when the stack is unset (noise_env="none", anti_noise empty).
+    from qssc.simulator import READOUT_NOISE, BRIGHT_CODE
+    eff_noise = effective_noise_sigma(
+        READOUT_NOISE, noise_env, anti_noise, calib.integration_shots)
+    filter_gain = filter_gain_breakdown(noise_env, anti_noise)
     return {
         "profile": calib.profile,
         "source": io_label,
@@ -888,6 +926,16 @@ def calibrate_array_endpoint(req: CalibrateArrayRequest, request: Request = None
         # register_width -- within-pad spots merge; centroiding localizes one).
         "sub_pixel_factor": calib.sub_pixel_factor,
         "spatial_channels": calib.spatial_channels,
+        # Invention 9: classical anti-noise filter stack. effective_noise_rel is
+        # the post-filter readout noise as a fraction of BRIGHT_CODE; filter_gain
+        # is the per-channel residual breakdown; noise_env/anti_noise echo the
+        # config. All collapse to back-compat values when the stack is unset.
+        "noise_env": req.noise_env,
+        "anti_noise": (anti_noise.to_dict()
+                       if not anti_noise.is_default() else None),
+        "effective_noise_counts": round(eff_noise, 2),
+        "effective_noise_rel": round(eff_noise / BRIGHT_CODE, 6),
+        "filter_gain": filter_gain,
         "pixels": [
             {"pixel_id": p.pixel_id, "nv_present": p.nv_present,
              "microdiamonds": p.microdiamonds, "register_width": p.register_width,

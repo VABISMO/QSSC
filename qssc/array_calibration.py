@@ -45,6 +45,11 @@ from .defects import DefectProfile, get_profile
 from .odmr_decompose import decompose_odmr
 from .simulator import resolvable_register_width, BRIGHT_CODE, READOUT_NOISE
 from .detector_centroid import SubPixelModel, localize_spots, pad_grid_centers
+from .noise_filters import (
+    AntiNoiseConfig,
+    NoiseEnvironment,
+    effective_noise_sigma,
+)
 
 # Readout noise expressed on the ODMR contrast axis (0..1): the lock-in photocurrent
 # noise (READOUT_NOISE, 16-bit counts) over the bright level (BRIGHT_CODE) -- the
@@ -123,6 +128,12 @@ class ArrayCalibration:
     sub_pixel_factor: int = 0        # 0 = no sub-pixel model (back-compat)
     spatial_channels: int = 0        # 64 * S when a SubPixelModel was used, else 0
     sub_pixel: Optional[dict] = None  # the SubPixelModel params (JSON round-trip)
+    # Invention 9 (anti-noise stack): the environmental model + filter config the
+    # calibration was measured under. Recording only on the calibration object --
+    # the noise was already applied inside _pixel_odmr_spectrum (sim) / baked into
+    # the codes matrix (real). None = no environmental model (back-compat).
+    noise_env: Optional[dict] = None
+    anti_noise: Optional[dict] = None
 
     @property
     def widths(self) -> list[int]:
@@ -153,6 +164,8 @@ class ArrayCalibration:
             "sub_pixel_factor": self.sub_pixel_factor,
             "spatial_channels": self.spatial_channels,
             "sub_pixel": self.sub_pixel,
+            "noise_env": self.noise_env,
+            "anti_noise": self.anti_noise,
         }
 
     def to_json(self, path: str | Path) -> None:
@@ -172,6 +185,8 @@ class ArrayCalibration:
             sub_pixel_factor=int(d.get("sub_pixel_factor", 0)),
             spatial_channels=int(d.get("spatial_channels", 0)),
             sub_pixel=d.get("sub_pixel"),
+            noise_env=d.get("noise_env"),
+            anti_noise=d.get("anti_noise"),
         )
 
     @classmethod
@@ -211,6 +226,8 @@ def _pixel_odmr_spectrum(prof: DefectProfile, nv_present: int,
                          contrast_single: float = 0.03,
                          noise_sigma: float = READOUT_NOISE_REL,
                          integration_shots: int = 1,
+                         noise_env: Optional[NoiseEnvironment] = None,
+                         anti_noise: Optional[AntiNoiseConfig] = None,
                          ) -> tuple[np.ndarray, np.ndarray]:
     """Synthesize one pixel's multi-line ODMR spectrum under the gradient.
 
@@ -269,7 +286,16 @@ def _pixel_odmr_spectrum(prof: DefectProfile, nv_present: int,
     # thermal/Johnson readout noise). This lets dimmer lone-NV bins clear the
     # min_snr detection bar in decompose_odmr -> the MEASURED width rises toward
     # min(resolvable, nv_present). integration_shots=1 -> unchanged.
-    eff_noise = noise_sigma / math.sqrt(max(1, int(integration_shots)))
+    # Invention 9: when an environmental model + filter stack is supplied, the
+    # per-point sigma is the stack-composed effective sigma (servo/iso/shield/
+    # feed-forward/common-mode attenuating the env channels on top of 1/sqrt(N)),
+    # converted to the contrast axis (/ BRIGHT_CODE). With no env (None) the bare
+    # noise_sigma/sqrt(N) is used -> bit-identical to the prior model.
+    if noise_env is not None or anti_noise is not None:
+        eff_noise = (effective_noise_sigma(READOUT_NOISE, noise_env, anti_noise,
+                                            integration_shots) / BRIGHT_CODE)
+    else:
+        eff_noise = noise_sigma / math.sqrt(max(1, int(integration_shots)))
     contrast = contrast + rng.normal(0.0, eff_noise, size=freqs.size)
     contrast = np.clip(contrast, 0.0, 1.0)
     return freqs, contrast
@@ -287,6 +313,8 @@ def calibrate_array(profile: DefectProfile | str = "NV",
                     rng: Optional[np.random.Generator] = None,
                     integration_shots: int = 1,
                     sub_pixel: Optional[SubPixelModel] = None,
+                    noise_env: Optional[NoiseEnvironment] = None,
+                    anti_noise: Optional[AntiNoiseConfig] = None,
                     ) -> ArrayCalibration:
     """Calibrate all 64 pixels: measure each pixel's usable qubit register width.
 
@@ -341,7 +369,8 @@ def calibrate_array(profile: DefectProfile | str = "NV",
         n_bins = max(1, min(nv_present, resolvable)) if nv_present > 0 else 1
         freqs, contrast = _pixel_odmr_spectrum(
             prof, nv_present, n_bins, gradient_mhz_per_um, pixel_size_um, rng,
-            integration_shots=integration_shots)
+            integration_shots=integration_shots,
+            noise_env=noise_env, anti_noise=anti_noise)
         comps = decompose_odmr(
             freqs, contrast,
             min_snr=4.0,
@@ -379,6 +408,8 @@ def calibrate_array(profile: DefectProfile | str = "NV",
         sub_pixel_factor=int(s_factor),
         spatial_channels=int(s_channels),
         sub_pixel=sub_pixel.to_dict() if sub_pixel is not None else None,
+        noise_env=noise_env.to_dict() if noise_env is not None else None,
+        anti_noise=anti_noise.to_dict() if anti_noise is not None else None,
     )
 
 
@@ -394,6 +425,8 @@ def calibrate_array_from_codes(
     min_snr: float = 4.0,
     integration_shots: int = 1,
     sub_pixel: Optional[SubPixelModel] = None,
+    noise_env: Optional[NoiseEnvironment] = None,
+    anti_noise: Optional[AntiNoiseConfig] = None,
 ) -> ArrayCalibration:
     """Build an :class:`ArrayCalibration` from a MEASURED ``(n_points, 64)`` code
     matrix — the real-hardware path.
@@ -495,6 +528,8 @@ def calibrate_array_from_codes(
         sub_pixel_factor=int(s_factor),
         spatial_channels=int(s_channels),
         sub_pixel=sub_pixel.to_dict() if sub_pixel is not None else None,
+        noise_env=noise_env.to_dict() if noise_env is not None else None,
+        anti_noise=anti_noise.to_dict() if anti_noise is not None else None,
     )
 
 

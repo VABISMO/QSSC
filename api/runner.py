@@ -32,6 +32,7 @@ from qssc.crypto import (
     derive_keypair, von_neumann_extract, bits_to_bytes, entropy_health,
 )
 from qssc.qkd import simulate_bb84
+from qssc.noise_filters import AntiNoiseConfig
 
 # Path to the cached per-pixel array calibration (Invention 4). The API's
 # /api/circuit/calibrate-array endpoint writes it; run_parallel reads it so
@@ -51,11 +52,22 @@ def _load_cached_calibration() -> ArrayCalibration | None:
     return None
 
 
+def _anti_noise_from_req(req: dict) -> AntiNoiseConfig | None:
+    """Build an :class:`AntiNoiseConfig` from the request's ``anti_noise`` dict.
+
+    Returns ``None`` (-> back-compat, no DD / no filters) when the field is
+    absent, empty, or resolves to the all-off default config.
+    """
+    cfg = AntiNoiseConfig.from_dict(req.get("anti_noise"))
+    return None if cfg.is_default() else cfg
+
+
 def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
              hardware: bool = False, n_nv_per_pixel: int = 10,
              gradient_mhz_per_um: float = 0.0,
              pixel_size_um: float = 200.0,
-             register_widths_per_pixel=None) -> QSSCBackend:
+             register_widths_per_pixel=None,
+             anti_noise=None) -> QSSCBackend:
     # Register mode: the backend simulates ONE pixel's ~10-NV register (the
     # circuit qubits, within-pixel all-to-all dipole); the 64-pixel hardware
     # die is the backend's separate chip view. The register auto-grows to fit
@@ -73,7 +85,8 @@ def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
                        hardware=fpga, n_nv_per_pixel=n_nv_per_pixel,
                        gradient_mhz_per_um=gradient_mhz_per_um,
                        pixel_size_um=pixel_size_um,
-                       register_widths_per_pixel=register_widths_per_pixel)
+                       register_widths_per_pixel=register_widths_per_pixel,
+                       anti_noise=anti_noise)
 
 
 def _make_fpga(profile: str, temperature_k: float, seed, hardware: bool):
@@ -151,9 +164,11 @@ def run_circuit(req: dict) -> dict:
     shots = int(req.get("shots", 2048))
     noise_mode = req.get("noise_mode", "real")
     hardware = bool(req.get("hardware", False))
+    anti_noise = _anti_noise_from_req(req)
     algo = str(req.get("algorithm", "shor")).lower()
     try:
-        b = _backend(profile, temperature_k, seed, noise_mode, hardware=hardware)
+        b = _backend(profile, temperature_k, seed, noise_mode, hardware=hardware,
+                     anti_noise=anti_noise)
     except NoFPGADetected as exc:
         return _no_fpga_result(exc)
     src = _source_label(b.hardware)
@@ -466,7 +481,7 @@ def run_circuit(req: dict) -> dict:
         # connection, so reuse the existing backend.
         if qrng_seed != seed and not hardware:
             b = _backend(profile, temperature_k, qrng_seed, noise_mode,
-                         hardware=hardware)
+                         hardware=hardware, anti_noise=anti_noise)
         res = b.run(qc, shots=raw_shots).result()
         counts = res.get_counts()
         # expand the measured outcomes into a flat list and shuffle so that
@@ -687,6 +702,7 @@ def run_parallel(req: dict) -> dict:
     noise_mode = req.get("noise_mode", "real")
     mode = str(req.get("mode", "sample")).lower()
     n_pixels = max(1, min(64, int(req.get("n_pixels", 64))))
+    anti_noise = _anti_noise_from_req(req)
     # Invention 4: when the caller opts in (use_calibration=true), load the
     # cached per-pixel calibration so each pixel runs at its MEASURED register
     # width (skip-narrow). Default False = the uniform-register back-compat
@@ -704,7 +720,8 @@ def run_parallel(req: dict) -> dict:
     try:
         b = _backend(profile, temperature_k, seed, noise_mode, hardware=False,
                      gradient_mhz_per_um=grad, pixel_size_um=psz,
-                     register_widths_per_pixel=reg_widths)
+                     register_widths_per_pixel=reg_widths,
+                     anti_noise=anti_noise)
     except NoFPGADetected as exc:
         return _no_fpga_result(exc)
 
@@ -852,7 +869,7 @@ def run_custom(req: dict) -> dict:
     try:
         b = _backend(profile, float(req.get("temperature_k", 300.0)),
                      int(req.get("seed", 42)), req.get("noise_mode", "real"),
-                     hardware=hardware)
+                     hardware=hardware, anti_noise=_anti_noise_from_req(req))
     except NoFPGADetected as exc:
         return _no_fpga_result(exc)
     try:

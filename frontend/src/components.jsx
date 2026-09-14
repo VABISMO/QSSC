@@ -1088,3 +1088,129 @@ export function MeasurementHelp({ algo, result, counts, numClbits, meas }) {
     </>
   )
 }
+
+// ---------------------------------------------------------------------------
+// AntiNoisePanel — Invention 9: the classical anti-noise filter stack (300 K).
+// Sliders/toggles for the thermal servo, vibration isolation, EMI shield,
+// feed-forward rejection, common-mode rejection, and the dynamical-decoupling
+// sequence (none/hahn/cpmg/xy8 + n blocks). All OFF by default -> bit-identical
+// to the prior noise model; turning a filter on attaches the anti_noise block
+// to the next circuit run. This is the buildable, room-temperature version of
+// "filter temperature/pressure as a signal": every channel here is a separable
+// classical perturbation (NOT the quantum n_th of the magnon bus, which is
+// temperature-bound and out of scope).
+// ---------------------------------------------------------------------------
+export function AntiNoisePanel({
+  servo, setServo, vib, setVib, emi, setEmi, ff, setFf, cm, setCm,
+  dd, setDd, ddN, setDdN, on,
+}) {
+  return (
+    <div className="anpanel">
+      <div className="hint" style={{ marginBottom: 10 }}>
+        Classical anti-noise filter stack (300 K, SNR-protective). Each control
+        attenuates one environmental channel on the readout noise budget; the DD
+        sequence extends the spin T₂ (refocuses low-frequency dephasing, capped
+        at 2·T₁). All OFF = the prior noise model (back-compat).
+      </div>
+      <div className="anrow">
+        <label className="anfield">
+          <span>Thermal servo gain <span className="mono">×1/(1+g)</span></span>
+          <input type="range" min="0" max="50" step="1" value={servo}
+            onChange={e => setServo(+e.target.value)} />
+          <span className="mono muted">{servo}</span>
+        </label>
+        <label className="anfield">
+          <span>Vibration iso residual</span>
+          <input type="range" min="0" max="1" step="0.01" value={vib}
+            onChange={e => setVib(+e.target.value)} />
+          <span className="mono muted">{vib.toFixed(2)}</span>
+        </label>
+      </div>
+      <div className="anrow">
+        <label className="anfield">
+          <span>EMI shield residual</span>
+          <input type="range" min="0" max="1" step="0.01" value={emi}
+            onChange={e => setEmi(+e.target.value)} />
+          <span className="mono muted">{emi.toFixed(2)}</span>
+        </label>
+        <label className="anfield">
+          <span>Feed-forward rejection</span>
+          <input type="range" min="0" max="0.99" step="0.01" value={ff}
+            onChange={e => setFf(+e.target.value)} />
+          <span className="mono muted">{ff.toFixed(2)}</span>
+        </label>
+      </div>
+      <div className="anrow">
+        <label className="ancheck">
+          <input type="checkbox" checked={cm} onChange={e => setCm(e.target.checked)} />
+          <span>Common-mode rejection (differential halves slow drift)</span>
+        </label>
+        <label className="anfield">
+          <span>DD sequence</span>
+          <select value={dd} onChange={e => setDd(e.target.value)}>
+            <option value="none">none</option>
+            <option value="hahn">Hahn echo (~2×)</option>
+            <option value="cpmg">CPMG (~2·n)</option>
+            <option value="xy8">XY8 (~2ⁿ)</option>
+          </select>
+        </label>
+        {dd !== 'none' && (
+          <label className="anfield">
+            <span>DD blocks (n)</span>
+            <input type="number" min="1" max="16" step="1" value={ddN}
+              onChange={e => setDdN(Math.max(1, +e.target.value || 1))} />
+          </label>
+        )}
+      </div>
+      <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+        {on
+          ? 'Anti-noise stack ACTIVE — the next run attaches the filter block.'
+          : 'All filters OFF — runs use the prior noise model (back-compat).'}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// NoiseBudget — shows the effective readout noise + per-filter gain breakdown
+// + effective T₂ from a calibrate-array or run assessment result. Collapses to
+// a single muted line when no anti-noise data is present (back-compat).
+// ---------------------------------------------------------------------------
+export function NoiseBudget({ result }) {
+  const rel = result && result.effective_noise_rel
+  const gain = result && result.filter_gain
+  const an = result && result.anti_noise
+  if (rel == null && !an) return null
+  return (
+    <div className="noisebudget">
+      <h3><span className="dot" />Anti-noise budget</h3>
+      {rel != null && (
+        <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>
+          Effective readout noise: <span className="mono" style={{ color: 'var(--brand)' }}>
+          {(rel * 100).toFixed(3)}%</span> of BRIGHT_CODE
+          {result.effective_noise_counts != null && (
+            <span> · {result.effective_noise_counts} counts</span>)}
+        </div>
+      )}
+      {gain && Object.keys(gain).length > 0 && (
+        <div className="angrid">
+          {Object.entries(gain).map(([k, v]) => (
+            <div className="angain" key={k}>
+              <span className="angain-k">{k}</span>
+              <span className="angain-v mono">{typeof v === 'number' ? v.toFixed(3) : v}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {an && (
+        <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+          DD: <span className="mono">{an.dd_sequence}</span>
+          {an.dd_sequence && an.dd_sequence !== 'none' && <> · n={an.dd_n_blocks}</>}
+          {' · '}servo {an.thermal_servo_gain} · vib {an.vibration_iso_residual}
+          {' · '}emi {an.emi_shield_residual} · ff {an.feed_forward_rejection}
+          {an.common_mode_reject && ' · CM on'}
+        </div>
+      )}
+    </div>
+  )
+}

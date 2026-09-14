@@ -535,3 +535,23 @@ textarea.code-editor:focus { outline: 1px solid var(--brand); border-color: var(
 }
 .resonance-modal h2 { font-size: 15.5px; display: flex; align-items: center; gap: 9px; margin-right: 40px; }
 .resonance-modal .qfreq-scroll { max-height: 60vh; }
+
+/* ---- Invention 9: anti-noise filter stack panel ---- */
+.anpanel { display: flex; flex-direction: column; gap: 10px; }
+.anrow { display: flex; flex-wrap: wrap; gap: 14px; }
+.anfield { display: flex; flex-direction: column; gap: 4px; flex: 1 1 220px; font-size: 12.5px; color: var(--muted); }
+.anfield span:last-child { font-size: 12px; }
+.anfield input[type="range"] { width: 100%; accent-color: var(--brand); }
+.anfield select { background: var(--panel-2); border: 1px solid var(--border); color: var(--fg);
+  border-radius: 7px; padding: 5px 8px; font-family: var(--font-mono); font-size: 12.5px; }
+.anfield input[type="number"] { background: var(--panel-2); border: 1px solid var(--border); color: var(--fg);
+  border-radius: 7px; padding: 5px 8px; font-family: var(--font-mono); font-size: 12.5px; width: 90px; }
+.ancheck { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); flex: 1 1 280px; }
+.ancheck input { accent-color: var(--brand); width: 16px; height: 16px; }
+.noisebudget { background: var(--panel-2); border: 1px solid var(--border); border-radius: 9px; padding: 10px 14px; }
+.noisebudget h3 { font-size: 13.5px; color: var(--brand); display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.angrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.angain { display: flex; justify-content: space-between; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 6px; padding: 4px 9px; font-size: 12px; }
+.angain-k { color: var(--muted); text-transform: capitalize; }
+.angain-v { color: var(--brand); }

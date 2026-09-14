@@ -41,6 +41,12 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from .defects import DefectProfile, get_profile, coherence_at_temperature
+from .noise_filters import (
+    AntiNoiseConfig,
+    NoiseEnvironment,
+    effective_noise_sigma,
+    effective_t2,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +148,9 @@ class SimulatedFPGA:
                  gradient_mhz_per_um: float = 1.0,
                  pixel_size_um: float = 200.0,
                  max_nv_per_microdiamond: int = 300,
-                 contrast_single: float = 0.03):
+                 contrast_single: float = 0.03,
+                 noise_env: Optional[NoiseEnvironment] = None,
+                 anti_noise: Optional[AntiNoiseConfig] = None):
         self.profile = get_profile(profile) if isinstance(profile, str) else profile
         self.temperature_k = temperature_k
         self.noise = noise
@@ -168,6 +176,20 @@ class SimulatedFPGA:
         self.lut: Dict[int, int] = {}
         t1, t2 = coherence_at_temperature(self.profile, temperature_k)
         self.t1, self.t2 = t1, t2
+        # Invention 9: classical anti-noise filter stack. ``noise_env`` models the
+        # environmental channels (temp drift, vibration, EMI, pressure) and
+        # ``anti_noise`` the filter stack that attenuates them (thermal servo,
+        # vibration iso, EMI shield, sensor feed-forward, common-mode rejection)
+        # plus an optional dynamical-decoupling sequence. DD refocuses low-
+        # frequency dephasing (T2*) -> extends T2 (capped at 2*T1, the relaxation
+        # limit; DD cannot refocus T1 / fast Markovian noise). Defaults (None) ->
+        # unchanged T2 and unchanged readout noise (bit-identical to the prior
+        # model); see qssc.noise_filters.
+        self.noise_env = noise_env
+        self.anti_noise = anti_noise
+        if anti_noise is not None and (anti_noise.dd_sequence or "none") != "none":
+            self.t2 = effective_t2(self.t2, anti_noise.dd_sequence,
+                                   anti_noise.dd_n_blocks, self.t1)
         # Ambient field + rotation the sensor is subjected to (the physical
         # quantity the on-chip compass/gyro read back). Defaults: a 500 uT
         # field (a nearby magnet -- the NV 5 MHz linewidth cannot resolve
@@ -389,7 +411,10 @@ class SimulatedFPGA:
             state = self.sim_states.get(site, 0)
             # bright ms=0 (state 0) -> high PL; dark ms=+-1 (state 1) -> ODMR dip
             level = BRIGHT_CODE if state == 0 else DARK_CODE
-        code = level + int(self.rng.normal(0, READOUT_NOISE))
+        # Invention 9: anti-noise stack sigma (defaults -> READOUT_NOISE).
+        nsigma = effective_noise_sigma(READOUT_NOISE, self.noise_env,
+                                       self.anti_noise, 1)
+        code = level + int(self.rng.normal(0, nsigma))
         return int(min(max(code, 0), ADC_MAX))
 
     def _calibrate(self) -> None:
@@ -468,14 +493,18 @@ class SimulatedFPGA:
         f0 = self.sim_freq                     # D, Hz
         lw = self.profile.odmr_linewidth_hz    # FWHM, Hz
         fs = np.linspace(f_start_khz * 1e3, f_stop_khz * 1e3, n_points)
+        # Invention 9: per-point noise sigma after the anti-noise stack (defaults
+        # -> READOUT_NOISE, bit-identical). Single sweep -> integration_shots=1.
+        nsigma = effective_noise_sigma(READOUT_NOISE, self.noise_env,
+                                       self.anti_noise, 1)
         # Lorentzian dip: PL = bright * (1 - contrast * L(f)); L(0) = 1.
         lor = (lw / 2.0) ** 2 / ((fs - f0) ** 2 + (lw / 2.0) ** 2)
         codes = BRIGHT_CODE * (1.0 - ODMR_CONTRAST * lor)
-        codes += self.rng.normal(0, READOUT_NOISE, size=n_points)
+        codes += self.rng.normal(0, nsigma, size=n_points)
         codes = np.clip(codes, 0, ADC_MAX).astype(int)
         # make the addressed channel reflect its pumped/bright state off-resonance
         if self.emitter_gs.get(qubit, 0) <= 0:
-            codes = BG_CODE + self.rng.normal(0, READOUT_NOISE, size=n_points).astype(int)
+            codes = BG_CODE + self.rng.normal(0, nsigma, size=n_points).astype(int)
             codes = np.clip(codes, 0, ADC_MAX)
         flat = [str(n_points)]
         for fk, ck in zip(fs, codes):
@@ -558,7 +587,12 @@ class SimulatedFPGA:
         line_freqs = self._pixel_line_freqs       # list of (n_lines,) Hz rel. centre
         line_contrasts = self._pixel_line_contrasts  # list of (n_lines,) dip frac
         # Invention 7: averaged noise is 1/sqrt(N) of the single-shot noise.
-        noise = READOUT_NOISE / math.sqrt(self.integration_shots)
+        # Invention 9: the classical anti-noise stack (thermal servo, vibration
+        # iso, EMI shield, feed-forward, common-mode) attenuates the environmental
+        # channels on top of the 1/sqrt(N) floor. Defaults (no env) -> the bare
+        # READOUT_NOISE/sqrt(N) (bit-identical to the prior model).
+        noise = effective_noise_sigma(READOUT_NOISE, self.noise_env,
+                                      self.anti_noise, self.integration_shots)
         # Invention 6: precompute the 64x64 charge-share weight matrix (spot q's
         # footprint across pads p) so a pixel's dip spills to its neighbours.
         W = None

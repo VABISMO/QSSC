@@ -6,6 +6,7 @@ import {
   SignalChart, CalibrationPanel, Verdict,
   OpticalChainDiagram, RunPhysics,
   CompassRose, GyroPanel, MagnetoImage, SensorField,
+  AntiNoisePanel, NoiseBudget,
 } from './components.jsx'
 
 // Fallback firmware command list (all 17 verbs). Used in the "Reply & readout"
@@ -249,6 +250,29 @@ export default function App() {
   const [hwMode, setHwMode] = useState('simulator')
   const fpgaMode = hwMode === 'hardware' ? 'real' : 'sim'
   const [probe, setProbe] = useState({ loading: false, data: null })
+
+  // ---- Invention 9: classical anti-noise filter stack (300 K, SNR-protective)
+  // All defaults are OFF (gain 0, residual 1, no feed-forward, no DD) so the
+  // stack is bit-identical to the prior model until the user opts in. The
+  // buildBody() helper only attaches the anti_noise block when a filter is on.
+  const [anServo, setAnServo] = useState(0)           // thermal servo gain
+  const [anVib, setAnVib] = useState(1.0)             // vibration isolation residual
+  const [anEmi, setAnEmi] = useState(1.0)             // EMI shield residual
+  const [anFf, setAnFf] = useState(0.0)               // feed-forward rejection fraction
+  const [anCm, setAnCm] = useState(false)             // common-mode rejection
+  const [anDd, setAnDd] = useState('none')            // DD sequence none|hahn|cpmg|xy8
+  const [anDdN, setAnDdN] = useState(1)               // DD refocusing blocks
+  const antiNoiseOn = anServo > 0 || anVib < 1.0 || anEmi < 1.0 || anFf > 0
+    || anCm || anDd !== 'none'
+  const antiNoise = antiNoiseOn ? {
+    thermal_servo_gain: anServo,
+    vibration_iso_residual: anVib,
+    emi_shield_residual: anEmi,
+    feed_forward_rejection: anFf,
+    common_mode_reject: anCm,
+    dd_sequence: anDd,
+    dd_n_blocks: anDdN,
+  } : null
 
   const refreshFpga = useCallback(() => {
     setFpgaLoading(true); setFpgaErr(null)
@@ -504,7 +528,9 @@ export default function App() {
   const buildBody = () => {
     const hardware = hwMode === 'hardware'
     if (algo === 'custom') {
-      return { code: customCode, profile, temperature_k: temperature, seed, shots, noise_mode: noiseMode, hardware }
+      const cb = { code: customCode, profile, temperature_k: temperature, seed, shots, noise_mode: noiseMode, hardware }
+      if (antiNoise) cb.anti_noise = antiNoise
+      return cb
     }
     const body = { algorithm: algo, profile, temperature_k: temperature, shots, noise_mode: noiseMode, hardware }
     // qrand: do NOT send the fixed seed -- the backend uses OS entropy when no
@@ -519,6 +545,8 @@ export default function App() {
     if (algo === 'qrand') { body.num_qubits = numQubits; body.num_bytes = qrBytes; body.common_name = qrCN }
     if (algo === 'bell') { body.num_qubits = numQubits }
     if (algo === 'bb84') { body.num_bits = numQubits; body.eavesdrop = bbEve }
+    // Invention 9: attach the anti-noise filter stack when any filter is on.
+    if (antiNoise) body.anti_noise = antiNoise
     return body
   }
 
@@ -1541,6 +1569,23 @@ export default function App() {
               )}
               {info.loading && <div className="muted"><span className="spinner" /> loading backend target…</div>}
               {runAssessment && <div style={{ marginTop: 12 }}><Verdict assessment={runAssessment} /></div>}
+            </div>
+
+            <div className="card" style={{ gridColumn: '1 / -1' }}>
+              <h2><span className="dot" />Anti-noise filter stack (Invention 9)</h2>
+              <AntiNoisePanel
+                servo={anServo} setServo={setAnServo}
+                vib={anVib} setVib={setAnVib}
+                emi={anEmi} setEmi={setAnEmi}
+                ff={anFf} setFf={setAnFf}
+                cm={anCm} setCm={setAnCm}
+                dd={anDd} setDd={setAnDd}
+                ddN={anDdN} setDdN={setAnDdN}
+                on={antiNoiseOn}
+              />
+              {runAssessment && runAssessment.anti_noise && (
+                <div style={{ marginTop: 10 }}><NoiseBudget result={runAssessment} /></div>
+              )}
             </div>
 
             <RunPhysics result={result} profile={profile} temperature={temperature} infoData={info.data} />

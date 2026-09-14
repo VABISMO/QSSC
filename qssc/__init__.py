@@ -47,6 +47,11 @@ from .prime_readout import (
     best_prime_for_nv, assign_prime_channels, prime_orthogonality,
     prime_decompose, prime_denoise, prime_noise_rejection, cross_talk_residual,
 )
+from .noise_filters import (
+    NoiseEnvironment, AntiNoiseConfig, noise_environment_preset,
+    effective_noise_sigma, effective_t2, filter_gain_breakdown,
+    hahn_echo, cpmg_decoupling,
+)
 
 __version__ = "2.0.0"
 __all__ = [
@@ -71,5 +76,8 @@ __all__ = [
     "n_resolvable_prime_channels", "best_prime_for_nv",
     "assign_prime_channels", "prime_orthogonality", "prime_decompose",
     "prime_denoise", "prime_noise_rejection", "cross_talk_residual",
+    "NoiseEnvironment", "AntiNoiseConfig", "noise_environment_preset",
+    "effective_noise_sigma", "effective_t2", "filter_gain_breakdown",
+    "hahn_echo", "cpmg_decoupling",
     "__version__",
 ]

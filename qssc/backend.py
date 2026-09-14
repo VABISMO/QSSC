@@ -52,6 +52,7 @@ from .simulator import (
     ADC_BITS, ADC_MAX, DETECT_THRESHOLD, N_SITES,
     N_NV_PER_PIXEL,
 )
+from .noise_filters import AntiNoiseConfig, effective_t2
 
 logger = logging.getLogger(__name__)
 
@@ -680,7 +681,8 @@ class QSSCBackend(BackendV2):
                  gradient_mhz_per_um: float = 0.0,
                  pixel_size_um: float = 200.0,
                  nuclear_memory: bool = False,
-                 register_widths_per_pixel: Optional[Sequence[int]] = None):
+                 register_widths_per_pixel: Optional[Sequence[int]] = None,
+                 anti_noise: Optional[AntiNoiseConfig] = None):
         """noise_mode: 'real' (default, full Aer thermal+depolarizing+readout
         noise from the defect physics) | 'phenomenological' (fast analytic
         approximation) | 'none' (ideal). 'aer' is accepted as an alias of 'real'.
@@ -784,6 +786,15 @@ class QSSCBackend(BackendV2):
                     pixel_size_um=pixel_size_um)
         t1, t2 = coherence_at_temperature(prof, temperature_k)
         self._t1, self._t2 = t1, t2
+        # Invention 9 — classical anti-noise stack: when a dynamical-decoupling
+        # sequence is configured, extend the spin T2 used for coherence survival
+        # and the dipole/thermal error models. DD refocuses low-frequency
+        # dephasing (T2*->T2) but is hard-capped at 2*T1 (energy relaxation is
+        # irreversible). anti_noise=None -> no change (back-compat).
+        self.anti_noise = anti_noise
+        if anti_noise is not None and (anti_noise.dd_sequence or "none") != "none":
+            self._t2 = effective_t2(self._t2, anti_noise.dd_sequence,
+                                    anti_noise.dd_n_blocks, self._t1)
         # Optical-coherence material property (photon indistinguishability):
         # T2,opt + HOM visibility V at this temperature, reported descriptively by
         # assess_circuit. V=1.0 (no optical model) when optical_t1_ns<=0. At 300 K
@@ -1500,6 +1511,9 @@ class QSSCBackend(BackendV2):
             "within_coherence": within,
             "within_optical_coherence": within_optical,
             "verdict": verdict,
+            # Invention 9 anti-noise stack echo (None when unset -> back-compat).
+            "anti_noise": (self.anti_noise.to_dict()
+                           if self.anti_noise is not None else None),
         }
 
     def _apply_phenomenological_noise(self, circuit: QuantumCircuit,
