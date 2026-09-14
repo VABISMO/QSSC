@@ -91,7 +91,7 @@ def _dipole_field(points_mm: np.ndarray, x0: float, y0: float, z0: float,
     m = np.asarray(moment_am2, dtype=float)
     rx = (points_mm[:, 0] - x0) * 1e-3
     ry = (points_mm[:, 1] - y0) * 1e-3
-    rz = np.full_like(rx, -z0 * 1e-3)    # source below the z=0 plane
+    rz = np.full_like(rx, +z0 * 1e-3)    # source below the z=0 plane (r_z = 0 - (-z0) = +z0)
     r2 = rx * rx + ry * ry + rz * rz
     r2 = np.maximum(r2, 1e-12)
     r = np.sqrt(r2)
