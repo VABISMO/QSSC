@@ -25,7 +25,7 @@
   --u-grad:linear-gradient(135deg,#22d3ee,#6366f1);
 }
 *{box-sizing:border-box}
-html{scroll-behavior:smooth;scroll-padding-top:78px}
+html{scroll-behavior:smooth;scroll-padding-top:14px}
 body{
   margin:0; background:var(--bg); color:var(--text);
   font-family:var(--font-body); font-size:15px; line-height:1.65;
@@ -36,23 +36,14 @@ h1,h2,h3,h4{font-family:var(--font-head);font-weight:600;line-height:1.2;letter-
 code,pre,.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
 .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
 
-/* ---- top nav ---- */
-nav.top{
-  position:sticky;top:0;z-index:50;
-  background:rgba(11,16,32,.86);backdrop-filter:blur(12px);
-  border-bottom:1px solid var(--border);
-}
-nav.top .row{display:flex;align-items:center;gap:18px;height:60px}
-nav.top .logo{display:flex;align-items:center;gap:10px;font-family:var(--font-head);font-weight:700;font-size:17px;letter-spacing:.02em}
-nav.top .logo svg{width:30px;height:30px;flex:0 0 auto}
-nav.top .logo .grad{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
-nav.top .links{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
-nav.top .links a{
-  padding:7px 13px;border-radius:9px;font-size:13px;font-weight:500;
-  color:var(--muted);border:1px solid transparent;transition:.2s;
-}
-nav.top .links a:hover{color:var(--text);background:var(--panel);border-color:var(--border)}
-nav.top .links a .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px;vertical-align:1px}
+/* ---- introducción ---- */
+section.intro{padding:54px 0 26px;border-top:1px solid var(--border)}
+section.intro h2{font-size:clamp(24px,3.4vw,32px);margin:0 0 16px}
+section.intro p{max-width:74ch;margin:0 0 14px;color:var(--text)}
+section.intro p.lead{font-size:17px;color:var(--muted)}
+section.intro code{font-family:var(--font-mono);font-size:13px;color:var(--brand)}
+section.intro strong{color:var(--text);font-weight:600}
+section.intro a{color:var(--brand);border-bottom:1px dotted var(--border)}
 
 /* ---- hero ---- */
 header.hero{
@@ -232,7 +223,6 @@ footer.ipfoot .meta b{color:var(--text);font-weight:600}
   html,body{background:var(--bg)}
   body{font-size:11pt;padding:0 12mm}
   html{scroll-behavior:auto}
-  nav.top{position:static;backdrop-filter:none;background:#0b1020}
   .tile,.callout,pre.files,.feat,.alg{break-inside:avoid}
   a{color:var(--brand)}
 }
@@ -263,37 +253,26 @@ section.bib h3{font-family:var(--font-mono);font-size:12px;font-weight:600;lette
 .alg .ah .ac{font-family:var(--font-mono);font-size:11px;color:var(--u);font-weight:600}
 .alg p{margin:0;color:var(--muted);font-size:13px;line-height:1.55}
 .alg .af{font-family:var(--font-mono);font-size:11px;color:var(--brand-2);margin-top:5px}
+/* ---- indice / table of contents ---- */
+section.indice{padding:54px 0 26px;border-top:1px solid var(--border)}
+section.indice h2{font-size:clamp(24px,3.4vw,32px);margin:0 0 18px}
+ol.toc{list-style:none;margin:0;padding:0;counter-reset:toc;max-width:100%}
+ol.toc > li{margin:0 0 14px}
+ol.toc > li > a{font-family:var(--font-head);font-size:17px;font-weight:600;color:var(--text);
+  text-decoration:none;border-bottom:1px dotted transparent;transition:.2s}
+ol.toc > li > a:hover{color:var(--brand);border-bottom-color:var(--border)}
+ol.toc .unum{font-family:var(--font-mono);font-size:12px;letter-spacing:.04em;font-weight:500}
+ol.toc ol.sub{list-style:none;margin:9px 0 0;padding:0 0 0 16px;border-left:1px solid var(--border);
+  columns:2;column-gap:34px}
+ol.toc ol.sub > li{margin:0 0 5px;break-inside:avoid}
+ol.toc ol.sub a{font-size:13.5px;color:var(--muted);text-decoration:none}
+ol.toc ol.sub a:hover{color:var(--text)}
+ol.toc ol.sub .sn{font-family:var(--font-mono);font-size:11px;color:var(--dim);margin-right:7px}
+@media (max-width:760px){ol.toc ol.sub{columns:1}}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
 </head>
 <body>
-
-<nav class="top">
-  <div class="wrap row">
-    <a class="logo" href="#top">
-      <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <defs><linearGradient id="ng" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#6366f1"/></linearGradient></defs>
-        <rect width="64" height="64" rx="14" fill="#0b1020" stroke="#263056"/>
-        <polygon points="32,8 52,20 52,44 32,56 12,44 12,20" stroke="url(#ng)" stroke-width="2.4" fill="none" stroke-linejoin="round"/>
-        <g fill="url(#ng)"><circle cx="32" cy="8" r="3.2"/><circle cx="52" cy="20" r="3.2"/><circle cx="52" cy="44" r="3.2"/><circle cx="32" cy="56" r="3.2"/><circle cx="12" cy="44" r="3.2"/><circle cx="12" cy="20" r="3.2"/></g>
-        <circle cx="32" cy="32" r="9" fill="none" stroke="#e0e7ff" stroke-width="1.4" opacity="0.7"/>
-        <circle cx="32" cy="32" r="4" fill="#f472b6"/>
-      </svg>
-      <span><span class="grad">QSSC</span></span>
-    </a>
-    <div class="links">
-      <a href="#metodologias"><span class="dot" style="background:#6366f1"></span>Metodologías</a>
-      <a href="#algoritmos"><span class="dot" style="background:#22d3ee"></span>Algoritmos</a>
-      <a href="#fpga"><span class="dot" style="background:#22d3ee"></span>FPGA</a>
-      <a href="#frontend"><span class="dot" style="background:#8b5cf6"></span>Frontend</a>
-      <a href="#backend"><span class="dot" style="background:#f472b6"></span>Backend</a>
-      <a href="#pcb"><span class="dot" style="background:#34d399"></span>Scripts PCB</a>
-      <a href="#ci"><span class="dot" style="background:#f59e0b"></span>CI + Tests</a>
-      <a href="#comparativa"><span class="dot" style="background:#22d3ee"></span>SLOCCount vs cloc</a>
-      <a href="#bibliografia"><span class="dot" style="background:#6366f1"></span>Bibliografía</a>
-    </div>
-  </div>
-</nav>
 
 <header class="hero" id="top">
   <div class="wrap">
@@ -357,6 +336,101 @@ section.bib h3{font-family:var(--font-mono);font-size:12px;font-weight:600;lette
     </div>
   </div>
 </header>
+
+<section class="indice" id="indice">
+  <div class="wrap">
+    <h2>Índice</h2>
+    <ol class="toc">
+      <li><a href="#introduccion">Introducción</a>
+      </li>
+      <li><a href="#metodologias">Catálogo de metodologías implementadas</a>
+      </li>
+      <li><a href="#algoritmos">Algoritmos implementados</a>
+      </li>
+      <li><a href="#fpga"><span class="unum" style="color:#22d3ee">Unidad I ·</span> Firmware FPGA — Controlador de placa cuántica</a>
+        <ol class="sub">
+          <li><a href="#fpga-1"><span class="sn">§1</span>Datos de la obra</a></li>
+          <li><a href="#fpga-2"><span class="sn">§2</span>Descripción general</a></li>
+          <li><a href="#fpga-3"><span class="sn">§3</span>Arquitectura y módulos</a></li>
+          <li><a href="#fpga-4"><span class="sn">§4</span>Tecnologías y lenguajes</a></li>
+          <li><a href="#fpga-5"><span class="sn">§5</span>Funcionalidades destacadas — metodologías implementadas</a></li>
+          <li><a href="#fpga-6"><span class="sn">§6</span>Originalidad y características distintivas</a></li>
+          <li><a href="#fpga-7"><span class="sn">§7</span>Estado de verificación</a></li>
+          <li><a href="#fpga-8"><span class="sn">§8</span>Entorno de ejecución</a></li>
+          <li><a href="#fpga-9"><span class="sn">§9</span>Lista de ficheros fuente depositados</a></li>
+        </ol>
+      </li>
+      <li><a href="#frontend"><span class="unum" style="color:#8b5cf6">Unidad II ·</span> Frontend web — Interfaz de operación del instrumento</a>
+        <ol class="sub">
+          <li><a href="#frontend-1"><span class="sn">§1</span>Datos de la obra</a></li>
+          <li><a href="#frontend-2"><span class="sn">§2</span>Descripción general</a></li>
+          <li><a href="#frontend-3"><span class="sn">§3</span>Arquitectura y módulos</a></li>
+          <li><a href="#frontend-4"><span class="sn">§4</span>Tecnologías y lenguajes</a></li>
+          <li><a href="#frontend-5"><span class="sn">§5</span>Funcionalidades destacadas — metodologías expuestas al operador</a></li>
+          <li><a href="#frontend-6"><span class="sn">§6</span>Originalidad y características distintivas</a></li>
+          <li><a href="#frontend-7"><span class="sn">§7</span>Estado de verificación</a></li>
+          <li><a href="#frontend-8"><span class="sn">§8</span>Entorno de ejecución</a></li>
+          <li><a href="#frontend-9"><span class="sn">§9</span>Lista de ficheros fuente depositados</a></li>
+        </ol>
+      </li>
+      <li><a href="#backend"><span class="unum" style="color:#f472b6">Unidad III ·</span> Backend — API, simulador cuántico y librería de física</a>
+        <ol class="sub">
+          <li><a href="#backend-1"><span class="sn">§1</span>Datos de la obra</a></li>
+          <li><a href="#backend-2"><span class="sn">§2</span>Descripción general</a></li>
+          <li><a href="#backend-3"><span class="sn">§3</span>Arquitectura y módulos</a></li>
+          <li><a href="#backend-4"><span class="sn">§4</span>Tecnologías y lenguajes</a></li>
+          <li><a href="#backend-5"><span class="sn">§5</span>Funcionalidades destacadas — metodologías implementadas</a></li>
+          <li><a href="#backend-6"><span class="sn">§6</span>Originalidad y características distintivas</a></li>
+          <li><a href="#backend-7"><span class="sn">§7</span>Estado de verificación</a></li>
+          <li><a href="#backend-8"><span class="sn">§8</span>Entorno de ejecución</a></li>
+          <li><a href="#backend-9"><span class="sn">§9</span>Lista de ficheros fuente depositados</a></li>
+        </ol>
+      </li>
+      <li><a href="#pcb"><span class="unum" style="color:#34d399">Unidad IV ·</span> Scripts de automatización PCB — Toolchain EDA KiCad</a>
+        <ol class="sub">
+          <li><a href="#pcb-1"><span class="sn">§1</span>Datos de la obra</a></li>
+          <li><a href="#pcb-2"><span class="sn">§2</span>Descripción general</a></li>
+          <li><a href="#pcb-3"><span class="sn">§3</span>Arquitectura y módulos</a></li>
+          <li><a href="#pcb-4"><span class="sn">§4</span>Tecnologías y lenguajes</a></li>
+          <li><a href="#pcb-5"><span class="sn">§5</span>Funcionalidades destacadas — metodologías EDA implementadas</a></li>
+          <li><a href="#pcb-6"><span class="sn">§6</span>Originalidad y características distintivas</a></li>
+          <li><a href="#pcb-7"><span class="sn">§7</span>Estado de verificación</a></li>
+          <li><a href="#pcb-8"><span class="sn">§8</span>Entorno de ejecución</a></li>
+          <li><a href="#pcb-9"><span class="sn">§9</span>Lista de ficheros fuente depositados</a></li>
+        </ol>
+      </li>
+      <li><a href="#ci"><span class="unum" style="color:#f59e0b">Unidad V ·</span> Sistema de integración continua (CI) y suite de tests</a>
+        <ol class="sub">
+          <li><a href="#ci-1"><span class="sn">§1</span>Datos de la obra</a></li>
+          <li><a href="#ci-2"><span class="sn">§2</span>Descripción general</a></li>
+          <li><a href="#ci-3"><span class="sn">§3</span>Arquitectura y módulos</a></li>
+          <li><a href="#ci-4"><span class="sn">§4</span>Tecnologías y lenguajes</a></li>
+          <li><a href="#ci-5"><span class="sn">§5</span>Funcionalidades destacadas — gates de calidad automatizados</a></li>
+          <li><a href="#ci-6"><span class="sn">§6</span>Originalidad y características distintivas</a></li>
+          <li><a href="#ci-7"><span class="sn">§7</span>Estado de verificación</a></li>
+          <li><a href="#ci-8"><span class="sn">§8</span>Entorno de ejecución</a></li>
+          <li><a href="#ci-9"><span class="sn">§9</span>Lista de ficheros fuente depositados</a></li>
+        </ol>
+      </li>
+      <li><a href="#comparativa">Anexo · Comparativa SLOCCount vs cloc</a>
+      </li>
+      <li><a href="#bibliografia">Bibliografía</a>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<!-- =========================== INTRODUCCIÓN =========================== -->
+<section class="intro" id="introduccion">
+  <div class="wrap">
+    <h2>Introducción</h2>
+    <p class="lead">El Proyecto QSSC (<em>Quantum Solid State Chip</em>) es un instrumento cuántico de estado sólido basado en una matriz de 64 píxeles de centros nitrógeno-vacante (NV) en diamante, operativo a temperatura ambiente (300 K). La presente memoria descriptiva acompaña al depósito del código fuente de las cinco unidades de software que constituyen la obra, para su inscripción en el Registro de la Propiedad Intelectual de España conforme al Art. 96.1 del Texto Refundido de la Ley de Propiedad Intelectual (RDLeg 1/1996).</p>
+    <p>La obra depositada comprende cinco unidades de software funcionalmente distintas pero integradas en un mismo instrumento: <strong>(I)</strong> firmware FPGA —controlador determinista de la placa cuántica en Verilog para Artix-7—; <strong>(II)</strong> frontend web —interfaz de operación, calibración y sensórica en React 18—; <strong>(III)</strong> backend —API REST, simulador cuántico Qiskit y librería de física en Python—; <strong>(IV)</strong> toolchain EDA —scripts de automatización KiCad para el diseño y routado de las dos placas PCB—; y <strong>(V)</strong> sistema de integración continua y suite de tests —verificación automatizada en GitHub Actions—. El conjunto suma 27.779 líneas físicas de código fuente (SLOC).</p>
+    <p>La física del dispositivo está fundamentada en datos: los parámetros del centro NV, el gate de 2 qubits por acoplamiento dipolar (gate de <em>spin</em>, no óptico, viable a 300 K) y los canales de error se anclan en la literatura citada en la <a href="#bibliografia">bibliografía</a> y en los datasheets de los componentes; las magnitudes no proporcionadas por el proveedor se indican como tales. Los algoritmos de autoría propia del QSSC —denoise por primas-coprimas, pila anti-ruido 300 K, super-resolución ODMR, centroiding sub-píxel, memoria nuclear ¹³C, sensórica tensorial y computación paralela 64-píxel— se describen en la sección <a href="#algoritmos">Algoritmos implementados</a> con referencia al fichero que los realiza.</p>
+    <p>La valoración de esfuerzo se obtiene con SLOCCount 2.26 (David A. Wheeler, GPL) como herramienta de registro, con verificación cruzada de cloc 2.11, y el modelo COCOMO básico (<code>PM = 2,4 · KSLOC^1,05</code>); el coste resultante (886.225 USD / 6,56 persona-años) es una estimación de coste de desarrollo, no un precio de mercado. El script reproducible <code>docs/propiedad-intelectual/sloc_count.py</code> contiene el conteo por fichero y la comparación SLOCCount/cloc de las cinco unidades. La guía canónica de instalación, uso y despliegue es el fichero <code>README.md</code> del repositorio (sección <em>Quick start</em>).</p>
+    <p>Titulares de la obra: <em>Vicent Nos Ripolles y Pablo Lopez</em>.</p>
+  </div>
+</section>
 
 <!-- =========================== CATÁLOGO DE METODOLOGÍAS (ÍNDICE) =========================== -->
 <section class="catalog" id="metodologias">
@@ -483,7 +557,7 @@ section.bib h3{font-family:var(--font-mono);font-size:12px;font-weight:600;lette
     </div>
 
     <div class="block">
-      <h3><span class="sn">§1</span> Datos de la obra</h3>
+      <h3 id="fpga-1"><span class="sn">§1</span> Datos de la obra</h3>
       <table class="kv">
         <tr><th>Título</th><td>QSSC — Firmware FPGA de control y readout para plataforma cuántica de 64 píxeles NV</td></tr>
         <tr><th>Tipo de obra</th><td>Programa de ordenador (Art. 96.1 del Texto Refundido de la Ley de Propiedad Intelectual, RDLeg 1/1996)</td></tr>
@@ -505,7 +579,7 @@ section.bib h3{font-family:var(--font-mono);font-size:12px;font-weight:600;lette
     </div>
 
     <div class="block">
-      <h3><span class="sn">§2</span> Descripción general</h3>
+      <h3 id="fpga-2"><span class="sn">§2</span> Descripción general</h3>
       <p class="lead">El firmware FPGA constituye la capa de control en tiempo real de la plataforma QSSC, un instrumento de computación y sensórica cuántica basado en una matriz de 64 píxeles, cada uno conteniendo microdiamantes con centros de nitrógeno-vacante (NV) de diamante, operando a temperatura ambiente (300 K).</p>
       <p>El firmware reside en una FPGA Xilinx Artix-7 y gobierna de forma determinista:</p>
       <ul>
@@ -519,7 +593,7 @@ section.bib h3{font-family:var(--font-mono);font-size:12px;font-weight:600;lette
     </div>
 
     <div class="block">
-      <h3><span class="sn">§3</span> Arquitectura y módulos</h3>
+      <h3 id="fpga-3"><span class="sn">§3</span> Arquitectura y módulos</h3>
       <p>El código se organiza en tres subdirectorios: <code>rtl/</code> (lógica síncrona sintetizable), <code>sim/</code> (banco de pruebas) y <code>synth/</code> (flujo de implementación).</p>
       <div class="sub">rtl/ — lógica sintetizable (12 módulos Verilog)</div>
       <div class="mod"><code>top_level.v</code> — <span class="desc">entidad de integración. Instancia todos los módulos, gestiona el reset asíncrono y el reloj único (50 MHz escalado a 100 MHz vía MMCM), y enruta el bus de comandos hacia los controladores de periféricos. Punto único de entrada/salida hacia el host y los dispositivos analógicos.</span></div>
@@ -543,7 +617,7 @@ section.bib h3{font-family:var(--font-mono);font-size:12px;font-weight:600;lette
     </div>
 
     <div class="block">
-      <h3><span class="sn">§4</span> Tecnologías y lenguajes</h3>
+      <h3 id="fpga-4"><span class="sn">§4</span> Tecnologías y lenguajes</h3>
       <table class="lang">
         <tr><th>Lenguaje</th><th>SLOC</th><th>%</th></tr>
         <tr><td><span class="bar" style="width:120px"></span>Verilog HDL</td><td>4.230</td><td>94,4 %</td></tr>
@@ -557,7 +631,7 @@ section.bib h3{font-family:var(--font-mono);font-size:12px;font-weight:600;lette
     </div>
 
     <div class="block">
-      <h3><span class="sn">§5</span> Funcionalidades destacadas — metodologías implementadas</h3>
+      <h3 id="fpga-5"><span class="sn">§5</span> Funcionalidades destacadas — metodologías implementadas</h3>
       <p class="lead">Cada metodología se realiza con un verbo del protocolo UART y un módulo RTL dedicado. Todas las cifras (frecuencias, duraciones de puerta, topes de acumulador) son constantes del firmware depositado.</p>
 
       <div class="sub">Adquisición y barrido ODMR</div>
@@ -604,7 +678,7 @@ section.bib h3{font-family:var(--font-mono);font-size:12px;font-weight:600;lette
     </div>
 
     <div class="block">
-      <h3><span class="sn">§6</span> Originalidad y características distintivas</h3>
+      <h3 id="fpga-6"><span class="sn">§6</span> Originalidad y características distintivas</h3>
       <ul>
         <li>Firmware diseñado específicamente para <b>computación y sensórica cuántica a temperatura ambiente</b> sobre centros NV de diamante, no un controlador de instrumento genérico.</li>
         <li><b>Readout paralelo de 64 canales</b> con ADCs simultáneos (AD7616) en lugar del muxeo serial habitual, para no perder la sincronía óptica entre píxeles.</li>
@@ -614,7 +688,7 @@ section.bib h3{font-family:var(--font-mono);font-size:12px;font-weight:600;lette
     </div>
 
     <div class="block">
-      <h3><span class="sn">§7</span> Estado de verificación</h3>
+      <h3 id="fpga-7"><span class="sn">§7</span> Estado de verificación</h3>
       <ul>
         <li>Banco de pruebas <code>sim/tb_top_level.v</code> (926 SLOC) que inyecta los verbos por UART modelo y modela la respuesta analógica de los ADCs; todos los escenarios pasan en iverilog: <b>ID</b> (<code>QSSC v1</code>), <b>STATUS</b> (PLL_LOCKED=1, ADC_BUSY=0), <b>RESET</b> (re-estroboscopia + anula gradiente), <b>ODMR_SWEEP</b> (4 líneas 2870000–2879999 + OK), <b>RUN_SEQUENCE</b> (00004 + 4×01234, puertas MW y escrituras PLL contadas), <b>Ramsey con fase</b> (puertas + escrituras PLL R1-only), <b>READ_LOCKIN</b> (sum_on/sum_off/n_on/n_off), <b>READ_LOCKINP</b> (válido + fuera-de-cotas → ERR), <b>RUN_ALL_ODMR</b> (2 filas × 64 muestras + OK), <b>SET_GRADIENT</b> (palabra MCP4921 + grad_en), <b>CALIBRATE</b> (LUT em→det) y <b>READ_RNG</b> (hex + footer 00064 0 0).</li>
         <li>Verificación estructural pyverilog y validación de constraints XDC en CI.</li>
@@ -623,7 +697,7 @@ section.bib h3{font-family:var(--font-mono);font-size:12px;font-weight:600;lette
     </div>
 
     <div class="block">
-      <h3><span class="sn">§8</span> Entorno de ejecución</h3>
+      <h3 id="fpga-8"><span class="sn">§8</span> Entorno de ejecución</h3>
       <ul>
         <li><b>Hardware</b>: placa QMTECH XC7A15T-1CSG325C; oscilador 50 MHz (MMCM → 100 MHz interno); programador JTAG/FT2232H.</li>
         <li><b>Dependencias externas</b>: sintetizador RF ADF4351, DAC MCP4921, driver LED TLC5947 ×3, ADC AD7616 ×4 — todos en la placa cabezal del QSSC.</li>
@@ -632,7 +706,7 @@ section.bib h3{font-family:var(--font-mono);font-size:12px;font-weight:600;lette
     </div>
 
     <div class="block">
-      <h3><span class="sn">§9</span> Lista de ficheros fuente depositados</h3>
+      <h3 id="fpga-9"><span class="sn">§9</span> Lista de ficheros fuente depositados</h3>
 <pre class="files">fpga/constraints.xdc
 fpga/rtl/adc_reader.v
 fpga/rtl/adf4351_ctrl.v
@@ -663,7 +737,7 @@ fpga/synth/run_synth.sh</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§1</span> Datos de la obra</h3>
+      <h3 id="frontend-1"><span class="sn">§1</span> Datos de la obra</h3>
       <table class="kv">
         <tr><th>Título</th><td>QSSC — Interfaz web de operación, calibración y sensórica para plataforma cuántica de 64 píxeles NV</td></tr>
         <tr><th>Tipo de obra</th><td>Programa de ordenador (Art. 96.1 RDLeg 1/1996)</td></tr>
@@ -685,7 +759,7 @@ fpga/synth/run_synth.sh</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§2</span> Descripción general</h3>
+      <h3 id="frontend-2"><span class="sn">§2</span> Descripción general</h3>
       <p class="lead">El frontend es una aplicación web de página única (SPA) que constituye la interfaz de usuario del instrumento cuántico QSSC. Permite a un operador:</p>
       <ul>
         <li>configurar y ejecutar circuitos cuánticos (Bell, Shor, Grover, QFT, caminos personalizados) sobre la matriz de 64 píxeles, en modo simulador o hardware real;</li>
@@ -698,7 +772,7 @@ fpga/synth/run_synth.sh</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§3</span> Arquitectura y módulos</h3>
+      <h3 id="frontend-3"><span class="sn">§3</span> Arquitectura y módulos</h3>
       <p>El código fuente reside en <code>frontend/src/</code> y consta de seis ficheros:</p>
       <div class="mod"><code>App.jsx</code> <span class="sloc">(1.833 SLOC)</span> — <span class="desc">componente raíz y orquestador de estado. Mantiene el estado global: plataforma de defecto (NV/SiC/hBN), temperatura, modo de ejecución (sim/real), modo de píxel (registro/ensamble), qubits por píxel, modos de lectura (super-resolución, Bayesiano, denoise por primas, anti-ruido) y los parámetros de los algoritmos. Construye los cuerpos de petición (<code>buildBody</code>) y renderiza el panel de controles globales y las pestañas.</span></div>
       <div class="mod"><code>components.jsx</code> <span class="sloc">(1.628 SLOC)</span> — <span class="desc">biblioteca de componentes: panel de calibración (flujo de etapas, marcado de qubits escaneados, modal de frecuencias por píxel), tarjeta de calibración paralela de 64 píxeles (selector de modo de lectura, preset anti-ruido, estadísticas de canales espaciales), panel de sensores, panel FPGA (botón de flasheo, auto-curación, referencia de verbos), histograma con marcado del resultado y modal de derivación.</span></div>
@@ -709,7 +783,7 @@ fpga/synth/run_synth.sh</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§4</span> Tecnologías y lenguajes</h3>
+      <h3 id="frontend-4"><span class="sn">§4</span> Tecnologías y lenguajes</h3>
       <table class="lang">
         <tr><th>Lenguaje</th><th>SLOC</th><th>%</th></tr>
         <tr><td><span class="bar" style="width:110px"></span>JavaScript / JSX</td><td>3.806</td><td>87,6 %</td></tr>
@@ -720,7 +794,7 @@ fpga/synth/run_synth.sh</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§5</span> Funcionalidades destacadas — metodologías expuestas al operador</h3>
+      <h3 id="frontend-5"><span class="sn">§5</span> Funcionalidades destacadas — metodologías expuestas al operador</h3>
       <div class="feats">
         <div class="feat"><div class="ft"><span class="n">01</span><b>Conmutador simulador / hardware real</b></div><p>El operador selecciona la fuente de ejecución; en modo real la interfaz detecta la FPGA y ofrece los verbos de control (ID/STATUS/RESET/ODMR_SWEEP), sin enmascarar un resultado sintético como real — la UI distingue y comunica explícitamente la fuente de cada resultado.</p></div>
         <div class="feat"><div class="ft"><span class="n">02</span><b>Calibración paralela de 64 píxeles (barrido ODMR)</b></div><p>Lanza el barrido ODMR del array, muestra la anchura de registro medida por píxel, el número de qubits escaneados, las frecuencias ODMR y un modal de pines/frecuencias. Refleja el lazo calibración → circuito: el N medido alimenta la rejilla del registro.</p></div>
@@ -737,7 +811,7 @@ fpga/synth/run_synth.sh</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§6</span> Originalidad y características distintivas</h3>
+      <h3 id="frontend-6"><span class="sn">§6</span> Originalidad y características distintivas</h3>
       <ul>
         <li>Interfaz diseñada específicamente para <b>operar un instrumento cuántico de matriz de 64 píxeles a temperatura ambiente</b>, no un dashboard genérico.</li>
         <li><b>Integración de primitivas cuánticas de alto nivel</b> (calibración ODMR, modos super-resolución/Bayesiana, sensórica tensorial) en la interfaz de operación, exponiendo la física del dispositivo al operador.</li>
@@ -747,7 +821,7 @@ fpga/synth/run_synth.sh</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§7</span> Estado de verificación</h3>
+      <h3 id="frontend-7"><span class="sn">§7</span> Estado de verificación</h3>
       <ul>
         <li>La construcción de producción (<code>vite build</code>) compila sin errores (bundle ~311 KB / 92 KB gzip).</li>
         <li>Verificación local API + frontend antes de cada entrega.</li>
@@ -756,7 +830,7 @@ fpga/synth/run_synth.sh</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§8</span> Entorno de ejecución</h3>
+      <h3 id="frontend-8"><span class="sn">§8</span> Entorno de ejecución</h3>
       <ul>
         <li><b>Navegador</b>: navegador web moderno con soporte ES2020.</li>
         <li><b>Construcción</b>: <code>npm install</code> + <code>npm run build</code> (Vite) → <code>dist/</code> estático.</li>
@@ -766,7 +840,7 @@ fpga/synth/run_synth.sh</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§9</span> Lista de ficheros fuente depositados</h3>
+      <h3 id="frontend-9"><span class="sn">§9</span> Lista de ficheros fuente depositados</h3>
 <pre class="files">frontend/src/App.jsx
 frontend/src/api.js
 frontend/src/components.jsx
@@ -787,7 +861,7 @@ frontend/src/styles.css</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§1</span> Datos de la obra</h3>
+      <h3 id="backend-1"><span class="sn">§1</span> Datos de la obra</h3>
       <table class="kv">
         <tr><th>Título</th><td>QSSC — API REST, simulador cuántico realista y librería de física para plataforma de 64 píxeles NV</td></tr>
         <tr><th>Tipo de obra</th><td>Programa de ordenador (Art. 96.1 RDLeg 1/1996)</td></tr>
@@ -809,13 +883,13 @@ frontend/src/styles.css</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§2</span> Descripción general</h3>
+      <h3 id="backend-2"><span class="sn">§2</span> Descripción general</h3>
       <p class="lead">El backend es la capa de software que (i) implementa un simulador cuántico realista de la plataforma QSSC, (ii) expone una API REST para que el frontend y clientes externos ejecuten circuitos, calibren la matriz y operen la sensórica, y (iii) contiene la librería de física (modelos de defecto, descomposición ODMR, magnetometría, gradiometría tensorial, readout super-res y Bayesiano, filtros anti-ruido) que comparten el simulador y la vía de hardware real.</p>
       <p>Se estructura en dos paquetes: <code>qssc/</code> (librería de física + simulador + backend cuántico Qiskit) y <code>api/</code> (servicio FastAPI + runner + cola de tareas). La vía de hardware real conecta con la FPGA por el mismo firmware depositado en la unidad FPGA, de modo que el backend opera sobre medidas reales cuando la placa está presente y sobre el simulador cuando no lo está, sin enmascarar una vía por otra.</p>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§3</span> Arquitectura y módulos</h3>
+      <h3 id="backend-3"><span class="sn">§3</span> Arquitectura y módulos</h3>
       <div class="sub">qssc/ — librería de física + simulador (5.100 SLOC)</div>
       <div class="mod"><code>backend.py</code> <span class="sloc">(1.753)</span> — <span class="desc"><code>QSSCBackend</code>: backend de Qiskit. Modela los 64 píxeles como procesadores independientes a 300 K, acoplamiento dipolo-dipolo dentro del píxel (1/r³, <code>dipole.py</code>), detuning por qubit, readout asimétrico y modos <code>pixel_mode</code> (registro/ensamble). Soporta <code>run_array</code> (un circuito por píxel, agregación 64×) con saltado de píxeles de ancho insuficiente.</span></div>
       <div class="mod"><code>simulator.py</code> <span class="sloc">(843)</span> — <span class="desc"><code>SimulatedFPGA</code>: emulación fiel de la FPGA (barrido ODMR con ruido de lectura, detectores, lock-in, secuencias de pulsos). <code>auto_align</code> coloca los NV sobre una rejilla de frecuencias ODMR medidas, no sintética.</span></div>
@@ -839,7 +913,7 @@ frontend/src/styles.css</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§4</span> Tecnologías y lenguajes</h3>
+      <h3 id="backend-4"><span class="sn">§4</span> Tecnologías y lenguajes</h3>
       <table class="lang">
         <tr><th>Lenguaje</th><th>SLOC</th><th>%</th></tr>
         <tr><td><span class="bar" style="width:140px"></span>Python</td><td>7.825</td><td>100 %</td></tr>
@@ -849,7 +923,7 @@ frontend/src/styles.css</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§5</span> Funcionalidades destacadas — metodologías implementadas</h3>
+      <h3 id="backend-5"><span class="sn">§5</span> Funcionalidades destacadas — metodologías implementadas</h3>
       <div class="feats">
         <div class="feat"><div class="ft"><span class="n">01</span><b>Descomposición espectral ODMR (contador de qubits)</b> <code>odmr_decompose.py</code></div><p>CLEAN / matching pursuit que resuelve líneas individuales con SNR mínimo y separación mínima &gt; linewidth. El número de líneas resueltas por píxel = anchura de registro = qubits. Es el contador de qubits por píxel.</p></div>
         <div class="feat"><div class="ft"><span class="n">02</span><b>Super-resolución ODMR (sparse OMP)</b> <code>superres_odmr.py</code></div><p>Deconvolución de líneas solapadas por orthogonal matching pursuit; deshace la respuesta espectral del píxel para resolver líneas bajo la linewidth.</p></div>
@@ -871,7 +945,7 @@ frontend/src/styles.css</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§6</span> Originalidad y características distintivas</h3>
+      <h3 id="backend-6"><span class="sn">§6</span> Originalidad y características distintivas</h3>
       <ul>
         <li>Backend cuántico donde <b>el número de qubits por píxel es una cantidad medida</b> (líneas ODMR resueltas), no un parámetro fijo, cerrando el lazo calibración → circuito sobre la rejilla de frecuencias medida.</li>
         <li><b>Modelo físico de 64 procesadores independientes a 300 K</b> (acoplamiento cross-píxel nulo a 2,5 mm) frente a una máquina de 640 qubits, con gate de 2 qubits spin por dipolo 1/r³ fundamentado (no penaliza el canal óptico HOM).</li>
@@ -881,7 +955,7 @@ frontend/src/styles.css</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§7</span> Estado de verificación</h3>
+      <h3 id="backend-7"><span class="sn">§7</span> Estado de verificación</h3>
       <ul>
         <li>Suite pytest completa en verde (salida 0, sin fallos): <b>416 tests superados, 12 omitidos</b>, en 33 ficheros de test.</li>
         <li>Tests de física (dipolo-dipole, canales de error, corrección Qiskit) + tests de integración API (TestClient sobre la app real) + test de la vía real con FPGA simulada (mock) para gradiometría tensorial y programación de gradiente.</li>
@@ -891,7 +965,7 @@ frontend/src/styles.css</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§8</span> Entorno de ejecución</h3>
+      <h3 id="backend-8"><span class="sn">§8</span> Entorno de ejecución</h3>
       <ul>
         <li><b>Python</b>: 3.12 con entorno virtual.</li>
         <li><b>Servicio</b>: <code>uvicorn api.main:app --port 8011</code>; worker RQ <code>rq worker qssc</code> desde el mismo árbol que la API.</li>
@@ -901,7 +975,7 @@ frontend/src/styles.css</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§9</span> Lista de ficheros fuente depositados</h3>
+      <h3 id="backend-9"><span class="sn">§9</span> Lista de ficheros fuente depositados</h3>
 <pre class="files">api/jobs.py
 api/main.py
 api/runner.py
@@ -940,7 +1014,7 @@ qssc/tensor_gradiometry.py</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§1</span> Datos de la obra</h3>
+      <h3 id="pcb-1"><span class="sn">§1</span> Datos de la obra</h3>
       <table class="kv">
         <tr><th>Título</th><td>QSSC — Toolchain EDA headless para la generación, enrutado y verificación de las placas PCB KiCad de la plataforma cuántica</td></tr>
         <tr><th>Tipo de obra</th><td>Programa de ordenador (Art. 96.1 del Texto Refundido de la Ley de Propiedad Intelectual, RDLeg 1/1996)</td></tr>
@@ -962,13 +1036,13 @@ qssc/tensor_gradiometry.py</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§2</span> Descripción general</h3>
+      <h3 id="pcb-2"><span class="sn">§2</span> Descripción general</h3>
       <p class="lead">Esta unidad es el toolchain EDA headless que genera, enruta y verifica las dos placas PCB del QSSC (placa principal 6 capas 150×118 mm y placa cabezal 6 capas) sin abrir la GUI de KiCad.</p>
       <p>El toolchain produce los ficheros <code>.kicad_pcb</code>, <code>.kicad_sch</code>, <code>.kicad_pro</code> y <code>.kicad_sym</code> por código —netlist, footprintes, apilado de capas, posicionado, fanout de bus del dado, planos de masa— y luego ejecuta el enrutado de señales, el vuelcado/reebarbado de zonas, el enrutador automático FreeRouting y el cierre de split-nets residuales, todo de forma programática y reproducible. La verificación (DRC/ERC, auditoría de conectividad y netlist) se ejecuta con <code>kicad-cli</code> y scripts de auditoría propios, de modo que las dos placas alcanzan DRC 0/0/0 de extremo a extremo sin intervención manual en la GUI.</p>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§3</span> Arquitectura y módulos</h3>
+      <h3 id="pcb-3"><span class="sn">§3</span> Arquitectura y módulos</h3>
       <p>23 scripts Python en <code>tools/</code>, organizados en cinco grupos funcionales:</p>
 
       <div class="sub">Generación del diseño (netlist + footprintes + capas)</div>
@@ -1003,7 +1077,7 @@ qssc/tensor_gradiometry.py</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§4</span> Tecnologías y lenguajes</h3>
+      <h3 id="pcb-4"><span class="sn">§4</span> Tecnologías y lenguajes</h3>
       <table class="lang">
         <tr><th>Lenguaje</th><th>SLOC</th><th>%</th></tr>
         <tr><td><span class="bar" style="width:140px"></span>Python 3.12</td><td>5.918</td><td>100 %</td></tr>
@@ -1013,7 +1087,7 @@ qssc/tensor_gradiometry.py</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§5</span> Funcionalidades destacadas — metodologías EDA implementadas</h3>
+      <h3 id="pcb-5"><span class="sn">§5</span> Funcionalidades destacadas — metodologías EDA implementadas</h3>
       <div class="feats">
         <div class="feat"><div class="ft"><span class="n">01</span><b>Generación headless del diseño completo</b> <code>gen_qssc_kicad.py</code></div><p>Construye ambas placas (principal 150×118 mm 6 capas + cabezal 6 capas) por código: netlist por datasheet, footprintes, apilado de capas, posicionado, zócalo SBT Ironwood del dado de 130 pads a 2,5 mm de pitch, bus del dado. Sin abrir la GUI de KiCad — reproducible.</p></div>
         <div class="feat"><div class="ft"><span class="n">02</span><b>Fanout del dado derivado de la capa de pads</b> <code>_chip_fanout</code></div><p>El fanout del bus del dado se deriva automáticamente de la capa de pads, con 0,80 mm de clearance, despejando el campo de 0,30 mm para que el autoruter no lo bloquee. HDI via floors 0,20/0,05.</p></div>
@@ -1028,7 +1102,7 @@ qssc/tensor_gradiometry.py</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§6</span> Originalidad y características distintivas</h3>
+      <h3 id="pcb-6"><span class="sn">§6</span> Originalidad y características distintivas</h3>
       <ul>
         <li>Toolchain EDA <b>100 % headless y reproducible</b>: las dos placas se generan, enrutan y verifican a DRC 0/0/0 sin abrir la GUI de KiCad, de extremo a extremo por código.</li>
         <li><b>Generación por código del netlist + footprintes + apilado</b> de un instrumento cuántico de matriz 64-píxel con dado de 130 pads a 2,5 mm y zócalo SBT, no captura manual de un esquema.</li>
@@ -1038,7 +1112,7 @@ qssc/tensor_gradiometry.py</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§7</span> Estado de verificación</h3>
+      <h3 id="pcb-7"><span class="sn">§7</span> Estado de verificación</h3>
       <ul>
         <li>Ambas placas alcanzan <b>DRC 0/0/0</b> (0 errores, 0 avisos, 0 split-nets) verificadas con <code>kicad-cli</code> headless.</li>
         <li>Auditoría de conectividad y pin-audit (scripts propios) en verde; integradas en el CI (<code>pcb.yml</code>).</li>
@@ -1047,7 +1121,7 @@ qssc/tensor_gradiometry.py</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§8</span> Entorno de ejecución</h3>
+      <h3 id="pcb-8"><span class="sn">§8</span> Entorno de ejecución</h3>
       <ul>
         <li><b>Python</b>: 3.12 con el mismo entorno virtual del proyecto (<code>.venv</code>).</li>
         <li><b>KiCad</b>: 8.0 (PPA <code>kicad/kicad-8.0-releases</code>); <code>kicad-cli</code> para DRC/ERC headless.</li>
@@ -1057,7 +1131,7 @@ qssc/tensor_gradiometry.py</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§9</span> Lista de ficheros fuente depositados</h3>
+      <h3 id="pcb-9"><span class="sn">§9</span> Lista de ficheros fuente depositados</h3>
 <pre class="files">tools/_audit_pins.py
 tools/_chip_map.py
 tools/_grep_ep.py
@@ -1095,7 +1169,7 @@ tools/widen_tracks.py</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§1</span> Datos de la obra</h3>
+      <h3 id="ci-1"><span class="sn">§1</span> Datos de la obra</h3>
       <table class="kv">
         <tr><th>Título</th><td>QSSC — Pipelines de integración continua (GitHub Actions) y suite de verificación automatizada</td></tr>
         <tr><th>Tipo de obra</th><td>Programa de ordenador (Art. 96.1 del Texto Refundido de la Ley de Propiedad Intelectual, RDLeg 1/1996)</td></tr>
@@ -1117,13 +1191,13 @@ tools/widen_tracks.py</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§2</span> Descripción general</h3>
+      <h3 id="ci-2"><span class="sn">§2</span> Descripción general</h3>
       <p class="lead">Esta unidad es el sistema de calidad que verifica automáticamente las otras cuatro en cada push y pull request: una suite de tests <code>pytest</code> que ejercita la física, la API, el modo hardware real, la readout avanzada, la sensórica y la PCB, y cuatro pipelines de GitHub Actions que orquestan tests, lint, simulación RTL, DRC de PCB, build y despliegue.</p>
       <p>El sistema garantiza que ningún cambio llega a <code>main</code> sin pasar los tests de software/física, el lint <code>ruff</code>, la simulación funcional <code>iverilog</code> del RTL, el DRC <code>kicad-cli</code> de ambas placas y el gate verde-de-CI antes del despliegue. Es la capa que hace reproducible y auditable el depósito completo.</p>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§3</span> Arquitectura y módulos</h3>
+      <h3 id="ci-3"><span class="sn">§3</span> Arquitectura y módulos</h3>
 
       <div class="sub">Pipelines de GitHub Actions (4 workflows, 9 jobs)</div>
       <div class="mod"><code>.github/workflows/ci.yml</code> <span class="sloc">(125 SLOC)</span> — <span class="desc">pipeline principal, 3 jobs en matriz Python: (1) <b>Tests</b> — <code>pytest --cov=qssc --cov=api</code> con cobertura + smoke test del CLI + subida de artefacto de cobertura; (2) <b>Lint</b> — <code>ruff check --select=E9,F63,F7,F82,F401,F841</code>; (3) <b>FPGA RTL</b> — parse pyverilog de todos los módulos + consistencia XDC↔top_level (<code>tools/check_xdc_ports.py</code>) + simulación funcional <code>iverilog -g2012 -DFAST_SIM</code> del testbench auto-verificable.</span></div>
@@ -1142,7 +1216,7 @@ tools/widen_tracks.py</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§4</span> Tecnologías y lenguajes</h3>
+      <h3 id="ci-4"><span class="sn">§4</span> Tecnologías y lenguajes</h3>
       <table class="lang">
         <tr><th>Lenguaje</th><th>SLOC</th><th>%</th></tr>
         <tr><td><span class="bar" style="width:140px"></span>Python 3.12 (tests)</td><td>4.843</td><td>93,0 %</td></tr>
@@ -1153,7 +1227,7 @@ tools/widen_tracks.py</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§5</span> Funcionalidades destacadas — gates de calidad automatizados</h3>
+      <h3 id="ci-5"><span class="sn">§5</span> Funcionalidades destacadas — gates de calidad automatizados</h3>
       <div class="feats">
         <div class="feat"><div class="ft"><span class="n">01</span><b>Gate de tests con cobertura</b> <code>ci.yml · Tests</code></div><p><code>pytest --cov=qssc --cov=api</code> en matriz de versiones de Python; smoke test del CLI (<code>qssc info</code>, <code>qssc shor 15</code>); subida del informe de cobertura como artefacto.</p></div>
         <div class="feat"><div class="ft"><span class="n">02</span><b>Lint estricto anti-errores en tiempo de ejecución</b> <code>ci.yml · Lint</code></div><p><code>ruff check --select=E9,F63,F7,F82,F401,F841</code> — captura errores de sintaxis, imports no usados y variables no usadas antes de llegar a main.</p></div>
@@ -1166,7 +1240,7 @@ tools/widen_tracks.py</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§6</span> Originalidad y características distintivas</h3>
+      <h3 id="ci-6"><span class="sn">§6</span> Originalidad y características distintivas</h3>
       <ul>
         <li>CI que verifica <b>las cuatro capas</b> del instrumento (backend, RTL, PCB, frontend) en cada push, no sólo los tests de software: simulación RTL + DRC de PCB real + lint + despliegue gateado.</li>
         <li><b>DRC de PCB real en CI</b> con <code>kicad-cli</code> + binding pcbnew instalado del PPA oficial — el mismo DRC que un ingeniero abriría en la GUI, ejecutado headless en cada cambio.</li>
@@ -1176,7 +1250,7 @@ tools/widen_tracks.py</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§7</span> Estado de verificación</h3>
+      <h3 id="ci-7"><span class="sn">§7</span> Estado de verificación</h3>
       <ul>
         <li>Suite <code>pytest</code> en verde (software/física): 354 funciones de test en 33 ficheros, salida 0 fallos.</li>
         <li>Simulación RTL <code>iverilog</code>: 18/18 escenarios del testbench pasan.</li>
@@ -1187,7 +1261,7 @@ tools/widen_tracks.py</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§8</span> Entorno de ejecución</h3>
+      <h3 id="ci-8"><span class="sn">§8</span> Entorno de ejecución</h3>
       <ul>
         <li><b>Tests locales</b>: <code>python -m pytest</code> (suite software/física); los tests PCB requieren <code>kicad-cli</code>.</li>
         <li><b>CI</b>: GitHub Actions sobre <code>ubuntu-latest</code>; KiCad 8.0 del PPA <code>kicad/kicad-8.0-releases</code>.</li>
@@ -1196,7 +1270,7 @@ tools/widen_tracks.py</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§9</span> Lista de ficheros fuente depositados</h3>
+      <h3 id="ci-9"><span class="sn">§9</span> Lista de ficheros fuente depositados</h3>
 <pre class="files">.github/workflows/ci.yml
 .github/workflows/deploy.yml
 .github/workflows/pcb.yml
