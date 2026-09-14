@@ -146,28 +146,136 @@ Herramientas: Yosys / Vivado (síntesis), iverilog (simulación), pyverilog
 
 ---
 
-### 5. Funcionalidades destacadas
+### 5. Funcionalidades destacadas — metodologías implementadas
 
-1. **Barrido ODMR paralelo de 64 píxeles** (`RUN_ALL_ODMR`): un único barrido
-   serial de frecuencia muestrea simultáneamente los 64 detectores y devuelve
-   una matriz (n_puntos × 64) de códigos ADC; el host descompone cada columna
-   en las líneas ODMR resueltas = número de qubits por píxel.
-2. **Secuencia de pulsos con detección síncrona** (`RUN_SEQUENCE` +
-   `READ_LOCKIN`): motor de secuencias con puerta de microondas temporizada,
-   acumulador lock-in simétrico (media-ventana, tope 10 000) y readout de Ramsey
-   con fase aplicada — habilita medidas de T2* / Hahn a 300 K.
-3. **Programación de bobina de gradiente** (`SET_GRADIENT <código>`): escribe el
-   DAC de gradiente antes del barrido para separar espectralmente los NV dentro
-   de un píxel (registro direccionable por gradiente).
-4. **Lectura cuántica prima** (`READ_LOCKINP`): lectura de lock-in integrada con
-   denoiser por primas-coprimas para mejorar la relación señal/ruido del
-   readout.
-5. **Generador de entropía cuántica** (`qrng_entropy`): RNG derivado del ruido
-   de detección cuántica con tests de salud y re-intento de 64× sobre la
-   entropía del SO.
-6. **Seguridad determinista**: watchdogs anti-bloqueo en todas las FSMs,
-   sincronizadores CDC de 2 FF para señales entre dominios de reloj, y
-   read-one-with-wait-for-fresh en el lector ADC para evitar datos rezagados.
+Cada metodología se realiza con un verbo del protocolo UART y un módulo RTL
+dedicado. Todas las cifras (frecuencias, duraciones de puerta, topes de
+acumulador) son constantes del firmware depositado.
+
+#### Adquisición y barrido ODMR
+
+1. **Barrido ODMR con puerta prolongada** (`ODMR_SWEEP`): barrido del ADF4351
+   sobre 2,80–2,94 GHz (transición ms=0 del NV, D≈2,87 GHz). Cada punto
+   mantiene la puerta RF 200 µs (`ODMR_GATE_NS`), mayor que los ~86 µs del
+   scan del ADC, y la lectura ADC se dispara al flanco de subida de la puerta
+   (*gate-rise read*) para que la muestra refleje la fluorescencia con MW
+   encendido. La escritura de frecuencia usa sólo el registro R1 del ADF4351
+   entre puntos para no re-lockear el lazo durante el barrido rápido.
+2. **Barrido ODMR paralelo de 64 píxeles** (`RUN_ALL_ODMR`): un único barrido
+   serial de frecuencia muestrea simultáneamente los 64 detectores en cada
+   punto y devuelve una matriz (n_puntos × 64) de códigos ADC; el host
+   descompone cada columna en las líneas ODMR resueltas, cuyo conteo es el
+   número de qubits por píxel. Un solo barrido produce los 64 espectros a la
+   vez, preservando la sincronía óptica entre píxeles.
+
+#### Secuencias de pulsos
+
+3. **Motor de pulsos Ramsey / Hahn / CPMG** (`RUN_SEQUENCE <site> <kind>
+   <n> <t_step>`): motor de secuencias sobre `n` ventanas (1..1024) con
+   tiempo de evolución libre T = i·t_step. Por ventana: puerta π/2 (fase 0) →
+   precesión libre T → [puerta π → retardo T] (Hahn kind=1 / CPMG kind=2) →
+   puerta π/2 de readout (fase 90° para Ramsey kind=0) → lectura ADC del
+   sitio → emisión del código. El RTL sólo secuencia puertas MW y snapshot
+   del ADC; el host ajusta T2* (Ramsey) / T2 (Hahn/CPMG). CPMG implementa un
+   eco π único en el RTL; el modelo de decaimiento multi-eco es host-side. El
+   motor vigila `mw_gate` subir y bajar antes de iniciar el retardo de
+   precesión — sin solape en T=0.
+4. **Readout de Ramsey con fase aplicada**: la puerta de readout π/2 se escribe
+   a fase 90° para el modo Ramsey. La fase se aplica como escritura R1-only
+   del ADF4351 (`pll_phase_only`) que cambia el registro PHASE sin retocar
+   R0/R2/R4, evitando un re-lock del lazo en medio de la secuencia. La
+   conversión de milirradianes a pasos de fase del chip es
+   `mrad_to_phase = m·4096/6283` (mrad → 0..4095 pasos mod 2π).
+5. **Pulso MW con fase y potencia** (`APPLY_PULSE <qubit> <freq_khz> <amp>
+   <duration_ns> <phase>`): programa la portadora del ADF4351 — fase (R1
+   PHASE, 12 bit), potencia (R4 RF_PWR, 4 niveles) — y temporiza la puerta
+   del conmutador RF durante `duration_ns` (`mw_gate_ns → mw_gate_load`). El
+   firmware **no** conforma una envolvente analógica de amplitud/fase (eso
+   requiere un AWG/modulador real); fija fase + potencia y gateda el RF — el
+   camino MW mínimo y verificable.
+
+#### Detección síncrona (lock-in)
+
+6. **Lock-in síncrono on/off** (`READ_LOCKIN <site> <n_cycles>`): acumulador
+   auto-temporizado independiente del `mod_sync` externo (sim-friendly). Por
+   ciclo: MW on medio-periodo (200 µs, `LI_HALF_NS`) + lectura ADC a
+   `sum_on`; MW off medio-periodo + lectura a `sum_off`. Respuesta
+   `<sum_on> <sum_off> <n_on> <n_off>` — acumulaciones raw; el host deriva
+   diff/σ/SNR. Media-ventana simétrica y tope de 10 000 ciclos. `mod_sync`
+   permanece como referencia externa del lock-in; el FPGA entrega las
+   muestras raw.
+7. **Lock-in de período primo** (`READ_LOCKINP <site> <n_cycles> <half_ns>`):
+   demodula a un medio-período `half_ns = p·τ/2` suministrado por el host,
+   donde `p` es el primo asignado al canal del NV. Como primas distintas son
+   pairwise coprimas, las referencias de lock-in son exactamente ortogonales
+   sobre el LCM (= pₐ·p_b) — cero cross-talk entre canales primos, no
+   meramente pequeño. La selección de primas y la ortogonalidad coprima se
+   mantienen en Python (`qssc.prime_readout`); el RTL sólo demodula al
+   medio-período pedido. Compatible hacia atrás: `READ_LOCKIN` conserva el
+   medio-período de 200 µs por defecto. Verificación de cotas: `n_cycles`
+   fuera de rango responde `ERR`.
+
+#### Técnicas de resolución / qubits
+
+8. **Bobina de gradiente magnético** (`SET_GRADIENT <código 0..4095>`):
+   escribe el DAC MCP4921 (12 bit) que programa la corriente de la bobina de
+   gradiente (I = V_dac/R_sense) antes del barrido ODMR, separando
+   espectralmente los NV dentro de un píxel → registro direccionable por
+   gradiente. La escritura SPI está serializada y espera a que `dac_ctrl`
+   termine el desplazamiento antes de responder OK. `RESET` anula el
+   gradiente (código 0, `grad_en=0`). El inverso
+   `gradient_dac_code_from_mhz` vive en el backend.
+
+#### Emisores y detectores
+
+9. **Emisores CQD paralelos** (`SET_EMITTER / DRIVE_EMITTER / DRIVE_PATTERN /
+   CLEAR_EMITTERS`): 3× TLC5947 de corriente constante, grayscale 12-bit por
+   canal, para los 64 emisores CQD. `SET_EMITTER` arma el nivel de un canal;
+   `DRIVE_PATTERN <duration_ms>` dispara **todos** los canales armados
+   simultáneamente (multi-emisor paralelo); `DRIVE_EMITTER` es el atajo de un
+   solo emisor a plena potencia; `CLEAR_EMITTERS` desarma los 64.
+10. **Calibración emisor→detector** (`CALIBRATE`): por cada emisor, lo bombea,
+    lee los 64 detectores y almacena el detector más brillante en
+    `cal_lut[em]`. Aísla qué emisor se acopla a qué electrodo detector — la
+    LUT de correspondencia óptica que el host usa para enrutar la
+    calibración ODMR.
+11. **Readout paralelo de 64 detectores** (`READ_DETECTORS / READ_DETECTOR`):
+    4× AD7616 dual simultaneous-sampling, 64 canales 16-bit sobre un bus SPI
+    de 9 hilos. Una FSM en background refresca continuamente una RAM 64×16
+    (8 CONVST por scan completo); la FSM de lectura snapshot el sample
+    solicitado. El código entregado es una **muestra de intensidad 16-bit**
+    (salida TIA digitalizada sobre el rango bipolar ±5 V), no un conteo de
+    fotones. `read_one` espera dato fresco (*wait-for-fresh*).
+
+#### Entropía cuántica
+
+12. **Generador de entropía cuántica** (`READ_RNG <n_bytes 1..256>` +
+    `qrng_entropy.v`): extractor de von-Neumann sobre el ruido LSB de un
+    canal oscuro del AD7616 — pares (b0,b1): 01 guarda 1, 10 guarda 0,
+    00/11 descarta. Empaqueta bits depolarizados en palabras W=32-bit.
+    `harvest_en` gatea el extractor; `flush` descarta el par/palabra parcial
+    para que la próxima palabra nazca sólo de muestras post-flush (mantiene
+    kept ≤ raw/2). `samples_seen` es un contador 24-bit. El verbo entrega
+    hex + un footer ` 00064 0 0\n` con el conteo de muestras raw. `mod_sync`
+    no se usa: la entropía viene del ruido eléctrico, no de la señal óptica.
+
+#### Seguridad determinista y control
+
+13. **Seguridad determinista**: watchdogs anti-bloqueo
+    (`GATE_WDOG_CYC = READ_WDOG_CYC = 200 000` ciclos, cubre la puerta máxima
+    de 200 µs + latencia de lectura con margen) en todas las FSM: **sólo**
+    `RESET` escapa de un `mw_gate` atascado o un ADC muerto. Sincronizador
+    CDC de 2 flip-flops para `adc_busy` que cruza dominios de reloj.
+    `read_one` espera dato fresco. La escritura R1-only de fase evita la
+    carrera de re-lock. `RESET` re-estroboscopia `adc_resetn`, anula emisores
+    y gradiente, pero **no** resetea el parser — puede recuperarse a mitad
+    de flujo.
+14. **Verbos de control y prueba** (`ID / STATUS / RESET`): `ID` responde
+    `QSSC v1`; `STATUS` devuelve una línea con `PLL_LOCKED`, `ADC_BUSY` y el
+    estado de la FSM; `RESET` reinicia los periféricos. Verbos desconocidos o
+    mal formados responden `ERR`. Los números son enteros decimales
+    (opcionalmente con signo); las muestras 16-bit se envían como ASCII
+    decimal separado por espacios.
 
 ---
 
@@ -189,7 +297,17 @@ Herramientas: Yosys / Vivado (síntesis), iverilog (simulación), pyverilog
 
 ### 7. Estado de verificación
 
-- 18/18 escenarios de simulación iverilog pasan (`sim/tb_top_level.v`).
+- Banco de pruebas `sim/tb_top_level.v` (926 SLOC) que inyecta los verbos por
+  UART modelo y modela la respuesta analógica de los ADCs; todos los
+  escenarios pasan en iverilog: **ID** (`QSSC v1`), **STATUS**
+  (PLL_LOCKED=1, ADC_BUSY=0), **RESET** (re-estroboscopia + anula gradiente),
+  **ODMR_SWEEP** (4 líneas 2870000–2879999 + OK), **RUN_SEQUENCE** (00004 +
+  4×01234, puertas MW y escrituras PLL contadas), **Ramsey con fase**
+  (puertas + escrituras PLL R1-only), **READ_LOCKIN**
+  (sum_on/sum_off/n_on/n_off), **READ_LOCKINP** (válido + fuera-de-cotas →
+  ERR), **RUN_ALL_ODMR** (2 filas × 64 muestras + OK), **SET_GRADIENT**
+  (palabra MCP4921 + grad_en), **CALIBRATE** (LUT em→det) y **READ_RNG**
+  (hex + footer 00064 0 0).
 - Verificación estructural pyverilog y validación de constraints XDC en CI.
 - El bitstream sintetiza para XC7A15T-1CSG325C (informe de utilización y timing
   generado por `synth/make_report.py`).

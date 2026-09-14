@@ -104,26 +104,48 @@ componentes propios.
 
 ---
 
-### 5. Funcionalidades destacadas
+### 5. Funcionalidades destacadas — metodologías expuestas al operador
 
 1. **Conmutador simulador / hardware real**: el operador selecciona la fuente
    de ejecución; en modo real la interfaz detecta la FPGA y ofrece los verbos
-   de control, sin enmascarar un resultado sintético como real.
-2. **Calibración paralela de 64 píxeles**: lanza el barrido ODMR del array,
-   muestra la anchura de registro medida por píxel, el número de qubits
-   escaneados, las frecuencias ODMR y un modal de pines/frecuencias.
-3. **Modos de lectura avanzados**: super-resolución ODMR (factor ajustable),
-   lectura Bayesiana (intervalo creíble ajustable 0,01–0,99), denoise por
-   primas y pila anti-ruido (pasivo/activo/completo) — todos conmutables desde
-   el panel.
-4. **Marcado de resultados y derivación**: el histograma marca el resultado
-   (factor, período, estado suma) y un modal explica paso a paso su
-   derivación desde los conteos cuánticos.
-5. **Panel de sensórica**: magnetómetro vectorial, gradiometría tensorial con
-   ajuste de dipolo, compás cuántico, giro y sensores auxiliares.
-6. **Modo de píxel registro/ensamble**: selector que refleja el modelo físico
-  (registro de N qubits dentro del píxel vs. ensamble de 1 qubit por píxel a
-  300 K), con el N medido por la calibración.
+   de control (ID/STATUS/RESET/ODMR_SWEEP), sin enmascarar un resultado
+   sintético como real — la UI distingue y comunica explícitamente la fuente
+   de cada resultado.
+2. **Calibración paralela de 64 píxeles (barrido ODMR)**: lanza el barrido
+   ODMR del array, muestra la anchura de registro medida por píxel, el número
+   de qubits escaneados, las frecuencias ODMR y un modal de
+   pines/frecuencias. Refleja el lazo calibración → circuito: el N medido
+   alimenta la rejilla del registro.
+3. **Super-resolución ODMR**: factor de super-resolución ajustable
+   (deconvolución sparse OMP de líneas solapadas), conmutable desde el panel
+   de modos de lectura.
+4. **Lectura Bayesiana cuántico-limitada**: intervalo creíble unilateral
+   ajustable 0,01–0,99 con corrección Bonferroni; lectura óptima por píxel.
+5. **Denoise por primas + pila anti-ruido**: conmutador de denoise por
+   primas-coprimas (lock-in de período primo) y pila anti-ruido clásica 300 K
+   en modo pasivo / activo / completo, con ganancia de filtro y límites
+   físicos visibles.
+6. **Centroiding sub-píxel e integración N-shot**: selector de régimen de
+   readout con centroiding por charge-sharing (imagen detector 64→64·S) e
+   integración N-shot del lock-in (eleva el ancho medido ~+30 %/píxel sin
+   cambio de hardware).
+7. **Panel de sensórica cuántica**: magnetómetro vectorial 4 ejes ⟨111⟩,
+   gradiometría tensorial con ajuste de dipolo, compás cuántico, giro y
+   sensores auxiliares (ferro/nav/thermal/current).
+8. **Modo de píxel registro / ensamble**: selector que refleja el modelo
+   físico (registro de N qubits dentro del píxel con gate dipolo K_N vs.
+   ensamble de 1 qubit por píxel a 300 K), con el N medido por la
+   calibración.
+9. **Regulador de gradiente**: control del DAC de la bobina de gradiente con
+   tope al máximo de la bobina, valor por defecto de ~70 líneas/píxel, y
+   visualización del tope resoluble + código DAC.
+10. **Marcado de resultados y derivación**: el histograma marca el resultado
+    (factor, período, estado suma) y un modal explica paso a paso su
+    derivación desde los conteos cuánticos — destinado a la reproducibilidad
+    experimental.
+11. **Ejecución paralela 64-píxel**: lanzamiento de la computación paralela
+    (Shor coprimo distribuido, muestreo 64×) con resultado marcado y
+    derivación al estilo del píxel único.
 
 ---
 

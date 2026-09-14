@@ -188,6 +188,31 @@ pre.files{
 .feat .ft b{color:var(--text);font-size:14.5px}
 .feat p{margin:0;color:var(--muted);font-size:13.5px;max-width:none}
 
+/* cross-cutting methodology catalog (index) */
+section.catalog{padding:54px 0 26px;border-top:1px solid var(--border)}
+section.catalog h2{font-size:clamp(24px,3.4vw,32px);margin:0 0 8px}
+section.catalog .cllead{color:var(--muted);max-width:72ch;margin:0 0 10px}
+section.catalog .lgnd{display:flex;gap:18px;flex-wrap:wrap;margin:14px 0 20px;font-family:var(--font-mono);font-size:11.5px;color:var(--muted);letter-spacing:.04em}
+section.catalog .lgnd span{display:inline-flex;align-items:center;gap:7px}
+section.catalog .lgnd .ck{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:5px;font-size:10px;font-weight:700}
+.matxwrap{overflow-x:auto;border:1px solid var(--border);border-radius:12px}
+table.matx{width:100%;border-collapse:collapse;font-size:13px;min-width:720px}
+table.matx th,table.matx td{padding:9px 12px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
+table.matx thead th{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);background:var(--bg-soft);position:sticky;top:60px;z-index:2}
+table.matx th.m{width:32%}
+table.matx td.mn{font-weight:600;color:var(--text);font-size:13.5px}
+table.matx td.mn code{font-size:11.5px;color:var(--brand);font-weight:500}
+table.matx td.d{color:var(--muted);font-size:12px;width:40%}
+table.matx td.y{text-align:center;width:9%}
+.ck{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:6px;font-size:11px;font-weight:700}
+.ck.f{background:rgba(34,211,238,.16);color:#22d3ee}
+.ck.b{background:rgba(244,114,182,.16);color:#f472b6}
+.ck.x{background:rgba(139,92,246,.16);color:#8b5cf6}
+.no{color:var(--dim);font-size:15px}
+table.matx tr.grp td{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--brand);background:color-mix(in srgb,var(--panel) 45%,transparent);padding:9px 12px;border-bottom:1px solid var(--border)}
+table.matx tbody tr:hover{background:color-mix(in srgb,var(--panel) 55%,transparent)}
+table.matx tr:last-child td{border-bottom:none}
+
 footer.ipfoot{
   margin-top:48px;padding:34px 0 46px;border-top:1px solid var(--border);
   background:var(--bg-soft);
@@ -231,6 +256,7 @@ footer.ipfoot .meta b{color:var(--text);font-weight:600}
       <span><span class="grad">QSSC</span></span>
     </a>
     <div class="links">
+      <a href="#metodologias"><span class="dot" style="background:#6366f1"></span>Metodologías</a>
       <a href="#fpga"><span class="dot" style="background:#22d3ee"></span>FPGA</a>
       <a href="#frontend"><span class="dot" style="background:#8b5cf6"></span>Frontend</a>
       <a href="#backend"><span class="dot" style="background:#f472b6"></span>Backend</a>
@@ -287,6 +313,73 @@ footer.ipfoot .meta b{color:var(--text);font-weight:600}
     </div>
   </div>
 </header>
+
+<!-- =========================== CATÁLOGO DE METODOLOGÍAS (ÍNDICE) =========================== -->
+<section class="catalog" id="metodologias">
+  <div class="wrap">
+    <h2>Catálogo de metodologías implementadas</h2>
+    <p class="cllead">Las metodologías con nombre propio del QSSC —barrido ODMR, secuencias de pulsos, lock-in, readout avanzado, sensórica— no viven en una sola capa: cada una se realiza parcialmente en el firmware FPGA (adquisición determinista), en el backend (física, descomposición, ajuste) y en el frontend (exposición al operador). Esta matriz es el índice navegable de las tres unidades: cada fila es una metodología y cada columna marca dónde hay código depositado que la implementa.</p>
+    <div class="lgnd">
+      <span><span class="ck f">F</span> Firmware FPGA</span>
+      <span><span class="ck b">B</span> Backend / física</span>
+      <span><span class="ck x">X</span> Frontend</span>
+      <span><span class="no">·</span> no implementado en esa capa</span>
+    </div>
+    <div class="matxwrap">
+    <table class="matx">
+      <thead><tr><th class="m">Metodología</th><th class="d">Breve descripción</th><th class="y">FPGA</th><th class="y">Back</th><th class="y">Front</th></tr></thead>
+      <tbody>
+
+      <tr class="grp"><td colspan="5">Adquisición y barrido ODMR</td></tr>
+      <tr><td class="mn">Barrido ODMR con puerta prolongada <code>ODMR_SWEEP</code></td><td class="d">Barrido de frecuencia 2,80–2,94 GHz vía ADF4351; puerta RF de 200 µs por punto (≥ ~86 µs de scan) y lectura ADC sincronizada al flanco de subida de la puerta.</td><td class="y"><span class="ck f">F</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="ck x">X</span></td></tr>
+      <tr><td class="mn">Barrido ODMR paralelo de 64 píxeles <code>RUN_ALL_ODMR</code></td><td class="d">Un único barrido serial muestrea simultáneamente los 64 detectores → matriz (n_puntos × 64) de códigos ADC.</td><td class="y"><span class="ck f">F</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="ck x">X</span></td></tr>
+      <tr><td class="mn">Descomposición espectral ODMR (contador de qubits)</td><td class="d">CLEAN / matching pursuit que resuelve líneas individuales; el número de líneas resueltas por píxel = anchura de registro = qubits.</td><td class="y"><span class="no">·</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="ck x">X</span></td></tr>
+
+      <tr class="grp"><td colspan="5">Secuencias de pulsos y lock-in</td></tr>
+      <tr><td class="mn">Motor de pulsos Ramsey / Hahn / CPMG <code>RUN_SEQUENCE</code></td><td class="d">Secuencia sobre n ventanas (T = i·t_step): π/2 → precesión T → [π → T] (Hahn/CPMG) → π/2 readout → lectura ADC. El host ajusta T2*/T2.</td><td class="y"><span class="ck f">F</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="no">·</span></td></tr>
+      <tr><td class="mn">Readout de Ramsey con fase (escritura R1-only) <code>APPLY_PULSE</code></td><td class="d">Puerta de readout π/2 a fase 90°; escritura de fase sólo en R1 (sin re-lock del PLL) para no perturbar el lazo entre pulsos.</td><td class="y"><span class="ck f">F</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="no">·</span></td></tr>
+      <tr><td class="mn">Pulso MW con fase y potencia <code>APPLY_PULSE</code></td><td class="d">Programa fase (R1 PHASE, 12 bit), potencia (R4 RF_PWR, 4 niveles) y temporiza la puerta del conmutador RF (duration_ns).</td><td class="y"><span class="ck f">F</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="no">·</span></td></tr>
+      <tr><td class="mn">Lock-in síncrono on/off <code>READ_LOCKIN</code></td><td class="d">Acumulador auto-temporizado: MW on medio-periodo → suma_on; MW off → suma_off. Reply de acumulaciones raw; el host deriva diff/σ/SNR.</td><td class="y"><span class="ck f">F</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="ck x">X</span></td></tr>
+      <tr><td class="mn">Lock-in de período primo <code>READ_LOCKINP</code></td><td class="d">Demodulación a un medio-período host = p·τ/2 (p primo); primas coprimas → ortogonalidad exacta (cero cross-talk entre canales). Denoiser coprimo.</td><td class="y"><span class="ck f">F</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="ck x">X</span></td></tr>
+
+      <tr class="grp"><td colspan="5">Técnicas de resolución y qubits</td></tr>
+      <tr><td class="mn">Bobina de gradiente (registro direccionable) <code>SET_GRADIENT</code></td><td class="d">DAC MCP4921 (12 bit) programa la corriente de la bobina para separar espectralmente los NV dentro de un píxel; ancho de registro gradiente-mediado.</td><td class="y"><span class="ck f">F</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="ck x">X</span></td></tr>
+      <tr><td class="mn">Super-resolución ODMR (sparse OMP)</td><td class="d">Deconvolución de líneas solapadas por orthogonal matching pursuit; deshace la respuesta espectral del píxel para resolver líneas bajo la linewidth.</td><td class="y"><span class="no">·</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="ck x">X</span></td></tr>
+      <tr><td class="mn">Centroiding sub-píxel por charge-sharing</td><td class="d">Reconstrucción del centroide de la spots del detector 64 → 64·S vía compartir carga; mejora la resolución de imagen, no incrementa qubits.</td><td class="y"><span class="no">·</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="ck x">X</span></td></tr>
+      <tr><td class="mn">Integración N-shot del lock-in</td><td class="d">Acumula N ciclos de lock-in para elevar el ancho medido (~+30 %/píxel) sin cambio de hardware; anchura de registro integrada.</td><td class="y"><span class="no">·</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="ck x">X</span></td></tr>
+      <tr><td class="mn">Lectura Bayesiana cuántico-limitada</td><td class="d">Intervalo creíble unilateral con corrección Bonferroni; lectura óptima cuántico-limitada por píxel.</td><td class="y"><span class="no">·</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="ck x">X</span></td></tr>
+      <tr><td class="mn">Pila anti-ruido clásica 300 K</td><td class="d">Filtros SNR-protectivos a temperatura ambiente; canales lentos no promedian como 1/√N; modo pasivo / activo / completo.</td><td class="y"><span class="no">·</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="ck x">X</span></td></tr>
+
+      <tr class="grp"><td colspan="5">Sensórica cuántica</td></tr>
+      <tr><td class="mn">Magnetometría vectorial 4 ejes ⟨111⟩</td><td class="d">Los 4 ejes tetraédricos del NV producen dobletes cuyo gap = 2γ|B·nᵢ|; búsqueda LS sobre las 2ᵏ combinaciones de signo reconstruye el vector B por píxel.</td><td class="y"><span class="ck f">F</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="ck x">X</span></td></tr>
+      <tr><td class="mn">Gradiometría tensorial + localización de dipolo</td><td class="d">Jacobiano por píxel del mapa B-vector 8×8×3; ajuste de dipolo (diferencial por splits signo-ambiguo o por vectores).</td><td class="y"><span class="ck f">F</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="ck x">X</span></td></tr>
+      <tr><td class="mn">Compás / giro cuántico</td><td class="d">Compás magnético y giro derivados de la matriz NV; sensores auxiliares ferro/nav/thermal/current.</td><td class="y"><span class="no">·</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="ck x">X</span></td></tr>
+
+      <tr class="grp"><td colspan="5">Readout paralelo y emisores</td></tr>
+      <tr><td class="mn">Readout paralelo 64 detectores (AD7616) <code>READ_DETECTORS</code></td><td class="d">4× AD7616 dual simultaneous-sampling, 64 canales 16-bit; FSM en background refresca RAM 64×16; lectura con espera de dato fresco.</td><td class="y"><span class="ck f">F</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="ck x">X</span></td></tr>
+      <tr><td class="mn">Emisores CQD paralelos (TLC5947) <code>DRIVE_PATTERN</code></td><td class="d">3× TLC5947 corriente constante, grayscale 12-bit por canal; dispara todos los emisores armados en paralelo (multi-emisor simultáneo).</td><td class="y"><span class="ck f">F</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="no">·</span></td></tr>
+      <tr><td class="mn">Calibración emisor→detector (LUT) <code>CALIBRATE</code></td><td class="d">Por emisor: bombea, lee los 64, almacena el detector más brillante → LUT em→det que aísla la correspondencia óptica.</td><td class="y"><span class="ck f">F</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="no">·</span></td></tr>
+
+      <tr class="grp"><td colspan="5">Computación cuántica</td></tr>
+      <tr><td class="mn">Computación paralela 64-píxel <code>run_array</code></td><td class="d">Un circuito por píxel con semillas independientes, agregación 64× shots; saltado de píxeles de ancho insuficiente.</td><td class="y"><span class="ck f">F</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="ck x">X</span></td></tr>
+      <tr><td class="mn">Shor coprimo distribuido</td><td class="d">Factorización de potencias primas vía perfect_power; el primer píxel que halla el período gana; QFT + aritmética eficiente.</td><td class="y"><span class="no">·</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="ck x">X</span></td></tr>
+      <tr><td class="mn">Acoplamiento dipolo 1/r³ (gate spin 2q)</td><td class="d">Gate de 2 qubits spin por dipolo dentro del píxel a 300 K; no penaliza el canal óptico (gate de espín, no HOM).</td><td class="y"><span class="no">·</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="no">·</span></td></tr>
+      <tr><td class="mn">Memoria nuclear NV + ¹³C (simulador)</td><td class="d">Qubit nuclear ¹³C con T2 ~1 s (literatura) apareado al electrón; STORE/RECALL por SWAP; vía simulador (necesita canal RF ~2 MHz en HW).</td><td class="y"><span class="no">·</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="no">·</span></td></tr>
+      <tr><td class="mn">Modo píxel registro / ensamble</td><td class="d">Registro de N qubits dentro del píxel (acoplamiento dipolo K_N) frente a ensamble de 1 qubit por píxel a 300 K; N medido.</td><td class="y"><span class="no">·</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="ck x">X</span></td></tr>
+      <tr><td class="mn">Calibración medida del ancho de registro</td><td class="d">El lazo calibración → circuito alimenta las frecuencias ODMR medidas como rejilla del registro; el N no es una constante dura.</td><td class="y"><span class="ck f">F</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="ck x">X</span></td></tr>
+
+      <tr class="grp"><td colspan="5">Infraestructura y seguridad</td></tr>
+      <tr><td class="mn">QRNG von-Neumann (entropía cuántica) <code>READ_RNG</code></td><td class="d">Extractor de von-Neumann sobre el ruido LSB de un canal oscuro del AD7616; palabras 32-bit, contador de muestras 24-bit, footer de estadísticas.</td><td class="y"><span class="ck f">F</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="no">·</span></td></tr>
+      <tr><td class="mn">Seguridad determinista (watchdogs / CDC)</td><td class="d">Watchdogs anti-bloqueo (200 k ciclos) en todas las FSM; sólo RESET escapa de un mw_gate atascado; sincronizador 2-FF para adc_busy; espera de dato fresco.</td><td class="y"><span class="ck f">F</span></td><td class="y"><span class="no">·</span></td><td class="y"><span class="no">·</span></td></tr>
+      <tr><td class="mn">Verbos de control ID / STATUS / RESET</td><td class="d">Identificación del firmware, estado (PLL_LOCKED, ADC_BUSY) y reset que re-estroboscopia periféricos sin perder el parser.</td><td class="y"><span class="ck f">F</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="ck x">X</span></td></tr>
+      <tr><td class="mn">Tareas asíncronas (cola RQ)</td><td class="d">Calibración y ejecución paralela no bloquean la API; modo síncrono en proceso para tests.</td><td class="y"><span class="no">·</span></td><td class="y"><span class="ck b">B</span></td><td class="y"><span class="no">·</span></td></tr>
+
+      </tbody>
+    </table>
+    </div>
+    <p class="cllead" style="margin-top:18px;font-size:12.5px">Cada metodología se detalla en el §5 de la unidad donde se implementa. Las celdas marcadas indican código depositado real (no planeado): el firmware aporta la adquisición determinista a nivel de ciclo de reloj, el backend la física y el ajuste, y el frontend la exposición al operador.</p>
+  </div>
+</section>
 
 <!-- =========================== UNIDAD 1 · FPGA =========================== -->
 <section class="unidad fpga" id="fpga">
@@ -372,14 +465,49 @@ footer.ipfoot .meta b{color:var(--text);font-weight:600}
     </div>
 
     <div class="block">
-      <h3><span class="sn">§5</span> Funcionalidades destacadas</h3>
+      <h3><span class="sn">§5</span> Funcionalidades destacadas — metodologías implementadas</h3>
+      <p class="lead">Cada metodología se realiza con un verbo del protocolo UART y un módulo RTL dedicado. Todas las cifras (frecuencias, duraciones de puerta, topes de acumulador) son constantes del firmware depositado.</p>
+
+      <div class="sub">Adquisición y barrido ODMR</div>
       <div class="feats">
-        <div class="feat"><div class="ft"><span class="n">01</span><b>Barrido ODMR paralelo de 64 píxeles</b> <code>RUN_ALL_ODMR</code></div><p>Un único barrido serial de frecuencia muestrea simultáneamente los 64 detectores y devuelve una matriz (n_puntos × 64) de códigos ADC; el host descompone cada columna en las líneas ODMR resueltas = número de qubits por píxel.</p></div>
-        <div class="feat"><div class="ft"><span class="n">02</span><b>Secuencia de pulsos con detección síncrona</b> <code>RUN_SEQUENCE + READ_LOCKIN</code></div><p>Motor de secuencias con puerta de microondas temporizada, acumulador lock-in simétrico (media-ventana, tope 10 000) y readout de Ramsey con fase aplicada — habilita medidas de T2* / Hahn a 300 K.</p></div>
-        <div class="feat"><div class="ft"><span class="n">03</span><b>Programación de bobina de gradiente</b> <code>SET_GRADIENT</code></div><p>Escribe el DAC de gradiente antes del barrido para separar espectralmente los NV dentro de un píxel (registro direccionable por gradiente).</p></div>
-        <div class="feat"><div class="ft"><span class="n">04</span><b>Lectura cuántica prima</b> <code>READ_LOCKINP</code></div><p>Lectura de lock-in integrada con denoiser por primas-coprimas para mejorar la relación señal/ruido del readout.</p></div>
-        <div class="feat"><div class="ft"><span class="n">05</span><b>Generador de entropía cuántica</b> <code>qrng_entropy</code></div><p>RNG derivado del ruido de detección cuántica con tests de salud y re-intento de 64× sobre la entropía del SO.</p></div>
-        <div class="feat"><div class="ft"><span class="n">06</span><b>Seguridad determinista</b></div><p>Watchdogs anti-bloqueo en todas las FSMs, sincronizadores CDC de 2 FF para señales entre dominios de reloj, y read-one-with-wait-for-fresh en el lector ADC para evitar datos rezagados.</p></div>
+        <div class="feat"><div class="ft"><span class="n">01</span><b>Barrido ODMR con puerta prolongada</b> <code>ODMR_SWEEP</code></div><p>Barrido de frecuencia del sintetizador ADF4351 sobre 2,80–2,94 GHz (transición ms=0 del NV, D≈2,87 GHz). Cada punto mantiene la puerta RF activa 200 µs (<code>ODMR_GATE_NS</code>), mayor que los ~86 µs del scan del ADC, y la lectura del ADC se dispara al flanco de subida de la puerta (<em>gate-rise read</em>) de modo que la muestra refleja la fluorescencia con MW encendido. La escritura de frecuencia usa sólo el registro R1 del ADF4351 entre puntos sucesivos para no re-lockear el lazo dePLL durante el barrido rápido.</p></div>
+        <div class="feat"><div class="ft"><span class="n">02</span><b>Barrido ODMR paralelo de 64 píxeles</b> <code>RUN_ALL_ODMR</code></div><p>Un único barrido serial de frecuencia muestrea simultáneamente los 64 detectores en cada punto y devuelve una matriz (n_puntos × 64) de códigos ADC; el host descompone cada columna en las líneas ODMR resueltas, cuyo conteo es el número de qubits por píxel. Un solo barrido produce los 64 espectros a la vez, preservando la sincronía óptica entre píxeles.</p></div>
+      </div>
+
+      <div class="sub">Secuencias de pulsos</div>
+      <div class="feats">
+        <div class="feat"><div class="ft"><span class="n">03</span><b>Motor de pulsos Ramsey / Hahn / CPMG</b> <code>RUN_SEQUENCE &lt;site&gt; &lt;kind&gt; &lt;n&gt; &lt;t_step&gt;</code></div><p>Motor de secuencias sobre <code>n</code> ventanas (1..1024) con tiempo de evolución libre T = i·t_step. Por ventana: puerta π/2 (fase 0) → precesión libre T → [puerta π → retardo T] (Hahn kind=1 / CPMG kind=2) → puerta π/2 de readout (fase 90° para Ramsey kind=0) → lectura ADC del sitio → emisión del código. El RTL sólo secuencia puertas MW y snapshot del ADC; el host ajusta T2* (Ramsey) / T2 (Hahn/CPMG). CPMG implementa un eco π único en el RTL; el modelo de decaimiento multi-eco es host-side. El motor vigila <code>mw_gate</code> subir y bajar antes de iniciar el retardo de precesión — sin solape en T=0.</p></div>
+        <div class="feat"><div class="ft"><span class="n">04</span><b>Readout de Ramsey con fase aplicada</b></div><p>La puerta de readout π/2 se escribe a fase 90° para el modo Ramsey. La fase se aplica como escritura R1-only del ADF4351 (<code>pll_phase_only</code>) que cambia el registro PHASE sin retocar R0/R2/R4, evitando un re-lock del lazo en medio de la secuencia. La conversión de milirradianes a pasos de fase del chip es <code>mrad_to_phase = m·4096/6283</code> (mrad → 0..4095 pasos mod 2π).</p></div>
+        <div class="feat"><div class="ft"><span class="n">05</span><b>Pulso MW con fase y potencia</b> <code>APPLY_PULSE &lt;qubit&gt; &lt;freq_khz&gt; &lt;amp&gt; &lt;duration_ns&gt; &lt;phase&gt;</code></div><p>Programa la portadora del ADF4351: fase (R1 PHASE, 12 bit), potencia (R4 RF_PWR, 4 niveles) y temporiza la puerta del conmutador RF durante <code>duration_ns</code> (<code>mw_gate_ns → mw_gate_load</code>). El firmware <b>no</b> conforma una envolvente analógica de amplitud/fase (eso requiere un AWG/modulador real); fija fase + potencia y gateda el RF — el camino MW mínimo y verificable.</p></div>
+      </div>
+
+      <div class="sub">Detección síncrona (lock-in)</div>
+      <div class="feats">
+        <div class="feat"><div class="ft"><span class="n">06</span><b>Lock-in síncrono on/off</b> <code>READ_LOCKIN &lt;site&gt; &lt;n_cycles&gt;</code></div><p>Acumulador auto-temporizado independiente del <code>mod_sync</code> externo (sim-friendly). Por ciclo: MW on medio-periodo (200 µs, <code>LI_HALF_NS</code>) + lectura ADC a <code>sum_on</code>; MW off medio-periodo + lectura a <code>sum_off</code>. Respuesta <code>&lt;sum_on&gt; &lt;sum_off&gt; &lt;n_on&gt; &lt;n_off&gt;</code> — acumulaciones raw; el host deriva diff/σ/SNR. Media-ventana simétrica y tope de 10 000 ciclos. <code>mod_sync</code> permanece como referencia externa del lock-in; el FPGA entrega las muestras raw.</p></div>
+        <div class="feat"><div class="ft"><span class="n">07</span><b>Lock-in de período primo</b> <code>READ_LOCKINP &lt;site&gt; &lt;n_cycles&gt; &lt;half_ns&gt;</code></div><p>Demodula a un medio-período <code>half_ns = p·τ/2</code> suministrado por el host, donde <code>p</code> es el primo asignado al canal del NV. Como primas distintas son pairwise coprimas, las referencias de lock-in son exactamente ortogonales sobre el LCM (= pₐ·p_b) — cero cross-talk entre canales primos, no meramente pequeño. La selección de primas y la ortogonalidad coprima se mantienen en Python (<code>qssc.prime_readout</code>); el RTL sólo demodula al medio-período pedido. Compatible hacia atrás: <code>READ_LOCKIN</code> conserva el medio-período de 200 µs por defecto. Verificación de cotas: <code>n_cycles</code> fuera de rango responde <code>ERR</code>.</p></div>
+      </div>
+
+      <div class="sub">Técnicas de resolución / qubits</div>
+      <div class="feats">
+        <div class="feat"><div class="ft"><span class="n">08</span><b>Bobina de gradiente magnético</b> <code>SET_GRADIENT &lt;código 0..4095&gt;</code></div><p>Escribe el DAC MCP4921 (12 bit) que programa la corriente de la bobina de gradiente (I = V<sub>dac</sub>/R<sub>sense</sub>) antes del barrido ODMR, separando espectralmente los NV dentro de un píxel → registro direccionable por gradiente. La escritura SPI está serializada y espera a que <code>dac_ctrl</code> termine el desplazamiento antes de responder OK. <code>RESET</code> anula el gradiente (código 0, <code>grad_en=0</code>). El inverso <code>gradient_dac_code_from_mhz</code> vive en el backend.</p></div>
+      </div>
+
+      <div class="sub">Emisores y detectores</div>
+      <div class="feats">
+        <div class="feat"><div class="ft"><span class="n">09</span><b>Emisores CQD paralelos</b> <code>SET_EMITTER / DRIVE_EMITTER / DRIVE_PATTERN / CLEAR_EMITTERS</code></div><p>3× TLC5947 de corriente constante, grayscale 12-bit por canal, para los 64 emisores CQD. <code>SET_EMITTER</code> arma el nivel de un canal; <code>DRIVE_PATTERN &lt;duration_ms&gt;</code> dispara <b>todos</b> los canales armados simultáneamente (multi-emisor paralelo); <code>DRIVE_EMITTER</code> es el atajo de un solo emisor a plena potencia; <code>CLEAR_EMITTERS</code> desarma los 64. El bus serie TLC5947 (GSCLK + BLANK + XLAT) se controla en <code>tlc5947_ctrl.v</code> con apagado global de seguridad.</p></div>
+        <div class="feat"><div class="ft"><span class="n">10</span><b>Calibración emisor→detector</b> <code>CALIBRATE</code></div><p>Por cada emisor: lo bombea, lee los 64 detectores, almacena el detector más brillante en <code>cal_lut[em]</code>. Aísla qué emisor se acopla a qué electrodo detector — la LUT de correspondencia óptica que el host usa para enrutar la calibración ODMR.</p></div>
+        <div class="feat"><div class="ft"><span class="n">11</span><b>Readout paralelo de 64 detectores</b> <code>READ_DETECTORS / READ_DETECTOR</code></div><p>4× AD7616 dual simultaneous-sampling, 64 canales 16-bit sobre un bus SPI de 9 hilos. Una FSM en background refresca continuamente una RAM 64×16 (8 CONVST por scan completo); la FSM de lectura (<code>read_one</code>/<code>read_all</code>) snapshot el sample solicitado. El código entregado es una <b>muestra de intensidad 16-bit</b> (salida TIA digitalizada sobre el rango bipolar ±5 V), no un conteo de fotones. <code>read_one</code> espera dato fresco (<em>wait-for-fresh</em>) para no servir un valor rezagado.</p></div>
+      </div>
+
+      <div class="sub">Entropía cuántica</div>
+      <div class="feats">
+        <div class="feat"><div class="ft"><span class="n">12</span><b>Generador de entropía cuántica</b> <code>READ_RNG &lt;n_bytes 1..256&gt;</code> + <code>qrng_entropy.v</code></div><p>Extractor de von-Neumann sobre el ruido LSB de un canal oscuro del AD7616: pares (b0,b1) → 01 guarda 1, 10 guarda 0, 00/11 descarta. Empaqueta bits depolarizados en palabras W=32-bit. <code>harvest_en</code> gatea el extractor; <code>flush</code> descarta el par/palabra parcial para que la próxima palabra nazca sólo de muestras post-flush (mantiene kept ≤ raw/2). <code>samples_seen</code> es un contador 24-bit (~200 k muestras, muy por debajo de 2²⁴). El verbo entrega hex + un footer <code> 00064 0 0\n</code> con el conteo de muestras raw. <code>mod_sync</code> no se usa: la entropía viene del ruido eléctrico, no de la señal óptica.</p></div>
+      </div>
+
+      <div class="sub">Seguridad determinista y control</div>
+      <div class="feats">
+        <div class="feat"><div class="ft"><span class="n">13</span><b>Seguridad determinista</b></div><p>Watchdogs anti-bloqueo (<code>GATE_WDOG_CYC = READ_WDOG_CYC = 200 000</code> ciclos, cubre la puerta máxima de 200 µs + latencia de lectura con margen) en todas las FSM: <b>sólo</b> <code>RESET</code> escapa de un <code>mw_gate</code> atascado o un ADC muerto. Sincronizador CDC de 2 flip-flops para <code>adc_busy</code> que cruza dominios de reloj. <code>read_one</code> espera dato fresco. La escritura R1-only de fase evita la carrera de re-lock. <code>RESET</code> re-estroboscopia <code>adc_resetn</code>, anula emisores y gradiente, pero <b>no</b> resetea el parser — puede recuperarse a mitad de flujo.</p></div>
+        <div class="feat"><div class="ft"><span class="n">14</span><b>Verbos de control y prueba</b> <code>ID / STATUS / RESET</code></div><p><code>ID</code> responde <code>QSSC v1\n</code>; <code>STATUS</code> devuelve una línea con <code>PLL_LOCKED</code>, <code>ADC_BUSY</code> y el estado de la FSM; <code>RESET</code> reinicia los periféricos. Verbos desconocidos o mal formados responden <code>ERR\n</code>. Los números son enteros decimales (opcionalmente con signo); las muestras 16-bit se envían como ASCII decimal separado por espacios.</p></div>
       </div>
     </div>
 
@@ -396,7 +524,7 @@ footer.ipfoot .meta b{color:var(--text);font-weight:600}
     <div class="block">
       <h3><span class="sn">§7</span> Estado de verificación</h3>
       <ul>
-        <li>18/18 escenarios de simulación iverilog pasan (<code>sim/tb_top_level.v</code>).</li>
+        <li>Banco de pruebas <code>sim/tb_top_level.v</code> (926 SLOC) que inyecta los verbos por UART modelo y modela la respuesta analógica de los ADCs; todos los escenarios pasan en iverilog: <b>ID</b> (<code>QSSC v1</code>), <b>STATUS</b> (PLL_LOCKED=1, ADC_BUSY=0), <b>RESET</b> (re-estroboscopia + anula gradiente), <b>ODMR_SWEEP</b> (4 líneas 2870000–2879999 + OK), <b>RUN_SEQUENCE</b> (00004 + 4×01234, puertas MW y escrituras PLL contadas), <b>Ramsey con fase</b> (puertas + escrituras PLL R1-only), <b>READ_LOCKIN</b> (sum_on/sum_off/n_on/n_off), <b>READ_LOCKINP</b> (válido + fuera-de-cotas → ERR), <b>RUN_ALL_ODMR</b> (2 filas × 64 muestras + OK), <b>SET_GRADIENT</b> (palabra MCP4921 + grad_en), <b>CALIBRATE</b> (LUT em→det) y <b>READ_RNG</b> (hex + footer 00064 0 0).</li>
         <li>Verificación estructural pyverilog y validación de constraints XDC en CI.</li>
         <li>El bitstream sintetiza para XC7A15T-1CSG325C (informe de utilización y timing generado por <code>synth/make_report.py</code>).</li>
       </ul>
@@ -405,9 +533,9 @@ footer.ipfoot .meta b{color:var(--text);font-weight:600}
     <div class="block">
       <h3><span class="sn">§8</span> Entorno de ejecución</h3>
       <ul>
-        <li><b>Hardware</b>: placa QMTECH XC7A15T-1CSG325C; oscilador 50 MHz; programador JTAG/FT2232H.</li>
-        <li><b>Dependencias externas</b>: sintetizador RF ADF4351, DAC MCP4921, driver LED TLC5947, ADC AD7616 ×4 — todos en la placa cabezal del QSSC.</li>
-        <li><b>Interfaz host</b>: UART 115200-8N1, protocolo de verbos ASCII documentado en <code>docs/</code>.</li>
+        <li><b>Hardware</b>: placa QMTECH XC7A15T-1CSG325C; oscilador 50 MHz (MMCM → 100 MHz interno); programador JTAG/FT2232H.</li>
+        <li><b>Dependencias externas</b>: sintetizador RF ADF4351, DAC MCP4921, driver LED TLC5947 ×3, ADC AD7616 ×4 — todos en la placa cabezal del QSSC.</li>
+        <li><b>Interfaz host</b>: UART 115200-8N1, protocolo de verbos ASCII documentado en <code>command_parser.v</code> y <code>docs/</code>.</li>
       </ul>
     </div>
 
@@ -500,14 +628,19 @@ fpga/synth/run_synth.sh</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§5</span> Funcionalidades destacadas</h3>
+      <h3><span class="sn">§5</span> Funcionalidades destacadas — metodologías expuestas al operador</h3>
       <div class="feats">
-        <div class="feat"><div class="ft"><span class="n">01</span><b>Conmutador simulador / hardware real</b></div><p>El operador selecciona la fuente de ejecución; en modo real la interfaz detecta la FPGA y ofrece los verbos de control, sin enmascarar un resultado sintético como real.</p></div>
-        <div class="feat"><div class="ft"><span class="n">02</span><b>Calibración paralela de 64 píxeles</b></div><p>Lanza el barrido ODMR del array, muestra la anchura de registro medida por píxel, el número de qubits escaneados, las frecuencias ODMR y un modal de pines/frecuencias.</p></div>
-        <div class="feat"><div class="ft"><span class="n">03</span><b>Modos de lectura avanzados</b></div><p>Super-resolución ODMR (factor ajustable), lectura Bayesiana (intervalo creíble 0,01–0,99), denoise por primas y pila anti-ruido (pasivo/activo/completo) — todos conmutables desde el panel.</p></div>
-        <div class="feat"><div class="ft"><span class="n">04</span><b>Marcado de resultados y derivación</b></div><p>El histograma marca el resultado (factor, período, estado suma) y un modal explica paso a paso su derivación desde los conteos cuánticos.</p></div>
-        <div class="feat"><div class="ft"><span class="n">05</span><b>Panel de sensórica</b></div><p>Magnetómetro vectorial, gradiometría tensorial con ajuste de dipolo, compás cuántico, giro y sensores auxiliares.</p></div>
-        <div class="feat"><div class="ft"><span class="n">06</span><b>Modo de píxel registro/ensamble</b></div><p>Selector que refleja el modelo físico (registro de N qubits dentro del píxel vs. ensamble de 1 qubit por píxel a 300 K), con el N medido por la calibración.</p></div>
+        <div class="feat"><div class="ft"><span class="n">01</span><b>Conmutador simulador / hardware real</b></div><p>El operador selecciona la fuente de ejecución; en modo real la interfaz detecta la FPGA y ofrece los verbos de control (ID/STATUS/RESET/ODMR_SWEEP), sin enmascarar un resultado sintético como real — la UI distingue y comunica explícitamente la fuente de cada resultado.</p></div>
+        <div class="feat"><div class="ft"><span class="n">02</span><b>Calibración paralela de 64 píxeles (barrido ODMR)</b></div><p>Lanza el barrido ODMR del array, muestra la anchura de registro medida por píxel, el número de qubits escaneados, las frecuencias ODMR y un modal de pines/frecuencias. Refleja el lazo calibración → circuito: el N medido alimenta la rejilla del registro.</p></div>
+        <div class="feat"><div class="ft"><span class="n">03</span><b>Super-resolución ODMR</b></div><p>Factor de super-resolución ajustable (deconvolución sparse OMP de líneas solapadas), conmutable desde el panel de modos de lectura.</p></div>
+        <div class="feat"><div class="ft"><span class="n">04</span><b>Lectura Bayesiana cuántico-limitada</b></div><p>Intervalo creíble unilateral ajustable 0,01–0,99 con corrección Bonferroni; lectura óptima por píxel.</p></div>
+        <div class="feat"><div class="ft"><span class="n">05</span><b>Denoise por primas + pila anti-ruido</b></div><p>Togle de denoise por primas-coprimas (lock-in de período primo) y pila anti-ruido clásica 300 K en modo pasivo / activo / completo, con ganancia de filtro y límites físicos visibles.</p></div>
+        <div class="feat"><div class="ft"><span class="n">06</span><b>Centroiding sub-píxel e integración N-shot</b></div><p>Selector de régimen de readout con centroiding por charge-sharing (imagen detector 64→64·S) e integración N-shot del lock-in (eleva el ancho medido ~+30 %/píxel sin cambio de hardware).</p></div>
+        <div class="feat"><div class="ft"><span class="n">07</span><b>Panel de sensórica cuántica</b></div><p>Magnetómetro vectorial 4 ejes ⟨111⟩, gradiometría tensorial con ajuste de dipolo, compás cuántico, giro y sensores auxiliares (ferro/nav/thermal/current).</p></div>
+        <div class="feat"><div class="ft"><span class="n">08</span><b>Modo de píxel registro / ensamble</b></div><p>Selector que refleja el modelo físico (registro de N qubits dentro del píxel con gate dipolo K_N vs. ensamble de 1 qubit por píxel a 300 K), con el N medido por la calibración.</p></div>
+        <div class="feat"><div class="ft"><span class="n">09</span><b>Regulador de gradiente</b></div><p>Control del DAC de la bobina de gradiente con tope al máximo de la bobina, valor por defecto de ~70 líneas/píxel, y visualización del tope resoluble + código DAC.</p></div>
+        <div class="feat"><div class="ft"><span class="n">10</span><b>Marcado de resultados y derivación</b></div><p>El histograma marca el resultado (factor, período, estado suma) y un modal explica paso a paso su derivación desde los conteos cuánticos — destinado a la reproducibilidad experimental.</p></div>
+        <div class="feat"><div class="ft"><span class="n">11</span><b>Ejecución paralela 64-píxel</b></div><p>Lanzamiento de la computación paralela (Shor coprimo distribuido, muestreo 64×) con resultado marcado y derivación al estilo del píxel único.</p></div>
       </div>
     </div>
 
@@ -624,15 +757,24 @@ frontend/src/styles.css</pre>
     </div>
 
     <div class="block">
-      <h3><span class="sn">§5</span> Funcionalidades destacadas</h3>
+      <h3><span class="sn">§5</span> Funcionalidades destacadas — metodologías implementadas</h3>
       <div class="feats">
-        <div class="feat"><div class="ft"><span class="n">01</span><b>Simulador cuántico realista</b></div><p>Acoplamiento dipolo vecino-más-cercano dentro del píxel, detuning por qubit, readout asimétrico, canales de error por defecto (depol, T1, T2, readout) anclados a datos del proveedor.</p></div>
-        <div class="feat"><div class="ft"><span class="n">02</span><b>Computación paralela de 64 píxeles</b></div><p><code>run_array</code> ejecuta un circuito por píxel con semillas independientes y agrega (64× los shots); saltado de píxeles de ancho insuficiente; Shor coprimo distribuido.</p></div>
-        <div class="feat"><div class="ft"><span class="n">03</span><b>Calibración medida del ancho de registro</b></div><p>El número de qubits por píxel es el conteo de líneas ODMR resueltas por <code>decompose_odmr</code>, no una constante dura; el lazo calibración → circuito alimenta las frecuencias medidas como rejilla del registro.</p></div>
-        <div class="feat"><div class="ft"><span class="n">04</span><b>Vía de hardware real completa</b></div><p>Detección de FPGA, verbos de control, barrido ODMR paralelo, programación de gradiente, integración N-shot y reconstrucción del mapa B-vector 4 ejes — todo sobre medidas reales, con degradación veraz a <code>no-fpga-detected</code>.</p></div>
-        <div class="feat"><div class="ft"><span class="n">05</span><b>Sensórica cuántica</b></div><p>Magnetómetro vectorial de 64 píxeles (4 ejes ⟨111⟩), gradiometría tensorial con localización de dipolo, compás, giro y sensores auxiliares.</p></div>
-        <div class="feat"><div class="ft"><span class="n">06</span><b>Readout avanzado</b></div><p>Super-resolución ODMR (sparse OMP), lectura Bayesiana cuántico-limitada, denoise por primas y pila anti-ruido clásica a 300 K.</p></div>
-        <div class="feat"><div class="ft"><span class="n">07</span><b>Tareas asíncronas</b></div><p>Calibración y ejecución paralela no bloquean la API (cola RQ), con modo síncrono en proceso para tests.</p></div>
+        <div class="feat"><div class="ft"><span class="n">01</span><b>Descomposición espectral ODMR (contador de qubits)</b> <code>odmr_decompose.py</code></div><p>CLEAN / matching pursuit que resuelve líneas individuales con SNR mínimo y separación mínima &gt; linewidth. El número de líneas resueltas por píxel = anchura de registro = qubits. Es el contador de qubits por píxel.</p></div>
+        <div class="feat"><div class="ft"><span class="n">02</span><b>Super-resolución ODMR (sparse OMP)</b> <code>superres_odmr.py</code></div><p>Deconvolución de líneas solapadas por orthogonal matching pursuit; deshace la respuesta espectral del píxel para resolver líneas bajo la linewidth.</p></div>
+        <div class="feat"><div class="ft"><span class="n">03</span><b>Lectura Bayesiana cuántico-limitada</b> <code>bayesian_readout.py</code></div><p>Intervalo creíble unilateral con corrección Bonferroni; lectura óptima cuántico-limitada por píxel.</p></div>
+        <div class="feat"><div class="ft"><span class="n">04</span><b>Centroiding sub-píxel</b> <code>detector_centroid.py</code></div><p>Reconstrucción del centroide por charge-sharing (imagen detector 64 → 64·S); mejora la resolución de imagen, no incrementa qubits.</p></div>
+        <div class="feat"><div class="ft"><span class="n">05</span><b>Denoise por primas-coprimas</b> <code>prime_readout.py</code></div><p>Selección de primas por canal (16 primas = 16 canales de direccionamiento), ortogonalidad coprima exacta (cero cross-talk), denoiser coprimo y rejection de fuera-de-banda.</p></div>
+        <div class="feat"><div class="ft"><span class="n">06</span><b>Pila anti-ruido clásica 300 K</b> <code>noise_filters.py</code></div><p>Filtros SNR-protectivos a temperatura ambiente; los canales lentos no promedian como 1/√N; <code>effective_noise_sigma</code> / <code>effective_t2</code> (DD tope 2·T1).</p></div>
+        <div class="feat"><div class="ft"><span class="n">07</span><b>Magnetometría vectorial 4 ejes ⟨111⟩</b> <code>magnetometry.py</code></div><p>Reconstruye el vector B por píxel desde los dobletes ODMR (gap = 2γ|B·nᵢ|), búsqueda LS sobre las 2ᵏ combinaciones de signo con referencia gradiométrica para romper la ambigüedad tetraédrica.</p></div>
+        <div class="feat"><div class="ft"><span class="n">08</span><b>Gradiometría tensorial + localización de dipolo</b> <code>tensor_gradiometry.py</code></div><p>Jacobiano por píxel del mapa B-vector 8×8×3; localización de dipolo por modo diferencial (splits signo-ambiguo) o por vectores; <code>tensor_gradient_sweep</code>.</p></div>
+        <div class="feat"><div class="ft"><span class="n">09</span><b>Computación paralela de 64 píxeles</b> <code>run_array</code></div><p>Un circuito por píxel con semillas independientes y agregación 64× shots; saltado de píxeles de ancho insuficiente; Shor coprimo distribuido (el primer píxel que halla el período gana).</p></div>
+        <div class="feat"><div class="ft"><span class="n">10</span><b>Acoplamiento dipolo 1/r³ (gate spin 2q)</b> <code>dipole.py</code></div><p>Gate de 2 qubits spin por dipolo dentro del píxel a 300 K (K_N all-to-all en modo registro); fundamenta el gate sin penalizar el canal óptico (gate de espín, no HOM).</p></div>
+        <div class="feat"><div class="ft"><span class="n">11</span><b>Memoria nuclear NV + ¹³C (simulador)</b> <code>nuclear.py</code></div><p>Qubit nuclear ¹³C con T2 ~1 s (literatura, no facilitada por el proveedor) apareado al electrón; STORE/RECALL por SWAP; vía simulador (necesita canal RF ~2 MHz en hardware).</p></div>
+        <div class="feat"><div class="ft"><span class="n">12</span><b>Calibración medida del ancho de registro</b> <code>array_calibration.py</code></div><p>El número de qubits por píxel es el conteo de líneas ODMR resueltas, no una constante dura; integra sub-píxel, N-shot, super-resolución y Bayes; el lazo calibración → circuito alimenta las frecuencias medidas como rejilla del registro. <code>cap_to_resolvable</code> separa el tope del registro-por-gradiente del doblete Zeeman del campo ambiente.</p></div>
+        <div class="feat"><div class="ft"><span class="n">13</span><b>Modo píxel registro / ensamble</b> <code>backend.py</code></div><p>Registro de N qubits dentro del píxel (acoplamiento dipolo K_N, gate 2q nativo) frente a ensamble de 1 qubit por píxel a 300 K (sin 2q cross-píxel); rechaza gates 2q en ensamble; N medido.</p></div>
+        <div class="feat"><div class="ft"><span class="n">14</span><b>Vía de hardware real completa</b></div><p>Detección de FPGA, verbos de control, barrido ODMR paralelo, programación de gradiente, integración N-shot y reconstrucción del mapa B-vector 4 ejes para gradiometría tensorial — todo sobre medidas reales, con degradación veraz a <code>no-fpga-detected</code>.</p></div>
+        <div class="feat"><div class="ft"><span class="n">15</span><b>QRNG + criptografía</b> <code>crypto.py / qkd.py</code></div><p>Primitivas criptográficas (QKD) y consumo de la entropía cuántica del firmware (<code>READ_RNG</code>) para el backend cuántico.</p></div>
+        <div class="feat"><div class="ft"><span class="n">16</span><b>Tareas asíncronas</b> <code>jobs.py</code></div><p>Calibración y ejecución paralela no bloquean la API (cola RQ), con modo síncrono en proceso para tests.</p></div>
       </div>
     </div>
 

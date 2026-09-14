@@ -145,32 +145,67 @@ asíncronas), Pydantic (modelos de petición), pytest (tests).
 
 ---
 
-### 5. Funcionalidades destacadas
+### 5. Funcionalidades destacadas — metodologías implementadas
 
-1. **Simulador cuántico realista**: acoplamiento dipolo vecino-más-cercano
-   dentro del píxel, detuning por qubit, readout asimétrico, canales de error
-   por defecto (depol, T1, T2, readout) anclados a datos del proveedor.
-2. **Computación paralela de 64 píxeles**: `run_array` ejecuta un circuito por
-   píxel con semillas independientes y agrega (64× los shots); saltado de
-   píxeles de ancho insuficiente; Shor coprimo distribuido (el primer píxel que
-   halla el período gana).
-3. **Calibración medida del ancho de registro**: el número de qubits por píxel
-   es el conteo de líneas ODMR resueltas por `decompose_odmr`, no una constante
-   dura; el lazo calibración → circuito alimenta las frecuencias medidas como
-   rejilla del registro.
-4. **Vía de hardware real completa**: detección de FPGA, verbos de control,
-   barrido ODMR paralelo, programación de gradiente, integración N-shot, y
-   reconstrucción del mapa B-vector 4 ejes para gradiometría tensorial — todo
-   sobre medidas reales, con degradación veraz a `no-fpga-detected`.
-5. **Sensórica cuántica**: magnetómetro vectorial de 64 píxeles (4 ejes ⟨111⟩),
-  gradiometría tensorial con localización de dipolo, compás, giro, y sensores
-  auxiliares.
-6. **Readout avanzado**: super-resolución ODMR (sparse OMP), lectura Bayesiana
-   cuántico-limitada, denoise por primas y pila anti-ruido clásica a 300 K.
-7. **Tareas asíncronas**: calibración y ejecución paralela no bloquean la API
-   (cola RQ), con modo síncrono en proceso para tests.
-
----
+1. **Descomposición espectral ODMR (contador de qubits)** (`odmr_decompose.py`):
+   CLEAN / matching pursuit que resuelve líneas individuales con SNR mínimo y
+   separación mínima > linewidth. El número de líneas resueltas por píxel =
+   anchura de registro = qubits. Es el contador de qubits por píxel.
+2. **Super-resolución ODMR (sparse OMP)** (`superres_odmr.py`): deconvolución
+   de líneas solapadas por orthogonal matching pursuit; deshace la respuesta
+   espectral del píxel para resolver líneas bajo la linewidth.
+3. **Lectura Bayesiana cuántico-limitada** (`bayesian_readout.py`): intervalo
+   creíble unilateral con corrección Bonferroni; lectura óptima
+   cuántico-limitada por píxel.
+4. **Centroiding sub-píxel** (`detector_centroid.py`): reconstrucción del
+   centroide por charge-sharing (imagen detector 64 → 64·S); mejora la
+   resolución de imagen, no incrementa qubits.
+5. **Denoise por primas-coprimas** (`prime_readout.py`): selección de primas
+   por canal (16 primas = 16 canales de direccionamiento), ortogonalidad
+   coprima exacta (cero cross-talk), denoiser coprimo y rejection de
+   fuera-de-banda.
+6. **Pila anti-ruido clásica 300 K** (`noise_filters.py`): filtros
+   SNR-protectivos a temperatura ambiente; los canales lentos no promedian
+   como 1/√N; `effective_noise_sigma` / `effective_t2` (DD tope 2·T1).
+7. **Magnetometría vectorial 4 ejes ⟨111⟩** (`magnetometry.py`): reconstruye
+   el vector B por píxel desde los dobletes ODMR (gap = 2γ|B·nᵢ|), búsqueda
+   LS sobre las 2ᵏ combinaciones de signo con referencia gradiométrica para
+   romper la ambigüedad tetraédrica.
+8. **Gradiometría tensorial + localización de dipolo**
+   (`tensor_gradiometry.py`): Jacobiano por píxel del mapa B-vector 8×8×3;
+   localización de dipolo por modo diferencial (splits signo-ambiguo) o por
+   vectores; `tensor_gradient_sweep`.
+9. **Computación paralela de 64 píxeles** (`run_array`): un circuito por
+   píxel con semillas independientes y agregación 64× shots; saltado de
+   píxeles de ancho insuficiente; Shor coprimo distribuido (el primer píxel
+   que halla el período gana).
+10. **Acoplamiento dipolo 1/r³ (gate spin 2q)** (`dipole.py`): gate de 2
+    qubits spin por dipolo dentro del píxel a 300 K (K_N all-to-all en modo
+    registro); fundamenta el gate sin penalizar el canal óptico (gate de
+    espín, no HOM).
+11. **Memoria nuclear NV + ¹³C (simulador)** (`nuclear.py`): qubit nuclear
+    ¹³C con T2 ~1 s (literatura, no facilitada por el proveedor) apareado al
+    electrón; STORE/RECALL por SWAP; vía simulador (necesita canal RF ~2 MHz
+    en hardware).
+12. **Calibración medida del ancho de registro** (`array_calibration.py`): el
+    número de qubits por píxel es el conteo de líneas ODMR resueltas, no una
+    constante dura; integra sub-píxel, N-shot, super-resolución y Bayes; el
+    lazo calibración → circuito alimenta las frecuencias medidas como rejilla
+    del registro. `cap_to_resolvable` separa el tope del
+    registro-por-gradiente del doblete Zeeman del campo ambiente.
+13. **Modo píxel registro / ensamble** (`backend.py`): registro de N qubits
+    dentro del píxel (acoplamiento dipolo K_N, gate 2q nativo) frente a
+    ensamble de 1 qubit por píxel a 300 K (sin 2q cross-píxel); rechaza
+    gates 2q en ensamble; N medido.
+14. **Vía de hardware real completa**: detección de FPGA, verbos de control,
+    barrido ODMR paralelo, programación de gradiente, integración N-shot y
+    reconstrucción del mapa B-vector 4 ejes para gradiometría tensorial —
+    todo sobre medidas reales, con degradación veraz a `no-fpga-detected`.
+15. **QRNG + criptografía** (`crypto.py` / `qkd.py`): primitivas
+    criptográficas (QKD) y consumo de la entropía cuántica del firmware
+    (`READ_RNG`) para el backend cuántico.
+16. **Tareas asíncronas** (`jobs.py`): calibración y ejecución paralela no
+    bloquean la API (cola RQ), con modo síncrono en proceso para tests.
 
 ### 6. Originalidad y características distintivas
 
