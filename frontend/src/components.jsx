@@ -51,7 +51,7 @@ export function QubitGrid({ sites, counts, numClbits, recovered }) {
             <div key={cell.idx}
                  className={`qcell ${lit ? 'on' : ''} ${cell.signal ? 'signal' : ''} ${cell.measured ? 'measured' : ''} ${cell.usable ? 'usable' : ''}`}
                  style={style}
-                 title={`q${cell.idx} (${cell.r},${cell.c}) · ~10-NV register${cell.measured ? ` · ${cell.signal ? 'signal' : 'top'} bit=${lit ? 1 : 0} · confidence ${(cell.confidence * 100).toFixed(0)}%` : ''}`}>{cell.idx}</div>
+                 title={`q${cell.idx} (${cell.r},${cell.c}) · register pixel${cell.measured ? ` · ${cell.signal ? 'signal' : 'top'} bit=${lit ? 1 : 0} · confidence ${(cell.confidence * 100).toFixed(0)}%` : ''}`}>{cell.idx}</div>
           )
         })}
       </div>
@@ -702,7 +702,7 @@ export function CalibrationPanel({ profile, temperature, seed, run, running, res
             {gradCode} {gradOn ? `· ${coilA.toFixed(2)} A · ~${spreadMhz.toFixed(0)} MHz spread` : '· gradient off (ensemble)'}
           </span>
         </label>
-        <button onClick={() => run({ gradient_code: gradCode, n_nv_per_pixel: 10 })}
+        <button onClick={() => run({ gradient_code: gradCode })}
           disabled={running} className="ghost" type="button">
           {running ? <><span className="spinner" /> Calibrating…</> : 'Run calibration'}
         </button>
