@@ -25,7 +25,7 @@
 > para `.xdc`). Verificación cruzada con cloc 2.11: 5.181 líneas de código
 > (tests 4.815 + workflows 366), diferencia −28 (−0,5 %). Fórmula COCOMO básica
 > `PM = 2,4 · KSLOC^1,05`. La valoración es una estimación de coste de
-> re-desarrollo, no un precio de mercado. El script reproducible
+> desarrollo, no un precio de mercado. El script reproducible
 > `docs/propiedad-intelectual/sloc_count.py` contiene el conteo por fichero y la
 > comparación SLOCCount/cloc de las cinco áreas.
 
@@ -236,6 +236,153 @@ tests/test_render_p1_svg.py
 tests/test_spincoater_gcode.py
 tests/test_superres_bayesian_tensor.py
 ```
+
+---
+
+## Algoritmos implementados en esta unidad
+
+La suite de tests verifica los algoritmos de las otras cuatro unidades; no
+implementa algoritmos propios, pero ejercita los siguientes de forma ejecutable y
+auditable (referencias a los artículos originales en la bibliografía):
+
+- **Física del dipolo 1/r³ y canales de error** [12,13] — `tests/test_circuit_physics_audit.py`.
+- **Shor / QFT / Grover** [1,3,2] — `tests/test_core.py`, `test_algorithms_platforms.py`.
+- **Magnetometría vectorial + gradiometría tensorial** [8,10,11] — `tests/test_magnetometer.py`, `test_superres_bayesian_tensor.py`.
+- **Descomposición ODMR (CLEAN/MP)** [23,24] y **super-res OMP** [25] — `tests/test_array_calibration.py`, `test_superres_bayesian_tensor.py`.
+- **Lectura Bayesiana + Bonferroni** [27,28] — `tests/test_superres_bayesian_tensor.py`.
+- **Centroiding por charge-sharing** [26] — `tests/test_detector_centroid.py`.
+- **Denoise por primas-coprimas** (propio) — `tests/test_prime_readout.py`.
+- **Pila anti-ruido 300 K** (propio) — `tests/test_noise_filters.py`, `test_noise_summary.py`.
+- **Memoria nuclear ¹³C** [16,17,18] — `tests/test_nuclear_memory.py`.
+- **Ancho de registro por gradiente** (propio) — `tests/test_field_gradient_register.py`.
+- **QRNG von-Neumann** [30] — `tests/test_qrng.py`.
+- **Modo píxel registro/ensamble** (propio) — `tests/test_pixel_mode.py`.
+- **Computación paralela 64-píxel** (propio) — `tests/test_parallel_computing.py`.
+
+---
+
+## Bibliografía
+
+Referencias a los artículos originales de los algoritmos publicados implementados
+en el QSSC, en formato académico con DOI. Los algoritmos propios del QSSC se
+describen en la sección *Algoritmos implementados* de cada unidad; aquí se cita
+sólo el método publicado en que se basan. La guía canónica de instalación, uso y
+despliegue es el fichero `README.md` del repositorio (sección *Quick start*).
+
+### Algoritmos cuánticos
+
+[1] Shor, P. W. «Algorithms for quantum computation: discrete logarithms and
+factoring». *Proc. 35th FOCS*, 124–134 (1994). arXiv:quant-ph/9501002.
+[2] Grover, L. K. «A fast quantum mechanical algorithm for database search».
+*Proc. 28th STOC*, 212–219 (1996); *Phys. Rev. Lett.* **79**, 325–328 (1997).
+doi:10.1103/PhysRevLett.79.325.
+[3] Coppersmith, D. «An approximate Fourier transform useful in quantum
+factoring». IBM Research Report RC19642 (1994); arXiv:quant-ph/0201067.
+[4] Draper, T. G. «Addition on a quantum computer». arXiv:quant-ph/0008033 (2000).
+[5] Qiskit Development Team. «Qiskit: an open-source framework for working with
+quantum computers» (multiplicador RGQFT). Zenodo (2024).
+doi:10.5281/zenodo.2562110.
+[6] Amico, M.; Saleem, Z. H.; Kumph, M. «Experimental study of Shor's quantum
+factoring algorithm using the IBM backend». *Phys. Rev. A* **100**, 012305 (2019).
+doi:10.1103/PhysRevA.100.012305.
+
+### Centro NV y sensórica cuántica
+
+[7] Doherty, M. W. *et al.* «The nitrogen-vacancy colour centre in diamond».
+*Phys. Rep.* **528**, 1–45 (2013). doi:10.1016/j.physrep.2013.02.001.
+[8] Balasubramanian, G. *et al.* «Nanoscale imaging magnetometry with
+nitrogen-vacancy centers in diamond». *Nature* **455**, 648–651 (2008).
+doi:10.1038/nature07277.
+[9] Jarmola, A. *et al.* «Temperature- and magnetic-field-dependent longitudinal
+spin relaxation in nitrogen-vacancy ensembles in diamond». *Phys. Rev. Lett.*
+**108**, 197601 (2012). doi:10.1103/PhysRevLett.108.197601.
+[10] Degen, C. L.; Reinhard, F.; Cappellaro, P. «Quantum sensing».
+*Rev. Mod. Phys.* **89**, 035002 (2017). doi:10.1103/RevModPhys.89.035002.
+[11] Rondin, L. *et al.* «Magnetometry with nitrogen-vacancy defects in diamond».
+*Rep. Prog. Phys.* **77**, 056503 (2014). doi:10.1088/0034-4885/77/5/056503.
+
+### Gate spin de 2 qubits por dipolo (300 K)
+
+[12] Neumann, P. *et al.* «Multipartite entanglement among single spins in
+diamond». *Science* **320**, 1326–1329 (2008). doi:10.1126/science.1157233.
+[13] Dolde, F. *et al.* «Room-temperature entanglement between single spins in
+diamond». *Nat. Phys.* **9**, 139–143 (2013). doi:10.1038/nphys2545.
+[14] Joas, J. *et al.* «Room-temperature entanglement between nitrogen-vacancy
+centers in diamond». *Phys. Rev. X* **15**, 021069 (2025).
+[15] Xie, T. *et al.* «High-fidelity CNOT gate between nitrogen-vacancy centers
+in diamond». *Phys. Rev. Lett.* **130**, 030601 (2023).
+doi:10.1103/PhysRevLett.130.030601.
+
+### Memoria nuclear ¹³C
+
+[16] Taminiau, T. H. *et al.* «Universal control and error correction in a
+solid-state spin register». *Nature* **486**, 91–94 (2014).
+doi:10.1038/nature11185.
+[17] Cramer, J. *et al.* «Repeated quantum error correction on a continuously
+encoded qubit by real-time feedback». *Nat. Commun.* **7**, 11526 (2016).
+doi:10.1038/ncomms11526.
+[18] Reimer, M. E. *et al.* «Single ¹³C nuclear spin control and readout in
+diamond». *Phys. Rev. B* **93**, 024104 (2016).
+
+### Secuencias de pulsos
+
+[19] Ramsey, N. F. «A molecular beam resonance method with separated oscillating
+fields». *Phys. Rev.* **78**, 695–699 (1950). doi:10.1103/PhysRev.78.695.
+[20] Hahn, E. L. «Spin echoes». *Phys. Rev.* **80**, 580–594 (1950).
+doi:10.1103/PhysRev.80.580.
+[21] Carr, H. Y.; Purcell, E. M. «Effects of diffusion on free precession in
+nuclear magnetic resonance experiments». *Phys. Rev.* **94**, 630–638 (1954).
+doi:10.1103/PhysRev.94.630.
+[22] Meiboom, S.; Gill, D. «Modified spin-echo method for measuring nuclear
+relaxation times». *Rev. Sci. Instrum.* **29**, 688–691 (1958).
+doi:10.1063/1.1716296.
+
+### Descomposición espectral y super-resolución
+
+[23] Högbom, J. A. «Aperture synthesis with a non-regular distribution of
+interferometer baselines». *Astron. Astrophys. Suppl.* **15**, 417–426 (1974).
+[algoritmo CLEAN.]
+[24] Mallat, S. G.; Zhang, Z. «Matching pursuits with time-frequency
+dictionaries». *IEEE Trans. Signal Process.* **41**, 3397–3415 (1993).
+doi:10.1109/78.258082.
+[25] Tropp, J. A.; Gilbert, A. C. «Signal recovery from random measurements via
+orthogonal matching pursuit». *IEEE Trans. Inf. Theory* **53**, 4655–4666 (2007).
+doi:10.1109/TIT.2007.909108.
+[26] Lampton, M.; Carlson, R. F. «Inexpensive, reliable position encoding for
+microchannel-plate detectors» (sensado de posición por división de carga).
+*Rev. Sci. Instrum.* **50**, 1093 (1979). doi:10.1063/1.1135729.
+
+### Lectura Bayesiana y detección cuántica
+
+[27] Helstrom, C. W. *Quantum Detection and Estimation Theory*. Academic Press,
+Nueva York (1976). ISBN 978-0-12-340050-5.
+[28] Bonferroni, C. E. «Teoria statistica delle classi e calcolo delle
+probabilità». *Pubblicazioni del R. Istituto Superiore di Scienze Economiche e
+Commerciali di Firenze* **8**, 3–62 (1936). [corrección de comparaciones
+múltiples.]
+
+### QKD y generador cuántico de aleatorios
+
+[29] Bennett, C. H.; Brassard, G. «Quantum cryptography: public key distribution
+and coin tossing». *Proc. IEEE Int. Conf. on Computers, Systems and Signal
+Processing*, 175–179 (Bangalore, 1984). [protocolo BB84.]
+[30] von Neumann, J. «Various techniques used in connection with random digits».
+*Appl. Math. Ser.* **12**, 36–38 (1951). [extractor de sesgo.]
+
+### Defectos spin en hBN y SiC
+
+[31] Gottscholl, V. A. *et al.* «Spin defects in hBN as promising sensors for
+magnetic fields». *Nat. Mater.* **19**, 540–545 (2020).
+doi:10.1038/s41563-020-0619-6.
+[32] Kianinia, M. *et al.* «Generation of spin defects in hexagonal boron
+nitride». *ACS Photonics* **7**, 2147–2152 (2020).
+doi:10.1021/acsphotonics.0c00661.
+[33] Carter, S. D. *et al.* «Spin coherence in SiC». *Phys. Rev. B* **92**,
+161202 (2015). doi:10.1103/PhysRevB.92.161202.
+[34] Kraus, H. *et al.* «Quantum clock in SiC». *Nat. Phys.* **10**, 157–162
+(2014). doi:10.1038/nphys2826.
+[35] Lekavicius, I. *et al.* «Spin coherence in SiC». *PRX Quantum* **3**,
+010343 (2022).
 
 ---
 
