@@ -263,11 +263,11 @@ module command_parser #(
     // each point reads ALL 64 channels (one row) via the S_RALL_WAIT/S_ENC/
     // S_REPLY_SEND read_all path (asweep_mode reroutes the post-row target to
     // S_ASWEEP_GATE_FALL instead of S_IDLE).
-    localparam [6:0] S_ASWEEP_PROG     = 7'd55;  // program PLL for point i
-    localparam [6:0] S_ASWEEP_PLL      = 7'd56;  // wait PLL done, arm gate
-    localparam [6:0] S_ASWEEP_GATE_WAIT= 7'd57;  // wait gate rise, then read_all
-    localparam [6:0] S_ASWEEP_GATE_FALL= 7'd58;  // wait gate fall, then next
-    localparam [6:0] S_ASWEEP_NEXT     = 7'd59;  // f += step; loop or finish OK
+    localparam [6:0] S_ASWEEP_PROG     = 7'd60;  // program PLL for point i
+    localparam [6:0] S_ASWEEP_PLL      = 7'd61;  // wait PLL done, arm gate
+    localparam [6:0] S_ASWEEP_GATE_WAIT= 7'd62;  // wait gate rise, then read_all
+    localparam [6:0] S_ASWEEP_GATE_FALL= 7'd63;  // wait gate fall, then next
+    localparam [6:0] S_ASWEEP_NEXT     = 7'd64;  // f += step; loop or finish OK
 
     // ---- Line buffer ------------------------------------------------------
     reg [7:0] cmd_buffer [0:63];
