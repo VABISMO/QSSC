@@ -111,19 +111,23 @@ def test_parallel_sample_runner():
 
 
 def test_parallel_endpoint():
-    """The /api/circuit/run-parallel endpoint serves a parallel-sample run."""
+    """The /api/circuit/run-parallel endpoint serves a parallel-sample run.
+    The endpoint is async by default; ?sync=true runs it in-process and returns
+    {job_id, status, result} so the test reads the result inline."""
     from fastapi.testclient import TestClient
     from api.main import app
     c = TestClient(app)
-    r = c.post("/api/circuit/run-parallel", json={
+    r = c.post("/api/circuit/run-parallel?sync=true", json={
         "mode": "sample", "n_pixels": 8, "num_qubits": 2,
         "shots": 256, "noise_mode": "ideal", "seed": 1,
     })
     assert r.status_code == 200
     j = r.json()
-    assert j["mode"] == "sample"
-    assert j["n_pixels"] == 8
-    assert sum(j["aggregate_counts"].values()) == 8 * 256
+    assert j["status"] == "finished"
+    res = j["result"]
+    assert res["mode"] == "sample"
+    assert res["n_pixels"] == 8
+    assert sum(res["aggregate_counts"].values()) == 8 * 256
 
 
 # -- Invention 4+5: calibrated per-pixel width -------------------------------

@@ -17,7 +17,7 @@ from typing import List, Optional
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from qssc import (
     get_profile, coherence_at_temperature,
@@ -166,6 +166,12 @@ class ParallelRunRequest(BaseModel):
     Run one circuit per pixel across the 64-pixel array (64 INDEPENDENT ~10-NV
     processors at 300 K) and aggregate. The chip's throughput is 64x a single
     pixel, not one 640-qubit circuit (64x10 > 63-qubit MPS cap)."""
+    # extra="allow" so the per-algorithm params the frontend sends (n_items,
+    # marked, x, op, a, b, num1, num2, bits, num_bytes, common_name, num_bits,
+    # eavesdrop, iterations -- the same fields RunRequest declares) pass through
+    # to run_parallel's sample-mode circuit builder + postprocess. Without this
+    # Pydantic drops them and grover/qft/math build with defaults (marked=0...).
+    model_config = ConfigDict(extra="allow")
     mode: str = "sample"        # shor | sample | custom
     profile: str = "NV"
     temperature_k: float = Field(300.0, ge=0.001, le=600)
@@ -177,6 +183,9 @@ class ParallelRunRequest(BaseModel):
     n: int = Field(15, ge=2, le=63)
     # sample mode
     num_qubits: int = Field(4, ge=1, le=64)
+    # sample: which demo algorithm to build per pixel (bell/grover/qft/math/
+    # qrand). Omitted -> uniform H+measure (the legacy sample behaviour).
+    algorithm: Optional[str] = None
     qasm: Optional[str] = None  # sample: a QASM circuit (else uniform H+measure)
     # custom mode
     circuits: Optional[list] = None  # list of QASM strings, one per pixel
@@ -1019,7 +1028,7 @@ def run_custom_circuit(req: CustomCircuitRequest, sync: bool = False,
 
 
 @app.post("/api/circuit/run-parallel")
-def run_parallel_circuits(req: ParallelRunRequest, sync: bool = True,
+def run_parallel_circuits(req: ParallelRunRequest, sync: bool = False,
                           request: Request = None):
     """64-parallel distributed computing (Invention 4).
 
@@ -1034,20 +1043,31 @@ def run_parallel_circuits(req: ParallelRunRequest, sync: bool = True,
         seeds = n_pixels x shots aggregated in one wall-clock step.
       * ``custom`` -- a list of QASM circuits, one per pixel.
 
-    Runs synchronously in-process (the parallel path is a tight loop over the
-    backend's run_array; no async RQ job wrapper needed for the demo).
+    Enqueued as an async RQ job (a 64-pixel Shor run is ~50 s of serial
+    Qiskit, which would block the single-worker event loop if run inline).
+    Returns ``{job_id, status}``; poll ``GET /api/jobs/{job_id}``. Pass
+    ``?sync=true`` to run synchronously in-process (localhost / tests only).
     """
     if request is not None and _rate_limited(request):
         raise HTTPException(429, "Rate limit exceeded — too many circuit requests, slow down.")
-    from api.runner import run_parallel as _run
-    try:
-        return _run(_req_dict(req))
-    except Exception as exc:  # noqa: BLE001 - surface sim errors, not a 500
-        return {"error": str(exc)}
+    _check_sync(request, sync)
+    payload = _req_dict(req)
+    payload.setdefault("noise_mode", "real")
+    payload.setdefault("temperature_k", 300.0)
+    if sync:
+        from api.runner import run_parallel as _run
+        try:
+            return {"job_id": None, "status": "finished", "result": _run(payload)}
+        except Exception as exc:  # noqa: BLE001 - surface sim errors, not a 500
+            return {"job_id": None, "status": "failed",
+                    "result": {"error": str(exc)}}
+    job_id = jobs.enqueue("parallel", payload)
+    return {"job_id": job_id, "status": "queued"}
 
 
 @app.post("/api/circuit/calibrate-array")
-def calibrate_array_endpoint(req: CalibrateArrayRequest, request: Request = None):
+def calibrate_array_endpoint(req: CalibrateArrayRequest, sync: bool = False,
+                             request: Request = None):
     """Calibrate the 64-pixel array's per-pixel register width (Invention 4+5).
 
     The width is the number of ODMR lines the field gradient (Invention 5) makes
@@ -1057,83 +1077,27 @@ def calibrate_array_endpoint(req: CalibrateArrayRequest, request: Request = None
     firmware verb and counts the lines from the measured 64-channel codes. The
     result is persisted to ``hardware/calibration/array_calibration.json`` and
     later ``run-parallel`` calls load it so each pixel runs at its own width.
+
+    Enqueued as an async RQ job (the sim path synthesizes 64 ODMR spectra and
+    runs ``decompose_odmr`` on each — ~30 s — which would block the
+    single-worker event loop if run inline). Returns ``{job_id, status}``;
+    poll ``GET /api/jobs/{job_id}``. Pass ``?sync=true`` to run synchronously
+    in-process (localhost / tests only).
     """
     if request is not None and _rate_limited(request):
         raise HTTPException(429, "Rate limit exceeded — too many circuit requests, slow down.")
-    from qssc.array_calibration import (
-        calibrate_array, calibrate_array_from_codes, best_uniform_width,
-    )
-    from qssc.defects import get_profile
-    prof = get_profile(req.profile)
-    source = str(req.source).lower()
-    try:
-        if source == "real":
-            fpga = _fpga()
-            if not hasattr(fpga, "run_all_odmr"):
-                return {"error": "real calibration needs a board with run_all_odmr "
-                                 "(set QSSC_FPGA_PORT or use source=sim)"}
-            # sweep +/- a few linewidths around D (the gradient spreads lines
-            # across the pixel; span covers the spread + margin)
-            d_khz = int(prof.zero_field_splitting / 1e3)
-            spread_khz = int(req.gradient_mhz_per_um * req.pixel_size_um * 1e3)
-            span_khz = max(spread_khz + int(prof.odmr_linewidth_hz / 1e3) * 4,
-                           int(prof.odmr_linewidth_hz / 1e3) * 6)
-            f_start = d_khz - span_khz
-            f_stop = d_khz + span_khz
-            n = int(req.n_points)
-            matrix = fpga.run_all_odmr(f_start, f_stop, n)
-            freqs_ghz = np.linspace(f_start * 1e3, f_stop * 1e3, n) / 1e9
-            calib = calibrate_array_from_codes(
-                matrix, freqs_ghz, prof,
-                gradient_mhz_per_um=req.gradient_mhz_per_um,
-                pixel_size_um=req.pixel_size_um,
-                seed=req.seed, temperature_k=req.temperature_k)
-            io_label = "real"
-        else:
-            calib = calibrate_array(
-                req.profile,
-                gradient_mhz_per_um=req.gradient_mhz_per_um,
-                pixel_size_um=req.pixel_size_um,
-                seed=req.seed,
-                temperature_k=req.temperature_k,
-                max_nv_per_microdiamond=req.max_nv_per_microdiamond)
-            io_label = "simulated"
-    except NoFPGADetected as exc:
-        return {"error": "no-fpga-detected",
-                "message": ("No FPGA detected — connect the board and set "
-                            "QSSC_FPGA_PORT, or use source=sim. (" + str(exc) + ")")}
-    except Exception as exc:  # noqa: BLE001 - surface errors, not a 500
-        return {"error": str(exc)}
-    # persist the calibration cache
-    try:
-        from pathlib import Path
-        cache = Path(__file__).resolve().parent.parent / "hardware" / "calibration"
-        cache.mkdir(parents=True, exist_ok=True)
-        calib.to_json(cache / "array_calibration.json")
-    except Exception:  # noqa: BLE001 - a cache write failure must not break the reply
-        pass
-    bw = best_uniform_width(calib.widths)
-    return {
-        "profile": calib.profile,
-        "source": io_label,
-        "gradient_mhz_per_um": calib.gradient_mhz_per_um,
-        "pixel_size_um": calib.pixel_size_um,
-        "seed": calib.seed,
-        "temperature_k": calib.temperature_k,
-        "n_pixels": calib.n_pixels,
-        "per_pixel_widths": calib.widths,
-        "min_width": calib.min_width,
-        "max_width": calib.max_width,
-        "best_uniform_width": bw[0],
-        "best_uniform_pixels": bw[1],
-        "total_working_qubits": bw[0] * bw[1],
-        "pixels": [
-            {"pixel_id": p.pixel_id, "nv_present": p.nv_present,
-             "microdiamonds": p.microdiamonds, "register_width": p.register_width,
-             "odmr_lines": p.odmr_lines}
-            for p in calib.pixels
-        ],
-    }
+    _check_sync(request, sync)
+    payload = _req_dict(req)
+    payload.setdefault("temperature_k", 300.0)
+    if sync:
+        from api.runner import run_calibrate_array as _run
+        try:
+            return {"job_id": None, "status": "finished", "result": _run(payload)}
+        except Exception as exc:  # noqa: BLE001 - surface errors, not a 500
+            return {"job_id": None, "status": "failed",
+                    "result": {"error": str(exc)}}
+    job_id = jobs.enqueue("calibrate", payload)
+    return {"job_id": job_id, "status": "queued"}
 
 
 # --- async job polling + history -------------------------------------------
@@ -1325,7 +1289,20 @@ def _compute_fpga_info() -> dict:
     return info
 
 
-_FPGA_INFO = _compute_fpga_info()
+# Synthesis report is a gitignored generated artifact (fpga/synth/synth.log,
+# ~3 MB). Recompute the snapshot when the log's mtime changes so a fresh
+# `run_synth.sh` is picked up without an API restart; repeated calls while the
+# log is unchanged return the cached snapshot for free.
+_FPGA_INFO_CACHE: dict = {"mtime": None, "info": None}
+
+
+def _fpga_info() -> dict:
+    log = _FPGA_ROOT / "synth" / "synth.log"
+    mtime = log.stat().st_mtime if log.is_file() else None
+    if _FPGA_INFO_CACHE["info"] is None or _FPGA_INFO_CACHE["mtime"] != mtime:
+        _FPGA_INFO_CACHE["info"] = _compute_fpga_info()
+        _FPGA_INFO_CACHE["mtime"] = mtime
+    return _FPGA_INFO_CACHE["info"]
 
 # Cached FPGA handle so state persists across commands (CALIBRATE builds the
 # LUT, SET_EMITTER arms, READ_DETECTOR reads — all stateful). With no
@@ -1354,7 +1331,7 @@ class FpgaCommandRequest(BaseModel):
 @app.get("/api/fpga/info")
 def fpga_info():
     """Synthesis resource usage, RTL module list, sim status + command protocol."""
-    return _FPGA_INFO
+    return _fpga_info()
 
 
 @app.post("/api/fpga/command")

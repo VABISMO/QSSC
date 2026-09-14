@@ -159,6 +159,10 @@ def _worker_run(kind: str, job_id: str, payload: dict) -> dict:
     try:
         if kind == "custom":
             result = runner.run_custom(payload)
+        elif kind == "parallel":
+            result = runner.run_parallel(payload)
+        elif kind == "calibrate":
+            result = runner.run_calibrate_array(payload)
         else:
             result = runner.run_circuit(payload)
         ok = "error" not in result
@@ -182,8 +186,17 @@ def worker_run_custom(job_id: str, payload: dict) -> dict:
     return _worker_run("custom", job_id, payload)
 
 
+def worker_run_parallel(job_id: str, payload: dict) -> dict:
+    return _worker_run("parallel", job_id, payload)
+
+
+def worker_run_calibrate(job_id: str, payload: dict) -> dict:
+    return _worker_run("calibrate", job_id, payload)
+
+
 def _run_in_fallback(kind: str, job_id: str, payload: dict):
-    fn = worker_run_custom if kind == "custom" else worker_run_circuit
+    fn = {"custom": worker_run_custom, "parallel": worker_run_parallel,
+          "calibrate": worker_run_calibrate}.get(kind, worker_run_circuit)
     future = _fallback_exec.submit(fn, job_id, payload)
 
     # Watchdog: enforce JOB_TIMEOUT_S so a runaway job cannot hold a fallback
@@ -208,7 +221,8 @@ def _run_in_fallback(kind: str, job_id: str, payload: dict):
 # --- public API used by the FastAPI endpoints --------------------------------
 
 def enqueue(kind: str, payload: dict) -> str:
-    """Enqueue a circuit job. ``kind`` is ``'circuit'`` or ``'custom'``.
+    """Enqueue a circuit job. ``kind`` is ``'circuit'``, ``'custom'``,
+    ``'parallel'`` (64-parallel run) or ``'calibrate'`` (array calibration).
 
     Returns a job_id. Status is polled via :func:`get_job`.
     """
@@ -223,15 +237,26 @@ def enqueue(kind: str, payload: dict) -> str:
     }
     if kind == "custom":
         summary["code"] = (payload.get("code", "") or "")[:160]
+    if kind == "parallel":
+        summary["algorithm"] = f"parallel-{payload.get('mode', 'sample')}"
+        summary["shots"] = payload.get("shots", 2048)
+    if kind == "calibrate":
+        summary["algorithm"] = "calibrate-array"
+        summary["shots"] = 0
     _record(job_id, status="queued", created_at=_now_ms(),
             queued_at=_now_ms(), **summary)
 
     conn = _get_redis()
     if conn is not None and _queue is not None:
         try:
-            fn = (worker_run_custom if kind == "custom"
-                  else worker_run_circuit)
-            rq_job = _queue.enqueue(fn, job_id, payload, job_timeout=300,
+            fn = {"custom": worker_run_custom,
+                  "parallel": worker_run_parallel,
+                  "calibrate": worker_run_calibrate}.get(kind, worker_run_circuit)
+            # 64-parallel Shor and the array calibration are heavier than a
+            # single-pixel run (up to 64 circuits / 64 decompose_odmr fits), so
+            # give them a longer RQ job timeout.
+            job_timeout = 900 if kind in ("parallel", "calibrate") else 300
+            rq_job = _queue.enqueue(fn, job_id, payload, job_timeout=job_timeout,
                                     result_ttl=600, failure_ttl=600)
             _record(job_id, rq_id=rq_job.id)
             return job_id

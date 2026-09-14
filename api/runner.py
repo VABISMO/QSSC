@@ -706,6 +706,140 @@ def run_circuit(req: dict) -> dict:
     return result
 
 
+# Algorithms routed to the parallel `sample` mode (one circuit per pixel, same
+# circuit on every pixel -> n_pixels x shots aggregated). Mirrors run_circuit's
+# per-algorithm construction but builds ONLY the circuit (no execution / no
+# per-algorithm interpretation -- the parallel path aggregates counts across
+# pixels; the shor-family race is handled by mode='shor', not here).
+_SAMPLE_ALGOS = ("bell", "grover", "qft", "math", "qrand")
+
+
+def _build_pixel_circuit(algo: str, req: dict):
+    """Build a single QuantumCircuit for one pixel in parallel ``sample`` mode.
+
+    Returns ``(qc, label)``. Falls back to H+measure on ``num_qubits`` for any
+    algorithm not in :data:`_SAMPLE_ALGOS` (bb84 / custom / unknown).
+    """
+    from qiskit import QuantumCircuit
+    algo = (algo or "").lower()
+    if algo == "bell":
+        n = max(2, int(req.get("num_qubits", 2)))
+        qc = QuantumCircuit(n, n)
+        qc.h(0)
+        for i in range(n - 1):
+            qc.cx(i, i + 1)
+        qc.measure(range(n), range(n))
+        return qc, "bell"
+    if algo == "grover":
+        from qiskit import QuantumRegister
+        nq = max(2, min(8, int(req.get("n_items") or req.get("num_qubits") or 3)))
+        marked = int(req.get("marked") or 0) % (2 ** nq)
+        qr = QuantumRegister(nq, "o")
+        oracle = QuantumCircuit(qr)
+        for i in range(nq):
+            if not ((marked >> i) & 1):
+                oracle.x(qr[i])
+        oracle.h(qr[-1])
+        oracle.mcx(list(range(nq - 1)), qr[-1])
+        oracle.h(qr[-1])
+        for i in range(nq):
+            if not ((marked >> i) & 1):
+                oracle.x(qr[i])
+        iters = max(1, int(round(math.pi / 4 * math.sqrt(2 ** nq))))
+        qc = grover_search(nq, oracle, iterations=iters)
+        return qc, "grover"
+    if algo == "qft":
+        n = max(2, min(64, int(req.get("num_qubits", 4))))
+        x = int(req.get("x", 1)) % (2 ** n)
+        qc = QuantumCircuit(n, n)
+        for i in range(n):
+            if (x >> i) & 1:
+                qc.x(i)
+        try:
+            from qiskit.circuit.library import QFTGate
+            gate = QFTGate(n)
+        except Exception:  # noqa: BLE001 - older qiskit fallback
+            from qiskit.circuit.library import QFT
+            gate = QFT(n).to_gate()
+        qc.append(gate, range(n))
+        qc.measure(range(n), range(n))
+        return qc, "qft"
+    if algo == "math":
+        op = req.get("op", "add")
+        num1 = float(req.get("a") if req.get("a") is not None
+                     else req.get("num1", 2.0))
+        raw_b = req.get("b") if req.get("b") is not None else req.get("num2")
+        num2 = float(raw_b) if raw_b is not None else None
+        qc = create_math_circuit(op, num1, num2, bits=req.get("bits"))
+        return qc, "math"
+    if algo == "qrand":
+        n = max(2, min(64, int(req.get("num_qubits", 8))))
+        qc = QuantumCircuit(n, n)
+        qc.h(range(n))
+        qc.measure(range(n), range(n))
+        return qc, "qrand"
+    # bb84 / custom / unknown -> H+measure on num_qubits (the parallel aggregate
+    # of a single-qubit protocol is not meaningful; show the uniform sample).
+    nq = max(1, min(64, int(req.get("num_qubits", 4))))
+    qc = QuantumCircuit(nq, nq)
+    qc.h(range(nq))
+    qc.measure(range(nq), range(nq))
+    return qc, algo or "sample"
+
+
+def _postprocess_sample(algo, req, qc, counts, shots):
+    """Derive the per-algorithm result fields from the parallel ``sample`` mode
+    AGGREGATE counts so the 64-pixel measurement gets the SAME green result
+    marker + derivation modal as the single-pixel run.
+
+    Mirrors the postprocess in :func:`run_circuit`'s bell/grover/qft/math
+    branches, but operates on the n_pixels x shots aggregate (the histogram the
+    dashboard shows) instead of a single pixel's counts -- so the marked bar IS
+    the top aggregate bar. ``counts`` is the aggregate dict; ``shots`` is the
+    TOTAL aggregate shots (n_pixels x per-pixel shots). Returns a dict to merge
+    into the parallel result. bell needs no backend fields (the frontend derives
+    it from counts + num_clbits); qrand/bb84 have no single "result bar" in the
+    aggregate (every bar is a random / protocol bit), so they return {} and the
+    frontend shows a 64x-ensemble derivation.
+    """
+    algo = (algo or "").lower()
+    if algo == "grover":
+        nq = max(2, min(8, int(req.get("n_items") or req.get("num_qubits") or 3)))
+        marked = int(req.get("marked") or 0) % (2 ** nq)
+        iters = max(1, int(round(math.pi / 4 * math.sqrt(2 ** nq))))
+        bs = max(counts, key=counts.get) if counts else None
+        found = int(bs.replace(" ", ""), 2) if (bs and qc.num_clbits) else 0
+        return {"n_items": nq, "marked": marked, "counts": counts,
+                "found": found, "success": found == marked, "iterations": iters}
+    if algo == "qft":
+        n = max(2, min(64, int(req.get("num_qubits", 4))))
+        x = int(req.get("x", 1)) % (2 ** n)
+        states = 2 ** n
+        expected = shots / states if states else 0
+        observed = list(counts.values()) if counts else []
+        chi2_norm = ((sum((c - expected) ** 2 / expected for c in observed)
+                      / max(1, states)) if expected else 0.0)
+        return {"n": n, "x": x, "counts": counts, "basis_states": states,
+                "expected_per_state": round(expected, 2),
+                "uniformity_chi2": round(chi2_norm, 3),
+                "uniform": bool(chi2_norm < 2.0), "qft": "forward"}
+    if algo == "math":
+        op = req.get("op", "add")
+        num1 = float(req.get("a") if req.get("a") is not None
+                     else req.get("num1", 2.0))
+        raw_b = req.get("b") if req.get("b") is not None else req.get("num2")
+        num2 = float(raw_b) if raw_b is not None else None
+        bs = max(counts, key=counts.get) if counts else None
+        _rw = qc.metadata.get("result_width", qc.num_clbits) if qc.metadata else qc.num_clbits
+        out = int(bs.replace(" ", ""), 2) & ((1 << _rw) - 1) if bs else 0
+        if op in ("sqrt", "log"):
+            out = (out / 2 ** _rw) * num1
+        return {"op": op, "a": num1, "b": num2, "counts": counts,
+                "result": out, "result_width": _rw}
+    # bell / qrand / bb84 / custom / unknown: no extra derive fields here.
+    return {}
+
+
 def run_parallel(req: dict) -> dict:
     """Run one circuit per pixel across the 64-pixel array IN PARALLEL and
     aggregate (Invention 4 — distributed computing).
@@ -752,7 +886,15 @@ def run_parallel(req: dict) -> dict:
             # pixel's register is capped consistently with the measurement.
             kw["gradient_mhz_per_um"] = grad
             kw["pixel_size_um"] = psz
-            kw["register_widths_per_pixel"] = reg_widths
+            # The per-pixel measured width only gates the SAMPLE/CUSTOM modes
+            # (each pixel runs at its own width -> narrow pixels skipped). The
+            # SHOR race uses a FIXED circuit width (3*bitlen(N)+1) set by N, not
+            # by the pixel -- applying register_widths_per_pixel there would skip
+            # every pixel whose measured width < the Shor width (e.g. Shor(15)=13q
+            # vs measured widths 5-12 -> 0 pixels run -> no factors, empty
+            # histogram). So do NOT gate the shor race by the per-pixel width.
+            if mode != "shor":
+                kw["register_widths_per_pixel"] = reg_widths
         b = _backend(profile, temperature_k, seed, noise_mode,
                      hardware=False, **kw)
     except NoFPGADetected as exc:
@@ -784,6 +926,11 @@ def run_parallel(req: dict) -> dict:
             circuits.append(qc)
             bases.append(a)
         res = b.run_array(circuits, shots=shots, max_pixels=n_pixels)
+        # Prime power N = p^k: the quantum gcd step is trivial (a^(r/2) = +/-1
+        # mod p^k -> gcd is 1 or N), so the factor is recovered classically.
+        # Mirrors run_circuit's shor branch so the 64-shor derivation can show
+        # the SAME full phase->period->gcd chain (plus the race context).
+        pp = perfect_power(n)
         per_pixel = []
         winner = None
         for i, (r, a) in enumerate(zip(res["per_pixel"], bases)):
@@ -797,12 +944,18 @@ def run_parallel(req: dict) -> dict:
             _ret = (None if noise_mode == "none"
                     else float(r.assessment.get("signal_retention", 0.0) or 0.0))
             cb = circuits[i].metadata["counting_bits"]
+            _reveal = {}
             r_period, factors = postprocess_period(
-                counts, cb, a, n, signal_retention=_ret)
+                counts, cb, a, n, signal_retention=_ret, reveal=_reveal)
+            # prime power: classical factors, keep the measured phase peak
+            if pp is not None:
+                factors = (pp[0], n // pp[0])
             ok = bool(factors[0]) and factors[0] * factors[1] == n
             entry = {"pixel": i, "a": a, "period": r_period,
                      "factors": list(factors) if factors[0] else None,
-                     "success": ok, "counts": counts}
+                     "success": ok, "counts": counts,
+                     "counting_bits": cb,
+                     "recovered": (_reveal if _reveal.get("bitstring") else None)}
             per_pixel.append(entry)
             if ok and winner is None:
                 winner = entry
@@ -811,7 +964,24 @@ def run_parallel(req: dict) -> dict:
                     "factors": (list(winner["factors"]) if winner else None),
                     "success": winner is not None,
                     "winner_pixel": (winner["pixel"] if winner else None),
-                    "winner_base": (winner["a"] if winner else None)})
+                    "winner_base": (winner["a"] if winner else None),
+                    "period": (winner["period"] if winner else None),
+                    "a": (winner["a"] if winner else None),
+                    "counting_qubits": (winner["counting_bits"] if winner else None),
+                    "num_qubits": circuits[0].num_qubits,
+                    "num_clbits": circuits[0].num_clbits})
+        if pp is not None:
+            out["prime_power"] = {"base": pp[0], "exp": pp[1]}
+        if winner and winner.get("recovered"):
+            out["recovered"] = {
+                "bitstring": winner["recovered"]["bitstring"],
+                "phase": round(float(winner["recovered"]["phase"]), 6),
+                "count": winner["recovered"]["count"],
+                "period": winner["recovered"]["period"],
+                "factors": list(winner["factors"]) if winner["factors"][0] else None,
+            }
+            if pp is not None:
+                out["recovered"]["prime_power"] = {"base": pp[0], "exp": pp[1]}
         if "skipped_pixels" in res:
             out["skipped_pixels"] = res["skipped_pixels"]
             out["n_run"] = res["n_run"]
@@ -820,16 +990,25 @@ def run_parallel(req: dict) -> dict:
 
     elif mode == "sample":
         from qiskit import QuantumCircuit
-        # build the same circuit on every pixel (independent seeds -> 64x shots)
+        # build the same circuit on every pixel (independent seeds -> 64x shots).
+        # When the request carries an `algorithm` (bell/grover/qft/math/qrand),
+        # build THAT circuit per pixel via _build_pixel_circuit so the 64-parallel
+        # run card reuses the single-pixel algorithm menu; otherwise fall back to
+        # QASM (if provided) or a uniform H+measure sample.
         qasm = req.get("qasm")
+        algo = str(req.get("algorithm", "")).lower()
         if qasm:
             from qiskit import qasm2
             qc0 = qasm2.loads(str(qasm)) if isinstance(qasm, str) else list(qasm)[0]
+            label = "qasm"
+        elif algo and algo != "sample":
+            qc0, label = _build_pixel_circuit(algo, req)
         else:
             nq = max(1, min(64, int(req.get("num_qubits", 4))))
             qc0 = QuantumCircuit(nq, nq)
             qc0.h(range(nq))
             qc0.measure(range(nq), range(nq))
+            label = "sample"
         circuits = [qc0] * n_pixels
         res = b.run_array(circuits, shots=shots, max_pixels=n_pixels)
         per_pixel = []
@@ -843,10 +1022,20 @@ def run_parallel(req: dict) -> dict:
             per_pixel.append({"pixel": i, "counts": r.get_counts(),
                               "approximate": r.approximate})
         n_run = sum(1 for p in per_pixel if not p.get("skipped"))
-        out.update({"num_qubits": qc0.num_qubits, "per_pixel": per_pixel,
+        out.update({"algorithm": label, "num_qubits": qc0.num_qubits,
+                    "num_clbits": qc0.num_clbits,
+                    "per_pixel": per_pixel,
                     "aggregate_counts": res["aggregate_counts"],
                     "total_shots": shots * n_run,
                     "n_run": n_run})
+        # Per-algorithm result fields from the AGGREGATE counts so the 64-pixel
+        # measurement gets the same green result marker + derivation modal as
+        # the single-pixel run (found/marked/uniform/result/...). bell derives
+        # client-side; qrand/bb84 return {} (no single result bar).
+        if algo and algo != "sample" and not qasm:
+            out.update(_postprocess_sample(algo, req, qc0,
+                                            res["aggregate_counts"],
+                                            shots * n_run))
         if "skipped_pixels" in res:
             out["skipped_pixels"] = res["skipped_pixels"]
             out["min_width"] = res["min_width"]
@@ -888,6 +1077,94 @@ def run_parallel(req: dict) -> dict:
     out["noise"] = b.noise_summary()
     out["elapsed_ms"] = round((time.perf_counter() - t0) * 1000, 2)
     return out
+
+
+def run_calibrate_array(req: dict) -> dict:
+    """Calibrate the 64-pixel array's per-pixel register width (Invention 4+5).
+
+    Mirror of the ``/api/circuit/calibrate-array`` endpoint logic, factored out
+    so it can run as an async RQ job (the sim path synthesizes 64 ODMR spectra
+    and runs ``decompose_odmr`` on each — ~30 s — so it must NOT block the
+    uvicorn event loop). ``source="sim"`` synthesizes each pixel's spectrum;
+    ``source="real"`` drives the ``RUN_ALL_ODMR`` firmware verb. The result is
+    persisted to ``hardware/calibration/array_calibration.json`` and returned.
+    """
+    from qssc.array_calibration import (
+        calibrate_array, calibrate_array_from_codes,
+    )
+    from qssc.defects import get_profile
+    import numpy as _np
+    profile = req.get("profile", "NV")
+    prof = get_profile(profile)
+    source = str(req.get("source", "sim")).lower()
+    try:
+        if source == "real":
+            fpga = _make_fpga(profile, float(req.get("temperature_k", 300.0)),
+                              int(req.get("seed", 42)), hardware=True)
+            if not hasattr(fpga, "run_all_odmr"):
+                return {"error": "real calibration needs a board with run_all_odmr "
+                                 "(set QSSC_FPGA_PORT or use source=sim)"}
+            d_khz = int(prof.zero_field_splitting / 1e3)
+            spread_khz = int(float(req.get("gradient_mhz_per_um", 0.5))
+                             * float(req.get("pixel_size_um", 200.0)) * 1e3)
+            span_khz = max(spread_khz + int(prof.odmr_linewidth_hz / 1e3) * 4,
+                           int(prof.odmr_linewidth_hz / 1e3) * 6)
+            f_start = d_khz - span_khz
+            f_stop = d_khz + span_khz
+            n = int(req.get("n_points", 400))
+            matrix = fpga.run_all_odmr(f_start, f_stop, n)
+            freqs_ghz = _np.linspace(f_start * 1e3, f_stop * 1e3, n) / 1e9
+            calib = calibrate_array_from_codes(
+                matrix, freqs_ghz, prof,
+                gradient_mhz_per_um=float(req.get("gradient_mhz_per_um", 0.5)),
+                pixel_size_um=float(req.get("pixel_size_um", 200.0)),
+                seed=int(req.get("seed", 42)),
+                temperature_k=float(req.get("temperature_k", 300.0)))
+            io_label = "real"
+        else:
+            calib = calibrate_array(
+                profile,
+                gradient_mhz_per_um=float(req.get("gradient_mhz_per_um", 0.5)),
+                pixel_size_um=float(req.get("pixel_size_um", 200.0)),
+                seed=int(req.get("seed", 42)),
+                temperature_k=float(req.get("temperature_k", 300.0)),
+                max_nv_per_microdiamond=int(req.get("max_nv_per_microdiamond", 100)))
+            io_label = "simulated"
+    except NoFPGADetected as exc:
+        return {"error": "no-fpga-detected",
+                "message": ("No FPGA detected — connect the board and set "
+                            "QSSC_FPGA_PORT, or use source=sim. (" + str(exc) + ")")}
+    except Exception as exc:  # noqa: BLE001 - surface sim errors, not a 500
+        return {"error": str(exc)}
+    # persist the calibration cache
+    try:
+        _CALIB_FILE.parent.mkdir(parents=True, exist_ok=True)
+        calib.to_json(_CALIB_FILE)
+    except Exception:  # noqa: BLE001 - a cache write failure must not break the reply
+        pass
+    bw = best_uniform_width(calib.widths)
+    return {
+        "profile": calib.profile,
+        "source": io_label,
+        "d_fit_ghz": round(prof.zero_field_splitting / 1e9, 6),
+        "gradient_mhz_per_um": calib.gradient_mhz_per_um,
+        "pixel_size_um": calib.pixel_size_um,
+        "seed": calib.seed,
+        "temperature_k": calib.temperature_k,
+        "n_pixels": calib.n_pixels,
+        "per_pixel_widths": calib.widths,
+        "min_width": calib.min_width,
+        "max_width": calib.max_width,
+        "best_uniform_width": bw[0],
+        "best_uniform_pixels": bw[1],
+        "total_working_qubits": bw[0] * bw[1],
+        "pixels": [
+            {"pixel_id": p.pixel_id, "nv_present": p.nv_present,
+             "microdiamonds": p.microdiamonds, "register_width": p.register_width,
+             "odmr_lines": p.odmr_lines}
+            for p in calib.pixels
+        ],
+    }
 
 
 def run_custom(req: dict) -> dict:
