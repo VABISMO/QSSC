@@ -2,10 +2,11 @@ import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { api } from './api.js'
 import { deriveMeasurement } from './derive.js'
 import {
-  QubitGrid, OdmrChart, BarCounts, MeasurementHelp,
+  QubitGrid, OdmrChart, BarCounts,
   SignalChart, CalibrationPanel, Verdict, NoiseBudget,
-  OpticalChainDiagram, RunPhysics,
+  OpticalChainDiagram, RunPhysics, MeasurementHelp,
   CompassRose, GyroPanel, MagnetoImage, SensorField,
+  ParallelCalibCard,
 } from './components.jsx'
 
 // Fallback firmware command list (all 17 verbs). Used in the "Reply & readout"
@@ -306,6 +307,19 @@ export default function App() {
   const [nNvPerPixel, setNNvPerPixel] = useState(null)
   const [registerLineFreqsHz, setRegisterLineFreqsHz] = useState(null)
   const [primeReadout, setPrimeReadout] = useState(true)
+  // `parallelMode` is the single "64-parallel ON/OFF" switch. OFF → the
+  // single-pixel path (Circuit Runner + per-pixel ODMR calibration). ON → the
+  // 64-pixel array path (array calibration + run-parallel). Exactly one Run
+  // and one Calibrate are visible at any time; the toggle swaps which.
+  const [parallelMode, setParallelMode] = useState(false)
+  // Visual subtabs within the Circuits tab (replaces the vertical timeline of
+  // section-titles): Circuit runner / Backend physics / Spectroscopy &
+  // calibration / Detected signal. Default = the runner (the primary action).
+  const [circuitsSub, setCircuitsSub] = useState('runner')
+  // Visual subtabs within the Sensors tab (replaces the vertical timeline of
+  // section-titles): Quantum sensors (compass/gyro/magneto) / Field imaging
+  // (ferro/nav/thermal/current). Default = the on-chip quantum sensors.
+  const [sensorsSub, setSensorsSub] = useState('quantum')
   const [modes, setModes] = useState(null)
   useEffect(() => { api.modes().then(setModes).catch(() => {}) }, [])
 
@@ -441,9 +455,15 @@ export default function App() {
   const [result, setResult] = useState(null)  // finished result dict
   const [runErr, setRunErr] = useState(null)
   const pollRef = useRef(null)
+  const parPollRef = useRef(null)
+  const arrCalibPollRef = useRef(null)
   // clear any pending status-poll timeout on unmount so it can't fire a
   // setState on the unmounted component.
-  useEffect(() => () => { if (pollRef.current) clearTimeout(pollRef.current) }, [])
+  useEffect(() => () => {
+    if (pollRef.current) clearTimeout(pollRef.current)
+    if (parPollRef.current) clearTimeout(parPollRef.current)
+    if (arrCalibPollRef.current) clearTimeout(arrCalibPollRef.current)
+  }, [])
 
   // ---- analog signal + calibration state ----
   const [seq, setSeq] = useState('ramsey')
@@ -451,6 +471,27 @@ export default function App() {
   const [calRun, setCalRun] = useState(null)
   const [calRunning, setCalRunning] = useState(false)
   const [calErr, setCalErr] = useState(null)
+
+  // ---- 64-parallel computing (Invention 4) + per-pixel array calibration ----
+  // Calibrate the array first (measured per-pixel register width), then run
+  // one circuit per pixel with use_calibration on. The calibration cache is
+  // persisted server-side (hardware/calibration/array_calibration.json) so the
+  // run-parallel endpoint loads it automatically when use_calibration=true.
+  const [parRun, setParRun] = useState(null)
+  const [parRunning, setParRunning] = useState(false)
+  const [parJob, setParJob] = useState(null)
+  const [parErr, setParErr] = useState(null)
+  const [arrCalib, setArrCalib] = useState(null)
+  const [arrCalibRunning, setArrCalibRunning] = useState(false)
+  const [arrCalibErr, setArrCalibErr] = useState(null)
+  // Shared 64-parallel card state (lifted here so the run card + the calibrate
+  // card — now placed in the Circuit Runner + Spectroscopy slots — stay in
+  // sync: the run body carries gradient/pixel-size, and useCalib gates the run
+  // on the cached calibration).
+  const [parGrad, setParGrad] = useState(0.5)
+  const [parPixelSize, setParPixelSize] = useState(200)
+  const [parNPixels, setParNPixels] = useState(64)
+  const [parUseCalib, setParUseCalib] = useState(true)
 
   // ---- history ----
   const [history, setHistory] = useState([])
@@ -549,6 +590,27 @@ export default function App() {
     return body
   }
 
+  // 64-parallel request body. Reuses buildBody() so the SAME algorithm menu
+  // drives both modes (the run card stays in place; only Pixels + Use-
+  // calibration are added in 64 mode). shor/period/qftnos -> the coprime-base
+  // race (mode='shor'); everything else -> mode='sample' building that
+  // algorithm's circuit per pixel on the backend.
+  const buildParallelBody = () => {
+    const base = buildBody()
+    const shorFamily = algo === 'shor' || algo === 'period' || algo === 'qftnos'
+    const body = { ...base,
+      n_pixels: parNPixels, use_calibration: parUseCalib,
+      gradient_mhz_per_um: parGrad, pixel_size_um: parPixelSize }
+    if (shorFamily) {
+      body.mode = 'shor'
+      body.n = nShor
+    } else {
+      body.mode = 'sample'
+      body.algorithm = algo
+    }
+    return body
+  }
+
   const runCircuit = async () => {
     if (pollRef.current) clearTimeout(pollRef.current)
     setRunErr(null); setResult(null)
@@ -622,6 +684,83 @@ export default function App() {
     finally { setCalRunning(false) }
   }
 
+  // 64-parallel: calibrate the array's per-pixel register width, then run one
+  // circuit per pixel. Both are enqueued as async RQ jobs (the sim calibrate
+  // path runs decompose_odmr on 64 spectra ~30 s, and a 64-pixel Shor run is
+  // ~50 s of serial Qiskit — both would block the single-worker event loop if
+  // run inline), so the dashboard polls GET /api/jobs/{id} until finished.
+  const calibrateArray = async (body) => {
+    if (arrCalibPollRef.current) clearTimeout(arrCalibPollRef.current)
+    setArrCalibRunning(true); setArrCalibErr(null); setArrCalib(null)
+    try {
+      const enq = await api.calibrateArray(body)
+      if (enq.error) { setArrCalibErr(enq.error); setArrCalibRunning(false); return }
+      const jobId = enq.job_id
+      // 64 decompose_odmr fits can take ~30 s; allow up to 300 polls (180 s)
+      // to match the single-pixel run window.
+      const MAX_POLLS = 300
+      const poll = async (n = 0) => {
+        try {
+          const rec = await api.job(jobId)
+          if (rec.status === 'finished') {
+            setArrCalib(rec.result || {})
+            setArrCalibRunning(false)
+          } else if (rec.status === 'failed') {
+            setArrCalibErr((rec.result && rec.result.error) || 'calibration failed')
+            setArrCalib(rec.result || null)
+            setArrCalibRunning(false)
+          } else if (n >= MAX_POLLS) {
+            setArrCalibErr(`calibration job ${jobId} did not finish after ${Math.round(MAX_POLLS * 0.6)}s`)
+            setArrCalibRunning(false)
+          } else {
+            arrCalibPollRef.current = setTimeout(() => poll(n + 1), 600)
+          }
+        } catch (e) {
+          if (n >= MAX_POLLS) { setArrCalibErr(e.message); setArrCalibRunning(false) }
+          else arrCalibPollRef.current = setTimeout(() => poll(n + 1), 600)
+        }
+      }
+      poll()
+    } catch (e) { setArrCalibErr(e.message); setArrCalibRunning(false) }
+  }
+
+  const runParallel = async (body) => {
+    if (parPollRef.current) clearTimeout(parPollRef.current)
+    setParRunning(true); setParErr(null); setParRun(null); setParJob({ status: 'queued' })
+    try {
+      const enq = await api.runParallel(body)
+      if (enq.error) { setParErr(enq.error); setParRunning(false); setParJob(null); return }
+      const jobId = enq.job_id
+      setParJob({ job_id: jobId, status: enq.status })
+      // A 64-pixel Shor run is ~50 s of serial Qiskit; allow up to 300 polls
+      // (180 s) to match the single-pixel run window.
+      const MAX_POLLS = 300
+      const poll = async (n = 0) => {
+        try {
+          const rec = await api.job(jobId)
+          setParJob({ job_id: jobId, status: rec.status })
+          if (rec.status === 'finished') {
+            setParRun(rec.result || {})
+            setParRunning(false)
+          } else if (rec.status === 'failed') {
+            setParErr((rec.result && rec.result.error) || 'run failed')
+            setParRun(rec.result || null)
+            setParRunning(false)
+          } else if (n >= MAX_POLLS) {
+            setParErr(`parallel job ${jobId} did not finish after ${Math.round(MAX_POLLS * 0.6)}s`)
+            setParRunning(false)
+          } else {
+            parPollRef.current = setTimeout(() => poll(n + 1), 600)
+          }
+        } catch (e) {
+          if (n >= MAX_POLLS) { setParErr(e.message); setParRunning(false) }
+          else parPollRef.current = setTimeout(() => poll(n + 1), 600)
+        }
+      }
+      poll()
+    } catch (e) { setParErr(e.message); setParRunning(false); setParJob(null) }
+  }
+
   const loadFromHistory = (rec) => {
     setResult(rec.result || null)
     setRunErr(null)
@@ -645,12 +784,98 @@ export default function App() {
   const runAssessment = result && result.assessment
   const runBits = result && result.num_clbits
   const runRecovered = result && (result.recovered || (result.result && result.result.recovered))
-  // per-algorithm "which bar is the correct result + how the binary -> result"
-  // derivation. Computed once, shared by the histogram marker (BarCounts signal)
-  // and the help modal (MeasurementHelp), so the marked bar and the shown work
-  // always agree. Pure client-side from the run result + displayed counts.
-  const meas = result && algo && algo !== 'custom'
-    ? deriveMeasurement(algo, result, displayCounts, runBits) : null
+  // Per-algorithm "which bar is the result + how it's derived" marker, shared
+  // by the histogram (signal bars) and the MeasurementHelp derivation modal.
+  const meas = result ? deriveMeasurement(algo, result, displayCounts, runBits) : null
+  // 64-parallel histogram + result marker — same marker + derivation treatment
+  // as the single-pixel measurement so both modes look identical. The sample
+  // mode shows the aggregate top bitstrings; shor mode marks the winner pixel's
+  // recovered factors (→ a×b) on the top aggregate bar (its phase peak).
+  const parAgg = parRun && parRun.aggregate_counts
+  // Shor RACE: the histogram must show the WINNER pixel's counting-register
+  // marginal counts (where its recovered phase peak is a top bar), NOT the
+  // 64-pixel full-bitstring aggregate — otherwise the winner's peak is buried
+  // below the top-8 cutoff and the green result marker is invisible. The
+  // backend returns per_pixel[winner].recovered.marginal_counts (sums to one
+  // pixel's shots). Sample mode keeps the aggregate (its top bitstring IS the
+  // result, same as single-pixel).
+  const _parWinner = parRun && parRun.mode === 'shor' && parRun.winner_pixel != null
+    && parRun.per_pixel && parRun.per_pixel[parRun.winner_pixel]
+  const parWinnerMarginal = _parWinner
+    && ((_parWinner.recovered || {}).marginal_counts)
+  const parSourceCounts = parWinnerMarginal || parAgg
+  const parTopCounts = parSourceCounts
+    ? Object.entries(parSourceCounts).sort((a, b) => b[1] - a[1]).slice(0, 8) : null
+  const parDisplayCounts = parTopCounts && parTopCounts.length
+    ? Object.fromEntries(parTopCounts) : null
+  // Shor shots = the winner pixel's shots (the marginal is over its runs, so
+  // Σ counts == shots and the mismatch flag clears); sample shots = aggregated.
+  const parShots = parRun && (parRun.mode === 'shor'
+    ? (parRun.shots || shots)
+    : (parRun.total_shots || parRun.shots || shots))
+  const parRecovered = parRun && parRun.mode === 'shor' && parRun.success
+    ? { factors: parRun.factors, period: parRun.period, bitstring: null } : null
+  // 64-parallel result marker + derivation — IDENTICAL treatment to the
+  // single-pixel measurement for every algorithm. The backend sample mode now
+  // postprocesses the aggregate counts (found/marked/uniform/result/...), so
+  // deriveMeasurement works on parRun exactly as it does on `result`. shor mode
+  // is a 64-pixel RACE; the backend returns the winner pixel's recovered
+  // bitstring / counting_qubits / factors / prime_power, so the full single-
+  // pixel phase→period→gcd chain is shown with the race context prepended.
+  // qrand/bb84/custom have no single "result bar" in the aggregate → a generic
+  // 64×-ensemble derivation.
+  const parMeas = (() => {
+    if (!parRun) return null
+    if (parRun.mode === 'shor') {
+      // 64-pixel Shor RACE: build the SAME full phase->period->gcd derivation
+      // the single-pixel measurement shows (via deriveMeasurement on the winner
+      // pixel's recovered bitstring / counting_qubits / factors / prime_power,
+      // which the backend now returns), then PREPEND the race-context steps so
+      // the modal explains every variable exactly like single-pixel, plus the
+      // 64-pixel race that found the winner.
+      const full = deriveMeasurement('shor', parRun, parDisplayCounts, parRun.num_clbits)
+      const raceSteps = [
+        { k: 'Race', v: `${parRun.n_pixels} pixels each run Shor on N=${parRun.n}, each with an independent coprime base a (gcd(a,N)=1)` },
+        { k: 'Winner', v: parRun.success
+          ? `pixel ${parRun.winner_pixel} (base a=${parRun.winner_base}) was the first to find a usable period r=${parRun.period}`
+          : 'no pixel found a period above the noise floor' },
+      ]
+      if (full) {
+        return {
+          bars: full.bars, label: full.label, hasResult: full.hasResult,
+          title: `64-pixel Shor race — pixel ${parRun.winner_pixel} (base a=${parRun.winner_base}) found the period; then the single-pixel phase→period→gcd chain`,
+          steps: [...raceSteps, ...full.steps],
+          summary: `Each of the ${parRun.n_pixels} pixels races an independent coprime base a; pixel ${parRun.winner_pixel} (a=${parRun.winner_base}) found period r=${parRun.period}. From there the factor recovery is EXACTLY the single-pixel Shor chain — the marked bar is that winner pixel's measured phase peak, its low counting bits give the phase, continued fractions lift the period, and gcd(a^(r/2)±1, ${parRun.n}) gives the factors. The 64-pixel race raises throughput (64× bases per wall-clock step), not coherence.${full.summary ? ' ' + full.summary : ''}`,
+        }
+      }
+      // no recovered bitstring (decohered): keep the short race verdict
+      return {
+        bars: [], label: '→ no signal', hasResult: false,
+        title: '64-pixel Shor race — no pixel found the period',
+        steps: [
+          ...raceSteps,
+          { k: 'Reason', v: `the circuits decohered at ${parRun.temperature_k} K (T₂ too short); cool the chip or use none/ideal mode` },
+        ],
+        summary: `None of the ${parRun.n_pixels} pixels found a phase peak above the noise floor, so no period/factors were recovered. The 64-pixel race raises throughput (64× bases in one wall-clock step), not coherence — cooling the chip extends T₂ and is what lets a pixel succeed.`,
+      }
+    }
+    // sample mode: reuse the SAME derivation as the single-pixel measurement.
+    const derived = deriveMeasurement(algo, parRun, parDisplayCounts, parRun.num_clbits)
+    if (derived) return derived
+    // qrand / bb84 / custom / unknown: no single result bar in the aggregate.
+    const topBs = parTopCounts && parTopCounts[0] ? parTopCounts[0][0] : null
+    return {
+      bars: topBs ? [topBs] : [], label: '→ 64× ensemble', hasResult: !!topBs,
+      title: `64-pixel ${algo || 'sample'} ensemble — aggregate of ${parRun.n_run || parRun.n_pixels} pixels`,
+      steps: [
+        { k: 'Mode', v: `same circuit on every pixel, independent seeds → ${(parRun.n_run || parRun.n_pixels)}× shots aggregated` },
+        { k: 'Aggregate', v: `${parRun.total_shots || parRun.shots} total counts across ${(parRun.n_run || parRun.n_pixels)} pixels` },
+        { k: 'Top bar', v: topBs ? `${topBs} (the most-probable outcome across all pixels)` : '—' },
+        { k: 'Result', v: 'the 64× aggregate boosts statistics; no single bar is "the answer" for this protocol' },
+      ],
+      summary: `Every pixel runs the same ${algo || 'sample'} circuit with an independent noise seed, so the aggregate histogram is the single-pixel distribution with ${(parRun.n_run || parRun.n_pixels)}× the shots — tighter peaks, same outcome statistics. The marked bar is the most-probable aggregate outcome.`,
+    }
+  })()
 
   return (
     <div className="app">
@@ -724,6 +949,14 @@ export default function App() {
               <div className="hint">yosys synth_xilinx estimate (no P&amp;R / no timing). The 64 detector channels read fully in parallel — no analog MUX, no XADC.</div>
               {fpgaLoading && <div className="muted"><span className="spinner" /> loading synthesis report…</div>}
               {fpgaErr && <div className="error">{fpgaErr}</div>}
+              {!fpgaLoading && !fpgaErr && fpga?.status === 'NO_SYNTHESIS' && (
+                <div className="muted" style={{ padding: '10px 0' }}>
+                  No synthesis run found — run <span className="mono">fpga/synth/run_synth.sh</span> (yosys) to populate the resource estimate. The RTL module list + command protocol below remain available.
+                </div>
+              )}
+              {!fpgaLoading && !fpgaErr && fpga?.status === 'PARSE_ERROR' && (
+                <div className="error" style={{ marginBottom: 8 }}>Could not parse <span className="mono">fpga/synth/synth.log</span> — re-run run_synth.sh.</div>
+              )}
               {fpga?.resources?.map(r => (
                 <div className="bar-row" key={r.name}>
                   <span className="muted mono" style={{ fontSize: 11.5 }}>{r.label}</span>
@@ -731,14 +964,14 @@ export default function App() {
                   <span className="mono" style={{ fontSize: 11, textAlign: 'right' }}>{r.pct}%</span>
                 </div>
               ))}
-              {fpga?.resources && (
+              {fpga?.resources?.length > 0 && (
                 <div className="legend" style={{ marginTop: 12 }}>
                   {fpga.resources.map(r => (
                     <div key={r.name}><b>{r.used}</b> / {r.available} {r.label}</div>
                   ))}
                 </div>
               )}
-              {fpga?.quality && (
+              {fpga?.resources?.length > 0 && fpga?.quality && (
                 <div className="row" style={{ marginTop: 14, marginBottom: 0 }}>
                   <div className="stat" style={{ flex: 1, padding: '9px 10px' }}>
                     <div className="k">Latches</div><span className={`chip ${fpga.quality.latches ? 'bad' : 'ok'}`}>{fpga.quality.latches} {fpga.quality.latches ? '⚠' : '✓'}</span>
@@ -994,6 +1227,22 @@ export default function App() {
             </span>
           </div>
 
+          {/* Visual subtabs within Sensors (replaces the section-title
+              timeline): Quantum sensors (compass/gyro/magneto) / Field
+              imaging (ferro/nav/thermal/current). Corporate line icons. */}
+          <nav className="subtabs" role="tablist" aria-label="Sensors sections">
+            {[
+              { k: 'quantum', label: 'Quantum sensors', icon: <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M15.5 8.5l-2 5-5 2 2-5 5-2z" /><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" /></svg> },
+              { k: 'field', label: 'Field imaging', icon: <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M5 8a3.5 3.5 0 017 0v8a3.5 3.5 0 11-7 0V8z" /><path d="M12 8a3.5 3.5 0 017 0v8a3.5 3.5 0 11-7 0V8z" /></svg> },
+            ].map(t => (
+              <button key={t.k} role="tab" type="button" aria-selected={sensorsSub === t.k}
+                className={`subtab ${sensorsSub === t.k ? 'on' : ''}`} onClick={() => setSensorsSub(t.k)}>
+                <span className="subtab-ic">{t.icon}</span>
+                <span className="subtab-lb">{t.label}</span>
+              </button>
+            ))}
+          </nav>
+          {sensorsSub === 'quantum' && (<>
           <div className="section-title">On-chip quantum sensors — compass · gyroscope · magneto-optic image</div>
           <div className="hint" style={{ marginBottom: 14, color: 'var(--dim)', fontSize: 12.5 }}>
             The same ADF4351 → J3 → A1 MW chain and 64-channel AD7616 readout run as quantum sensors.
@@ -1044,8 +1293,10 @@ export default function App() {
               <MagnetoImage data={mag} error={magErr} loading={magLoading} />
             </div>
           </div>
+          </>)}
 
           {/* =================== CONTACTLESS FIELD IMAGING =================== */}
+          {sensorsSub === 'field' && (<>
           <div className="section-title">Contactless field imaging — ferromagnetic · geomagnetic nav · temperature · current</div>
           <div className="hint" style={{ marginBottom: 14, color: 'var(--dim)', fontSize: 12.5 }}>
             Magnetic fields penetrate fog, smoke, water, tissue, packaging and non-magnetic walls — so the same
@@ -1108,6 +1359,7 @@ export default function App() {
               <SensorField data={current} error={currentErr} loading={currentLoading} promptText="Press Measure to image the current field." />
             </div>
           </div>
+          </>)}
         </>
       ) : mainTab === 'code' ? (
         /* ============================= CODE (scripts) ============================= */
@@ -1199,13 +1451,58 @@ export default function App() {
       ) : (
         /* ============================= HARDWARE (default) ============================= */
         <>
+          {/* Visual subtabs within Circuits (replaces the section-title
+              timeline): Circuit runner / Backend physics / Spectroscopy &
+              calibration / Detected signal / Settings. Corporate line icons
+              per tab. The Settings tab (last) holds the global controls card
+              (64-parallel toggle, environment, defect platform, temperature,
+              execution mode, RNG seed, pixel mode, prime denoise). */}
+          <nav className="subtabs" role="tablist" aria-label="Circuits sections">
+            {[
+              { k: 'runner', label: 'Circuit runner', icon: <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="7" y="7" width="10" height="10" rx="1.5" /><path d="M10 7V4M14 7V4M10 20v-3M14 20v-3M7 10H4M7 14H4M20 10h-3M20 14h-3" /></svg> },
+              { k: 'physics', label: 'Backend physics', icon: <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" /><ellipse cx="12" cy="12" rx="9" ry="3.6" /><ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(60 12 12)" /><ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(120 12 12)" /></svg> },
+              { k: 'spectro', label: 'Spectroscopy & calibration', icon: <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9h6l2 7 2-12 2 6h6" /></svg> },
+              { k: 'signal', label: 'Detected signal', icon: <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h4V6h6v12h6V9h2" /></svg> },
+              { k: 'settings', label: 'Settings', icon: <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg> },
+            ].map(t => (
+              <button key={t.k} role="tab" type="button" aria-selected={circuitsSub === t.k}
+                className={`subtab ${circuitsSub === t.k ? 'on' : ''}`} onClick={() => setCircuitsSub(t.k)}>
+                <span className="subtab-ic">{t.icon}</span>
+                <span className="subtab-lb">{t.label}</span>
+              </button>
+            ))}
+          </nav>
+          {circuitsSub === 'settings' && (<>
           {/* ============================= GLOBAL CONTROLS ============================= */}
           <div className="card" style={{ marginBottom: 18 }}>
+            {/* Two top-level switches in one row, two columns: the 64-parallel
+                ON/OFF toggle (which Run + Calibrate set is shown below) and the
+                Simulator / Hardware-real environment. */}
+            <div className="row" style={{ marginBottom: 12, alignItems: 'flex-start', gap: 18 }}>
+            {/* The single "64-parallel ON/OFF" switch. OFF = single-pixel path
+                (Circuit Runner + per-pixel ODMR calibration); ON = 64-pixel
+                array path (array calibration + run-parallel). The bottom half
+                of this tab swaps accordingly, so there is exactly one Run and
+                one Calibrate visible at any time — no duplicated panels. */}
+            <div className="seg-toggle" role="group" aria-label="64-parallel mode" style={{ flex: 1, marginBottom: 0 }}>
+              <span className="seg-label">64-parallel</span>
+              <button className={`seg ${!parallelMode ? 'on' : ''}`} onClick={() => setParallelMode(false)}>
+                <span className="seg-ic">◇</span> OFF · single pixel
+              </button>
+              <button className={`seg ${parallelMode ? 'on' : ''}`} onClick={() => setParallelMode(true)}>
+                <span className="seg-ic">▦</span> ON · 64 pixels
+              </button>
+              <span className="seg-note">
+                {parallelMode
+                  ? '64-pixel array — calibrate the array, then run one circuit across all pixels (64× throughput).'
+                  : 'Single pixel — run one circuit on one pixel, calibrate its ODMR register.'}
+              </span>
+            </div>
             {/* Top-level Simulator / Hardware-real switch. Green when Hardware
                 real is selected. In Hardware-real mode the Aer noise-mode
                 selector is hidden (the real board's physics replace it) and a
                 probe indicator shows whether a board answered the ID handshake. */}
-            <div className="seg-toggle" role="group" aria-label="Execution environment" style={{ marginBottom: 12 }}>
+            <div className="seg-toggle" role="group" aria-label="Execution environment" style={{ flex: 1, marginBottom: 0 }}>
               <span className="seg-label">Environment</span>
               <button className={`seg ${hwMode === 'simulator' ? 'on' : ''}`} onClick={() => setHwMode('simulator')}>
                 <span className="seg-ic">◈</span> Simulator
@@ -1222,6 +1519,7 @@ export default function App() {
                       ? `FPGA connected — ${(probe.data.id || 'QSSC').split('\n')[0]} on ${probe.data.port}`
                       : 'No FPGA detected — connect the board and set QSSC_FPGA_PORT, or switch to Simulator'}
               </span>
+            </div>
             </div>
             <div className="row" style={{ marginBottom: 0 }}>
               <div className="field">
@@ -1315,12 +1613,19 @@ export default function App() {
             </div>
           </div>
 
-          {/* ============================= CIRCUIT RUNNER ============================= */}
-          <div className="section-title">Circuit Runner</div>
+          </>)}
+
+          {/* ============================= CIRCUIT RUNNER (single-pixel path) ============================= */}
+          {circuitsSub === 'runner' && (<>
           <div className="grid cols-2">
+          {/* The single-pixel run card stays in place in both modes. In 64-
+              parallel mode only a Pixels + Use-calibration row is added and
+              Run routes to runParallel; the algorithm menu is identical. */}
           <div className="card">
-              <h2><span className="dot" />Run a quantum algorithm</h2>
-              <div className="hint">Enqueued as an async Redis/RQ job; the dashboard polls and updates when it is ready. Custom circuit loads by default.</div>
+              <h2><span className="dot" />Run a quantum algorithm{parallelMode && <span className="pill" style={{ marginLeft: 8, fontSize: 10.5 }}>64-pixel parallel</span>}</h2>
+              <div className="hint">{parallelMode
+                ? 'Runs the chosen algorithm on every pixel (independent seeds) and aggregates; shor/period/qftnos race coprime bases across pixels.'
+                : 'Enqueued as an async Redis/RQ job; the dashboard polls and updates when it is ready.'}</div>
               <div className="row">
                 <div className="field">
                   <label>Algorithm</label>
@@ -1338,6 +1643,27 @@ export default function App() {
                   <input type="number" min="64" step="64" value={shots} onChange={e => setShots(+e.target.value)} />
                 </div>
               </div>
+
+              {/* 64-parallel only: Pixels + Use-calibration. The only controls
+                  added in 64 mode -- everything else (algorithm menu, shots,
+                  per-algo fields) is identical to the single-pixel run card. */}
+              {parallelMode && (
+                <div className="row">
+                  <div className="field">
+                    <label>Pixels</label>
+                    <input type="number" min="1" max="64" value={parNPixels} onChange={e => setParNPixels(Math.max(1, Math.min(64, +e.target.value || 1)))} />
+                  </div>
+                  <div className="field" style={{ justifyContent: 'flex-end' }}>
+                    <label>Use calibration</label>
+                    <div style={{ display: 'flex', gap: 8, paddingTop: 9 }}>
+                      <button type="button" className={parUseCalib ? '' : 'ghost'} style={{ padding: '5px 12px', fontSize: 12 }}
+                        onClick={() => setParUseCalib(true)}>On</button>
+                      <button type="button" className={parUseCalib ? 'ghost' : ''} style={{ padding: '5px 12px', fontSize: 12 }}
+                        onClick={() => setParUseCalib(false)}>Off</button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {QUBIT_CFG[algo] && (
                 <div className="row">
@@ -1473,18 +1799,20 @@ export default function App() {
               {algo === 'qftnos' && <div className="hint">Lightweight QFT-based factoring: reduced counting register (t=l+1 vs Shor's 2l+1) + swapless inverse QFT + precomputed controlled mod-mult, then classical gcd factoring from the period. Far fewer qubits/gates than full Shor.</div>}
               {algo === 'bb84' && <div className="hint">Prepare-and-measure QKD over the QSSC backend (chip readout/decoherence = the channel). Sift matching bases, compute QBER, declare secure iff QBER &lt; 11%. An intercept-resend Eve adds ~25% QBER → detected.</div>}
 
-              <button onClick={runCircuit} disabled={running} style={{ marginTop: 6 }}>
-                {running ? <><span className="spinner" /> {job ? `Job ${job.status}…` : 'Running…'}</> : 'Run circuit'}
+              <button onClick={parallelMode ? () => runParallel(buildParallelBody()) : runCircuit} disabled={parallelMode ? parRunning : running} style={{ marginTop: 6 }}>
+                {(parallelMode ? parRunning : running)
+                  ? <><span className="spinner" /> {(parallelMode ? parJob : job) ? `Job ${(parallelMode ? parJob : job).status}…` : 'Running…'}</>
+                  : (parallelMode ? 'Run 64-pixel parallel' : 'Run circuit')}
               </button>
-              {job && <span className="muted mono" style={{ marginLeft: 12, fontSize: 12 }}>job {job.job_id} · {job.status}</span>}
-              {runErr && <div className="error" style={{ marginTop: 10 }}>{runErr}</div>}
+              {(parallelMode ? parJob : job) && <span className="muted mono" style={{ marginLeft: 12, fontSize: 12 }}>job {(parallelMode ? parJob : job).job_id} · {(parallelMode ? parJob : job).status}</span>}
+              {(parallelMode ? parErr : runErr) && <div className="error" style={{ marginTop: 10 }}>{parallelMode ? parErr : runErr}</div>}
               {result && result.error === 'no-fpga-detected' && (
                 <div className="error" style={{ marginTop: 10 }}>
                   No FPGA detected — connect the board and set QSSC_FPGA_PORT, or switch to Simulator.
                   {result.message ? ` (${result.message})` : ''}
                 </div>
               )}
-              {result && !result.error && (
+              {!parallelMode && result && !result.error && (
                 <div style={{ marginTop: 16 }}>
                   <div className="kv">
                     <span className="k">Algorithm</span><span className="v">{result.algorithm}</span>
@@ -1568,24 +1896,69 @@ export default function App() {
                   )}
                 </div>
               )}
+              {parallelMode && parRun && !parRun.error && (
+                <div style={{ marginTop: 16 }}>
+                  <div className="kv">
+                    <span className="k">Mode</span><span className="v">{parRun.mode}{parRun.calibrated ? ' · calibrated' : ''}</span>
+                    <span className="k">Algorithm</span><span className="v">{parRun.algorithm || (parRun.mode === 'shor' ? 'shor' : 'sample')}</span>
+                    <span className="k">Pixels</span><span className="v">{parRun.n_pixels}{parRun.n_run != null ? ` (${parRun.n_run} run)` : ''}</span>
+                    <span className="k">Qubits</span><span className="v">{parRun.num_qubits ?? '–'}</span>
+                    <span className="k">Shots</span><span className="v">{parRun.total_shots || parRun.shots}</span>
+                    <span className="k">Throughput</span><span className="v">{parRun.throughput_x}×</span>
+                    <span className="k">Wall time</span><span className="v">{parRun.elapsed_ms} ms</span>
+                  </div>
+                  {parRun.mode === 'shor' && (
+                    <div className={`expected ${parRun.success ? '' : 'bad'}`} style={{ marginTop: 12 }}>
+                      {parRun.success
+                        ? <>Factors of {parRun.n}: {parRun.factors[0]} × {parRun.factors[1]} ✓ — winner pixel {parRun.winner_pixel} (base a={parRun.winner_base})</>
+                        : <>No factors recovered across {parRun.n_pixels} pixels — the circuits decohered at {parRun.temperature_k} K (cool the chip to extend T₂).</>}
+                    </div>
+                  )}
+                  {parRun.per_pixel_widths && (
+                    <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
+                      Per-pixel register widths: min {parRun.min_width ?? '–'} · max {parRun.max_width ?? '–'} · best uniform {parRun.best_uniform_width ?? '–'} ({parRun.best_uniform_pixels ?? '–'} pixels)
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
-            {/* measurement column (right): histogram + qubit grid */}
+            {/* measurement column (right): histogram + qubit grid — same position
+                in both modes; only the counts + result marker swap to the 64
+                aggregate when parallelMode is ON. */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
               <div className="card histcard">
                 <h2><span className="dot" />Measurement histogram
-                  {result && algo && algo !== 'custom' && (
-                    <MeasurementHelp algo={algo} meas={meas} />
-                  )}
                 </h2>
-                <div className="hint">{runMarginal
-                  ? 'Phase-register marginal (ancilla collapsed): bar counts sum to shots, the recovered signal peak is concentrated.'
-                  : 'Top bitstrings from the most recent run (most-probable first).'}</div>
-                {displayCounts
-                  ? <BarCounts counts={displayCounts} recovered={runRecovered} shots={shots} signal={meas} />
-                  : runErr
-                    ? <div className="muted">Last run failed — see the error above.</div>
-                    : <div className="muted">No run yet — execute a circuit on the left.</div>}
+                <div className="hint">{parallelMode
+                  ? (parRun && parRun.mode === 'shor'
+                      ? '64-pixel Shor: the first pixel to find the period wins — its recovered factors mark the result.'
+                      : 'Aggregate top bitstrings across all 64 pixels (n_pixels × shots total).')
+                  : (runMarginal
+                      ? 'Phase-register marginal (ancilla collapsed): bar counts sum to shots, the recovered signal peak is concentrated.'
+                      : 'Top bitstrings from the most recent run (most-probable first).')}</div>
+                {parallelMode
+                  ? (parDisplayCounts
+                      ? <BarCounts counts={parDisplayCounts} shots={parShots}
+                          signal={parMeas} recovered={parRecovered} />
+                      : parErr
+                        ? <div className="muted">Last run failed — see the error above.</div>
+                        : <div className="muted">No 64-parallel run yet — run a circuit on the left.</div>)
+                  : (displayCounts
+                      ? <BarCounts counts={displayCounts} shots={shots}
+                          signal={meas} recovered={runRecovered} />
+                      : runErr
+                        ? <div className="muted">Last run failed — see the error above.</div>
+                        : <div className="muted">No run yet — execute a circuit on the left.</div>)}
+                {/* "How is the result calculated from this measurement?" — same
+                    derivation modal in both modes (single-pixel algo or 64-shor). */}
+                {parallelMode
+                  ? (parMeas && <MeasurementHelp
+                      algo={parRun && parRun.mode === 'shor' ? 'shor' : algo}
+                      result={parRun} counts={parDisplayCounts}
+                      numClbits={parRun && parRun.num_clbits} meas={parMeas} />)
+                  : (meas && <MeasurementHelp algo={algo} result={result}
+                      counts={displayCounts} numClbits={runBits} meas={meas} />)}
               </div>
 
               <div className="card">
@@ -1594,9 +1967,9 @@ export default function App() {
                 {cal.data && cal.data.sites && (
                   <QubitGrid
                     sites={cal.data.sites}
-                    counts={displayCounts}
-                    numClbits={runBits}
-                    recovered={runRecovered}
+                    counts={parallelMode ? parDisplayCounts : displayCounts}
+                    numClbits={parallelMode ? (parRun && parRun.num_clbits) : runBits}
+                    recovered={parallelMode ? parRecovered : runRecovered}
                   />
                 )}
                 {cal.loading && <div className="muted"><span className="spinner" /> calibrating…</div>}
@@ -1606,7 +1979,8 @@ export default function App() {
           </div>
 
           {/* ============================= BACKEND PHYSICS ============================= */}
-          <div className="section-title">Backend physics</div>
+          </>)}
+          {circuitsSub === 'physics' && (<>
           <div className="grid cols-2">
             <div className="card">
               <h2><span className="dot" />Backend physics</h2>
@@ -1626,27 +2000,31 @@ export default function App() {
                 </div>
               )}
               {info.loading && <div className="muted"><span className="spinner" /> loading backend target…</div>}
-              {runAssessment && <div style={{ marginTop: 12 }}><Verdict assessment={runAssessment} /></div>}
-              {result && result.noise && <NoiseBudget noise={result.noise} />}
+              {!parallelMode && runAssessment && <div style={{ marginTop: 12 }}><Verdict assessment={runAssessment} /></div>}
+              {(parallelMode ? parRun && parRun.noise : result && result.noise) && <NoiseBudget noise={parallelMode ? parRun.noise : result.noise} />}
             </div>
 
-            <RunPhysics result={result} profile={profile} temperature={temperature} infoData={info.data} />
+            <RunPhysics result={parallelMode ? parRun : result} profile={profile} temperature={temperature} infoData={info.data} />
 
             <div className="card optchain-card" style={{ gridColumn: '1 / -1' }}>
               <h2><span className="dot" />Optical readout chain</h2>
               <div className="hint">The physics of every chip component, recalculated for the selected defect &amp; temperature: CQD ASE emitter → SU-8/PDMS waveguide → <b>defect crystal</b> (the spin host / qubit — pump in, photoluminescence out) → long-pass filter → 2D photodetector → TIA → 4× AD7616 (16-bit parallel) → 1 kHz lock-in. Cooling cuts detector noise (∝√T) and raises ODMR contrast, so the lock-in SNR climbs — change the temperature or defect above and watch the dip, noise and SNR update.</div>
-              <OpticalChainDiagram data={info.data && info.data.optical_readout} infoData={info.data} profile={profile} temperature={temperature} activeSites={result?.num_qubits} />
+              <OpticalChainDiagram data={info.data && info.data.optical_readout} infoData={info.data} profile={profile} temperature={temperature} activeSites={(parallelMode ? parRun : result)?.num_qubits} />
             </div>
           </div>
 
           {/* ============================= SPECTROSCOPY + CALIBRATION ============================= */}
-          <div className="section-title">Spectroscopy &amp; calibration</div>
+          </>)}
+          {circuitsSub === 'spectro' && (<>
           <div className="grid cols-2">
             <div className="card">
               <h2><span className="dot" />ODMR spectrum</h2>
               <div className="hint">Lock-in ODMR — the on-chip graphene/MoS₂ detector array's photocurrent dips at D ± γB (resonant MW flips the spin dark), with hyperfine replicas.</div>
               <OdmrChart data={odmr.data} error={odmr.error} />
             </div>
+            {/* 64-parallel OFF = single-pixel ODMR calibration; ON = 64-array
+                calibration in the SAME card slot. One calibrate, same position. */}
+            {!parallelMode ? (
             <div className="card">
               <h2><span className="dot" />Calibration process</h2>
               <CalibrationPanel
@@ -1654,10 +2032,21 @@ export default function App() {
                 run={runCalibration} running={calRunning} result={calRun} err={calErr}
               />
             </div>
+            ) : (
+              <ParallelCalibCard
+                grad={parGrad} setGrad={setParGrad}
+                pixelSize={parPixelSize} setPixelSize={setParPixelSize}
+                source={hwMode === 'hardware' ? 'real' : 'sim'}
+                profile={profile} temperature={temperature} seed={seed}
+                onCalibrate={calibrateArray} calibRunning={arrCalibRunning}
+                calibResult={arrCalib} calibErr={arrCalibErr}
+              />
+            )}
           </div>
 
           {/* ============================= ANALOG SIGNAL ============================= */}
-          <div className="section-title">Detected signal</div>
+          </>)}
+          {circuitsSub === 'signal' && (<>
           <div className="card">
             <h2><span className="dot" />Analog detected signal</h2>
             <div className="hint">Lock-in-demodulated detector photocurrent the on-chip graphene/MoS₂ array records during a pulse sequence.</div>
@@ -1675,6 +2064,7 @@ export default function App() {
             </div>
             <SignalChart data={signal.data} error={signal.error} />
           </div>
+          </>)}
 
           <footer style={{ marginTop: 30, color: 'var(--dim)', fontSize: 12.5, textAlign: 'center' }}>
             QSSC — Quantum Solid State Chip · v2.0.0 · NV-diamond / hBN V_B⁻ / SiC V_Si ·

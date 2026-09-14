@@ -51,7 +51,7 @@ export function QubitGrid({ sites, counts, numClbits, recovered }) {
             <div key={cell.idx}
                  className={`qcell ${lit ? 'on' : ''} ${cell.signal ? 'signal' : ''} ${cell.measured ? 'measured' : ''} ${cell.usable ? 'usable' : ''}`}
                  style={style}
-                 title={`q${cell.idx} (${cell.r},${cell.c}) · ~10-NV register${cell.measured ? ` · ${cell.signal ? 'signal' : 'top'} bit=${lit ? 1 : 0} · confidence ${(cell.confidence * 100).toFixed(0)}%` : ''}`}>{cell.idx}</div>
+                 title={`q${cell.idx} (${cell.r},${cell.c}) · register pixel${cell.measured ? ` · ${cell.signal ? 'signal' : 'top'} bit=${lit ? 1 : 0} · confidence ${(cell.confidence * 100).toFixed(0)}%` : ''}`}>{cell.idx}</div>
           )
         })}
       </div>
@@ -127,6 +127,73 @@ export function QubitFrequencyTable({ sites, dGhz, loading, error }) {
                   <td className="mono">{(s.t2_us != null ? s.t2_us : 0).toFixed(1)}</td>
                   <td className="mono">{(s.t2_star_us != null ? s.t2_star_us : 0).toFixed(1)}</td>
                   <td>{s.usable === false ? <span className="tag bad">dropout</span> : <span className="tag ok">ok</span>}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ParallelPixelFreqTable — the 64-pixel resonance map produced by the array
+// calibration (calibrate_array). Each pixel's decompose_odmr resolves N ODMR
+// line centres (GHz); the line count IS that pixel's measured register width.
+// One row per pixel (8×8 grid), mirroring the single-pixel QubitFrequencyTable
+// but per-pixel (a pixel holds N lines, not one).
+// ---------------------------------------------------------------------------
+export function ParallelPixelFreqTable({ pixels, dGhz }) {
+  if (!pixels || !pixels.length) return <div className="muted">no pixel data</div>
+  const cols = 8
+  const widths = pixels.map(p => p.register_width || 0)
+  const working = widths.filter(w => w > 0).length
+  const allLines = pixels.flatMap(p => p.odmr_lines || [])
+  const spread = allLines.length ? (Math.max(...allLines) - Math.min(...allLines)) * 1e3 : 0
+  return (
+    <div>
+      <div className="hint" style={{ marginBottom: 8 }}>
+        Per-pixel ODMR decomposition — each of the {pixels.length} die pixels is swept and
+        <b> decompose_odmr</b> fits its resolvable lines (measured D{dGhz ? `≈${dGhz}` : ''} GHz
+        ± a per-pixel strain / local-B / gradient detuning). The <b>Qubits</b> column is the
+        pixel's measured register width N (the ODMR line count at the applied gradient,
+        Invention 5). {working}/{pixels.length} pixels resolved ≥1 line; aggregate detuning
+        spread <b>{spread.toFixed(2)} MHz</b>. A narrow MW pulse at any f<sub>i</sub> addresses
+        only that pixel's i-th NV.
+      </div>
+      <div className="qfreq-scroll">
+        <table className="qfreq">
+          <thead>
+            <tr>
+              <th>Pixel</th><th>R</th><th>C</th>
+              <th>µdiamonds</th>
+              <th>Qubits</th>
+              <th>Resolved ODMR line frequencies (GHz)</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pixels.map(p => {
+              const id = p.pixel_id
+              const nq = p.register_width || 0
+              const lines = p.odmr_lines || []
+              return (
+                <tr key={id} className={nq === 0 ? 'drop' : ''}>
+                  <td className="mono">{id}</td>
+                  <td>{Math.floor(id / cols)}</td>
+                  <td>{id % cols}</td>
+                  <td className="mono">{p.microdiamonds != null ? p.microdiamonds : '–'}</td>
+                  <td className="mono" style={{ color: nq > 1 ? 'var(--ok, #2c8a4a)' : nq === 1 ? 'var(--muted)' : 'var(--err)', fontWeight: 600 }}>{nq}</td>
+                  <td className="mono" style={{ fontSize: 11.5 }}>
+                    {lines.length ? lines.map(f => f.toFixed(6)).join(' · ') : '—'}
+                  </td>
+                  <td>{nq === 0
+                    ? <span className="tag bad">dropout</span>
+                    : nq === 1
+                      ? <span className="tag">ensemble</span>
+                      : <span className="tag ok">register</span>}
+                  </td>
                 </tr>
               )
             })}
@@ -702,7 +769,7 @@ export function CalibrationPanel({ profile, temperature, seed, run, running, res
             {gradCode} {gradOn ? `· ${coilA.toFixed(2)} A · ~${spreadMhz.toFixed(0)} MHz spread` : '· gradient off (ensemble)'}
           </span>
         </label>
-        <button onClick={() => run({ gradient_code: gradCode, n_nv_per_pixel: 10 })}
+        <button onClick={() => run({ gradient_code: gradCode })}
           disabled={running} className="ghost" type="button">
           {running ? <><span className="spinner" /> Calibrating…</> : 'Run calibration'}
         </button>
@@ -1233,5 +1300,248 @@ export function MeasurementHelp({ algo, result, counts, numClbits, meas }) {
         </div>
       )}
     </>
+  )
+}
+
+// ---- 64-parallel computing (Invention 4) + per-pixel array calibration -----
+// Two cards: (1) calibrate the 64-pixel array's measured register width
+// (Invention 4+5 — gradient makes N ODMR lines resolvable per pixel;
+// source=sim synthesizes spectra, source=real drives RUN_ALL_ODMR), and
+// (2) run one circuit per pixel across the array and aggregate. Calibrate
+// first, then Run with use_calibration on so each pixel runs at its own
+// measured width (narrow pixels are SKIPPED, never truncated).
+function _ParPixelGrid({ widths, cols = 8 }) {
+  const max = Math.max(1, ...(widths || []))
+  const n = (widths || []).length
+  if (!n) return null
+  return (
+    <div>
+      <div style={{ fontSize: 12.5, marginBottom: 6, color: 'var(--brand)' }}>
+        Per-pixel register width ({n} pixels · {cols}×{Math.ceil(n / cols)} grid)
+      </div>
+      <div style={{
+        display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`,
+        gap: 3, maxWidth: 360,
+      }}>
+        {(widths || []).map((w, i) => {
+          const f = w / max
+          const empty = w === 0
+          return (
+            <div key={i} title={`pixel ${i}: width ${w}`}
+              style={{
+                aspectRatio: '1 / 1',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 11, fontFamily: 'var(--mono, monospace)',
+                color: empty ? 'var(--muted)' : 'var(--bg, #061018)',
+                background: empty
+                  ? 'var(--surface-2, rgba(255,255,255,0.04))'
+                  : `rgba(34, 211, 238, ${0.22 + 0.78 * f})`,
+                border: '1px solid var(--border, rgba(255,255,255,0.1))',
+                borderRadius: 4,
+              }}>{w}</div>
+          )
+        })}
+      </div>
+      <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>
+        0 = no NV detected · cyan intensity ∝ measured register width
+      </div>
+    </div>
+  )
+}
+
+// 64-parallel computing (Invention 4+5). The single ParallelPanel was split
+// into two independent cards so they can drop into the SAME UI slots the
+// single-pixel path uses — the run card replaces "Run a quantum algorithm" and
+// the calibrate card replaces "Calibration process" when the 64-parallel
+// switch is ON. Block positions stay identical between the two modes (the user
+// insisted the layout must not move, only the minimal 64 content swaps in).
+// Shared state (gradient, pixel size, mode, pixel count …) is lifted to
+// App.jsx and passed to both cards so a calibrate + a run stay consistent.
+
+export function ParallelCalibCard({
+  grad, setGrad, pixelSize, setPixelSize, source,
+  profile, temperature, seed,
+  onCalibrate, calibRunning, calibResult, calibErr,
+}) {
+  const calib = calibResult && !calibResult.error ? calibResult : null
+  const calibErrTxt = calibResult && calibResult.error ? calibResult.error : (calibErr || null)
+  const [resOpen, setResOpen] = useState(false)
+  return (
+    <div className="card">
+      <h2><span className="dot" />Calibrate the 64-pixel array</h2>
+      <div className="hint">Measure each pixel's register width N from the ODMR line count.</div>
+      <div className="row" style={{ alignItems: 'flex-end', marginTop: 10 }}>
+        <div className="field">
+          <label>Gradient (MHz/µm)</label>
+          <input type="number" min="0" max="100" step="0.05" value={grad}
+            onChange={e => setGrad(+e.target.value)} />
+        </div>
+        <div className="field">
+          <label>Pixel size (µm)</label>
+          <input type="number" min="1" max="5000" step="1" value={pixelSize}
+            onChange={e => setPixelSize(+e.target.value)} />
+        </div>
+        <button onClick={() => onCalibrate({
+            profile, gradient_mhz_per_um: grad, pixel_size_um: pixelSize,
+            seed, temperature_k: temperature, source,
+          })}
+          disabled={calibRunning} className="ghost" type="button" style={{ height: 36 }}>
+          {calibRunning ? <><span className="spinner" /> Calibrating…</> : 'Calibrate array'}
+        </button>
+      </div>
+      {calibErrTxt && <div className="error" style={{ marginTop: 10 }}>{calibErrTxt}</div>}
+      {calib && (
+        <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 8,
+          background: 'var(--surface-2, rgba(255,255,255,0.04))',
+          border: '1px solid var(--border, rgba(255,255,255,0.1))' }}>
+          <div style={{ fontSize: 13, marginBottom: 8, color: 'var(--brand)' }}>
+            Array calibration · <span className="mono">{calib.source}</span> · {calib.n_pixels} pixels
+          </div>
+          <div className="stats" style={{ marginBottom: 10 }}>
+            <div className="stat"><div className="k">Best uniform N</div><div className="v">{calib.best_uniform_width}</div></div>
+            <div className="stat"><div className="k">Pixels @ N</div><div className="v">{calib.best_uniform_pixels}</div></div>
+            <div className="stat"><div className="k">Total qubits</div><div className="v" style={{ color: 'var(--ok, #2c8a4a)' }}>{calib.total_working_qubits}</div></div>
+            <div className="stat"><div className="k">Width range</div><div className="v">{calib.min_width}–{calib.max_width}</div></div>
+          </div>
+          <_ParPixelGrid widths={calib.per_pixel_widths} />
+          {Array.isArray(calib.pixels) && calib.pixels.length > 0 && (
+            <button type="button" className="ghost" style={{ marginTop: 12 }}
+              onClick={() => setResOpen(true)}>
+              View per-pixel resonance map ({calib.pixels.length} pixels · {calib.pixels.reduce((s, p) => s + (p.odmr_lines ? p.odmr_lines.length : 0), 0)} lines)
+            </button>
+          )}
+        </div>
+      )}
+      {resOpen && calib && Array.isArray(calib.pixels) && (
+        <div className="resonance-overlay" onClick={() => setResOpen(false)}>
+          <div className="resonance-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="meas-help-close" type="button"
+              onClick={() => setResOpen(false)} aria-label="Close">×</button>
+            <h2><span className="dot" />Per-pixel resonance map (64-pixel array · calibrated)</h2>
+            <ParallelPixelFreqTable pixels={calib.pixels} dGhz={calib.d_fit_ghz} />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function ParallelRunCard({
+  mode, setMode, nPixels, setNPixels, useCalib, setUseCalib,
+  nShor, setNShor, numQubits, setNumQubits, grad, pixelSize,
+  profile, temperature, seed, shots, noiseMode, pixelMode, primeReadout,
+  onRun, runRunning, runResult, runErr, calib,
+}) {
+  const run = runResult && !runResult.error ? runResult : null
+  const runErrTxt = runResult && runResult.error ? runResult.error : (runErr || null)
+  const buildBody = () => {
+    const body = {
+      profile, temperature_k: temperature, seed, shots, noise_mode: noiseMode,
+      mode, n_pixels: nPixels, use_calibration: useCalib,
+      pixel_mode: pixelMode, prime_readout: primeReadout,
+      gradient_mhz_per_um: grad, pixel_size_um: pixelSize,
+    }
+    if (mode === 'shor') body.n = nShor
+    if (mode === 'sample') body.num_qubits = numQubits
+    return body
+  }
+  return (
+    <div className="card">
+      <h2><span className="dot" />Run 64-parallel</h2>
+      <div className="hint">Invention 4 — 64 INDEPENDENT ~10-NV processors at 300 K (1/r³ → 0 at the 2.5 mm pitch); chip throughput is 64× a single pixel, not one 640-qubit circuit. With calibration on, each pixel runs at its measured width and narrow pixels are skipped (never truncated — a truncated Shor gives wrong factors).</div>
+      <div className="row" style={{ alignItems: 'flex-end', marginTop: 10 }}>
+        <div className="field">
+          <label>Mode</label>
+          <select value={mode} onChange={e => setMode(e.target.value)}>
+            <option value="sample">sample — same circuit, 64× shots</option>
+            <option value="shor">shor — coprime bases race to factor N</option>
+          </select>
+        </div>
+        <div className="field">
+          <label>Pixels (1..64)</label>
+          <input type="number" min="1" max="64" step="1" value={nPixels}
+            onChange={e => setNPixels(Math.min(64, Math.max(1, +e.target.value || 1)))} />
+        </div>
+        {mode === 'shor' ? (
+          <div className="field">
+            <label>Integer N</label>
+            <input type="number" min="2" max="63" step="1" value={nShor}
+              onChange={e => setNShor(+e.target.value)} />
+          </div>
+        ) : (
+          <div className="field">
+            <label>Qubits/pixel</label>
+            <input type="number" min="1" max="64" step="1" value={numQubits}
+              onChange={e => setNumQubits(+e.target.value)} />
+          </div>
+        )}
+      </div>
+      <div className="row" style={{ alignItems: 'center', marginTop: 8 }}>
+        <div className="field" style={{ flex: 0 }}>
+          <label>Use calibration</label>
+          <button type="button" className={`seg ${useCalib ? 'on' : ''}`}
+            style={{ minWidth: 86, justifyContent: 'center', height: 36 }}
+            onClick={() => setUseCalib(v => !v)} aria-pressed={useCalib}>
+            {useCalib ? '✓ ON' : 'OFF'}
+          </button>
+        </div>
+        <button onClick={() => onRun(buildBody())} disabled={runRunning}
+          style={{ height: 36, marginLeft: 'auto' }}>
+          {runRunning ? <><span className="spinner" /> Running…</> : 'Run 64-parallel'}
+        </button>
+      </div>
+      {useCalib && !calib && (
+        <div className="muted" style={{ fontSize: 11.5, marginTop: 8, color: 'var(--warn, #b8860b)' }}>
+          Calibration is on but no array calibration is cached — calibrate first, or the run falls back to the uniform register.
+        </div>
+      )}
+      {runErrTxt && <div className="error" style={{ marginTop: 10 }}>{runErrTxt}</div>}
+      {run && (
+        <div style={{ marginTop: 14 }}>
+          <div className="kv">
+            <span className="k">Mode</span><span className="v">{run.mode}</span>
+            <span className="k">Pixels run</span><span className="v">{run.n_run != null ? run.n_run : run.n_pixels}</span>
+            <span className="k">Throughput</span><span className="v">{run.throughput_x}×</span>
+            <span className="k">Calibrated</span><span className="v">{run.calibrated ? 'yes' : 'no'}</span>
+            {run.shots && <><span className="k">Shots</span><span className="v">{run.shots}</span></>}
+            <span className="k">Wall time</span><span className="v">{run.elapsed_ms} ms</span>
+          </div>
+          {run.skipped_pixels != null && (
+            <div className="expected" style={{ marginTop: 10 }}>
+              Skipped {run.skipped_pixels} narrow pixel(s) · width range {run.min_width}–{run.max_width}
+              {run.best_uniform_width != null && ` · best uniform N=${run.best_uniform_width} on ${run.best_uniform_pixels} pixels`}
+            </div>
+          )}
+          {run.mode === 'shor' && (
+            <div className={`expected ${run.success ? '' : 'bad'}`} style={{ marginTop: 10 }}>
+              {run.success
+                ? `✓ Factors of ${run.n}: ${run.factors[0]} × ${run.factors[1]} (pixel ${run.winner_pixel}, base a=${run.winner_base})`
+                : `✗ No pixel found the period for N=${run.n} — decoherence at ${run.temperature_k} K (cool the chip or raise shots).`}
+            </div>
+          )}
+          {run.mode === 'shor' && run.per_pixel && (
+            <div style={{ marginTop: 10, maxHeight: 220, overflowY: 'auto',
+              border: '1px solid var(--border, rgba(255,255,255,0.1))', borderRadius: 6, padding: 8 }}>
+              <div className="mono" style={{ fontSize: 11.5, lineHeight: 1.7 }}>
+                {run.per_pixel.filter(p => !p.skipped).slice(0, 24).map(p => (
+                  <div key={p.pixel}>
+                    <span className="muted">px{String(p.pixel).padStart(2, '0')}</span>{' '}
+                    a={p.a} r={p.period != null ? p.period : '—'}{' '}
+                    {p.factors ? `→ ${p.factors[0]}×${p.factors[1]}` : '—'}{' '}
+                    {p.success ? '✓' : ''}
+                  </div>
+                ))}
+                {run.per_pixel.some(p => p.skipped) && (
+                  <div className="muted" style={{ marginTop: 4 }}>
+                    + {run.per_pixel.filter(p => p.skipped).length} skipped (width &lt; circuit)
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          {run.noise && <NoiseBudget noise={run.noise} />}
+        </div>
+      )}
+    </div>
   )
 }

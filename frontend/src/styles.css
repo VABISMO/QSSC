@@ -206,6 +206,31 @@ textarea.code-editor:focus { outline: 1px solid var(--brand); border-color: var(
 .maintab.active { color: var(--text); background: var(--panel); border-color: var(--border); border-bottom: 1px solid var(--panel); }
 .maintab.active .mt-ic { color: var(--accent); }
 
+/* ---- Circuits section subtabs (Circuit runner / Backend physics /
+     Spectroscopy & calibration / Detected signal) — replaces the vertical
+     section-title timeline with a visual icon tab bar ---- */
+.subtabs { display: flex; gap: 6px; margin: 4px 0 20px; padding: 5px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; }
+.subtab {
+  flex: 1; font-family: var(--font-head); font-size: 13px; font-weight: 500;
+  padding: 10px 12px; cursor: pointer; color: var(--muted);
+  border: 1px solid transparent; border-radius: 9px; background: transparent;
+  display: flex; align-items: center; justify-content: center; gap: 9px;
+  transition: color .15s, background .15s, border-color .15s; white-space: nowrap;
+}
+.subtab .subtab-ic { display: inline-flex; color: var(--muted); transition: color .15s; }
+.subtab .subtab-ic svg { display: block; }
+.subtab:hover { color: var(--text); background: rgba(34,211,238,.06); }
+.subtab:hover .subtab-ic { color: var(--brand); }
+.subtab.on { color: var(--text); background: var(--panel); border-color: var(--border);
+  box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.subtab.on .subtab-ic { color: var(--accent); }
+.subtab-lb { letter-spacing: .01em; }
+@media (max-width: 860px) {
+  .subtabs { flex-wrap: wrap; }
+  .subtab { flex: 1 1 40%; font-size: 12px; padding: 9px 8px; gap: 7px; }
+}
+
 /* ---- T1/T2 legend ---- */
 .legend { margin-top: 12px; display: grid; gap: 6px; padding: 11px 13px; background: var(--panel-2);
   border: 1px solid var(--border); border-radius: 9px; font-size: 12.5px; color: var(--muted); }

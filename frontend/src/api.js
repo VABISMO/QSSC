@@ -42,6 +42,11 @@ export const api = {
   // async circuit execution (Redis + RQ) -> returns {job_id, status}
   run: (body) => post('/api/circuit/run', body),
   runCustom: (body) => post('/api/circuit/custom', body),
+  // 64-parallel distributed computing (Invention 4) + per-pixel array
+  // calibration (Invention 4+5). Calibrate first, then run-parallel with
+  // use_calibration=true so each pixel runs at its measured register width.
+  runParallel: (body) => post('/api/circuit/run-parallel', body),
+  calibrateArray: (body) => post('/api/circuit/calibrate-array', body),
   // job polling + history (MongoDB)
   job: (id) => get(`/api/jobs/${id}`),
   jobs: (limit = 50) => get(`/api/jobs?limit=${limit}`),

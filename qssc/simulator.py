@@ -163,6 +163,9 @@ class SimulatedFPGA:
         # different environment.
         self.b_vector_t: List[float] = [500e-6, 0.0, -200e-6]
         self.rotation_rate_dps: float = 100.0
+        # per-pixel ODMR resonance detuning (drawn lazily by _run_all_odmr to
+        # model the gradient spreading the 64 pixel resonances).
+        self._pixel_detun_hz: Optional[np.ndarray] = None
 
     # -- command interface -------------------------------------------------
     def send_command(self, command: str) -> str:
@@ -262,6 +265,20 @@ class SimulatedFPGA:
                 if not (0 <= qubit < self.N_SITES) or n_points <= 0 or n_points > 4096:
                     return "ERR"
                 return self._odmr_sweep(qubit, f_start, f_stop, n_points)
+            if head == "RUN_ALL_ODMR":
+                # RUN_ALL_ODMR <f_start_khz> <f_stop_khz> <n_points>: the
+                # 64-parallel calibration primitive (Invention 4+5). Sweep the
+                # ADF4351 across the NV resonance and sample ALL 64 AD7616
+                # channels per point -- one ODMR spectrum per pixel from a
+                # single command. Returns n_points lines of 64 space-separated
+                # 16-bit codes, then OK (the host reshapes to (n,64) and runs
+                # decompose_odmr per column to count each pixel's resolved
+                # lines = its calibrated register width).
+                f_start = int(parts[1]); f_stop = int(parts[2])
+                n_points = int(parts[3])
+                if n_points <= 0 or n_points > 4096:
+                    return "ERR"
+                return self._run_all_odmr(f_start, f_stop, n_points)
             if head == "READ_COMPASS":
                 # READ_COMPASS [n_avg]: 4-axis ODMR doublet fit -> ambient
                 # B-vector + heading. Mirrors qssc.sensors.compass_measure.
@@ -449,6 +466,66 @@ class SimulatedFPGA:
             flat.append(f"{int(fk / 1e3)}")      # back to kHz
             flat.append(str(int(ck)))
         return " ".join(flat)
+
+    def _run_all_odmr(self, f_start_khz: int, f_stop_khz: int,
+                      n_points: int) -> str:
+        """Sweep the ADF4351 and sample all 64 detectors per point (Invention 4+5).
+
+        Each pixel's ODMR response is a Lorentzian PL dip at D + a per-pixel
+        detuning (the field gradient spreads the 64 pixel resonances, so the 64
+        columns dip at slightly different frequencies -- the raw form
+        :func:`qssc.odmr_decompose.decompose_odmr` fits per pixel to count its
+        resolved lines). Returns ``n_points`` lines of 64 space-separated 16-bit
+        codes, then a final ``OK`` -- the same shape the RTL
+        ``RUN_ALL_ODMR`` handler emits, so the host parser is identical for sim
+        and real hardware.
+        """
+        f0 = self.sim_freq                     # D, Hz
+        lw = self.profile.odmr_linewidth_hz    # FWHM, Hz
+        fs = np.linspace(f_start_khz * 1e3, f_stop_khz * 1e3, n_points)
+        # per-pixel resonance detuning (the gradient resolve): drawn once, held
+        # so repeated sweeps are consistent. Spread ~ a few linewidths.
+        if self._pixel_detun_hz is None:
+            self._pixel_detun_hz = self.rng.normal(
+                0.0, max(lw * 2.0, 1.0), self.N_SITES)
+        detun = self._pixel_detun_hz
+        lines = []
+        for fi in fs:
+            codes = []
+            for q in range(self.N_SITES):
+                if self.emitter_gs.get(q, 0) <= 0:
+                    c = BG_CODE + self.rng.normal(0, READOUT_NOISE)
+                else:
+                    f_center = f0 + detun[q]
+                    lor = (lw / 2.0) ** 2 / ((fi - f_center) ** 2 + (lw / 2.0) ** 2)
+                    c = BRIGHT_CODE * (1.0 - ODMR_CONTRAST * lor) \
+                        + self.rng.normal(0, READOUT_NOISE)
+                codes.append(int(min(max(int(c), 0), ADC_MAX)))
+            lines.append(" ".join(str(c) for c in codes))
+        return "\n".join(lines) + "\nOK"
+
+    def run_all_odmr(self, f_start_khz: int, f_stop_khz: int,
+                     n_points: int) -> np.ndarray:
+        """Host helper: ``RUN_ALL_ODMR`` -> ``(n_points, 64)`` int32 code matrix.
+
+        Row ``i`` is the 64-pixel photocurrent at frequency point ``i``. The
+        host runs :func:`qssc.odmr_decompose.decompose_odmr` per column (pixel)
+        to count each pixel's resolved ODMR lines = its calibrated register
+        width. Mirrors :meth:`qssc.backend.FPGAConnection.run_all_odmr`.
+        """
+        reply = self.send_command(
+            f"RUN_ALL_ODMR {int(f_start_khz)} {int(f_stop_khz)} {int(n_points)}")
+        if reply == "ERR":
+            raise IOError("RUN_ALL_ODMR rejected (bad args)")
+        toks = reply.split()
+        if toks and toks[-1] == "OK":
+            toks = toks[:-1]
+        codes = [int(t) for t in toks]
+        want = n_points * self.N_SITES
+        if len(codes) != want:
+            raise IOError(
+                f"RUN_ALL_ODMR arity: got {len(codes)}, want {want}")
+        return np.array(codes, dtype=np.int32).reshape(n_points, self.N_SITES)
 
     def _read_compass(self, n_avg: int) -> str:
         """4-axis ODMR doublet fit -> ambient B-vector + heading.

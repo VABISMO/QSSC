@@ -17,7 +17,7 @@ from typing import List, Optional
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from qssc import (
     get_profile, coherence_at_temperature,
@@ -166,6 +166,12 @@ class ParallelRunRequest(BaseModel):
     Run one circuit per pixel across the 64-pixel array (64 INDEPENDENT ~10-NV
     processors at 300 K) and aggregate. The chip's throughput is 64x a single
     pixel, not one 640-qubit circuit (64x10 > 63-qubit MPS cap)."""
+    # extra="allow" so the per-algorithm params the frontend sends (n_items,
+    # marked, x, op, a, b, num1, num2, bits, num_bytes, common_name, num_bits,
+    # eavesdrop, iterations -- the same fields RunRequest declares) pass through
+    # to run_parallel's sample-mode circuit builder + postprocess. Without this
+    # Pydantic drops them and grover/qft/math build with defaults (marked=0...).
+    model_config = ConfigDict(extra="allow")
     mode: str = "sample"        # shor | sample | custom
     profile: str = "NV"
     temperature_k: float = Field(300.0, ge=0.001, le=600)
@@ -177,6 +183,9 @@ class ParallelRunRequest(BaseModel):
     n: int = Field(15, ge=2, le=63)
     # sample mode
     num_qubits: int = Field(4, ge=1, le=64)
+    # sample: which demo algorithm to build per pixel (bell/grover/qft/math/
+    # qrand). Omitted -> uniform H+measure (the legacy sample behaviour).
+    algorithm: Optional[str] = None
     qasm: Optional[str] = None  # sample: a QASM circuit (else uniform H+measure)
     # custom mode
     circuits: Optional[list] = None  # list of QASM strings, one per pixel
@@ -189,6 +198,33 @@ class ParallelRunRequest(BaseModel):
     register_line_freqs_hz: Optional[list] = None
     prime_readout: bool = False
     n_noise_bins: int = Field(64, ge=1, le=4096)
+    # Invention 4: opt in to the cached per-pixel calibration (each pixel runs
+    # at its MEASURED register width, narrow pixels skipped). Default False =
+    # the uniform-register back-compat path. Calibrate first via
+    # /api/circuit/calibrate-array, then set use_calibration=true here.
+    use_calibration: bool = False
+
+
+class CalibrateArrayRequest(BaseModel):
+    """Invention 4+5 — calibrate the 64-pixel array's per-pixel qubit register
+    width (a MEASURED quantity: the number of ODMR lines the field gradient
+    makes resolvable in each pixel, capped by the NVs present).
+
+    ``source="sim"`` synthesizes each pixel's ODMR spectrum and counts the
+    resolved lines analytically; ``source="real"`` drives the ``RUN_ALL_ODMR``
+    firmware verb (sweep MW, read all 64 detectors per point) and counts the
+    lines from the measured codes. Both produce the same
+    ``ArrayCalibration`` shape and persist it to
+    ``hardware/calibration/array_calibration.json`` so subsequent
+    ``run-parallel`` calls run each pixel at its own calibrated width."""
+    profile: str = "NV"
+    gradient_mhz_per_um: float = Field(0.5, ge=0.0, le=100.0)
+    pixel_size_um: float = Field(200.0, ge=1.0, le=5000.0)
+    seed: int = Field(42, ge=0, le=2_147_483_647)
+    temperature_k: float = Field(300.0, ge=0.001, le=600)
+    source: str = "sim"          # sim | real
+    max_nv_per_microdiamond: int = Field(100, ge=1, le=1000)
+    n_points: int = Field(400, ge=32, le=4096)  # real path sweep points
 
 
 # ---------------------------------------------------------------------------
@@ -992,7 +1028,7 @@ def run_custom_circuit(req: CustomCircuitRequest, sync: bool = False,
 
 
 @app.post("/api/circuit/run-parallel")
-def run_parallel_circuits(req: ParallelRunRequest, sync: bool = True,
+def run_parallel_circuits(req: ParallelRunRequest, sync: bool = False,
                           request: Request = None):
     """64-parallel distributed computing (Invention 4).
 
@@ -1007,16 +1043,61 @@ def run_parallel_circuits(req: ParallelRunRequest, sync: bool = True,
         seeds = n_pixels x shots aggregated in one wall-clock step.
       * ``custom`` -- a list of QASM circuits, one per pixel.
 
-    Runs synchronously in-process (the parallel path is a tight loop over the
-    backend's run_array; no async RQ job wrapper needed for the demo).
+    Enqueued as an async RQ job (a 64-pixel Shor run is ~50 s of serial
+    Qiskit, which would block the single-worker event loop if run inline).
+    Returns ``{job_id, status}``; poll ``GET /api/jobs/{job_id}``. Pass
+    ``?sync=true`` to run synchronously in-process (localhost / tests only).
     """
     if request is not None and _rate_limited(request):
         raise HTTPException(429, "Rate limit exceeded — too many circuit requests, slow down.")
-    from api.runner import run_parallel as _run
-    try:
-        return _run(_req_dict(req))
-    except Exception as exc:  # noqa: BLE001 - surface sim errors, not a 500
-        return {"error": str(exc)}
+    _check_sync(request, sync)
+    payload = _req_dict(req)
+    payload.setdefault("noise_mode", "real")
+    payload.setdefault("temperature_k", 300.0)
+    if sync:
+        from api.runner import run_parallel as _run
+        try:
+            return {"job_id": None, "status": "finished", "result": _run(payload)}
+        except Exception as exc:  # noqa: BLE001 - surface sim errors, not a 500
+            return {"job_id": None, "status": "failed",
+                    "result": {"error": str(exc)}}
+    job_id = jobs.enqueue("parallel", payload)
+    return {"job_id": job_id, "status": "queued"}
+
+
+@app.post("/api/circuit/calibrate-array")
+def calibrate_array_endpoint(req: CalibrateArrayRequest, sync: bool = False,
+                             request: Request = None):
+    """Calibrate the 64-pixel array's per-pixel register width (Invention 4+5).
+
+    The width is the number of ODMR lines the field gradient (Invention 5) makes
+    resolvable in each pixel, capped by the NVs physically present — a MEASURED
+    quantity, not a fixed knob. ``source="sim"`` synthesizes each pixel's
+    spectrum and counts the lines; ``source="real"`` runs the ``RUN_ALL_ODMR``
+    firmware verb and counts the lines from the measured 64-channel codes. The
+    result is persisted to ``hardware/calibration/array_calibration.json`` and
+    later ``run-parallel`` calls load it so each pixel runs at its own width.
+
+    Enqueued as an async RQ job (the sim path synthesizes 64 ODMR spectra and
+    runs ``decompose_odmr`` on each — ~30 s — which would block the
+    single-worker event loop if run inline). Returns ``{job_id, status}``;
+    poll ``GET /api/jobs/{job_id}``. Pass ``?sync=true`` to run synchronously
+    in-process (localhost / tests only).
+    """
+    if request is not None and _rate_limited(request):
+        raise HTTPException(429, "Rate limit exceeded — too many circuit requests, slow down.")
+    _check_sync(request, sync)
+    payload = _req_dict(req)
+    payload.setdefault("temperature_k", 300.0)
+    if sync:
+        from api.runner import run_calibrate_array as _run
+        try:
+            return {"job_id": None, "status": "finished", "result": _run(payload)}
+        except Exception as exc:  # noqa: BLE001 - surface errors, not a 500
+            return {"job_id": None, "status": "failed",
+                    "result": {"error": str(exc)}}
+    job_id = jobs.enqueue("calibrate", payload)
+    return {"job_id": job_id, "status": "queued"}
 
 
 # --- async job polling + history -------------------------------------------
@@ -1120,6 +1201,12 @@ _FPGA_PROTOCOL = [
     {"cmd": "ODMR_SWEEP", "args": "qubit f_start_khz f_stop_khz n_points",
      "reply": "<n> f0 c0 f1 c1 … / ERR",
      "desc": "sweep the ADF4351 across the NV resonance, one AD7616 sample per point"},
+    {"cmd": "RUN_ALL_ODMR", "args": "f_start_khz f_stop_khz n_points",
+     "reply": "n × (64 × 0..65535) + OK / ERR",
+     "desc": "64-parallel calibration sweep (Invention 4+5): sweep the ADF4351 "
+             "and read all 64 AD7616 channels per point → one ODMR spectrum per "
+             "pixel; the host runs decompose_odmr per column to count each "
+             "pixel's resolved lines = its calibrated register width"},
     {"cmd": "READ_COMPASS", "args": "[n_avg]", "reply": "<B_nT> <heading°> <elev°> <sens_µT> <axes> / ERR",
      "desc": "4-axis ODMR doublet fit → ambient B-vector + heading (compass_measure)"},
     {"cmd": "READ_GYRO", "args": "T_ns", "reply": "<rate_dps> <noise_dps> <t2_µs> <grade> / ERR",
@@ -1202,7 +1289,20 @@ def _compute_fpga_info() -> dict:
     return info
 
 
-_FPGA_INFO = _compute_fpga_info()
+# Synthesis report is a gitignored generated artifact (fpga/synth/synth.log,
+# ~3 MB). Recompute the snapshot when the log's mtime changes so a fresh
+# `run_synth.sh` is picked up without an API restart; repeated calls while the
+# log is unchanged return the cached snapshot for free.
+_FPGA_INFO_CACHE: dict = {"mtime": None, "info": None}
+
+
+def _fpga_info() -> dict:
+    log = _FPGA_ROOT / "synth" / "synth.log"
+    mtime = log.stat().st_mtime if log.is_file() else None
+    if _FPGA_INFO_CACHE["info"] is None or _FPGA_INFO_CACHE["mtime"] != mtime:
+        _FPGA_INFO_CACHE["info"] = _compute_fpga_info()
+        _FPGA_INFO_CACHE["mtime"] = mtime
+    return _FPGA_INFO_CACHE["info"]
 
 # Cached FPGA handle so state persists across commands (CALIBRATE builds the
 # LUT, SET_EMITTER arms, READ_DETECTOR reads — all stateful). With no
@@ -1231,7 +1331,7 @@ class FpgaCommandRequest(BaseModel):
 @app.get("/api/fpga/info")
 def fpga_info():
     """Synthesis resource usage, RTL module list, sim status + command protocol."""
-    return _FPGA_INFO
+    return _fpga_info()
 
 
 @app.post("/api/fpga/command")

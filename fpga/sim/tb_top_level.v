@@ -298,7 +298,7 @@ module tb_top_level;
     integer k16, ok16;       // RUN_SEQUENCE verify loop
     integer li_k, li_ok;     // READ_LOCKIN verify loop
     integer k18, ok18;       // Ramsey RUN_SEQUENCE verify loop
-    integer ok19;            // SET_GRADIENT verify
+    integer r19, k19, base19, ok19;  // RUN_ALL_ODMR + SET_GRADIENT verify loop
     reg [7:0] cmd_bytes [0:39];
     initial begin
         // Reset
@@ -1047,7 +1047,51 @@ module tb_top_level;
                      rx_log_cnt, ok18, mw_gate_pulses, pll_wr_count);
         end
 
-        // ---- 19) SET_GRADIENT 2048 -> OK + MCP4921 framed SPI word 0x3800 --
+        // ---- 19) RUN_ALL_ODMR 2870000 2880000 2 -> 2 rows x 64 codes + OK ----
+        // Invention 4+5 calibration verb: per freq point reprogram the ADF4351,
+        // gate the RF, and read ALL 64 AD7616 channels (one row). The behavioural
+        // ADC returns a constant 1234 per channel, so every code is "1234". Row
+        // layout = 64 * ("1234" + sep), sep=' ' for channels 0..62, sep='\n' for
+        // channel 63 (code_is_last) -> 64*5 = 320 bytes/row. 2 rows + "OK\n" = 643.
+        // No per-row header: just n rows of 64 decimal codes then OK.
+        entropy_mode = 1'b0;
+        rx_log_cnt = 0;
+        cmd_bytes[0]="R";  cmd_bytes[1]="U";  cmd_bytes[2]="N";  cmd_bytes[3]="_";
+        cmd_bytes[4]="A";  cmd_bytes[5]="L";  cmd_bytes[6]="L";  cmd_bytes[7]="_";
+        cmd_bytes[8]="O";  cmd_bytes[9]="D";  cmd_bytes[10]="M"; cmd_bytes[11]="R";
+        cmd_bytes[12]=" "; cmd_bytes[13]="2"; cmd_bytes[14]="8"; cmd_bytes[15]="7";
+        cmd_bytes[16]="0"; cmd_bytes[17]="0"; cmd_bytes[18]="0"; cmd_bytes[19]="0";
+        cmd_bytes[20]=" "; cmd_bytes[21]="2"; cmd_bytes[22]="8"; cmd_bytes[23]="8";
+        cmd_bytes[24]="0"; cmd_bytes[25]="0"; cmd_bytes[26]="0"; cmd_bytes[27]="0";
+        cmd_bytes[28]=" "; cmd_bytes[29]="2"; cmd_bytes[30]=8'h0A;
+        $display("TB: sending RUN_ALL_ODMR 2870000 2880000 2 (expect 2 rows x 64 \"1234\" + OK)");
+        for (c=0;c<31;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(643, W_SAFE);
+        ok19 = 1;
+        if (rx_log_cnt != 643) ok19 = 0;
+        // each row: 64 codes of "1234", sep ' ' between, '\n' after channel 63
+        for (r19=0; r19<2 && ok19; r19=r19+1) begin
+            for (k19=0; k19<64 && ok19; k19=k19+1) begin
+                base19 = r19*320 + k19*5;
+                if (!(rx_log[base19+0]==="1" && rx_log[base19+1]==="2" &&
+                      rx_log[base19+2]==="3" && rx_log[base19+3]==="4")) ok19 = 0;
+                if (k19 < 63 && rx_log[base19+4] !== " ") ok19 = 0;
+                if (k19 == 63 && rx_log[base19+4] !== 8'h0A) ok19 = 0;
+            end
+        end
+        // trailing "OK\n"
+        if (!(rx_log[640]===8'h4F && rx_log[641]===8'h4B && rx_log[642]===8'h0A))
+            ok19 = 0;
+        if (ok19) begin
+            ok_count = ok_count + 1;
+            $display("TB: RUN_ALL_ODMR = 2 rows x 64 \"1234\" + OK  (PASS)");
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL RUN_ALL_ODMR (got %0d bytes, first=0x%02h)",
+                     rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
+        end
+
+        // ---- 20) SET_GRADIENT 2048 -> OK + MCP4921 framed SPI word 0x3800 --
         // Programs the Invention 5 gradient-coil DAC to midscale (code 2048).
         // The dac_ctrl must shift the 16-bit framed word {4'b0011, 12'd2048}
         // = 0x3800 (channel A, unbuffered, 1x gain, !SHDN) and pulse cs_n, then
@@ -1081,8 +1125,8 @@ module tb_top_level;
                      rx_log_cnt, grad_xact_count, grad_shift_reg, grad_en);
         end
 
-        // ---- 20) RESET clears the gradient DAC (G1) -------------------------
-        // Scenario 19 left grad_dac_value_w=2048 (grad_en=1, coil on). A RESET
+        // ---- 21) RESET clears the gradient DAC (G1) -------------------------
+        // Scenario 20 left grad_dac_value_w=2048 (grad_en=1, coil on). A RESET
         // must zero grad_dac_value_w so the coil turns OFF (only power-on reset
         // cleared it before -- a stray field survived RESET). The load pulse is
         // deferred to the end of S_RESET_WAIT so dac_ctrl (held in sync reset by

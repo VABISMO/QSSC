@@ -111,16 +111,83 @@ def test_parallel_sample_runner():
 
 
 def test_parallel_endpoint():
-    """The /api/circuit/run-parallel endpoint serves a parallel-sample run."""
+    """The /api/circuit/run-parallel endpoint serves a parallel-sample run.
+    The endpoint is async by default; ?sync=true runs it in-process and returns
+    {job_id, status, result} so the test reads the result inline."""
     from fastapi.testclient import TestClient
     from api.main import app
     c = TestClient(app)
-    r = c.post("/api/circuit/run-parallel", json={
+    r = c.post("/api/circuit/run-parallel?sync=true", json={
         "mode": "sample", "n_pixels": 8, "num_qubits": 2,
         "shots": 256, "noise_mode": "ideal", "seed": 1,
     })
     assert r.status_code == 200
     j = r.json()
-    assert j["mode"] == "sample"
-    assert j["n_pixels"] == 8
-    assert sum(j["aggregate_counts"].values()) == 8 * 256
+    assert j["status"] == "finished"
+    res = j["result"]
+    assert res["mode"] == "sample"
+    assert res["n_pixels"] == 8
+    assert sum(res["aggregate_counts"].values()) == 8 * 256
+
+
+# -- Invention 4+5: calibrated per-pixel width -------------------------------
+def _calibrated_backend(widths, seed=42):
+    """Build a backend with a measured per-pixel width list."""
+    return QSSCBackend("NV", seed=seed, noise_mode="real",
+                       register_widths_per_pixel=widths)
+
+
+def test_run_array_skips_narrow_pixels():
+    """A circuit WIDER than a pixel's calibrated width is skipped for that
+    pixel (never truncated); the rest run and produce correct results."""
+    # 8 pixels: widths 2,2,2,2,5,5,5,5. A 4-qubit circuit fits pixels 4..7
+    # (width 5) and is skipped on pixels 0..3 (width 2 < 4).
+    widths = [2, 2, 2, 2, 5, 5, 5, 5]
+    b = _calibrated_backend(widths)
+    circs = [_bell(4) for _ in range(8)]
+    out = b.run_array(circs, shots=128)
+    assert out["n_pixels"] == 8
+    assert out["skipped_pixels"] == [0, 1, 2, 3]
+    assert out["n_run"] == 4
+    # the 4 run pixels each contributed 128 shots -> 512 aggregate
+    assert sum(out["aggregate_counts"].values()) == 4 * 128
+    # skipped entries are dicts flagging the reason + widths
+    for i in range(4):
+        e = out["per_pixel"][i]
+        assert isinstance(e, dict) and e.get("skipped") is True
+        assert e["pixel_width"] == 2 and e["circuit_width"] == 4
+
+
+def test_run_array_per_pixel_width():
+    """Different pixels run different-width circuits: a 2-qubit circuit fits
+    ALL pixels (even the width-2 ones), nothing is skipped, and the per-pixel
+    widths are reported back."""
+    widths = [2, 3, 4, 5, 6, 7, 8, 9]
+    b = _calibrated_backend(widths)
+    circs = [_bell(2) for _ in range(8)]
+    out = b.run_array(circs, shots=64)
+    assert out["skipped_pixels"] == []
+    assert out["n_run"] == 8
+    assert out["per_pixel_widths"] == widths
+    assert out["min_width"] == 2 and out["max_width"] == 9
+    assert sum(out["aggregate_counts"].values()) == 8 * 64
+
+
+def test_run_array_uniform_when_no_calibration():
+    """Without register_widths_per_pixel the uniform path is unchanged: no
+    skips, no per_pixel_widths key, full aggregate (back-compat)."""
+    b = QSSCBackend("NV", seed=42, noise_mode="real")
+    circs = [_bell(2) for _ in range(8)]
+    out = b.run_array(circs, shots=64)
+    assert out["n_pixels"] == 8
+    assert "skipped_pixels" not in out
+    assert "per_pixel_widths" not in out
+    assert sum(out["aggregate_counts"].values()) == 8 * 64
+
+
+def test_best_uniform_width_helper():
+    """best_uniform_width picks the N maximizing N * count(width >= N)."""
+    from qssc.array_calibration import best_uniform_width
+    # N=4: 8 pixels -> 32 (winner); N=6: 5 -> 30; N=10: 2 -> 20
+    n, k = best_uniform_width([4, 6, 6, 10, 10, 6, 4, 4])
+    assert (n, k) == (4, 8)
