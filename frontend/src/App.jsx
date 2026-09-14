@@ -1,8 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { api } from './api.js'
-import { deriveMeasurement } from './derive.js'
 import {
-  QubitGrid, OdmrChart, BarCounts, MeasurementHelp,
+  QubitGrid, OdmrChart, BarCounts,
   SignalChart, CalibrationPanel, Verdict, NoiseBudget,
   OpticalChainDiagram, RunPhysics,
   CompassRose, GyroPanel, MagnetoImage, SensorField,
@@ -307,6 +306,11 @@ export default function App() {
   const [nNvPerPixel, setNNvPerPixel] = useState(null)
   const [registerLineFreqsHz, setRegisterLineFreqsHz] = useState(null)
   const [primeReadout, setPrimeReadout] = useState(true)
+  // `parallelMode` is the single "64-parallel ON/OFF" switch. OFF → the
+  // single-pixel path (Circuit Runner + per-pixel ODMR calibration). ON → the
+  // 64-pixel array path (array calibration + run-parallel). Exactly one Run
+  // and one Calibrate are visible at any time; the toggle swaps which.
+  const [parallelMode, setParallelMode] = useState(false)
   const [modes, setModes] = useState(null)
   useEffect(() => { api.modes().then(setModes).catch(() => {}) }, [])
 
@@ -682,12 +686,6 @@ export default function App() {
   const runAssessment = result && result.assessment
   const runBits = result && result.num_clbits
   const runRecovered = result && (result.recovered || (result.result && result.result.recovered))
-  // per-algorithm "which bar is the correct result + how the binary -> result"
-  // derivation. Computed once, shared by the histogram marker (BarCounts signal)
-  // and the help modal (MeasurementHelp), so the marked bar and the shown work
-  // always agree. Pure client-side from the run result + displayed counts.
-  const meas = result && algo && algo !== 'custom'
-    ? deriveMeasurement(algo, result, displayCounts, runBits) : null
 
   return (
     <div className="app">
@@ -1238,6 +1236,25 @@ export default function App() {
         <>
           {/* ============================= GLOBAL CONTROLS ============================= */}
           <div className="card" style={{ marginBottom: 18 }}>
+            {/* The single "64-parallel ON/OFF" switch. OFF = single-pixel path
+                (Circuit Runner + per-pixel ODMR calibration); ON = 64-pixel
+                array path (array calibration + run-parallel). The bottom half
+                of this tab swaps accordingly, so there is exactly one Run and
+                one Calibrate visible at any time — no duplicated panels. */}
+            <div className="seg-toggle" role="group" aria-label="64-parallel mode" style={{ marginBottom: 12 }}>
+              <span className="seg-label">64-parallel</span>
+              <button className={`seg ${!parallelMode ? 'on' : ''}`} onClick={() => setParallelMode(false)}>
+                <span className="seg-ic">◇</span> OFF · single pixel
+              </button>
+              <button className={`seg ${parallelMode ? 'on' : ''}`} onClick={() => setParallelMode(true)}>
+                <span className="seg-ic">▦</span> ON · 64 pixels
+              </button>
+              <span className="seg-note">
+                {parallelMode
+                  ? '64-pixel array — calibrate the array, then run one circuit across all pixels (64× throughput).'
+                  : 'Single pixel — run one circuit on one pixel, calibrate its ODMR register.'}
+              </span>
+            </div>
             {/* Top-level Simulator / Hardware-real switch. Green when Hardware
                 real is selected. In Hardware-real mode the Aer noise-mode
                 selector is hidden (the real board's physics replace it) and a
@@ -1352,7 +1369,9 @@ export default function App() {
             </div>
           </div>
 
-          {/* ============================= CIRCUIT RUNNER ============================= */}
+          {/* ============================= CIRCUIT RUNNER (single-pixel path) ============================= */}
+          {!parallelMode && (
+            <>
           <div className="section-title">Circuit Runner</div>
           <div className="grid cols-2">
           <div className="card">
@@ -1611,15 +1630,12 @@ export default function App() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
               <div className="card histcard">
                 <h2><span className="dot" />Measurement histogram
-                  {result && algo && algo !== 'custom' && (
-                    <MeasurementHelp algo={algo} meas={meas} />
-                  )}
                 </h2>
                 <div className="hint">{runMarginal
                   ? 'Phase-register marginal (ancilla collapsed): bar counts sum to shots, the recovered signal peak is concentrated.'
                   : 'Top bitstrings from the most recent run (most-probable first).'}</div>
                 {displayCounts
-                  ? <BarCounts counts={displayCounts} recovered={runRecovered} shots={shots} signal={meas} />
+                  ? <BarCounts counts={displayCounts} shots={shots} />
                   : runErr
                     ? <div className="muted">Last run failed — see the error above.</div>
                     : <div className="muted">No run yet — execute a circuit on the left.</div>}
@@ -1641,8 +1657,12 @@ export default function App() {
               </div>
             </div>
           </div>
+            </>
+          )}
 
           {/* ============================= 64-PARALLEL COMPUTING ============================= */}
+          {parallelMode && (
+            <>
           <div className="section-title">64-parallel computing &amp; array calibration</div>
           <ParallelPanel
             profile={profile} temperature={temperature} seed={seed}
@@ -1653,6 +1673,8 @@ export default function App() {
             onRun={runParallel} runRunning={parRunning}
             runResult={parRun} runErr={parErr}
           />
+            </>
+          )}
 
           {/* ============================= BACKEND PHYSICS ============================= */}
           <div className="section-title">Backend physics</div>
@@ -1696,6 +1718,7 @@ export default function App() {
               <div className="hint">Lock-in ODMR — the on-chip graphene/MoS₂ detector array's photocurrent dips at D ± γB (resonant MW flips the spin dark), with hyperfine replicas.</div>
               <OdmrChart data={odmr.data} error={odmr.error} />
             </div>
+            {!parallelMode && (
             <div className="card">
               <h2><span className="dot" />Calibration process</h2>
               <CalibrationPanel
@@ -1703,6 +1726,7 @@ export default function App() {
                 run={runCalibration} running={calRunning} result={calRun} err={calErr}
               />
             </div>
+            )}
           </div>
 
           {/* ============================= ANALOG SIGNAL ============================= */}
