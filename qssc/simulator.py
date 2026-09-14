@@ -41,6 +41,12 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from .defects import DefectProfile, get_profile, coherence_at_temperature
+from .noise_filters import (
+    AntiNoiseConfig,
+    NoiseEnvironment,
+    effective_noise_sigma,
+    effective_t2,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -136,11 +142,29 @@ class SimulatedFPGA:
 
     def __init__(self, profile: DefectProfile | str = "NV",
                  temperature_k: float = 300.0, noise: float = 0.1,
-                 seed: Optional[int] = None):
+                 seed: Optional[int] = None,
+                 sub_pixel=None,
+                 integration_shots: int = 1,
+                 gradient_mhz_per_um: float = 1.0,
+                 pixel_size_um: float = 200.0,
+                 max_nv_per_microdiamond: int = 300,
+                 contrast_single: float = 0.03,
+                 noise_env: Optional[NoiseEnvironment] = None,
+                 anti_noise: Optional[AntiNoiseConfig] = None):
         self.profile = get_profile(profile) if isinstance(profile, str) else profile
         self.temperature_k = temperature_k
         self.noise = noise
         self.rng = np.random.default_rng(seed)
+        # Invention 6: optional charge-sharing centroiding model. When set,
+        # _run_all_odmr spreads each pixel's ODMR dip to neighbouring pads via
+        # the sheet's charge-share kernel (a real spatial image per frequency
+        # point, instead of 64 independent channels). Lazy-typed to avoid a
+        # circular import with qssc.detector_centroid (which imports simulator
+        # constants). See qssc.detector_centroid.SubPixelModel.
+        self.sub_pixel = sub_pixel
+        # Invention 7: N-shot lock-in averaging -> per-point noise drops by
+        # sqrt(N) (uncorrelated thermal/Johnson readout noise). 1 = no averaging.
+        self.integration_shots = max(1, int(integration_shots))
         # per-channel 12-bit grayscale (TLC5947 gs register); 0 = off. A channel
         # "pumps" its coupled detector when gs > 0 (DRIVE_EMITTER sets full,
         # SET_EMITTER arms an arbitrary level, DRIVE_PATTERN fires all armed).
@@ -152,6 +176,20 @@ class SimulatedFPGA:
         self.lut: Dict[int, int] = {}
         t1, t2 = coherence_at_temperature(self.profile, temperature_k)
         self.t1, self.t2 = t1, t2
+        # Invention 9: classical anti-noise filter stack. ``noise_env`` models the
+        # environmental channels (temp drift, vibration, EMI, pressure) and
+        # ``anti_noise`` the filter stack that attenuates them (thermal servo,
+        # vibration iso, EMI shield, sensor feed-forward, common-mode rejection)
+        # plus an optional dynamical-decoupling sequence. DD refocuses low-
+        # frequency dephasing (T2*) -> extends T2 (capped at 2*T1, the relaxation
+        # limit; DD cannot refocus T1 / fast Markovian noise). Defaults (None) ->
+        # unchanged T2 and unchanged readout noise (bit-identical to the prior
+        # model); see qssc.noise_filters.
+        self.noise_env = noise_env
+        self.anti_noise = anti_noise
+        if anti_noise is not None and (anti_noise.dd_sequence or "none") != "none":
+            self.t2 = effective_t2(self.t2, anti_noise.dd_sequence,
+                                   anti_noise.dd_n_blocks, self.t1)
         # Ambient field + rotation the sensor is subjected to (the physical
         # quantity the on-chip compass/gyro read back). Defaults: a 500 uT
         # field (a nearby magnet -- the NV 5 MHz linewidth cannot resolve
@@ -166,6 +204,21 @@ class SimulatedFPGA:
         # per-pixel ODMR resonance detuning (drawn lazily by _run_all_odmr to
         # model the gradient spreading the 64 pixel resonances).
         self._pixel_detun_hz: Optional[np.ndarray] = None
+        # Few-NV COMPUTE regime (Invention 5 + the per-pixel register model):
+        # each pixel holds one microdiamond of ~100-300 NVs whose resonances the
+        # field gradient spreads across the pixel into resolvable, linewidth-
+        # spaced bins -- DISTINCT frequency-addressed lines (the 2009
+        # Neumann/Taminiau regime), NOT one ensemble dip. Drawn lazily and held
+        # so repeated sweeps see a consistent spectrum. ``_pixel_lines[q]`` is a
+        # (n_lines,) array of dip fractions (codes fraction of BRIGHT) and
+        # ``_pixel_line_freqs[q]`` the matching (n_lines,) resonance offsets (Hz
+        # from D). A bin holding k NVs saturates: contrast = 1-(1-c)^k.
+        self.gradient_mhz_per_um = float(gradient_mhz_per_um)
+        self.pixel_size_um = float(pixel_size_um)
+        self.max_nv_per_microdiamond = int(max_nv_per_microdiamond)
+        self.contrast_single = float(contrast_single)
+        self._pixel_line_freqs: Optional[list[np.ndarray]] = None
+        self._pixel_line_contrasts: Optional[list[np.ndarray]] = None
 
     # -- command interface -------------------------------------------------
     def send_command(self, command: str) -> str:
@@ -373,7 +426,10 @@ class SimulatedFPGA:
             state = self.sim_states.get(site, 0)
             # bright ms=0 (state 0) -> high PL; dark ms=+-1 (state 1) -> ODMR dip
             level = BRIGHT_CODE if state == 0 else DARK_CODE
-        code = level + int(self.rng.normal(0, READOUT_NOISE))
+        # Invention 9: anti-noise stack sigma (defaults -> READOUT_NOISE).
+        nsigma = effective_noise_sigma(READOUT_NOISE, self.noise_env,
+                                       self.anti_noise, 1)
+        code = level + int(self.rng.normal(0, nsigma))
         return int(min(max(code, 0), ADC_MAX))
 
     def _calibrate(self) -> None:
@@ -452,20 +508,61 @@ class SimulatedFPGA:
         f0 = self.sim_freq                     # D, Hz
         lw = self.profile.odmr_linewidth_hz    # FWHM, Hz
         fs = np.linspace(f_start_khz * 1e3, f_stop_khz * 1e3, n_points)
+        # Invention 9: per-point noise sigma after the anti-noise stack (defaults
+        # -> READOUT_NOISE, bit-identical). Single sweep -> integration_shots=1.
+        nsigma = effective_noise_sigma(READOUT_NOISE, self.noise_env,
+                                       self.anti_noise, 1)
         # Lorentzian dip: PL = bright * (1 - contrast * L(f)); L(0) = 1.
         lor = (lw / 2.0) ** 2 / ((fs - f0) ** 2 + (lw / 2.0) ** 2)
         codes = BRIGHT_CODE * (1.0 - ODMR_CONTRAST * lor)
-        codes += self.rng.normal(0, READOUT_NOISE, size=n_points)
+        codes += self.rng.normal(0, nsigma, size=n_points)
         codes = np.clip(codes, 0, ADC_MAX).astype(int)
         # make the addressed channel reflect its pumped/bright state off-resonance
         if self.emitter_gs.get(qubit, 0) <= 0:
-            codes = BG_CODE + self.rng.normal(0, READOUT_NOISE, size=n_points).astype(int)
+            codes = BG_CODE + self.rng.normal(0, nsigma, size=n_points).astype(int)
             codes = np.clip(codes, 0, ADC_MAX)
         flat = [str(n_points)]
         for fk, ck in zip(fs, codes):
             flat.append(f"{int(fk / 1e3)}")      # back to kHz
             flat.append(str(int(ck)))
         return " ".join(flat)
+
+    def _draw_pixel_lines(self) -> None:
+        """Draw each pixel's few-NV COMPUTE register (lazily, once).
+
+        One microdiamond per pixel carries ``[max_nv/3, max_nv]`` NVs (100-300 at
+        the default 300 cap). The field gradient spreads their resonances across
+        the within-pixel spread (``gradient * pixel_size``) into resolvable,
+        linewidth-spaced bins; a bin holding ``k`` NVs is one ODMR line of
+        contrast ``1-(1-c)**k`` (NV contrasts add and saturate). These are
+        DISTINCT frequency-addressed lines -- the 2009 Neumann/Taminiau regime
+        (several qubits + 2q gates from one stone), NOT the 10^12-NV ensemble
+        sensing stone that collapses to one line. Held across sweeps so the
+        spectrum is consistent (the calibration decomposes it into lines).
+        """
+        prof = self.profile
+        lw = prof.odmr_linewidth_hz                       # FWHM, Hz
+        spread_hz = self.gradient_mhz_per_um * 1e6 * self.pixel_size_um
+        n_bins = max(1, int(round(spread_hz / lw))) if self.gradient_mhz_per_um > 0 else 1
+        c = self.contrast_single
+        if self.gradient_mhz_per_um <= 0.0 or n_bins <= 1:
+            # no gradient -> every NV piles onto one ensemble line at the pixel
+            # centre (one resolvable qubit, the sensing/ensemble regime).
+            self._pixel_line_freqs = [np.array([0.0]) for _ in range(self.N_SITES)]
+            self._pixel_line_contrasts = [np.array([c]) for _ in range(self.N_SITES)]
+            return
+        start = -spread_hz / 2.0 + lw / 2.0
+        bin_centres = start + np.arange(n_bins) * lw      # Hz, relative to pixel centre
+        lo = max(1, self.max_nv_per_microdiamond // 3)
+        self._pixel_line_freqs = []
+        self._pixel_line_contrasts = []
+        for _ in range(self.N_SITES):
+            n_nv = int(self.rng.integers(lo, self.max_nv_per_microdiamond + 1))
+            picks = self.rng.integers(0, n_bins, size=n_nv)
+            occ = np.bincount(picks, minlength=n_bins)
+            mask = occ > 0
+            self._pixel_line_freqs.append(bin_centres[mask].copy())
+            self._pixel_line_contrasts.append(1.0 - (1.0 - c) ** occ[mask])
 
     def _run_all_odmr(self, f_start_khz: int, f_stop_khz: int,
                       n_points: int) -> str:
@@ -479,28 +576,81 @@ class SimulatedFPGA:
         codes, then a final ``OK`` -- the same shape the RTL
         ``RUN_ALL_ODMR`` handler emits, so the host parser is identical for sim
         and real hardware.
+
+        Invention 6 (``self.sub_pixel`` set): each pixel's dip spreads to its
+        neighbours via the graphene/MoS2 sheet charge-share kernel, so the 64
+        codes per point are a real spatial image (charge-sharing centroiding
+        input) instead of 64 independent channels.
+
+        Invention 7 (``self.integration_shots > 1``): per-point readout noise
+        drops by ``sqrt(N)`` (N-shot lock-in averaging of uncorrelated
+        thermal/Johnson noise).
         """
         f0 = self.sim_freq                     # D, Hz
         lw = self.profile.odmr_linewidth_hz    # FWHM, Hz
         fs = np.linspace(f_start_khz * 1e3, f_stop_khz * 1e3, n_points)
-        # per-pixel resonance detuning (the gradient resolve): drawn once, held
-        # so repeated sweeps are consistent. Spread ~ a few linewidths.
+        # per-pixel centre detuning (cross-pixel gradient offset): drawn once,
+        # held so repeated sweeps are consistent. Spread ~ a few linewidths.
         if self._pixel_detun_hz is None:
             self._pixel_detun_hz = self.rng.normal(
                 0.0, max(lw * 2.0, 1.0), self.N_SITES)
         detun = self._pixel_detun_hz
+        # per-pixel few-NV line set (the within-pixel gradient spread -> distinct
+        # frequency-addressed NV lines). Drawn once, held across sweeps.
+        if self._pixel_line_freqs is None:
+            self._draw_pixel_lines()
+        line_freqs = self._pixel_line_freqs       # list of (n_lines,) Hz rel. centre
+        line_contrasts = self._pixel_line_contrasts  # list of (n_lines,) dip frac
+        # Invention 7: averaged noise is 1/sqrt(N) of the single-shot noise.
+        # Invention 9: the classical anti-noise stack (thermal servo, vibration
+        # iso, EMI shield, feed-forward, common-mode) attenuates the environmental
+        # channels on top of the 1/sqrt(N) floor. Defaults (no env) -> the bare
+        # READOUT_NOISE/sqrt(N) (bit-identical to the prior model).
+        noise = effective_noise_sigma(READOUT_NOISE, self.noise_env,
+                                      self.anti_noise, self.integration_shots)
+        # Invention 6: precompute the 64x64 charge-share weight matrix (spot q's
+        # footprint across pads p) so a pixel's dip spills to its neighbours.
+        W = None
+        if self.sub_pixel is not None:
+            from .detector_centroid import charge_share_weights, pad_grid_centers
+            centers = pad_grid_centers(self.sub_pixel.pad_pitch_mm)
+            W = np.vstack([charge_share_weights(tuple(centers[q]), centers,
+                                                self.sub_pixel.sigma_sheet_mm)
+                           for q in range(self.N_SITES)])  # (64, 64): W[q, p]
+        hw2 = (lw / 2.0) ** 2
+
+        def _pixel_dip_frac(q: int, fi: float) -> float:
+            """Total ODMR dip fraction (of BRIGHT) for pixel q at frequency fi:
+            sum of its NV-line Lorentzians, each weighted by its bin contrast."""
+            lf = f0 + detun[q] + line_freqs[q]      # absolute line freqs (Hz)
+            lor = hw2 / ((fi - lf) ** 2 + hw2)      # (n_lines,) peak-1 Lorentzian
+            return float(np.sum(line_contrasts[q] * lor))
+
         lines = []
         for fi in fs:
-            codes = []
-            for q in range(self.N_SITES):
-                if self.emitter_gs.get(q, 0) <= 0:
-                    c = BG_CODE + self.rng.normal(0, READOUT_NOISE)
-                else:
-                    f_center = f0 + detun[q]
-                    lor = (lw / 2.0) ** 2 / ((fi - f_center) ** 2 + (lw / 2.0) ** 2)
-                    c = BRIGHT_CODE * (1.0 - ODMR_CONTRAST * lor) \
-                        + self.rng.normal(0, READOUT_NOISE)
-                codes.append(int(min(max(int(c), 0), ADC_MAX)))
+            if W is None:
+                codes = []
+                for q in range(self.N_SITES):
+                    if self.emitter_gs.get(q, 0) <= 0:
+                        c = BG_CODE + self.rng.normal(0, noise)
+                    else:
+                        dip_frac = min(_pixel_dip_frac(q, fi), 1.0)
+                        c = BRIGHT_CODE * (1.0 - dip_frac) + self.rng.normal(0, noise)
+                    codes.append(int(min(max(int(c), 0), ADC_MAX)))
+            else:
+                # forward-model: each pixel q's dip depth, then spread to pads.
+                dip_q = np.zeros(self.N_SITES)
+                for q in range(self.N_SITES):
+                    if self.emitter_gs.get(q, 0) <= 0:
+                        continue
+                    dip_q[q] = BRIGHT_CODE * min(_pixel_dip_frac(q, fi), 1.0)
+                # pad p collects the sum of its neighbours' spread dips
+                pad_dip = W.T @ dip_q            # (64,) pad-space dip
+                base = np.where(
+                    [self.emitter_gs.get(q, 0) > 0 for q in range(self.N_SITES)],
+                    float(BRIGHT_CODE), float(BG_CODE))
+                codes = base - pad_dip + self.rng.normal(0, noise, self.N_SITES)
+                codes = [int(min(max(int(c), 0), ADC_MAX)) for c in codes]
             lines.append(" ".join(str(c) for c in codes))
         return "\n".join(lines) + "\nOK"
 

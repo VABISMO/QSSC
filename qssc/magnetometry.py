@@ -115,6 +115,137 @@ def _recover_b_vector(splits_mhz: Sequence[float], gamma_hz_per_t: float,
     return (best_x if best_x is not None else np.zeros(3)), len(resolved)
 
 
+def b_vector_from_odmr_lines(lines_ghz: Sequence[float],
+                             profile: DefectProfile | str = "NV",
+                             linewidth_mhz: Optional[float] = None,
+                             reference_t: Optional[Sequence[float]] = None
+                             ) -> tuple[np.ndarray, int, list, float]:
+    """Reconstruct the B-VECTOR of ONE pixel from its MEASURED ODMR line
+    frequencies -- the real-hardware path (Invention 1 real / Invention 19).
+
+    This is the host-side calculation the simulator's :func:`measure_pixel`
+    replaces: instead of simulating the 4 <111> doublet splits from a known B,
+    it takes the line centres ``decompose_odmr`` resolved from a real
+    ``RUN_ALL_ODMR`` sweep and inverts them to B. Each NV <111> axis under a
+    field B produces a doublet at D +/- gamma*(B.n_i): two lines symmetric
+    about the zero-field splitting D, separated by delta_i = 2*gamma*|B.n_i|.
+    So:
+
+    1. detune each line from D (MHz),
+    2. pair lines that are mirror-symmetric about D (within linewidth/2) into
+       doublets -- the pair's split is ``|f_high - f_low|``,
+    3. the (up to 4) distinct splits are the |B.n_i| projections of the 4 axes,
+    4. search the axis-assignment (permutations) + sign ambiguity to find the
+       B-vector with the lowest least-squares residual (the 4 axes are not
+       labelled in a combined ensemble spectrum, so the assignment is unknown;
+       the lowest-residual assignment is the physical one).
+
+    A pixel with fewer than 3 resolved doublets (the bulk-ensemble collapse at
+    low field -- one line, no splitting) CANNOT fix a 3-component vector and
+    returns a zero vector with ``n_resolved_axes`` < 3 (the truthful "field too
+    small to reconstruct the vector" result, not a fabricated vector).
+
+    Returns ``(B_T, n_resolved_axes, splits_mhz, residual_T2)``.
+    """
+    prof = get_profile(profile) if isinstance(profile, str) else profile
+    gamma = prof.gyromagnetic_ratio
+    d_hz = prof.zero_field_splitting
+    lw = (linewidth_mhz if linewidth_mhz is not None
+          else prof.odmr_linewidth_hz / 1e6)
+    if not lines_ghz or len(lines_ghz) < 2:
+        return np.zeros(3), 0, [], float("inf")
+    # detunings from D in MHz
+    det = [round((float(f) * 1e9 - d_hz) / 1e6, 4) for f in lines_ghz]
+    pair_tol = float(lw) / 2.0
+    used = set()
+    splits: list[float] = []
+    for i, di in enumerate(det):
+        if i in used:
+            continue
+        # find a mirror partner at ~ -di (the other half of the doublet)
+        best_j, best_err = -1, pair_tol
+        for j in range(i + 1, len(det)):
+            if j in used:
+                continue
+            err = abs(det[j] + di)
+            if err < best_err:
+                best_err, best_j = err, j
+        if best_j >= 0:
+            used.add(i); used.add(best_j)
+            splits.append(round(abs(det[i] - det[best_j]), 4))  # = 2|di|
+        else:
+            # unpaired line: a single manifold line (other branch below the
+            # detection bar) -> split = 2|di| is the best estimate, but flag it
+            # as a half-doublet by using 2|di| only if it clears the threshold.
+            if abs(di) > pair_tol:
+                splits.append(round(2.0 * abs(di), 4))
+    # distinct splits, largest first, capped at 4 (the 4 NV axes)
+    splits = sorted(set(splits), reverse=True)[:4]
+    n_res = min(len(splits), 4)
+    if n_res < 3:
+        return np.zeros(3), n_res, splits, float("inf")
+    # search axis-assignment (permutations) + sign ambiguity for the
+    # lowest-residual B-vector. A_i . B = +/- |B.n_i| -> lstsq over signs.
+    from itertools import permutations
+    b_proj_t = np.array(splits) * 1e6 / (2.0 * gamma)          # |B.n_i| in T
+    best_x, best_resid = np.zeros(3), float("inf")
+    for perm in permutations(range(4), n_res):
+        A = _NV_AXES[list(perm)]                               # (n_res, 3)
+        for mask in range(1 << n_res):
+            signs = np.array([1.0 if (mask >> k) & 1 else -1.0
+                              for k in range(n_res)])
+            sol, *_ = np.linalg.lstsq(A, signs * b_proj_t, rcond=None)
+            resid = float(np.linalg.norm(A @ sol - signs * b_proj_t))
+            if resid < best_resid:
+                best_resid, best_x = resid, sol
+    # reference sign-lock (differential mode): pick the branch closest to the
+    # baseline among the low-residual candidates.
+    if reference_t is not None and best_resid < float("inf"):
+        ref = np.asarray(reference_t, dtype=float)
+        tol = max(best_resid * 1e-3, float(lw) * 1e6 / (2.0 * gamma))
+        candidates = []
+        for perm in permutations(range(4), n_res):
+            A = _NV_AXES[list(perm)]
+            for mask in range(1 << n_res):
+                signs = np.array([1.0 if (mask >> k) & 1 else -1.0
+                                  for k in range(n_res)])
+                sol, *_ = np.linalg.lstsq(A, signs * b_proj_t, rcond=None)
+                resid = float(np.linalg.norm(A @ sol - signs * b_proj_t))
+                if resid <= best_resid + tol:
+                    candidates.append((resid, sol))
+        if candidates:
+            best_x = min(candidates, key=lambda rs: float(
+                np.linalg.norm(rs[1] - ref)))[1]
+    # B in Tesla -> the caller scales to µT. Guard against a degenerate zero.
+    if not np.any(np.abs(best_x) > 0):
+        n_res = 0
+    return best_x, n_res, splits, best_resid
+
+
+def b_vector_map_from_array_calibration(calib, profile: DefectProfile | str = "NV",
+                                        linewidth_mhz: Optional[float] = None
+                                        ) -> np.ndarray:
+    """Build the (grid, grid, 3) per-pixel B-VECTOR map (Tesla) the tensor
+    gradiometer (Invention 19) consumes, from a cached
+    :class:`qssc.array_calibration.ArrayCalibration`'s per-pixel measured
+    ``odmr_lines``. Each pixel's lines are inverted to a B-vector by
+    :func:`b_vector_from_odmr_lines`; pixels with too few resolved doublets get
+    a zero vector (the ensemble collapse -- field too small to reconstruct).
+    """
+    prof = get_profile(profile) if isinstance(profile, str) else profile
+    lw = (linewidth_mhz if linewidth_mhz is not None
+          else prof.odmr_linewidth_hz / 1e6)
+    grid = 8
+    fmap = np.zeros((grid, grid, 3))
+    for p in calib.pixels:
+        lines = p.odmr_lines or []
+        b, _n, _s, _r = b_vector_from_odmr_lines(lines, prof, lw)
+        r, c = divmod(p.pixel_id, grid)
+        if r < grid and c < grid:
+            fmap[r, c] = b
+    return fmap
+
+
 def measure_pixel(profile: DefectProfile, b_vector_t: Sequence[float],
                    n_avg: int, linewidth_mhz: float,
                    rng: np.random.Generator,
@@ -271,21 +402,22 @@ def synthetic_field_map(grid: int = 8,
 
     A linear gradient + an optional vertical magnetic dipole offset, sampled
     at each pixel centre. This is the synthetic source the magnetometer images;
-    real hardware would feed the measured per-pixel field directly.
+    real hardware would feed the measured per-pixel field directly. The dipole
+    uses the same full-vector forward model
+    (:func:`qssc.tensor_gradiometry._dipole_field`) the dipole localizer fits,
+    so a synthetic demo field is self-consistent with the fit.
     """
-    out = np.zeros((grid, grid, 3))
-    for iy in range(grid):
-        for ix in range(grid):
-            px = (ix - (grid - 1) / 2.0) * pitch_mm
-            py = (iy - (grid - 1) / 2.0) * pitch_mm
-            bx = base_bx_ut + gradient_ut_mm * ix
-            by = base_by_ut + gradient_ut_mm * 0.3 * iy
-            bz = base_bz_ut
-            if dipole_moment_am2 != 0.0:
-                rx, ry = (px - dipole_x_mm) * 1e-3, (py - dipole_y_mm) * 1e-3
-                d = dipole_z_mm * 1e-3
-                r2 = rx * rx + ry * ry + d * d
-                bz_dip = 1e-7 * dipole_moment_am2 * (2 * d * d - rx * rx - ry * ry) / (r2 ** 2.5)
-                bz += bz_dip * 1e6
-            out[iy, ix] = [bx, by, bz]
+    from .tensor_gradiometry import _dipole_field
+    pts = np.array([
+        [(ix - (grid - 1) / 2.0) * pitch_mm, (iy - (grid - 1) / 2.0) * pitch_mm]
+        for iy in range(grid) for ix in range(grid)
+    ])
+    out = np.zeros((grid * grid, 3))
+    out[:, 0] = base_bx_ut + gradient_ut_mm * np.array([ix for iy in range(grid) for ix in range(grid)])
+    out[:, 1] = base_by_ut + gradient_ut_mm * 0.3 * np.array([iy for iy in range(grid) for ix in range(grid)])
+    out[:, 2] = base_bz_ut
+    if dipole_moment_am2 != 0.0:
+        out += _dipole_field(pts, dipole_x_mm, dipole_y_mm, dipole_z_mm,
+                            [0.0, 0.0, dipole_moment_am2])
+    return out.reshape(grid, grid, 3)
     return out

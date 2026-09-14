@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
-from scipy.optimize import curve_fit
 from scipy.signal import find_peaks, savgol_filter
 
 # Diamond physical constants for the NV-count estimator.
@@ -134,11 +133,81 @@ def _gaussian_sum(freqs_ghz, *params):
     return y
 
 
+def _clean_decompose(freqs, dip, noise_floor, min_snr,
+                     psf_fwhm_mhz, min_separation_mhz, max_iter=512):
+    """CLEAN / matching-pursuit line resolver for overlapping ODMR lines.
+
+    At Case D (gradient places lines ~one linewidth apart) the per-line
+    Gaussians overlap heavily and a plain ``find_peaks`` merges dim lines into
+    the shoulders of bright neighbours -- it under-counts the resolvable
+    qubits. CLEAN iteratively finds the strongest dip, subtracts a unit-peak
+    Gaussian PSF at that frequency, and repeats on the residual. Subtracting
+    the bright line exposes its dim shoulder as a new maximum, so overlapping
+    lines that ``find_peaks`` merges are recovered (the principle behind
+    radio-astronomy CLEAN and wedge-and-strip decompositions).
+
+    Returns a list of ``(amplitude, freq_ghz, sigma_ghz)`` for every line whose
+    peak clears ``min_snr * noise_floor``. ``psf_fwhm_mhz`` is the known ODMR
+    line FWHM (the PSF shape, = the NV inhomogeneous linewidth); lines in the
+    spectrum are assumed to share that width. ``min_separation_mhz`` rejects
+    duplicate picks on the same physical line.
+    """
+    df = float(freqs[1] - freqs[0])
+    psf_sigma = psf_fwhm_mhz * 1e-3 / 2.355  # FWHM -> sigma (GHz)
+    inv_2s2 = 1.0 / (2.0 * psf_sigma ** 2)
+    # absolute SNR bar + a small relative floor: on near-noise-free synthetic
+    # data the noise floor ~0 would make the bar ~0 and pick up numerical
+    # artefacts (smoothing wiggles) as spurious lines. The 1%-of-peak floor
+    # sits safely between those artefacts (~1e-6) and a real dim lone-NV line
+    # (~0.03 contrast), so it never cuts a genuine qubit line.
+    dip_max = float(np.asarray(dip).max()) if dip.size else 0.0
+    min_amp = max(min_snr * noise_floor, 0.01 * dip_max)
+    min_sep = min_separation_mhz * 1e-3  # GHz
+    residual = np.asarray(dip, dtype=float).copy()
+    n = freqs.size
+    half = max(1, int(round(5.0 * psf_sigma / df)))
+    found: list[tuple[float, float, float]] = []
+    for _ in range(max_iter):
+        idx = int(np.argmax(residual))
+        amp = float(residual[idx])
+        if amp < min_amp:
+            break
+        # The dip is a Gaussian sampled on a discrete grid; the true peak
+        # almost never lands exactly on a sample. Subtracting a PSF pinned to
+        # the nearest sample leaves a ~2%-of-peak wing that CLEAN re-picks as a
+        # spurious second line. Parabolic-interpolate the sub-grid peak and
+        # subtract an analytic Gaussian centred there -> the off-centre residual
+        # vanishes at its source instead of being thresholded away.
+        if 0 < idx < n - 1:
+            y_m, y_0, y_p = residual[idx - 1], residual[idx], residual[idx + 1]
+            denom = y_m - 2.0 * y_0 + y_p
+            offset = 0.5 * (y_m - y_p) / denom if denom != 0.0 else 0.0
+            peak_amp = y_0 - 0.25 * (y_m - y_p) * offset
+            f = float(freqs[idx]) + offset * df
+            amp_use = float(peak_amp) if peak_amp > 0.0 else amp
+        else:
+            f = float(freqs[idx])
+            amp_use = amp
+        # duplicate of an already-found line (residual artefact): suppress a
+        # small window so it is not re-picked, but do not record it.
+        if any(abs(f - ff) < min_sep for _, ff, _ in found):
+            lo, hi = max(0, idx - 2), min(n, idx + 3)
+            residual[lo:hi] = np.minimum(residual[lo:hi], min_amp * 0.5)
+            continue
+        # subtract the unit-peak analytic Gaussian scaled by the peak amplitude,
+        # centred at the interpolated frequency (sub-grid, not grid-pinned).
+        lo, hi = max(0, idx - half), min(n, idx + half + 1)
+        seg = freqs[lo:hi]
+        residual[lo:hi] -= amp_use * np.exp(-((seg - f) ** 2) * inv_2s2)
+        found.append((amp_use, f, psf_sigma))
+    return found
+
+
 def decompose_odmr(
     freqs_ghz: np.ndarray,
     contrast: np.ndarray,
     noise_floor: Optional[float] = None,
-    min_snr: float = 3.0,
+    min_snr: float = 4.0,
     linewidth_guess_mhz: float = 2.0,
     min_separation_mhz: float = 1.5,
 ) -> list[OdmrComponent]:
@@ -151,6 +220,12 @@ def decompose_odmr(
         Same convention as ``qssc.simulator.simulate_odmr``.
     noise_floor : noise sigma on the contrast (estimated if None).
     min_snr : minimum contrast/noise to accept a component as a real qubit.
+        Default 4 (a 4-sigma confident detection). 3 sigma is marginal: on an
+        800-point sweep a 3-sigma bar gives ~1 noise false-positive per pixel,
+        which inflates the 1-shot count above the cleaner N-shot count and breaks
+        the integration-monotonicity of the measured width; 4 sigma rejects
+        those bumps while keeping every real line (lone-NV bins clear it under
+        modest N-shot integration, multi-NV bins clear it single-shot).
     linewidth_guess_mhz : initial FWHM guess for each line (MHz).
     min_separation_mhz : reject duplicate peaks closer than this (MHz).
 
@@ -172,55 +247,34 @@ def decompose_odmr(
     if noise_floor <= 0:
         noise_floor = 1e-6
 
-    # --- 2. smooth lightly for peak detection ------------------------------
-    win = min(11, n if n % 2 else n - 1)
-    smooth = savgol_filter(dip, window_length=win, polyorder=3) if n >= 11 else dip
+    # --- 2. resolve lines via CLEAN (matching pursuit) ---------------------
+    # CLEAN iteratively subtracts the strongest Gaussian line so the dim
+    # shoulders of overlapping lines (Case D, ~1-linewidth spacing) are
+    # exposed -- find_peaks merges them and under-counts. CLEAN is the
+    # primary resolver; find_peaks is the fallback for sparse / single-line
+    # spectra where CLEAN has nothing to chase.
+    found = _clean_decompose(freqs, dip, noise_floor, min_snr,
+                             linewidth_guess_mhz, min_separation_mhz)
+    if not found:
+        win = min(11, n if n % 2 else n - 1)
+        smooth = savgol_filter(dip, window_length=win, polyorder=3) if n >= 11 else dip
+        prominence = max(min_snr * noise_floor, 0.05 * float(smooth.max()))
+        min_dist = max(1, int(round(min_separation_mhz * 1e-3 /
+                                   (freqs[1] - freqs[0]))))
+        peaks, _ = find_peaks(smooth, prominence=prominence, distance=min_dist)
+        sigma0 = linewidth_guess_mhz * 1e-3 / 2.355
+        found = [(float(smooth[pk]), float(freqs[pk]), sigma0) for pk in peaks]
 
-    # --- 3. detect candidate peaks -----------------------------------------
-    prominence = max(min_snr * noise_floor, 0.05 * float(smooth.max()))
-    min_dist = max(1, int(round(min_separation_mhz * 1e-3 /
-                               (freqs[1] - freqs[0]))))
-    peaks, props = find_peaks(smooth, prominence=prominence, distance=min_dist)
-    if peaks.size == 0:
-        return []
-
-    # --- 4. fit a sum of Gaussians, seeded from the detected peaks ---------
-    sigma0 = linewidth_guess_mhz * 1e-3 / 2.355  # FWHM -> sigma (GHz)
-    p0, lb, ub = [], [], []
-    f_min, f_max = float(freqs.min()), float(freqs.max())
-    for pk in peaks:
-        a = float(smooth[pk])
-        f = float(freqs[pk])
-        p0 += [a, f, sigma0]
-        lb += [0.0, f_min, 1e-5]
-        ub += [1.0, f_max, (f_max - f_min)]
-    # For dense spectra the global sum-of-Gaussians fit is expensive (3 params
-    # per peak) and only refines freq/contrast — it does not change the line
-    # COUNT, which find_peaks already fixed under the SNR prominence and
-    # min-separation constraints. Skip it past this many peaks and use the raw
-    # peak amplitudes (the SNR filter below still applies).
-    _MAX_FIT_PEAKS = 8
-    popt = p0
-    if len(peaks) <= _MAX_FIT_PEAKS:
-        try:
-            popt, _ = curve_fit(_gaussian_sum, freqs, dip, p0=p0,
-                                bounds=(lb, ub), maxfev=8000)
-        except Exception:
-            # fall back to the raw peak amplitudes if the global fit fails
-            popt = p0
-
-    # --- 5. accept components above the SNR bar ----------------------------
+    # --- 3. accept components above the SNR bar ----------------------------
     components: list[OdmrComponent] = []
-    for i in range(0, len(popt), 3):
-        a, f, s = popt[i], popt[i + 1], popt[i + 2]
+    for a, f, s in found:
         if a <= 0 or s <= 0:
             continue
-        fwhm_mhz = 2.355 * s * 1e3
         snr = a / noise_floor
         if snr < min_snr:
             continue
         components.append(OdmrComponent(
-            freq_ghz=float(f), linewidth_mhz=float(fwhm_mhz),
+            freq_ghz=float(f), linewidth_mhz=float(2.355 * s * 1e3),
             contrast=float(a), snr=float(snr)))
     components.sort(key=lambda c: c.freq_ghz)
     return components

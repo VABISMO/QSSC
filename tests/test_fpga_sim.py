@@ -88,3 +88,33 @@ def test_simulated_fpga_run_all_odmr_shape():
     assert codes.dtype.kind in "iu"
     # codes are 16-bit ADC samples -> bounded [0, 65535]
     assert int(codes.min()) >= 0 and int(codes.max()) <= 0xFFFF
+
+
+def test_simulated_fpga_sub_pixel_and_integration():
+    """Invention 6+7: SimulatedFPGA accepts a SubPixelModel (sheet spreading) and
+    integration_shots (sqrt(N) noise reduction); both keep the (n,64) shape and
+    ADC bounds, and integration lowers the per-point noise."""
+    from qssc.simulator import SimulatedFPGA
+    from qssc.detector_centroid import SubPixelModel
+
+    def _pump(f):
+        for q in range(64):
+            f.emitter_gs[q] = 4095
+
+    # sub-pixel sheet spreading: shape + bounds preserved
+    f_sp = SimulatedFPGA("NV", seed=5, sub_pixel=SubPixelModel())
+    _pump(f_sp)
+    c_sp = f_sp.run_all_odmr(2_870_000, 2_880_000, 16)
+    assert c_sp.shape == (16, 64)
+    assert int(c_sp.min()) >= 0 and int(c_sp.max()) <= 0xFFFF
+
+    # integration: 16 shots -> noise drops vs 1 shot (same seed + pump)
+    f1 = SimulatedFPGA("NV", seed=5, integration_shots=1)
+    _pump(f1)
+    r1 = f1.run_all_odmr(2_870_000, 2_880_000, 32)
+    f16 = SimulatedFPGA("NV", seed=5, integration_shots=16)
+    _pump(f16)
+    r16 = f16.run_all_odmr(2_870_000, 2_880_000, 32)
+    assert r16.shape == (32, 64)
+    # the off-resonance pads' spread is dominated by noise; averaged std is lower
+    assert float(r16.std()) < float(r1.std())

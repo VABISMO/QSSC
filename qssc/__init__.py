@@ -38,6 +38,7 @@ from .sensors import (
 )
 from .magnetometry import (
     magnetometer_sweep, synthetic_field_map, MagnetometerResult,
+    b_vector_from_odmr_lines, b_vector_map_from_array_calibration,
 )
 from .nuclear import (
     nuclear_swap_time_s, nuclear_gate_fidelity, memory_survival,
@@ -51,6 +52,21 @@ from .prime_readout import (
 from .odmr_decompose import (
     decompose_odmr, OdmrComponent, BFieldEstimate, b_field_from_odmr,
     count_nv_centers,
+)
+from .noise_filters import (
+    NoiseEnvironment, AntiNoiseConfig, noise_environment_preset,
+    effective_noise_sigma, effective_t2, filter_gain_breakdown,
+    hahn_echo, cpmg_decoupling,
+)
+from .superres_odmr import (
+    superres_decompose, superres_measured_width,
+)
+from .bayesian_readout import (
+    bayesian_decompose, bayesian_measured_width,
+)
+from .tensor_gradiometry import (
+    tensor_gradient_sweep, tensor_gradient_map, localize_dipole,
+    localize_dipole_from_splits, TensorPixel, TensorGradientResult,
 )
 
 __version__ = "2.0.0"
@@ -70,6 +86,7 @@ __all__ = [
     "lockin_integrated_readout", "compass_measure", "gyro_measure",
     "CompassResult", "GyroResult",
     "magnetometer_sweep", "synthetic_field_map", "MagnetometerResult",
+    "b_vector_from_odmr_lines", "b_vector_map_from_array_calibration",
     "nuclear_swap_time_s", "nuclear_gate_fidelity", "memory_survival",
     "nuclear_memory_advantage",
     "PRIME_SYMBOLS", "PrimeChannel", "usable_primes",
@@ -78,5 +95,12 @@ __all__ = [
     "prime_denoise", "prime_noise_rejection", "cross_talk_residual",
     "decompose_odmr", "OdmrComponent", "BFieldEstimate", "b_field_from_odmr",
     "count_nv_centers",
+    "NoiseEnvironment", "AntiNoiseConfig", "noise_environment_preset",
+    "effective_noise_sigma", "effective_t2", "filter_gain_breakdown",
+    "hahn_echo", "cpmg_decoupling",
+    "superres_decompose", "superres_measured_width",
+    "bayesian_decompose", "bayesian_measured_width",
+    "tensor_gradient_sweep", "tensor_gradient_map", "localize_dipole",
+    "localize_dipole_from_splits", "TensorPixel", "TensorGradientResult",
     "__version__",
 ]
