@@ -249,6 +249,17 @@ section.bib h3{font-family:var(--font-mono);font-size:12px;font-weight:600;lette
 .alg .ah .ac{font-family:var(--font-mono);font-size:11px;color:var(--u);font-weight:600}
 .alg p{margin:0;color:var(--muted);font-size:13px;line-height:1.55}
 .alg .af{font-family:var(--font-mono);font-size:11px;color:var(--brand-2);margin-top:5px}
+.alg .formula{
+  margin:9px 0 0;padding:10px 13px;
+  background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;
+  font-family:var(--font-mono);font-size:12.5px;line-height:1.75;color:var(--text);
+  overflow-x:auto;white-space:pre-wrap;word-break:break-word;
+}
+.alg .formula .fl{color:var(--dim);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;display:block;margin-bottom:3px}
+.alg .formula .fn{color:var(--u);font-weight:600}
+.alg .formula .vr{color:var(--brand)}
+.alg .formula .cmt{color:var(--dim);font-style:italic}
+.alg .formula + .alg .formula{margin-top:8px}
 /* ---- firma de los autores ---- */
 section.firmas{padding:54px 0 72px;border-top:1px solid var(--border)}
 section.firmas h2{font-size:clamp(24px,3.4vw,32px);margin:0 0 8px}
@@ -511,20 +522,65 @@ ol.toc ol.sub .sn{font-family:var(--font-mono);font-size:11px;color:var(--dim);m
       <div class="alg"><div class="ah"><b>Defectos hBN / SiC</b><span class="ac">[31,32,33,34,35]</span></div><p>Perfiles físicos de defectos spin en nitruro de boro hexagonal y carburo de silicio (alternativas al NV).</p><div class="af">qssc/defects.py</div></div>
     </div>
 
-    <h3 style="--u:#6366f1">Algoritmos originales del QSSC · descripción y fichero</h3>
+    <h3 style="--u:#6366f1">Algoritmos originales del QSSC · descripción, función matemática y fichero</h3>
     <div class="alglist" style="--u:#6366f1">
-      <div class="alg"><div class="ah"><b>Magnetómetro vectorial de matriz 64-píxel</b><span class="inv-tag">algoritmo propio</span></div><p>Reconstruye el vector B por píxel desde los 4 dobletes tetraédricos ⟨111⟩; búsqueda LS sobre las 2ᵏ combinaciones de signo con referencia gradiométrica para romper la ambigüedad tetraédrica del NV. Basado en el principio de magnetometría NV <span class="ref">[8,10,11]</span>.</p><div class="af">qssc/magnetometry.py</div></div>
-      <div class="alg"><div class="ah"><b>Readout por primas-coprimas + denoiser</b><span class="inv-tag">algoritmo propio</span></div><p>Demodulación lock-in a medio-período p·τ/2 con p primo; las primas coprimas dan ortogonalidad exacta (cero cross-talk entre canales). Denoiser coprimo y rechazo fuera-de-banda. Implementado en firmware (verbo <code>READ_LOCKINP</code>) y backend.</p><div class="af">qssc/prime_readout.py · fpga/rtl/command_parser.v</div></div>
-      <div class="alg"><div class="ah"><b>Memoria nuclear NV + ¹³C emparejada</b><span class="inv-tag">algoritmo propio</span></div><p>Qubit nuclear ¹³C apareado al electrón NV con STORE/RECALL por SWAP; vía simulador (necesita canal RF ~2 MHz en hardware). Basado en el control nuclear publicado <span class="ref">[16,17,18]</span>.</p><div class="af">qssc/nuclear.py</div></div>
-      <div class="alg"><div class="ah"><b>Computación paralela de 64 píxeles</b><span class="inv-tag">algoritmo propio</span></div><p>Un circuito por píxel con semillas independientes y agregación 64× de shots; saltado de píxeles de ancho insuficiente; Shor coprimo distribuido (el primer píxel que halla el período gana).</p><div class="af">qssc/backend.py (run_array) · api/runner.py</div></div>
-      <div class="alg"><div class="ah"><b>Ancho de registro mediado por gradiente</b><span class="inv-tag">algoritmo propio</span></div><p>La bobina de gradiente + DAC separan espectralmente los NV dentro de un píxel; el ancho de registro es el número de líneas ODMR resueltas, con un tope físico del máximo de la bobina. Inverso del driver del DAC (MCP4921 → MHz/µm).</p><div class="af">qssc/simulator.py · qssc/array_calibration.py</div></div>
-      <div class="alg"><div class="ah"><b>Centroiding sub-píxel sobre ITO continuo</b><span class="inv-tag">algoritmo propio</span></div><p>Reconstrucción del centroide por charge-sharing sobre un electrodo ITO continuo: imagen del detector 64 → 64·S con metadatos de spot; mejora la resolución de imagen, no incrementa qubits. Basado en el principio de división de carga <span class="ref">[26]</span>.</p><div class="af">qssc/detector_centroid.py</div></div>
-      <div class="alg"><div class="ah"><b>Integración N-shot del lock-in</b><span class="inv-tag">algoritmo propio</span></div><p>Acumula N ciclos de lock-in para elevar el ancho de registro medido (~+30 %/píxel) sin cambio de hardware; anchura integrada por píxel.</p><div class="af">qssc/array_calibration.py</div></div>
-      <div class="alg"><div class="ah"><b>Pila anti-ruido clásica 300 K</b><span class="inv-tag">algoritmo propio</span></div><p>Filtros SNR-protectivos a temperatura ambiente; los canales lentos no promedian como 1/√N; <code>effective_noise_sigma</code> / <code>effective_t2</code> con dynamical decoupling topado a 2·T1. Modo pasivo / activo / completo.</p><div class="af">qssc/noise_filters.py</div></div>
-      <div class="alg"><div class="ah"><b>Super-resolución ODMR sparse</b><span class="inv-tag">algoritmo propio</span></div><p>Deconvolución de líneas ODMR solapadas por OMP sobre un diccionario espectral; deshace la respuesta del píxel para resolver líneas bajo la linewidth. Basado en OMP <span class="ref">[25]</span>.</p><div class="af">qssc/superres_odmr.py</div></div>
-      <div class="alg"><div class="ah"><b>Lectura Bayesiana cuántico-limitada por píxel</b><span class="inv-tag">algoritmo propio</span></div><p>Intervalo creíble unilateral con corrección Bonferroni aplicada por píxel sobre la matriz de 64; lectura óptima cuántico-limitada. Basado en Helstrom / Bonferroni <span class="ref">[27,28]</span>.</p><div class="af">qssc/bayesian_readout.py</div></div>
-      <div class="alg"><div class="ah"><b>Gradiometría tensorial + localización de dipolo</b><span class="inv-tag">algoritmo propio</span></div><p>Jacobiano por píxel del mapa B-vector 8×8×3; localización de dipolo por modo diferencial (splits signo-ambiguo) o por vectores; barrido <code>tensor_gradient_sweep</code>.</p><div class="af">qssc/tensor_gradiometry.py</div></div>
-      <div class="alg"><div class="ah"><b>Selector modo píxel registro / ensamble (N medido)</b><span class="inv-tag">algoritmo propio</span></div><p>Registro de N qubits dentro del píxel (acoplamiento dipolo K_N all-to-all, gate 2q nativo) frente a ensamble de 1 qubit por píxel a 300 K (sin 2q cross-píxel); N medido por la calibración ODMR, no constante dura.</p><div class="af">qssc/backend.py</div></div>
+      <div class="alg"><div class="ah"><b>Magnetómetro vectorial de matriz 64-píxel</b><span class="inv-tag">algoritmo propio</span></div><p>Reconstruye el vector B por píxel desde los 4 dobletes tetraédricos ⟨111⟩; búsqueda LS sobre las 2ᵏ combinaciones de signo con referencia gradiométrica para romper la ambigüedad tetraédrica del NV. Basado en el principio de magnetometría NV <span class="ref">[8,10,11]</span>.</p><div class="formula"><span class="fl">Modelo directo · doblete Zeeman</span>
+<span class="fn">Δᵢ</span>(B) = (2γ/10⁶)·|B·nᵢ|   [MHz]   <span class="cmt">nᵢ = i-ésimo eje ⟨111⟩, γ = 28,024 GHz/T</span>
+<span class="fl">Reconstrucción inversa · mínimos cuadrados sobre signos</span>
+<span class="fn">B̂</span> = argmin<sub>B∈ℝ³, s∈{±1}ᵏ</sub> ‖A·B − s⊙b̂‖₂   <span class="cmt">A = [nᵢ], b̂ᵢ = Δᵢ·10⁶/(2γ) [T], k ≤ 4</span>
+<span class="cmt">entre las soluciones con residuo ≤ residuo_mín + tol se elige la más próxima a la referencia B₀ (modo gradiométrico)</span></div><div class="af">qssc/magnetometry.py</div></div>
+      <div class="alg"><div class="ah"><b>Readout por primas-coprimas + denoiser</b><span class="inv-tag">algoritmo propio</span></div><p>Demodulación lock-in a periodo primo p·τ; las primas coprimas dan ortogonalidad exacta (cero cross-talk entre canales) con la referencia cosenoidal sobre una ventana lcm. Denoiser coprimo y rechazo fuera-de-banda. Implementado en firmware (verbo <code>READ_LOCKINP</code>) y backend.</p><div class="formula"><span class="fl">Demodulación lock-in a periodo primo</span>
+<span class="fn">A_p</span> = (2/N)·Σ<sub>n=0</sub><sup>N−1</sup> s[n]·cos(2πn/p)   <span class="cmt">N = múltiplo entero del lcm del conjunto de primas</span>
+<span class="fl">Ortogonalidad exacta (referencia cosenoidal, ventana lcm)</span>
+Σ<sub>n=0</sub><sup>lcm(p,q)−1</sup> cos(2πn/p)·cos(2πn/q) = 0   <span class="cmt">p, q primas distintas; por suma-a-producto y cancelación de ciclos enteros</span></div><div class="af">qssc/prime_readout.py · fpga/rtl/command_parser.v</div></div>
+      <div class="alg"><div class="ah"><b>Memoria nuclear NV + ¹³C emparejada</b><span class="inv-tag">algoritmo propio</span></div><p>Qubit nuclear ¹³C apareado al electrón NV con STORE/RECALL por rotación controlada en el acoplamiento hiperfino; vía simulador (necesita canal RF ~2 MHz en hardware). Basado en el control nuclear publicado <span class="ref">[16,17,18]</span>.</p><div class="formula"><span class="fl">Tiempo de gate (rotación controlada hiperfina)</span>
+<span class="fn">t_SWAP</span> = 1 / (2·A∥)   <span class="cmt">A∥ = acoplamiento hiperfino secular [Hz]; a A = 2 MHz → 250 ns</span>
+<span class="fl">Fidelidad del gate</span>
+<span class="fn">F_SWAP</span> = [1 − (p_T1 + 4·p_T2)/3]·(1 − δ)   <span class="cmt">p_T1 = 1−e<sup>−t/T1</sup>, p_T2 = 1−e<sup>−t/(2·T2_n)</sup>, T1 = 2·T2_n</span>
+<span class="fl">Supervivencia y ventaja</span>
+<span class="fn">S</span>(t) = e<sup>−t/T2_n</sup>   ;   <span class="fn">G</span> = T2_n / T2_e</div><div class="af">qssc/nuclear.py</div></div>
+      <div class="alg"><div class="ah"><b>Computación paralela de 64 píxeles</b><span class="inv-tag">algoritmo propio</span></div><p>Un circuito por píxel con semillas independientes y agregación 64× de shots; saltado de píxeles de ancho insuficiente; Shor coprimo distribuido (el primer píxel que halla el período gana).</p><div class="formula"><span class="fl">Agregación 64× sobre píxeles no saltados</span>
+<span class="fn">C</span>[b] = Σ<sub>i∈P</sub> cᵢ[b]   <span class="cmt">P = {píxeles con ancho medido ≥ num_qubits}; semillaᵢ = base_seed + i</span>
+<span class="cmt">un píxel se SALTA (nunca se trunca) si el circuito excede su ancho medido — un Shor truncado devuelve factores erróneos</span></div><div class="af">qssc/backend.py (run_array) · api/runner.py</div></div>
+      <div class="alg"><div class="ah"><b>Ancho de registro mediado por gradiente</b><span class="inv-tag">algoritmo propio</span></div><p>La bobina de gradiente + DAC separan espectralmente los NV dentro de un píxel; el ancho de registro es el número de líneas ODMR resueltas, con un tope físico del máximo de la bobina. Inverso del driver del DAC (MCP4921 → MHz/µm).</p><div class="formula"><span class="fl">Criterio de resolución espectral (Rayleigh)</span>
+<span class="fn">N_res</span> = max(1, ⌊(g · L) / Δf⌋)   <span class="cmt">g = gradiente [MHz/µm], L = tamaño de píxel [µm], Δf = linewidth [MHz]</span>
+<span class="cmt">separación = linewidth: dos Lorentzianas se resuelven sólo si su separación ≥ FWHM, si no colapsan en una línea única</span></div><div class="af">qssc/simulator.py · qssc/array_calibration.py</div></div>
+      <div class="alg"><div class="ah"><b>Centroiding sub-píxel sobre ITO continuo</b><span class="inv-tag">algoritmo propio</span></div><p>Reconstrucción del centroide por charge-sharing sobre un electrodo ITO continuo: imagen del detector 64 → 64·S con metadatos de spot; mejora la resolución de imagen, no incrementa qubits. Basado en el principio de división de carga <span class="ref">[26]</span>.</p><div class="formula"><span class="fl">Núcleo de reparto de carga (Gaussiano normalizado)</span>
+<span class="fn">w_p</span> = exp(−d_p²/(2σ²)) / Σ<sub>p'</sub> exp(−d_{p'}²/(2σ²))
+<span class="fl">Centroide por división de carga</span>
+<span class="fn">x_c</span> = Σ_p q_p·x_p / Σ_p q_p   ;   <span class="fn">y_c</span> = Σ_p q_p·y_p / Σ_p q_p   <span class="cmt">q_p = carga en el electrodo p</span>
+<span class="fl">Factor sub-píxel</span>
+<span class="fn">S</span> = max(1, ⌊SNR/umbral⌋)   →   canales = 64·S</div><div class="af">qssc/detector_centroid.py</div></div>
+      <div class="alg"><div class="ah"><b>Integración N-shot del lock-in</b><span class="inv-tag">algoritmo propio</span></div><p>Acumula N ciclos de lock-in para elevar el ancho de registro medido (~+30 %/píxel) sin cambio de hardware; anchura integrada por píxel.</p><div class="formula"><span class="fl">Ruido de readout tras N ciclos (canal rápido incorrelado)</span>
+<span class="fn">σ_eff</span>(N) = σ₁ / √N
+<span class="fl">SNR por línea</span>
+<span class="fn">SNR</span>(N) = (A_k / σ₁)·√N   <span class="cmt">A_k = 1 − (1 − c_s)ᵏ = contraste de k NV en el bin</span>
+<span class="cmt">los NV marginales cruzan el umbral min_snr a medida que √N crece → ancho medido +30 %/píxel sin cambio de hardware</span></div><div class="af">qssc/array_calibration.py</div></div>
+      <div class="alg"><div class="ah"><b>Pila anti-ruido clásica 300 K</b><span class="inv-tag">algoritmo propio</span></div><p>Filtros SNR-protectivos a temperatura ambiente; los canales lentos no promedian como 1/√N; <code>effective_noise_sigma</code> / <code>effective_t2</code> con dynamical decoupling topado a 2·T1. Modo pasivo / activo / completo.</p><div class="formula"><span class="fl">Sigma efectivo (composición en cuadratura)</span>
+<span class="fn">σ_eff</span> = √(σ_floor² + Σ<sub>canales</sub> σ_c²)   <span class="cmt">σ_floor = base/√N</span>
+<span class="cmt">canales lentos (temp, presión): N⁰ — NO promedian como 1/√N (correlacionados entre shots); canales rápidos (vib, EMI): 1/√N</span>
+<span class="fl">T2 efectivo con dynamical decoupling</span>
+<span class="fn">T2_eff</span> = min(T2_dd, 2·T1)   <span class="cmt">tope de relajación 1/T2 = 1/(2·T1) + 1/Tφ; el DD extiende Tφ</span></div><div class="af">qssc/noise_filters.py</div></div>
+      <div class="alg"><div class="ah"><b>Super-resolución ODMR sparse</b><span class="inv-tag">algoritmo propio</span></div><p>Deconvolución de líneas ODMR solapadas por OMP sobre un diccionario espectral; deshace la respuesta del píxel para resolver líneas bajo la linewidth. Basado en OMP <span class="ref">[25]</span>.</p><div class="formula"><span class="fl">Diccionario espectral (Gaussianos unitarios)</span>
+<span class="fn">Φ</span>[i,j] = exp(−(f_i − c_j)²/(2σ²)) / ‖Φ_j‖
+<span class="fl">OMP iterativo (proyección ortogonal)</span>
+<span class="fn">j*</span> = argmax<sub>j</sub> |⟨Φ_j, r⟩|   ;   <span class="fn">x</span> = argmin ‖Φ_S x − y‖₂   ;   r ← y − Φ_S x
+<span class="cmt">parada al piso de ruido ‖r‖ ≤ σ·√N o amplitud < umbral</span></div><div class="af">qssc/superres_odmr.py</div></div>
+      <div class="alg"><div class="ah"><b>Lectura Bayesiana cuántico-limitada por píxel</b><span class="inv-tag">algoritmo propio</span></div><p>Intervalo creíble unilateral con corrección Bonferroni aplicada por píxel sobre la matriz de 64; lectura óptima cuántico-limitada. Basado en Helstrom / Bonferroni <span class="ref">[27,28]</span>.</p><div class="formula"><span class="fl">Posterior Gaussiano del filtro adaptado</span>
+<span class="fn">â_j</span> = (Φ_j·y)/‖Φ_j‖²   ;   <span class="fn">σ_j</span> = σ/‖Φ_j‖   <span class="cmt">estimador de filtro adaptado, varianza Cramér–Rao</span>
+<span class="fl">Test creíble unilateral + Bonferroni</span>
+línea j  ⇔  â_j/σ_j &gt; z(1 − (1−C)/n_bins)  ∧  â_j &gt; 0   <span class="cmt">α_per = (1−C)/n_bins, error familiar ≤ 1−C</span></div><div class="af">qssc/bayesian_readout.py</div></div>
+      <div class="alg"><div class="ah"><b>Gradiometría tensorial + localización de dipolo</b><span class="inv-tag">algoritmo propio</span></div><p>Jacobiano por píxel del mapa B-vector 8×8×3; localización de dipolo por modo diferencial (splits signo-ambiguo) o por vectores; barrido <code>tensor_gradient_sweep</code>.</p><div class="formula"><span class="fl">Campo del dipolo</span>
+<span class="fn">B</span>(r) = (μ₀/4π)·[3(m·r̂)r̂ − m] / r³   <span class="cmt">μ₀/4π = 10⁻⁷ T·m/A</span>
+<span class="fl">Jacobiano por píxel (diferencias finitas centrales)</span>
+<span class="fn">J</span>[i] = [[∂B_x/∂x, ∂B_x/∂y],[∂B_y/∂x, ∂B_y/∂y],[∂B_z/∂x, ∂B_z/∂y]]   [µT/mm]
+<span class="fl">Localizador diferencial (sin ambigüedad de signo)</span>
+Δsᵢ·sgn(B_bg·nᵢ) ≈ (2γ/10⁶)(B_dip·nᵢ)   →   argmin<sub>x₀,y₀,z₀,m</sub> ‖(2γ/10⁶)(B_dip·nᵢ) − Δsᵢ·sgn(B_bg·nᵢ)‖₂</div><div class="af">qssc/tensor_gradiometry.py</div></div>
+      <div class="alg"><div class="ah"><b>Selector modo píxel registro / ensamble (N medido)</b><span class="inv-tag">algoritmo propio</span></div><p>Registro de N qubits dentro del píxel (acoplamiento dipolo K_N all-to-all, gate 2q nativo) frente a ensamble de 1 qubit por píxel a 300 K (sin 2q cross-píxel); N medido por la calibración ODMR, no constante dura.</p><div class="formula"><span class="fl">Acoplamiento dipolo dentro del píxel (modo registro)</span>
+<span class="fn">d</span> = (μ₀/4π)·(g_e μ_B)² / (h·r³)   [Hz]   ;   <span class="fn">t_CZ</span> = 1/(2d)
+<span class="cmt">registro: K_n all-to-all sobre N qubits del píxel, gate 2q nativo; ensamble: 64 píxeles = 64 qubits, sin 2q cross-píxel (d → 0 a 2,5 mm)</span>
+<span class="fl">N medido (de la calibración ODMR)</span>
+<span class="fn">N</span> = len(líneas resueltas por decompose_odmr)   <span class="cmt">N medido reemplaza cualquier constante dura</span></div><div class="af">qssc/backend.py</div></div>
     </div>
   </div>
 </section>

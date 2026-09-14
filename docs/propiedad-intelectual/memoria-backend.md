@@ -306,18 +306,107 @@ qssc/tensor_gradiometry.py
 
 ### Algoritmos originales del QSSC
 
-- **Magnetómetro vectorial de matriz 64-píxel + resolución de ambigüedad tetraédrica** (propio; basado en [8,10,11]) — `qssc/magnetometry.py`.
-- **Readout por primas-coprimas + denoiser coprimo** (propio) — `qssc/prime_readout.py`.
-- **Memoria nuclear NV + ¹³C emparejada (STORE/RECALL por SWAP)** (propio; basado en [16,17,18]) — `qssc/nuclear.py`.
-- **Computación paralela de 64 píxeles (`run_array`, agregación 64×, saltado por ancho)** (propio) — `qssc/backend.py` · `api/runner.py`.
-- **Ancho de registro mediado por gradiente (bobina + DAC, tope resoluble)** (propio) — `qssc/simulator.py` · `qssc/array_calibration.py`.
-- **Centroiding sub-píxel sobre electrodo ITO continuo** (propio; basado en [26]) — `qssc/detector_centroid.py`.
-- **Integración N-shot del lock-in (+~30 %/píxel, sin cambio HW)** (propio) — `qssc/array_calibration.py`.
-- **Pila anti-ruido clásica 300 K (canales lentos no 1/√N)** (propio) — `qssc/noise_filters.py`.
-- **Super-resolución ODMR sparse (diccionario ODMR + OMP)** (propio; basado en [25]) — `qssc/superres_odmr.py`.
-- **Lectura Bayesiana cuántico-limitada por píxel + Bonferroni** (propio; basado en [27,28]) — `qssc/bayesian_readout.py`.
-- **Gradiometría tensorial + localización de dipolo (Jacobiano 8×8×3)** (propio) — `qssc/tensor_gradiometry.py`.
+Para cada algoritmo propio se incluye la función matemática que lo define (notación de
+función), verificada contra el código depositado.
+
+- **Magnetómetro vectorial de matriz 64-píxel + resolución de ambigüedad tetraédrica**
+  (propio; basado en [8,10,11]) — `qssc/magnetometry.py`.
+
+  ```
+  Δᵢ(B) = (2γ/10⁶)·|B·nᵢ|        [MHz]   (nᵢ = eje ⟨111⟩, γ = 28,024 GHz/T)
+  B̂ = argmin_{B∈ℝ³, s∈{±1}ᵏ} ‖A·B − s⊙b̂‖₂   (A=[nᵢ], b̂ᵢ=Δᵢ·10⁶/(2γ) [T], k≤4)
+  ```
+
+- **Readout por primas-coprimas + denoiser coprimo** (propio) — `qssc/prime_readout.py`
+  · `fpga/rtl/command_parser.v`.
+
+  ```
+  A_p = (2/N)·Σ_{n=0}^{N−1} s[n]·cos(2πn/p)        (N = múltiplo del lcm de las primas)
+  Σ_{n=0}^{lcm(p,q)−1} cos(2πn/p)·cos(2πn/q) = 0   (p,q primas distintas — ortogonalidad exacta)
+  ```
+
+- **Memoria nuclear NV + ¹³C emparejada (STORE/RECALL por rotación controlada
+  hiperfina)** (propio; basado en [16,17,18]) — `qssc/nuclear.py`.
+
+  ```
+  t_SWAP = 1/(2·A∥)                              (A∥ = hiperfino secular [Hz])
+  F_SWAP = [1 − (p_T1 + 4·p_T2)/3]·(1 − δ)       (p_T1=1−e^{−t/T1}, p_T2=1−e^{−t/(2·T2_n)})
+  S(t) = e^{−t/T2_n}   ;   G = T2_n/T2_e
+  ```
+
+- **Computación paralela de 64 píxeles (`run_array`, agregación 64×, saltado por
+  ancho)** (propio) — `qssc/backend.py` · `api/runner.py`.
+
+  ```
+  C[b] = Σ_{i∈P} cᵢ[b]        (P = {píxeles con ancho ≥ num_qubits}; semillaᵢ = base_seed + i)
+  # un píxel se SALTA (nunca se trunca) si el circuito excede su ancho medido
+  ```
+
+- **Ancho de registro mediado por gradiente (bobina + DAC, tope resoluble)** (propio)
+  — `qssc/simulator.py` · `qssc/array_calibration.py`.
+
+  ```
+  N_res = max(1, ⌊(g·L)/Δf⌋)   (g [MHz/µm], L [µm], Δf = linewidth [MHz]; separación ≥ FWHM o colapsa)
+  ```
+
+- **Centroiding sub-píxel sobre electrodo ITO continuo** (propio; basado en [26]) —
+  `qssc/detector_centroid.py`.
+
+  ```
+  w_p = exp(−d_p²/(2σ²)) / Σ_{p'} exp(−d_{p'}²/(2σ²))
+  x_c = Σ_p q_p·x_p / Σ_p q_p   ;   y_c = Σ_p q_p·y_p / Σ_p q_p   (q_p = carga en electrodo p)
+  S = max(1, ⌊SNR/umbral⌋)  →  canales = 64·S   (resolución de imagen, no más qubits)
+  ```
+
+- **Integración N-shot del lock-in (+~30 %/píxel, sin cambio HW)** (propio) —
+  `qssc/array_calibration.py`.
+
+  ```
+  σ_eff(N) = σ₁/√N          (canal rápido incorrelado)
+  SNR(N) = (A_k/σ₁)·√N      (A_k = 1−(1−c_s)ᵏ = contraste de k NV en el bin)
+  ```
+
+- **Pila anti-ruido clásica 300 K (canales lentos no 1/√N)** (propio) —
+  `qssc/noise_filters.py`.
+
+  ```
+  σ_eff = √(σ_floor² + Σ_canales σ_c²)   (σ_floor = base/√N)
+  # lentos (temp,presión): N⁰ — no promedian como 1/√N; rápidos (vib,EMI): 1/√N
+  T2_eff = min(T2_dd, 2·T1)              (tope de relajación 1/T2 = 1/(2·T1) + 1/Tφ)
+  ```
+
+- **Super-resolución ODMR sparse (diccionario ODMR + OMP)** (propio; basado en [25])
+  — `qssc/superres_odmr.py`.
+
+  ```
+  Φ[i,j] = exp(−(f_i−c_j)²/(2σ²)) / ‖Φ_j‖
+  j* = argmax_j |⟨Φ_j, r⟩| ;  x = argmin ‖Φ_S x − y‖₂ ;  r ← y − Φ_S x   (parada: ‖r‖ ≤ σ·√N)
+  ```
+
+- **Lectura Bayesiana cuántico-limitada por píxel + Bonferroni** (propio; basado en
+  [27,28]) — `qssc/bayesian_readout.py`.
+
+  ```
+  â_j = (Φ_j·y)/‖Φ_j‖²   ;   σ_j = σ/‖Φ_j‖            (filtro adaptado, varianza Cramér–Rao)
+  línea j ⇔ â_j/σ_j > z(1 − (1−C)/n_bins) ∧ â_j > 0   (Bonferroni α_per = (1−C)/n_bins)
+  ```
+
+- **Gradiometría tensorial + localización de dipolo (Jacobiano 8×8×3)** (propio) —
+  `qssc/tensor_gradiometry.py`.
+
+  ```
+  B(r) = (μ₀/4π)·[3(m·r̂)r̂ − m]/r³                  (μ₀/4π = 10⁻⁷ T·m/A)
+  J[i] = [[∂B_x/∂x, ∂B_x/∂y],[∂B_y/∂x, ∂B_y/∂y],[∂B_z/∂x, ∂B_z/∂y]]   [µT/mm]
+  Δsᵢ·sgn(B_bg·nᵢ) ≈ (2γ/10⁶)(B_dip·nᵢ)  →  argmin_{x₀,y₀,z₀,m} ‖…‖₂   (sin ambigüedad de signo)
+  ```
+
 - **Selector modo píxel registro/ensamble con N medido** (propio) — `qssc/backend.py`.
+
+  ```
+  d = (μ₀/4π)·(g_e μ_B)²/(h·r³) [Hz]   ;   t_CZ = 1/(2d)        (acoplamiento dipolo 1/r³)
+  # registro: K_n all-to-all sobre N qubits del píxel; ensamble: 64 píxeles, sin 2q cross-píxel
+  N = len(líneas resueltas por decompose_odmr)               (N medido reemplaza constante dura)
+  ```
 
 ---
 
