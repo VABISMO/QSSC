@@ -1460,6 +1460,7 @@ export function ParallelCalibCard({
   grad, setGrad, pixelSize, setPixelSize, source,
   profile, temperature, seed,
   onCalibrate, calibRunning, calibResult, calibErr,
+  antiNoisePresets,
 }) {
   const calib = calibResult && !calibResult.error ? calibResult : null
   const calibErrTxt = calibResult && calibResult.error ? calibResult.error : (calibErr || null)
@@ -1477,6 +1478,7 @@ export function ParallelCalibCard({
   const [bayesianOn, setBayesianOn] = useState(false)               // Bayesian readout
   const [bayesianConf, setBayesianConf] = useState(0.95)            // credible level
   const [noiseEnv, setNoiseEnv] = useState('none')                  // environmental noise model
+  const [antiNoisePreset, setAntiNoisePreset] = useState('off')     // anti-noise filter stack preset
   const [maxNv, setMaxNv] = useState(300)                           // NVs per microdiamond
   const [nPoints, setNPoints] = useState(400)                       // sweep points (real path)
   // On-board gradient coil: MCP4921 12-bit DAC, I_coil = 5 V * code/4096 / 1 Ω,
@@ -1515,6 +1517,9 @@ export function ParallelCalibCard({
       integration_shots: integrationShots,
       max_nv_per_microdiamond: maxNv, n_points: nPoints,
       noise_env: noiseEnv,
+    }
+    if (antiNoisePreset !== 'off' && antiNoisePresets && antiNoisePresets[antiNoisePreset]) {
+      b.anti_noise = antiNoisePresets[antiNoisePreset]
     }
     if (subPixel) { b.sub_pixel = true; b.sigma_sheet_mm = sigmaSheet }
     if (superresOn) b.superres = superresFactor
@@ -1597,6 +1602,15 @@ export function ParallelCalibCard({
                   <option value="noisy">noisy</option>
                 </select>
               </div>
+              <div className="field">
+                <label>Anti-noise stack</label>
+                <select value={antiNoisePreset} onChange={e => setAntiNoisePreset(e.target.value)}>
+                  <option value="off">off</option>
+                  <option value="passive">passive</option>
+                  <option value="active">active</option>
+                  <option value="full">full (XY8 DD)</option>
+                </select>
+              </div>
             </div>
             <div className="adv-group">
               <div className="adv-group-title">Microdiamond model</div>
@@ -1633,7 +1647,7 @@ export function ParallelCalibCard({
                   <span>Statistical readout</span>
                 </label>
                 <RangeSlider label="Confidence" value={bayesianConf}
-                  min={0} max={1} step={0.01} fmt={(v) => v.toFixed(2)}
+                  min={0.01} max={0.99} step={0.01} fmt={(v) => v.toFixed(2)}
                   disabled={!bayesianOn} onChange={(v) => setBayesianConf(v)} />
               </div>
             </div>
@@ -1657,6 +1671,40 @@ export function ParallelCalibCard({
             <div className="stat"><div className="k">Total qubits</div><div className="v" style={{ color: 'var(--ok, #2c8a4a)' }}>{calib.total_working_qubits}</div></div>
             <div className="stat"><div className="k">Width range</div><div className="v">{calib.min_width}–{calib.max_width}</div></div>
           </div>
+          {(calib.spatial_channels || calib.effective_noise_rel != null || calib.filter_gain) && (
+            <div className="stats" style={{ marginBottom: 10 }}>
+              {calib.spatial_channels != null && (
+                <div className="stat"><div className="k">Spatial channels</div><div className="v">{calib.spatial_channels}</div></div>
+              )}
+              {calib.effective_noise_rel != null && (
+                <div className="stat"><div className="k">Effective readout noise</div>
+                  <div className="v">{(calib.effective_noise_rel * 100).toFixed(2)}%</div></div>
+              )}
+              {calib.noise_env && calib.noise_env !== 'none' && (
+                <div className="stat"><div className="k">Noise env</div><div className="v">{calib.noise_env}</div></div>
+              )}
+              {calib.anti_noise && (
+                <div className="stat"><div className="k">Anti-noise</div><div className="v">on</div></div>
+              )}
+              {calib.gradient_code != null && (
+                <div className="stat"><div className="k">Coil DAC code</div>
+                  <div className="v">{calib.gradient_code}/4095{calib.gradient_applied_ok === false ? ' (not applied)' : ''}</div></div>
+              )}
+            </div>
+          )}
+          {calib.filter_gain && (
+            <div className="hint" style={{ fontSize: 11.5, marginBottom: 8 }}>
+              Anti-noise filter gain:{' '}
+              {Object.entries(calib.filter_gain).map(([k, v]) => `${k}=${typeof v === 'number' ? v.toFixed(2) : v}`).join(' · ')}
+            </div>
+          )}
+          {calib.physics_limits && (
+            <div className="hint" style={{ fontSize: 11.5 }}>
+              Physics limits — gradient ≤ {calib.physics_limits.gradient_max_mhz_per_um} MHz/µm ·
+              microdiamond {calib.physics_limits.pixel_size_min_um}–{calib.physics_limits.pixel_size_max_um} µm ·
+              NV ceiling {calib.physics_limits.nv_ceiling} · linewidth {calib.physics_limits.linewidth_mhz} MHz
+            </div>
+          )}
           <_ParPixelGrid widths={calib.per_pixel_widths} />
           {Array.isArray(calib.pixels) && calib.pixels.length > 0 && (
             <button type="button" className="ghost" style={{ marginTop: 12 }}

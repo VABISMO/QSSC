@@ -296,6 +296,84 @@ def test_calibrate_array_endpoint_real_path_averages_n_sweeps():
     assert sum(j["per_pixel_widths"]) >= sum(r1.json()["result"]["per_pixel_widths"])
 
 
+def test_calibrate_array_real_path_sends_set_gradient():
+    """Invention 5 real-hardware path: the endpoint must program the gradient
+    coil (SET_GRADIENT <code>) BEFORE run_all_odmr so the per-pixel ODMR lines
+    spread and become resolvable. The response reports the DAC code actually
+    sent + whether the board acknowledged it (gradient_applied_ok). The code is
+    derived from gradient_mhz_per_um via gradient_dac_code_from_mhz unless an
+    explicit gradient_code override is supplied."""
+    from fastapi.testclient import TestClient
+    import api.runner as api_runner
+    from api.main import app
+    from qssc.simulator import SimulatedFPGA
+    from qssc.array_calibration import gradient_dac_code_from_mhz
+
+    base_fpga = SimulatedFPGA("NV", seed=7)
+    for q in range(64):
+        base_fpga.emitter_gs[q] = 4095
+    sent = {"cmds": []}
+
+    class _SpyFPGA:
+        def __getattr__(self, name):
+            return getattr(base_fpga, name)
+
+        def send_command(self, cmd):
+            sent["cmds"].append(cmd)
+            return "OK"
+
+        def run_all_odmr(self, f_start, f_stop, n):
+            return base_fpga.run_all_odmr(f_start, f_stop, n)
+
+    spy = _SpyFPGA()
+    saved_make = api_runner._make_fpga
+    api_runner._make_fpga = lambda *a, **k: spy
+    try:
+        c = TestClient(app)
+        # derived code: gradient_mhz_per_um=1.0 -> code = round(1.0/2.23*4095)
+        r = c.post("/api/circuit/calibrate-array?sync=true", json={
+            "source": "real", "integration_shots": 1, "seed": 42,
+            "gradient_mhz_per_um": 1.0, "n_points": 32,
+        })
+    finally:
+        api_runner._make_fpga = saved_make
+    assert r.status_code == 200, r.text
+    j = r.json()["result"]
+    expected_code = gradient_dac_code_from_mhz(1.0)
+    # SET_GRADIENT was sent before the sweep with the derived code
+    assert any(c.startswith("SET_GRADIENT") for c in sent["cmds"]), sent["cmds"]
+    assert f"SET_GRADIENT {expected_code}" in sent["cmds"]
+    assert j["gradient_code"] == expected_code
+    assert j["gradient_applied_ok"] is True
+    # the gradient write happens before the ODMR sweep
+    assert sent["cmds"][0].startswith("SET_GRADIENT")
+
+    # explicit gradient_code override is honoured verbatim
+    sent["cmds"] = []
+    api_runner._make_fpga = lambda *a, **k: spy
+    try:
+        r2 = c.post("/api/circuit/calibrate-array?sync=true", json={
+            "source": "real", "integration_shots": 1, "seed": 42,
+            "gradient_mhz_per_um": 1.0, "gradient_code": 2048, "n_points": 32,
+        })
+    finally:
+        api_runner._make_fpga = saved_make
+    assert r2.status_code == 200, r2.text
+    j2 = r2.json()["result"]
+    assert "SET_GRADIENT 2048" in sent["cmds"]
+    assert j2["gradient_code"] == 2048
+
+    # sim path does not touch the coil (no code, no applied flag)
+    r3 = c.post("/api/circuit/calibrate-array?sync=true", json={
+        "source": "sim", "integration_shots": 1, "seed": 42,
+        "gradient_mhz_per_um": 1.0, "n_points": 32,
+    })
+    assert r3.status_code == 200, r3.text
+    j3 = r3.json()["result"]
+    assert j3["gradient_code"] is None
+    assert j3["gradient_applied_ok"] is None
+
+
 def test_calibration_odmr_lines_length_equals_register_width():
     """The cached calibration's per-pixel odmr_lines (the qubit frequencies)
     are truncated to register_width: a line beyond the gradient's resolvable

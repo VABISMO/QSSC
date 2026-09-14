@@ -98,6 +98,19 @@ MAX_MICRODIAMONDS_PER_PIXEL = 1
 # Gradient: the on-board MCP4921 coil driver tops out at GRAD_COIL_MAX_MHZ_PER_UM
 # (full-scale DAC code 4095 -> 2.23 MHz/um). Above this the coil cannot follow.
 GRAD_COIL_MAX_MHZ_PER_UM = 2.23
+
+
+def gradient_dac_code_from_mhz(grad_mhz_per_um: float) -> int:
+    """Nearest 12-bit MCP4921 DAC code that produces the requested field
+    gradient (inverse of the coil driver's code -> gradient map). Capped at
+    4095 (coil full-scale -> GRAD_COIL_MAX_MHZ_PER_UM); 0 for a non-positive
+    request (coil off). Matches the single-pixel calibration path's
+    ``_gradient_from_code`` inverse: code/4095 * GRAD_COIL_MAX_MHZ_PER_UM."""
+    if not grad_mhz_per_um or grad_mhz_per_um <= 0:
+        return 0
+    return max(0, min(4095, round(grad_mhz_per_um / GRAD_COIL_MAX_MHZ_PER_UM * 4095)))
+
+
 # Microdiamond size: the stone must fit inside one die pixel. The die pad pitch
 # is 2.5 mm, so a stone larger than ~1 mm would overlap its neighbour. 10 um is
 # the smallest commercially-polished microdiamond that seats reliably.
@@ -535,6 +548,7 @@ def calibrate_array_from_codes(
     anti_noise: Optional[AntiNoiseConfig] = None,
     superres: Optional[float] = None,
     bayesian: Optional[float] = None,
+    cap_to_resolvable: bool = True,
 ) -> ArrayCalibration:
     """Build an :class:`ArrayCalibration` from a MEASURED ``(n_points, 64)`` code
     matrix — the real-hardware path.
@@ -562,6 +576,18 @@ def calibrate_array_from_codes(
     sub-pixel (x, y) position of each pixel's dip -- the charge-sharing
     centroiding image. This is imaging metadata (``spatial_channels = 64 * S``)
     and does NOT change ``register_width``.
+
+    ``cap_to_resolvable`` (default True) truncates each pixel's resolved lines
+    to the gradient-register cap ``resolvable_register_width(...)`` -- the
+    number of NVs an ADDRESSING field gradient can separate across the pixel
+    (Invention 5). Set it False for a measurement whose lines do NOT come from
+    an addressing gradient, so the cap must not prune them: the tensor
+    gradiometer (Invention 19) reads the 4 NV <111> Zeeman doublets split by
+    the AMBIENT field (no addressing gradient -> ``gradient_mhz_per_um=0`` ->
+    ``resolvable=1``), and those doublets are the lines the B-vector inversion
+    needs; capping them to 1 would collapse the reconstruction. The qubit
+    register-width calibration (the ``run-parallel`` path) keeps the default
+    True so the gradient cap still bounds the qubit count.
     """
     prof = get_profile(profile) if isinstance(profile, str) else profile
     codes = np.asarray(codes, dtype=float)
@@ -576,6 +602,9 @@ def calibrate_array_from_codes(
     # the reported register width.
     resolvable = resolvable_register_width(
         gradient_mhz_per_um, pixel_size_um, linewidth_mhz)
+    # When the caller opts out of the gradient-register cap (tensor gradiometry:
+    # ambient-field <111> doublets, not gradient-binned NVs), do not truncate.
+    width_cap = resolvable if cap_to_resolvable else n_pixels * 64 + 16
     # Invention 6: per-frequency-point centroiding on the 64-pad rows. Each row
     # is one MW frequency; the dips across the 64 pads are the resonant pixels,
     # localized to sub-pixel (x, y) by charge-sharing centroiding.
@@ -621,7 +650,7 @@ def calibrate_array_from_codes(
                 pixel_size_um=pixel_size_um, d_ghz=prof.d_ghz,
                 noise_sigma=noise_sigma, min_snr=min_snr,
                 superres_factor=float(superres))
-            register_width = max(1, min(measured, resolvable))
+            register_width = max(1, min(measured, width_cap))
         elif bayesian is not None and 0.0 < bayesian < 1.0:
             # Invention 14: Bayesian one-sided credible-interval detector.
             edge_std = float(np.std(np.concatenate([col[:edge], col[-edge:]])))
@@ -632,7 +661,7 @@ def calibrate_array_from_codes(
                 gradient_mhz_per_um=gradient_mhz_per_um,
                 pixel_size_um=pixel_size_um, d_ghz=prof.d_ghz,
                 noise_sigma=noise_sigma, confidence=float(bayesian))
-            register_width = max(1, min(measured, resolvable))
+            register_width = max(1, min(measured, width_cap))
         else:
             comps = decompose_odmr(
                 freqs, contrast,
@@ -640,7 +669,7 @@ def calibrate_array_from_codes(
                 linewidth_guess_mhz=linewidth_mhz,
                 min_separation_mhz=linewidth_mhz * 0.8,
             )
-            register_width = max(1, min(len(comps), resolvable))
+            register_width = max(1, min(len(comps), width_cap))
         # Truncate to the capped width (same as the sim path): lines beyond the
         # resolvable cap are not independent qubits. len(odmr_lines) == width.
         odmr_lines = [round(c.freq_ghz, 6) for c in comps[:register_width]]

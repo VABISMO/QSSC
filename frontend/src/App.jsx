@@ -2124,6 +2124,7 @@ export default function App() {
                 profile={profile} temperature={temperature} seed={seed}
                 onCalibrate={calibrateArray} calibRunning={arrCalibRunning}
                 calibResult={arrCalib} calibErr={arrCalibErr}
+                antiNoisePresets={ANTI_NOISE_PRESETS}
               />
             )}
           </div>
