@@ -225,20 +225,16 @@ footer.ipfoot .disclaim{font-size:13px;color:var(--dim);max-width:70ch;line-heig
 footer.ipfoot .meta{display:flex;gap:22px;flex-wrap:wrap;margin-top:16px;font-family:var(--font-mono);font-size:11.5px;color:var(--muted);letter-spacing:.04em}
 footer.ipfoot .meta b{color:var(--text);font-weight:600}
 
-/* print: clean light for paper submission */
+/* print: retain the full themed design — backgrounds, gradients, accents */
+@page{margin:14mm}
 @media print{
-  :root{--bg:#fff;--bg-soft:#f7f8fc;--panel:#fff;--panel-2:#f3f5fb;--border:#dde2ee;--text:#121826;--muted:#445;--dim:#667;--brand:#0aa;--brand-2:#55a;--ok:#076}
-  body{background:#fff;color:#121826;font-size:11pt}
-  nav.top{position:static;background:#fff;border-bottom:2px solid #121826;backdrop-filter:none}
-  nav.top .links{display:none}
-  header.hero{background:#fff;border-bottom:1px solid #dde2ee;padding:30px 0 24px}
-  header.hero h1 .grad,header.hero .brandmark .wm .grad,nav.top .logo .grad{background:none;-webkit-text-fill-color:initial;color:#0aa}
-  .tile,section.unidad,footer.ipfoot{break-inside:avoid;box-shadow:none}
-  .tile{border:1px solid #dde2ee}
-  .callout,pre.files,.feat{break-inside:avoid}
-  pre.files{background:#f7f8fc;color:#334}
-  a{color:#0aa}
-  .block > h3::before{background:#0aa}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  html,body{background:var(--bg)}
+  body{font-size:11pt}
+  html{scroll-behavior:auto}
+  nav.top{position:static;backdrop-filter:none;background:#0b1020}
+  .tile,section.unidad,footer.ipfoot,.callout,pre.files,.feat,.alg,.alglist{break-inside:avoid}
+  a{color:var(--brand)}
 }
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
 
