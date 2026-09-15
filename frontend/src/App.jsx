@@ -6,7 +6,7 @@ import {
   SignalChart, CalibrationPanel, Verdict, NoiseBudget,
   OpticalChainDiagram, RunPhysics, MeasurementHelp,
   CompassRose, GyroPanel, MagnetoImage, SensorField, TensorPanel,
-  ParallelCalibCard,
+  ParallelCalibCard, ParallelCalibResults,
 } from './components.jsx'
 
 // Fallback firmware command list (all 17 verbs). Used in the "Reply & readout"
@@ -2100,15 +2100,17 @@ export default function App() {
           {/* ============================= SPECTROSCOPY + CALIBRATION ============================= */}
           </>)}
           {circuitsSub === 'spectro' && (<>
+          {/* 64-parallel OFF = single-pixel: ODMR left, calibration right.
+              64-parallel ON = 64-array: FORM left, RESULTS + ODMR spectrum
+              stacked right (ODMR below the resonance-map button). Uses the
+              page's own two-column grid — no nested split inside one cell. */}
+          {!parallelMode ? (
           <div className="grid cols-2">
             <div className="card">
               <h2><span className="dot" />ODMR spectrum</h2>
               <div className="hint">Lock-in ODMR — the on-chip graphene/MoS₂ detector array's photocurrent dips at D ± γB (resonant MW flips the spin dark), with hyperfine replicas.</div>
               <OdmrChart data={odmr.data} error={odmr.error} />
             </div>
-            {/* 64-parallel OFF = single-pixel ODMR calibration; ON = 64-array
-                calibration in the SAME card slot. One calibrate, same position. */}
-            {!parallelMode ? (
             <div className="card">
               <h2><span className="dot" />Calibration process</h2>
               <CalibrationPanel
@@ -2116,18 +2118,29 @@ export default function App() {
                 run={runCalibration} running={calRunning} result={calRun} err={calErr}
               />
             </div>
-            ) : (
-              <ParallelCalibCard
-                grad={parGrad} setGrad={setParGrad}
-                pixelSize={parPixelSize} setPixelSize={setParPixelSize}
-                source={hwMode === 'hardware' ? 'real' : 'sim'}
-                profile={profile} temperature={temperature} seed={seed}
-                onCalibrate={calibrateArray} calibRunning={arrCalibRunning}
-                calibResult={arrCalib} calibErr={arrCalibErr}
-                antiNoisePresets={ANTI_NOISE_PRESETS}
-              />
-            )}
           </div>
+          ) : (
+          <div className="grid cols-2">
+            {/* LEFT column: the calibration form */}
+            <ParallelCalibCard
+              grad={parGrad} setGrad={setParGrad}
+              pixelSize={parPixelSize} setPixelSize={setParPixelSize}
+              source={hwMode === 'hardware' ? 'real' : 'sim'}
+              profile={profile} temperature={temperature} seed={seed}
+              onCalibrate={calibrateArray} calibRunning={arrCalibRunning}
+              antiNoisePresets={ANTI_NOISE_PRESETS}
+            />
+            {/* RIGHT column: measured results, then the ODMR spectrum below */}
+            <div>
+              <ParallelCalibResults calibResult={arrCalib} calibErr={arrCalibErr} />
+              <div className="card" style={{ marginTop: 16 }}>
+                <h2><span className="dot" />ODMR spectrum</h2>
+                <div className="hint">Lock-in ODMR — the on-chip graphene/MoS₂ detector array's photocurrent dips at D ± γB (resonant MW flips the spin dark), with hyperfine replicas.</div>
+                <OdmrChart data={odmr.data} error={odmr.error} />
+              </div>
+            </div>
+          </div>
+          )}
 
           {/* ============================= ANALOG SIGNAL ============================= */}
           </>)}
