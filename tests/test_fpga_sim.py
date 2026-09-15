@@ -118,3 +118,67 @@ def test_simulated_fpga_sub_pixel_and_integration():
     assert r16.shape == (32, 64)
     # the off-resonance pads' spread is dominated by noise; averaged std is lower
     assert float(r16.std()) < float(r1.std())
+
+# ---------------------------------------------------------------------------
+# READ_LOCKINP IQ demod -- SimulatedFPGA + FPGAConnection parse/bounds tests
+# ---------------------------------------------------------------------------
+
+def test_simulated_fpga_read_lockinp_amplitude():
+    """SimulatedFPGA.read_lockinp generates a prime-modulated detector stream
+    and demods it against the per-prime ROM, recovering the modulation depth
+    (~1280 codes = 0.5*ODMR_CONTRAST*BRIGHT_CODE) with SNR > 1 over enough
+    whole periods. Pins the host<->sim mirror of the firmware IQ demod."""
+    from qssc.simulator import SimulatedFPGA
+    from qssc.prime_readout import PRIME_SYMBOLS
+
+    fpga = SimulatedFPGA("NV", seed=5)
+    idx, p = 3, PRIME_SYMBOLS[3]      # p=7
+    n = p * 16                        # 16 whole periods -> SNR gain
+    res = fpga.read_lockinp(site=0, n_samples=n, prime_idx=idx)
+    assert res["prime"] == p
+    assert res["n_samples"] == n
+    assert res["prime_idx"] == idx
+    # recovered modulation depth ~1280 codes; noise/16-period average ~160
+    assert abs(res["amplitude_code"] - 1280) < 400, res
+    assert res["snr"] > 1.0, res
+
+
+def test_fpga_connection_read_lockinp_parse():
+    """FPGAConnection.read_lockinp parses the three-int IQ reply
+    (``<I> <Q> <n>``) and builds the IQ result dict, and validates the
+    site / n_samples / prime_idx bounds. The real constructor opens a serial
+    port + does an ID handshake, so the instance is built via __new__ with a
+    stubbed send_command -- this tests the wire-format parse + bounds, not the
+    UART transport."""
+    from qssc.backend import FPGAConnection
+    from qssc.prime_readout import PRIME_SYMBOLS
+
+    sent = []
+
+    def fake_send(cmd):
+        sent.append(cmd)
+        # p=7 constant-code reply: I=-1234 (cos-rounding residual), Q=0, n=7
+        return "-000000000001234 000000000000000 0000000007"
+
+    conn = FPGAConnection.__new__(FPGAConnection)
+    conn.send_command = fake_send
+
+    res = conn.read_lockinp(site=0, n_samples=7, prime_idx=3)
+    assert sent == ["READ_LOCKINP 0 7 3"]
+    assert res["I"] == -1234
+    assert res["Q"] == 0
+    assert res["n_samples"] == 7
+    assert res["prime"] == PRIME_SYMBOLS[3] == 7
+    assert res["prime_idx"] == 3
+    # amplitude from a DC residual is a small rounding-scale value, not a signal
+    assert res["amplitude_code"] >= 0
+
+    # bounds validation (never reaches the wire on a bad arg)
+    for bad in [(64, 7, 3), (-1, 7, 3), (0, 0, 3), (0, 100001, 3),
+                (0, 7, 16), (0, 7, -1)]:
+        try:
+            conn.read_lockinp(*bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"expected ValueError for {bad}")
+    assert sent == ["READ_LOCKINP 0 7 3"], "bad args must not reach the wire"

@@ -356,19 +356,21 @@ class SimulatedFPGA:
                     return "ERR"
                 return self._read_lockin(ref_khz, n_cycles)
             if head == "READ_LOCKINP":
-                # READ_LOCKINP <site> <n_cycles> <half_ns>: prime-period lock-in.
-                # Same accumulator as READ_LOCKIN with a host-supplied on/off
-                # half-period (half_ns = p*tau/2 for the prime p the Python
-                # qssc.prime_readout assigned to this NV channel). The simulator
-                # stub reuses the lock-in model (the half-period does not change
-                # the sim physics); the real RTL demodulates at half_ns.
+                # READ_LOCKINP <site> <n_samples> <prime_idx>: prime-period
+                # cosine/sine IQ lock-in. prime_idx (0..15) selects a system
+                # prime p; the sim generates n_samples modulated detector codes
+                # and MACs them against the EXACTLY-period-p per-prime cos/sin
+                # ROM (the same ROM the RTL holds), replying "<I> <Q> <n>".
                 if len(parts) < 4:
                     return "ERR"
-                n_cycles = int(parts[2])
-                half_ns = int(parts[3])
-                if n_cycles <= 0 or n_cycles > 10000 or half_ns < 2000:
+                try:
+                    site = int(parts[1]); n_samples = int(parts[2]); pidx = int(parts[3])
+                except ValueError:
                     return "ERR"
-                return self._read_lockin(int(parts[1]) or 1000, n_cycles)
+                if not (0 <= site < N_SITES) or not (1 <= n_samples <= 100000) \
+                        or not (0 <= pidx < 16):
+                    return "ERR"
+                return self._read_lockinp_iq(site, n_samples, pidx)
             if head == "RUN_SEQUENCE":
                 # RUN_SEQUENCE <kind> <n_windows>: sim-side model of the RTL
                 # pulse-sequence engine (RUN_SEQUENCE verb, PR3a). kind in
@@ -717,6 +719,31 @@ class SimulatedFPGA:
         return (f"{res['differential_code']:.1f} {res['sigma_code']:.1f} "
                 f"{res['single_frame_snr']:.2f} {res['integrated_snr']:.2f}")
 
+    def _read_lockinp_iq(self, site: int, n_samples: int, prime_idx: int) -> str:
+        """Sim-side model of the RTL ``READ_LOCKINP`` IQ demodulator.
+
+        Generates ``n_samples`` detector codes whose PL is sinusoidally
+        modulated at the prime period ``p = PRIME_SYMBOLS[prime_idx]`` (the
+        prime channel this NV is driven on), then MACs them against the per-
+        prime cos/sin ROM -- the SAME ROM the RTL holds -- and replies
+        ``"<I> <Q> <n>"``. The modulation amplitude is the ODMR contrast depth
+        (``0.5 * ODMR_CONTRAST * BRIGHT_CODE``); the demod recovers it as
+        ``amplitude_code`` in the host result. Per-sample noise at
+        ``READOUT_NOISE``; ``site`` selects the channel (the sim modulation
+        depth is site-independent, matching the constant-ADC testbench model).
+        """
+        from .prime_readout import lockin_iq_demod
+        from .prime_readout import PRIME_SYMBOLS
+        p = PRIME_SYMBOLS[int(prime_idx)]
+        baseline = 0.5 * (BRIGHT_CODE + DARK_CODE)
+        amp = 0.5 * ODMR_CONTRAST * BRIGHT_CODE           # modulation depth (codes)
+        k = np.arange(int(n_samples))
+        codes = baseline + amp * np.cos(2.0 * np.pi * k / p)
+        codes += self.rng.normal(0, READOUT_NOISE, size=int(n_samples))
+        codes = np.clip(codes, 0, ADC_MAX).astype(np.int64)
+        I, Q, n = lockin_iq_demod(codes, int(prime_idx))
+        return f"{I} {Q} {n}"
+
     def _run_sequence(self, kind: str, n_windows: int) -> str:
         """Sim-side model of the RTL pulse-sequence engine (RUN_SEQUENCE, PR3a).
 
@@ -765,18 +792,25 @@ class SimulatedFPGA:
         return lockin_integrated_readout(BRIGHT_CODE, ODMR_CONTRAST,
                                          int(n_cycles), READOUT_NOISE, rng=self.rng)
 
-    def read_lockinp(self, site: int, n_cycles: int, half_ns: int) -> dict:
-        """Prime-period lock-in -> differential + SNR (mirrors FPGAConnection).
+    def read_lockinp(self, site: int, n_samples: int, prime_idx: int) -> dict:
+        """Prime-period IQ lock-in -> amplitude + SNR (mirrors FPGAConnection).
 
-        The half-period ``half_ns`` (= p*tau/2 for the prime p the Python
-        :mod:`qssc.prime_readout` assigned to this NV channel) selects the
-        orthogonal modulation channel. The simulator stub reuses the lock-in
-        model (the half-period does not change the sim physics); the real RTL
-        demodulates at ``half_ns``. Same dict shape as :meth:`read_lockin`.
+        ``prime_idx`` (0..15) selects the prime channel ``p =
+        PRIME_SYMBOLS[prime_idx]``. The sim generates ``n_samples`` codes whose
+        PL is modulated at period ``p`` and MACs them against the per-prime
+        cos/sin ROM (the SAME ROM the RTL holds), then returns the IQ result
+        dict (see :func:`qssc.prime_readout.lockin_iq_result`): recovered
+        ``amplitude_code``, ``phase_rad``, integrated ``sigma_code`` and
+        ``snr``. Same dict shape as :meth:`FPGAConnection.read_lockinp`.
         """
-        if int(half_ns) < 2000:
-            raise ValueError("half_ns must be >= 2000")
-        return self.read_lockin(site, n_cycles)
+        from .prime_readout import lockin_iq_result
+        if not (0 <= int(site) < self.N_SITES) or not (1 <= int(n_samples) <= 100000):
+            raise ValueError("site/n_samples out of range")
+        if not (0 <= int(prime_idx) < 16):
+            raise ValueError("prime_idx must be 0..15")
+        reply = self._read_lockinp_iq(int(site), int(n_samples), int(prime_idx))
+        I, Q, n = (int(t) for t in reply.split())
+        return lockin_iq_result(I, Q, n, int(prime_idx), float(READOUT_NOISE))
 
     def read_gyro(self, site: int, t_ns: int, n_windows: int = 64) -> dict:
         """Ramsey pi/2-T-pi/2 -> rotation rate (gyro_measure dict shape)."""

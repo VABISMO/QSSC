@@ -192,3 +192,126 @@ def test_16_symbols_are_channels_not_qudit_states():
     # a 10-qubit pixel is 2^10 = 1024, NOT 16^10
     assert 2 ** 10 == 1024
     assert 16 ** 10 != 1024
+
+# ---------------------------------------------------------------------------
+# IQ demodulator (firmware READ_LOCKINP mirror) -- parity + physics tests
+# ---------------------------------------------------------------------------
+import re
+from pathlib import Path
+
+from qssc.prime_readout import (
+    PRIME_IQ_ROM, lockin_iq_demod, lockin_iq_result,
+)
+
+_RTL = Path(__file__).resolve().parents[1] / "fpga" / "rtl" / "command_parser.v"
+
+
+def _parse_rtl_rom(name: str) -> dict[int, int]:
+    """Parse ``<name>[i]=[-]12'sdV;`` assignments from command_parser.v -> {i: V}."""
+    text = _RTL.read_text()
+    pat = re.compile(rf"{name}\[\s*(\d+)\s*\]\s*=\s*(-?)12'sd(\d+)")
+    return {int(m.group(1)): (int(m.group(3)) * (-1 if m.group(2) else 1))
+            for m in pat.finditer(text)}
+
+
+def _parse_rtl_word(name: str, bits: int) -> dict[int, int]:
+    """Parse ``<name>[i]=<bits>'dV;`` (unsigned) assignments -> {i: V}."""
+    text = _RTL.read_text()
+    pat = re.compile(rf"{name}\[\s*(\d+)\s*\]\s*=\s*{bits}'d(\d+)")
+    return {int(m.group(1)): int(m.group(2)) for m in pat.finditer(text)}
+
+
+def test_iq_rom_matches_rtl():
+    """The Python PRIME_IQ_ROM (single source of truth the host demod uses) is
+    bit-identical to the cos_rom/sin_rom/prime_tab the firmware MACs against.
+    If the RTL ROM is regenerated, this test catches a drift before the
+    host/firmware demodulators silently disagree."""
+    ptab = _parse_rtl_word("prime_tab", 6)
+    pbase = _parse_rtl_word("prime_base", 9)
+    cos = _parse_rtl_rom("cos_rom")
+    sin = _parse_rtl_rom("sin_rom")
+    # prime_tab matches PRIME_SYMBOLS
+    for i, p in enumerate(PRIME_SYMBOLS):
+        assert ptab[i] == p, f"prime_tab[{i}] {ptab[i]} != PRIME_SYMBOLS {p}"
+    # each per-prime cos/sin block matches the Python ROM exactly
+    for idx, p in enumerate(PRIME_SYMBOLS):
+        base = pbase[idx]
+        cos_py, sin_py = PRIME_IQ_ROM[idx]
+        for k in range(p):
+            assert cos[base + k] == cos_py[k], \
+                f"cos[{p}][{k}] rtl={cos[base + k]} py={cos_py[k]}"
+            assert sin[base + k] == sin_py[k], \
+                f"sin[{p}][{k}] rtl={sin[base + k]} py={sin_py[k]}"
+
+
+def test_lockin_iq_demod_amplitude_recovery():
+    """A pure A*cos(2*pi*k/p) signal demodulated at the SAME prime p recovers
+    amplitude A (in ADC-code units) -- the matched-filter gain. Phase=0 -> Q~0,
+    I carries the signal. The detector delivers INTEGER ADC codes, so the test
+    signal is np.round'd (np.int64 truncation toward zero would break the
+    cosine symmetry cos[k]=cos[p-k] and leak a spurious Q)."""
+    for idx, p in enumerate(PRIME_SYMBOLS):
+        n = p * 8                       # whole periods -> no window leakage
+        A = 1280.0                      # codes (== sim modulation depth)
+        k = np.arange(n)
+        codes = np.round(A * np.cos(2.0 * np.pi * k / p)).astype(np.int64)
+        I, Q, nn = lockin_iq_demod(codes, idx)
+        assert nn == n
+        amp = lockin_iq_result(I, Q, n, idx, readout_noise=0.0)["amplitude_code"]
+        # amplitude_code = 2*hypot/(n*S) for p>2, hypot/(n*S) for p==2; the
+        # 12-bit ROM + integer-code rounding leaves a <1-LSB residual.
+        assert abs(amp - A) < 1.0, f"p={p}: recovered amp {amp} != {A}"
+        # phase 0 + integer symmetric codes + antisymmetric sin_rom (sin[i] =
+        # -sin[p-i] by numpy's symmetric round) -> Q cancels exactly per period;
+        # allow a per-period 1-LSB safety margin against a .5-rounding boundary.
+        assert abs(Q) <= p, f"p={p}: Q={Q} not a rounding residual (I={I})"
+
+
+def test_lockin_iq_demod_cross_talk_orthogonality():
+    """A signal at prime q, demodulated at a DIFFERENT prime p over a whole-LCM
+    window, projects to ~0 -- the prime-coprime orthogonality the IQ demod
+    buys over the old +-1/(p*q) square-wave residual. This is the reason the
+    rewrite exists: the cross-talk must be bounded by 12-bit ROM rounding
+    (~0.02%), not the parameter-fragile square-wave residual."""
+    worst = 0.0
+    for iidx, p in enumerate(PRIME_SYMBOLS):
+        for qidx, q in enumerate(PRIME_SYMBOLS):
+            if p == q:
+                continue
+            n = p * q                      # exactly one LCM (coprime)
+            k = np.arange(n)
+            A = 1280.0
+            codes = A * np.cos(2.0 * np.pi * k / q)   # signal at q
+            I, Q, nn = lockin_iq_demod(codes, iidx)    # demod at p
+            assert nn == n
+            mag = float(np.hypot(int(I), int(Q)))
+            # normalize to the on-channel amplitude the same signal would give
+            ref_I, ref_Q, _ = lockin_iq_demod(
+                A * np.cos(2.0 * np.pi * np.arange(n) / p), iidx)
+            ref_mag = float(np.hypot(int(ref_I), int(ref_Q)))
+            leak = mag / ref_mag if ref_mag else 0.0
+            worst = max(worst, leak)
+            # ROM-rounding orthogonality floor: ~0.02%, NOT the square-wave
+            # +-1/(p*q) floor (which for p=2,q=3 is ~17%).
+            assert leak < 1e-3, \
+                f"cross-talk p={p},q={q}: leak={leak:.4%} > 0.1%"
+    # the square-wave residual would be ~1/(p*q); for the smallest pair
+    # p=2,q=3 that is ~16.7%. The IQ demod beats it by >100x.
+    assert worst < 1e-3
+
+
+def test_lockin_iq_demod_dc_rejection():
+    """A CONSTANT detector code (no modulation) demodulates to Q=0 EXACTLY
+    (sin is antisymmetric -> rounding cancels over whole periods) and I is the
+    small +-1-per-period cos-rounding residual the host can subtract. This is
+    the DC / baseline rejection that makes the lock-in a band-pass."""
+    C = 49920                       # arbitrary constant ADC code
+    for idx, p in enumerate(PRIME_SYMBOLS):
+        n = p * 4                   # whole periods
+        codes = np.full(n, C, dtype=np.int64)
+        I, Q, nn = lockin_iq_demod(codes, idx)
+        assert nn == n
+        assert Q == 0, f"p={p}: DC Q={Q} != 0 (quadrature must cancel exactly)"
+        # I = C * sum(cos_rom[k]) over whole periods -- the per-period cos
+        # rounding residual is deterministic + bounded by ~p (one LSB/step).
+        assert abs(I) <= C * p, f"p={p}: DC I={I} unexpectedly large"
