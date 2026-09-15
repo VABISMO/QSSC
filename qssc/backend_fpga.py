@@ -128,24 +128,42 @@ class FPGAConnection:
         reply = self.send_command(f"READ_LOCKIN {int(site)} {int(n_cycles)}")
         return self._parse_lockin_reply(reply)
 
-    def read_lockinp(self, site: int, n_cycles: int, half_ns: int) -> dict:
-        """``READ_LOCKINP <site> <n> <half_ns>`` -> prime-period lock-in result.
+    def read_lockinp(self, site: int, n_samples: int, prime_idx: int) -> dict:
+        """``READ_LOCKINP <site> <n_samples> <prime_idx>`` -> IQ demod result.
 
-        Same accumulator + reply shape as :meth:`read_lockin`, but the on/off
-        half-period is the host-supplied ``half_ns`` (= ``p * tau / 2`` for the
-        prime ``p`` that :mod:`qssc.prime_readout` assigned to this NV channel),
-        instead of the fixed 200 us default. The prime-coprime orthogonality
-        (zero cross-talk over the LCM) lives in the Python readout model; the
-        RTL just demodulates at the requested half-period. Returns the same
-        dict shape as :meth:`read_lockin`.
+        Prime-period cosine/sine IQ lock-in. ``prime_idx`` (0..15) selects one
+        of the 16 system primes ``p = PRIME_SYMBOLS[prime_idx]`` the Python
+        :mod:`qssc.prime_readout` assigned to this NV channel. The firmware
+        demodulates against an EXACTLY-period-p cos/sin reference (per-prime ROM
+        + wrapping sample counter) and replies ``"<I> <Q> <n>"`` (three signed
+        ints, NO ``OK``): ``I`` = sum(code*cos), ``Q`` = sum(code*sin), ``n`` =
+        samples taken. The prime-coprime orthogonality (zero cross-talk over
+        the LCM to 12-bit rounding, ~75x better than the +-1/(p*q) odd-prime
+        square-wave residual) lives in the exactly-period-p reference. Returns
+        the IQ result dict (see :func:`qssc.prime_readout.lockin_iq_result`).
         """
-        if not (0 <= int(site) < N_SITES) or not (1 <= int(n_cycles) <= 100000):
-            raise ValueError("site/n_cycles out of range")
-        if int(half_ns) < 2000:
-            raise ValueError("half_ns must be >= 2000 (>= 20 clk cycles)")
+        from .prime_readout import lockin_iq_result
+        if not (0 <= int(site) < N_SITES) or not (1 <= int(n_samples) <= 100000):
+            raise ValueError("site/n_samples out of range")
+        if not (0 <= int(prime_idx) < 16):
+            raise ValueError("prime_idx must be 0..15")
         reply = self.send_command(
-            f"READ_LOCKINP {int(site)} {int(n_cycles)} {int(half_ns)}")
-        return self._parse_lockin_reply(reply)
+            f"READ_LOCKINP {int(site)} {int(n_samples)} {int(prime_idx)}")
+        I, Q, n = self._parse_lockin_iq_reply(reply)
+        return lockin_iq_result(I, Q, n, int(prime_idx), float(READOUT_NOISE))
+
+    def _parse_lockin_iq_reply(self, reply: str) -> tuple[int, int, int]:
+        """Parse the three-int IQ reply ``"<I> <Q> <n>"`` from READ_LOCKINP.
+
+        The firmware emits each of I/Q as a 16-char signed decimal (sign + 15
+        digits) and n as a 10-digit unsigned decimal, whitespace-separated and
+        ``\\n``-terminated (45 bytes). ``str.split`` + ``int`` handle the sign
+        and the leading-space (non-negative) padding directly.
+        """
+        toks = reply.split()
+        if len(toks) != 3:
+            raise IOError(f"READ_LOCKINP reply mismatch: {reply!r}")
+        return int(toks[0]), int(toks[1]), int(toks[2])
 
     def _parse_lockin_reply(self, reply: str) -> dict:
         """Parse the four-int lock-in reply (shared by READ_LOCKIN/READ_LOCKINP)."""
