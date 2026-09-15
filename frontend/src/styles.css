@@ -81,6 +81,10 @@ a.grad, .grad a { text-decoration: none; }
 .card h2 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--grad); }
 .card .hint { color: var(--dim); font-size: 12.5px; margin: -2px 0 14px; }
 
+/* empty-state placeholder for a results card before its first run */
+.empty { color: var(--dim); font-size: 12.5px; padding: 18px 12px; text-align: center;
+  border: 1px dashed var(--border); border-radius: 10px; }
+
 /* stats */
 .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 .stat { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 11px 12px;

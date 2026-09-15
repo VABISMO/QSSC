@@ -54,10 +54,14 @@ def nuclear_gate_fidelity(nuclear_t2_s: float, swap_time_s: float,
     # nuclear T1 ~ T2*2 (relaxation limited) as a conservative cap; the thermal
     # channel uses t1 ~ 2*t2 so the T1 and T2 Kraus terms are both meaningful.
     t1 = 2.0 * nuclear_t2_s
+    # Average gate infidelity of a non-unital relaxation channel over the
+    # Haar orbit (the QSSC uses a generic controlled-rotation, not a unital
+    # axis).  With <r_z> = 0 over the orbit the Bloch-sphere average collapses
+    # to F_avg = (3 + 2 e^{-t/T2} + e^{-t/T1}) / 6, hence the dephasing weight
+    # is 2 (not 4) and the T1 weight is 1 — matching qssc.dipole.
     p_t1 = 1.0 - math.exp(-swap_time_s / t1)
-    p_t2 = 1.0 - math.exp(-swap_time_s / (2.0 * nuclear_t2_s))
-    # thermal + depol composed fidelity (same form as the dipole helper)
-    thermal = 1.0 - (p_t1 + 4.0 * p_t2) / 3.0
+    p_t2 = 1.0 - math.exp(-swap_time_s / nuclear_t2_s)
+    thermal = 1.0 - (p_t1 + 2.0 * p_t2) / 6.0
     return max(0.0, min(1.0, thermal * (1.0 - depol)))
 
 

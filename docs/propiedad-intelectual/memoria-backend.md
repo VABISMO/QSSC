@@ -317,22 +317,63 @@ función), verificada contra el código depositado.
   B̂ = argmin_{B∈ℝ³, s∈{±1}ᵏ} ‖A·B − s⊙b̂‖₂   (A=[nᵢ], b̂ᵢ=Δᵢ·10⁶/(2γ) [T], k≤4)
   ```
 
+  Variables:
+  - `Δᵢ` — desdoblamiento Zeeman medido en el píxel i [MHz] = separación del doblete ODMR
+  - `γ` — relación giromagnética del electrón = 28,024 GHz/T (constante del centro NV)
+  - `B` — vector de campo magnético incógnita a reconstruir [T]
+  - `nᵢ` — versor del i-ésimo eje cuántico NV ⟨111⟩ (1 de los 4 del tetraedro)
+  - `A` — matriz 3×k cuyas columnas son los versores nᵢ (modelo directo B→doubletes)
+  - `b̂ᵢ` — proyección del campo sobre nᵢ deducida del doblete [T] = Δᵢ·10⁶/(2γ)
+  - `s` — vector de signos ∈ {±1}ᵏ que resuelve la ambigüedad de signo del doblete
+  - `k` — número de ejes NV resueltos en el píxel (≤ 4)
+
 - **Readout por primas-coprimas + denoiser coprimo** (propio) — `qssc/prime_readout.py`
-  · `fpga/rtl/command_parser.v`.
+  · `fpga/rtl/command_parser.v`. La definición matemática del algoritmo usa una
+  referencia **cosenoidal**: dos primas coprimas distintas dan ortogonalidad exacta
+  **por pares** (cross-talk nulo entre dos canales coprimos) sobre una ventana
+  igual al lcm del par. El firmware (`READ_LOCKINP`) aproxima la referencia
+  cosenoidal con una onda cuadrada ±1 (boxcar de un ADC sample por
+  medio-periodo); las ondas cuadradas de primas impares no son de media cero, por
+  lo que esa aproximación arrastra un cross-talk residual ±1/(p·q) entre primas
+  impares (sólo p=2 es de media cero).
 
   ```
-  A_p = (2/N)·Σ_{n=0}^{N−1} s[n]·cos(2πn/p)        (N = múltiplo del lcm de las primas)
-  Σ_{n=0}^{lcm(p,q)−1} cos(2πn/p)·cos(2πn/q) = 0   (p,q primas distintas — ortogonalidad exacta)
+  A_p = (2/N)·Σ_{n=0}^{N−1} s[n]·cos(2πn/p)        (N = ventana; ortogonalidad exacta por pares si N es múltiplo del lcm del par)
+  Σ_{n=0}^{lcm(p,q)−1} cos(2πn/p)·cos(2πn/q) = 0   (p,q primas distintas — ortogonalidad exacta por pares, suma-a-producto)
+  Σ_{n=0}^{pq−1} sgn_p[n]·sgn_q[n] = ±1            (firmware: onda cuadrada; cross-talk residual ±1/(p·q) para primas impares)
   ```
+
+  Variables:
+  - `A_p` — amplitud del canal de modulación de periodo p·τ recuperada por el lock-in
+  - `N` — número de muestras de la ventana de demodulación (entero)
+  - `s[n]` — señal muestreada en el instante n (ADC del detector integrado por el lock-in)
+  - `p, q` — primas coprimas distintas; el periodo de cada canal es p·τ, q·τ
+  - `τ` — reloj base del lock-in (1 µs en el QSSC); el medio-periodo host = p·τ/2
+  - `lcm(p,q)` — mínimo común múltiplo del par = p·q; ventana de ortogonalidad exacta por pares
+  - `sgn_p[n]` — onda cuadrada ±1 de periodo p usada por el firmware (aproximación al coseno)
+  - `cos(2πn/p)` — referencia cosenoidal del demodulador software (definición exacta del algoritmo)
 
 - **Memoria nuclear NV + ¹³C emparejada (STORE/RECALL por rotación controlada
   hiperfina)** (propio; basado en [16,17,18]) — `qssc/nuclear.py`.
 
   ```
   t_SWAP = 1/(2·A∥)                              (A∥ = hiperfino secular [Hz])
-  F_SWAP = [1 − (p_T1 + 4·p_T2)/3]·(1 − δ)       (p_T1=1−e^{−t/T1}, p_T2=1−e^{−t/(2·T2_n)})
+  F_SWAP = [1 − (p_T1 + 2·p_T2)/6]·(1 − δ)       (F_avg=(3+2e^{−t/T2}+e^{−t/T1})/6; p_T1=1−e^{−t/T1}, p_T2=1−e^{−t/T2_n})
   S(t) = e^{−t/T2_n}   ;   G = T2_n/T2_e
   ```
+
+  Variables:
+  - `t_SWAP` — tiempo de la rotación controlada hiperfina (un entangler CNOT-equivalente); un SWAP completo = 3 rotaciones
+  - `A∥` — componente secular del acoplamiento hiperfino electrón–¹³C [Hz] (~2 MHz)
+  - `F_SWAP` — fidelidad media del gate (canal térmico compuesto con el error de drive)
+  - `p_T1` — probabilidad de relajación longitudinal = 1 − e^{−t/T1}
+  - `p_T2` — probabilidad de dephasing = 1 − e^{−t/T2_n}
+  - `T1, T2_n` — relajación longitudinal y coherencia del qubit nuclear ¹³C [s]; T1 ≈ 2·T2_n
+  - `δ` — error de depolarización del drive de RF (canal de control, independiente de la decoherencia)
+  - `t` — duración del gate [s] = t_SWAP
+  - `S(t)` — fracción del estado cuántico almacenado que sobrevive un tiempo t sobre el ¹³C
+  - `T2_e` — coherencia del electrón NV [s] (referencia; mucho más corta que T2_n)
+  - `G` — ventaja de almacenamiento = T2_n/T2_e (cuántas veces más dura la memoria nuclear)
 
 - **Computación paralela de 64 píxeles (`run_array`, agregación 64×, saltado por
   ancho)** (propio) — `qssc/backend.py` · `api/runner.py`.
@@ -342,12 +383,27 @@ función), verificada contra el código depositado.
   # un píxel se SALTA (nunca se trunca) si el circuito excede su ancho medido
   ```
 
+  Variables:
+  - `C[b]` — conteo agregado del bitstring b sobre los 64 píxeles (histograma 64×)
+  - `cᵢ[b]` — conteo del bitstring b devuelto por el píxel i (con su semilla independiente)
+  - `P` — conjunto de píxeles no saltados = {píxeles cuyo ancho medido ≥ num_qubits del circuito}
+  - `semillaᵢ` — semilla PRNG del píxel i = base_seed + i (independiente por píxel)
+  - `ancho medido` — número de qubits resueltos del píxel i (de la calibración ODMR)
+  - `num_qubits` — qubits que requiere el circuito (Bell=2, Shor-n=n, …)
+
 - **Ancho de registro mediado por gradiente (bobina + DAC, tope resoluble)** (propio)
   — `qssc/simulator.py` · `qssc/array_calibration.py`.
 
   ```
   N_res = max(1, ⌊(g·L)/Δf⌋)   (g [MHz/µm], L [µm], Δf = linewidth [MHz]; separación ≥ FWHM o colapsa)
   ```
+
+  Variables:
+  - `N_res` — número de líneas ODMR resueltas = anchura de registro = qubits del píxel (entero ≥ 1)
+  - `g` — gradiente de campo de la bobina [MHz/µm] (programado por el DAC MCP4921)
+  - `L` — tamaño del píxel [µm] (extensión espacial del conjunto NV)
+  - `Δf` — anchura de línea ODMR (FWHM) [MHz] del defecto (~5 MHz para NV)
+  - `g·L` — dispersión espectral total inducida por el gradiente [MHz] = ventana de direccionalidad
 
 - **Centroiding sub-píxel sobre electrodo ITO continuo** (propio; basado en [26]) —
   `qssc/detector_centroid.py`.
@@ -358,6 +414,16 @@ función), verificada contra el código depositado.
   S = max(1, ⌊SNR/umbral⌋)  →  canales = 64·S   (resolución de imagen, no más qubits)
   ```
 
+  Variables:
+  - `w_p` — peso (fracción de carga) asignado al electrodo p para un spot dado
+  - `d_p` — distancia del spot al centro del electrodo p [µm]
+  - `σ` — dispersión de la nube de carga sobre el ITO continuo [µm]
+  - `x_c, y_c` — coordenadas del centroide reconstruido [µm]
+  - `q_p` — carga total recogida en el electrodo p (suma de los w_p del spot)
+  - `x_p, y_p` — coordenadas del centro del electrodo p [µm]
+  - `S` — factor sub-píxel = canales por píxel (resolución de imagen 64 → 64·S)
+  - `SNR` — relación señal-ruido del spot; umbral = SNR mínimo para subdividir
+
 - **Integración N-shot del lock-in (+~30 %/píxel, sin cambio HW)** (propio) —
   `qssc/array_calibration.py`.
 
@@ -365,6 +431,15 @@ función), verificada contra el código depositado.
   σ_eff(N) = σ₁/√N          (canal rápido incorrelado)
   SNR(N) = (A_k/σ₁)·√N      (A_k = 1−(1−c_s)ᵏ = contraste de k NV en el bin)
   ```
+
+  Variables:
+  - `σ_eff(N)` — ruido de readout efectivo tras N ciclos de lock-in integrados
+  - `σ₁` — ruido de un solo ciclo (canal rápido incorrelado)
+  - `N` — número de ciclos de lock-in acumulados
+  - `SNR(N)` — relación señal-ruido de la línea k tras N ciclos
+  - `A_k` — contraste ODMR de k NV en el bin = 1 − (1 − c_s)ᵏ
+  - `c_s` — contraste de un solo NV (profundidad ODMR por defecto)
+  - `k` — número de NV que contribuyen al bin (línea espectral)
 
 - **Pila anti-ruido clásica 300 K (canales lentos no 1/√N)** (propio) —
   `qssc/noise_filters.py`.
@@ -375,6 +450,15 @@ función), verificada contra el código depositado.
   T2_eff = min(T2_dd, 2·T1)              (tope de relajación 1/T2 = 1/(2·T1) + 1/Tφ)
   ```
 
+  Variables:
+  - `σ_eff` — sigma de ruido efectivo del píxel (composición en cuadratura de canales)
+  - `σ_floor` — ruido de piso (base/√N, el canal cuántico rápido incorrelado)
+  - `σ_c` — sigma de cada canal de ruido clásico (temp, presión, vib, EMI…)
+  - `N` — número de shots promediados (los canales lentos escalan como N⁰, no 1/√N)
+  - `T2_eff` — coherencia efectiva tras el dynamical decoupling, topada por la relajación
+  - `T2_dd` — coherencia extendida por la secuencia de DD (CPMG/XY8…)
+  - `T1, Tφ` — relajación longitudinal y dephasing puro [s]; 1/T2 = 1/(2·T1) + 1/Tφ
+
 - **Super-resolución ODMR sparse (diccionario ODMR + OMP)** (propio; basado en [25])
   — `qssc/superres_odmr.py`.
 
@@ -383,6 +467,18 @@ función), verificada contra el código depositado.
   j* = argmax_j |⟨Φ_j, r⟩| ;  x = argmin ‖Φ_S x − y‖₂ ;  r ← y − Φ_S x   (parada: ‖r‖ ≤ σ·√N)
   ```
 
+  Variables:
+  - `Φ` — diccionario espectral; columna j = Gaussiano unitario centrado en c_j
+  - `Φ[i,j]` — respuesta del píxel a la frecuencia f_i de una línea en c_j (normalizada)
+  - `f_i, c_j` — frecuencias de muestreo y centros de las líneas candidatas [GHz]
+  - `σ` — anchura espectral del píxel (FWHM/2,35) [GHz]
+  - `‖Φ_j‖` — norma de la columna j (normaliza el Gaussiano a energía unitaria)
+  - `j*` — índice de la línea candidata de mayor correlación con el residuo
+  - `r` — residuo = y − Φ_S·x (se actualiza cada iteración OMP)
+  - `x` — amplitudes sparse estimadas (LS sobre el soporte S seleccionado)
+  - `y` — espectro ODMR medido (vector de contrastes por frecuencia)
+  - `S` — soporte = conjunto de líneas seleccionadas hasta la parada
+
 - **Lectura Bayesiana cuántico-limitada por píxel + Bonferroni** (propio; basado en
   [27,28]) — `qssc/bayesian_readout.py`.
 
@@ -390,6 +486,17 @@ función), verificada contra el código depositado.
   â_j = (Φ_j·y)/‖Φ_j‖²   ;   σ_j = σ/‖Φ_j‖            (filtro adaptado, varianza Cramér–Rao)
   línea j ⇔ â_j/σ_j > z(1 − (1−C)/n_bins) ∧ â_j > 0   (Bonferroni α_per = (1−C)/n_bins)
   ```
+
+  Variables:
+  - `â_j` — estimador de máxima verosimilitud (filtro adaptado) de la amplitud de la línea j
+  - `σ_j` — incertidumbre (Cramér–Rao) de â_j = σ/‖Φ_j‖
+  - `Φ_j` — filtro adaptado (columna del diccionario espectral) para la línea j
+  - `y` — espectro ODMR medido (vector de contrastes por frecuencia)
+  - `σ` — ruido de readout por bin [u.a.]
+  - `z(·)` — cuantil de la normal estándar (umbral estadístico unilateral)
+  - `C` — credibilidad global deseada (0,01–0,99, p.e. 0,95)
+  - `n_bins` — número de bins del espectro (corrección de comparaciones múltiples)
+  - `α_per` — nivel de significancia por bin tras Bonferroni = (1−C)/n_bins
 
 - **Gradiometría tensorial + localización de dipolo (Jacobiano 8×8×3)** (propio) —
   `qssc/tensor_gradiometry.py`.
@@ -400,6 +507,19 @@ función), verificada contra el código depositado.
   Δsᵢ·sgn(B_bg·nᵢ) ≈ (2γ/10⁶)(B_dip·nᵢ)  →  argmin_{x₀,y₀,z₀,m} ‖…‖₂   (sin ambigüedad de signo)
   ```
 
+  Variables:
+  - `B(r)` — campo del dipolo en el punto de observación r [T]
+  - `m` — momento magnético del dipolo fuente [A·m²]
+  - `r, r̂` — vector del dipolo al píxel (= píxel − fuente; norma r y versor r̂) [m]; fuente bajo el plano z=0 ⇒ r_z = +z₀
+  - `μ₀/4π` — constante magnética = 10⁻⁷ T·m/A
+  - `J[i]` — Jacobiano 3×2 del campo en el píxel i (gradiente in-plano) [µT/mm]
+  - `B_x,B_y,B_z` — componentes del campo medido en el píxel [µT]
+  - `Δsᵢ` — variación del doblete Zeeman en el píxel i causada por el dipolo [MHz]
+  - `B_bg` — campo de fondo (sin dipolo) que fija el signo del doblete [T]
+  - `B_dip` — campo del dipolo candidato, función de x₀,y₀,z₀,m [T]
+  - `nᵢ` — versor del eje NV del píxel i (proyecta el campo sobre el doblete)
+  - `x₀,y₀,z₀,m` — posición y momento del dipolo incógnita (ajuste LS)
+
 - **Selector modo píxel registro/ensamble con N medido** (propio) — `qssc/backend.py`.
 
   ```
@@ -407,6 +527,17 @@ función), verificada contra el código depositado.
   # registro: K_n all-to-all sobre N qubits del píxel; ensamble: 64 píxeles, sin 2q cross-píxel
   N = len(líneas resueltas por decompose_odmr)               (N medido reemplaza constante dura)
   ```
+
+  Variables:
+  - `d` — acoplamiento dipolo-dipolo entre dos NV del píxel [Hz]
+  - `g_e` — factor g del electrón (~2,003)
+  - `μ_B` — magnetón de Bohr [J/T]
+  - `h` — constante de Planck [J·s]
+  - `r` — separación entre dos NV del píxel [m] (el acoplamiento escala como 1/r³)
+  - `t_CZ` — tiempo de un gate CZ por acoplamiento dipolo = 1/(2d) [s]
+  - `K_n` — grafo completo all-to-all de N qubits (modo registro); gate 2q nativo en cada par
+  - `N` — anchura de registro = nº de líneas ODMR resueltas (medido, no constante)
+  - `decompose_odmr` — descomposición espectral que cuenta las líneas resueltas por píxel
 
 ---
 

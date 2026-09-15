@@ -1,12 +1,23 @@
 """Invention 2+ — prime-coprime frequency-multiplexed readout + denoiser.
 
 Each NV channel is driven at a modulation period T_i = p_i * tau with p_i
-PRIME. Distinct primes are coprime, so over the LCM (= p_a * p_b) the two
-square-wave trains are EXACTLY orthogonal (CRT: the (t mod p_a, t mod p_b)
-pair takes every residue pair once -> the integral factors into 0*0 = 0).
-The receiver projects onto the prime set and rejects energy at non-prime
-periods as noise (matched-filter / coprime denoiser). 16 prime symbols = 16
-ADDRESS CHANNELS (16 NVs), NOT a 16-state qudit (NV is 2-level).
+PRIME. The demodulation reference is a COSINE at the prime period. Distinct
+odd primes are coprime, so over the LCM (= p_a * p_b) the two cosine
+references are EXACTLY orthogonal (product-to-sum identity + whole-cycle
+cancellation: the cross-correlation is a sum of whole periods of a
+co-prime-frequency cosine, which integrates to zero). The receiver projects
+onto the prime set and rejects energy at non-prime periods as noise
+(matched-filter / coprime denoiser). 16 prime symbols = 16 ADDRESS CHANNELS
+(16 NVs), NOT a 16-state qudit (NV is 2-level).
+
+Note: the cosine reference is what the Python demodulator (prime_orthogonality
+/ prime_decompose) uses and what gives exact pairwise orthogonality over the
+LCM. The firmware lock-in (READ_LOCKINP) approximates the reference with a
++-1 square-wave boxcar; odd-prime square waves are NOT zero-mean, so the
+hardware approximation carries a small +-1/(p*q) cross-talk residual between
+odd-prime pairs (only p=2 is zero-mean). The algorithm's defining orthogonality
+is the cosine result tested here; the square-wave residual is a firmware
+fidelity trade-off, documented in the IP memoria.
 """
 from __future__ import annotations
 
@@ -86,8 +97,8 @@ def test_assign_prime_channels_one_per_nv():
 
 
 def test_prime_orthogonality_exact_at_lcm():
-    """Two distinct-prime square-wave trains are EXACTLY orthogonal over the
-    LCM (CRT). Equal primes give 1.0."""
+    """Two distinct-prime COSINE references are EXACTLY orthogonal over the
+    LCM (product-to-sum + whole-cycle cancellation). Equal primes give 1.0."""
     # 7 and 13 coprime -> cross-correlation 0 over LCM=91
     assert abs(prime_orthogonality(7, 13)) < 1e-12
     assert abs(prime_orthogonality(2, 3)) < 1e-12
