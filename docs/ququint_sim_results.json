@@ -1,0 +1,59 @@
+{
+  "simulation_only": true,
+  "seed": 42,
+  "dimension": 5,
+  "shots_per_point": 4000,
+  "honesty": {
+    "fidelities_are": "depolarizing Monte-Carlo MODEL numbers (this file), not measurements",
+    "gate_counts_are": "literature/decomposition arguments (7 T vs 4 M, Campbell et al.)",
+    "hardware_mapping": {
+      "nv_electron": {
+        "levels": 2,
+        "comment": "ms=0, ms=+-1 (S=1, but readout/control uses the 0<->+1 two-level subspace)"
+      },
+      "n_14n_nucleus": {
+        "levels": 3,
+        "comment": "I=1"
+      },
+      "c_13c_memory_nucleus": {
+        "levels": 2,
+        "comment": "I=1/2"
+      },
+      "combined_per_site": 12,
+      "native_gf5_system": null,
+      "conclusion": "No spin-2 (I=2) nucleus in the QSSC stack -> the GF(5) layer is simulation-only. A future 5-level encoding would need an I=2 nucleus (e.g. a deliberately implanted donor) -- hardware work, not software."
+    }
+  },
+  "ccz_fidelity_vs_depolarizing": [
+    {
+      "p": 0.001,
+      "qubit_ccz_7T_13steps": 0.994,
+      "ququint_ccz_4M_4steps": 0.9952,
+      "advantage": 0.0012
+    },
+    {
+      "p": 0.01,
+      "qubit_ccz_7T_13steps": 0.9333,
+      "ququint_ccz_4M_4steps": 0.9645,
+      "advantage": 0.0312
+    },
+    {
+      "p": 0.05,
+      "qubit_ccz_7T_13steps": 0.7322,
+      "ququint_ccz_4M_4steps": 0.86,
+      "advantage": 0.1278
+    },
+    {
+      "p": 0.1,
+      "qubit_ccz_7T_13steps": 0.5515,
+      "ququint_ccz_4M_4steps": 0.7165,
+      "advantage": 0.165
+    }
+  ],
+  "ccz_phase_check": {
+    "expected": "exp(2i pi/5)",
+    "got_real": 0.309017,
+    "got_imag": 0.951057,
+    "ok": true
+  }
+}
