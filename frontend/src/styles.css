@@ -81,6 +81,14 @@ a.grad, .grad a { text-decoration: none; }
 .card h2 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--grad); }
 .card .hint { color: var(--dim); font-size: 12.5px; margin: -2px 0 14px; }
 
+/* calibration card: forms on the left, measured results on the right */
+.calib-split { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: start; }
+.calib-forms { min-width: 0; }
+.calib-results { min-width: 0; }
+.calib-results .empty { color: var(--dim); font-size: 12.5px; padding: 18px 12px; text-align: center;
+  border: 1px dashed var(--border); border-radius: 10px; }
+@media (max-width: 860px) { .calib-split { grid-template-columns: 1fr; gap: 16px; } }
+
 /* stats */
 .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 .stat { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 11px 12px;

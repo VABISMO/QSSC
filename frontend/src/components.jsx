@@ -207,7 +207,7 @@ export function ParallelPixelFreqTable({ pixels, dGhz }) {
 // ---------------------------------------------------------------------------
 // OdmrChart — SVG line chart of the ODMR contrast vs frequency.
 // ---------------------------------------------------------------------------
-export function OdmrChart({ data, error }) {
+export function OdmrChart({ data, error, caption }) {
   if (error) return <div className="error">{error}</div>
   if (!data || !data.frequencies_ghz) return <div className="muted">Loading spectrum…</div>
   const f = data.frequencies_ghz
@@ -250,8 +250,8 @@ export function OdmrChart({ data, error }) {
         <text className="axtext" x={W / 2} y={H - 4} textAnchor="middle">frequency (GHz)</text>
       </svg>
       <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-        Resonance dip ≈ <span className="mono" style={{ color: 'var(--brand)' }}>{data.resonance_ghz} GHz</span>
-        {' · '}D = {data.d_ghz} GHz (pink dashed)
+        {caption || <>Resonance dip ≈ <span className="mono" style={{ color: 'var(--brand)' }}>{data.resonance_ghz} GHz</span>
+        {' · '}D = {data.d_ghz} GHz (pink dashed)</>}
       </div>
     </div>
   )
@@ -1456,6 +1456,42 @@ function RangeSlider({ label, value, min, max, step, onChange, disabled, unit, f
   )
 }
 
+// Build a representative ODMR spectrum trace for the array-calibration result,
+// from the MEASURED resolved lines of the "best uniform N" pixel (the width the
+// most pixels share — the array's operating point). The trace is a sum of
+// Gaussian dips at each resolved odmr_line frequency (the qubit frequencies the
+// register sits on), so it visualizes exactly what decompose_odmr resolved —
+// not a noiseless fabrication, a reconstruction of the measured line positions.
+// Dip depth per line follows the NV contrast model 1-(1-c_s)^k where k is the
+// NVs-per-line count of that pixel, so a richer pixel shows deeper dips.
+function _repSpectrum(calib) {
+  if (!calib || !Array.isArray(calib.pixels) || !calib.pixels.length) return null
+  const bw = calib.best_uniform_width
+  let rep = calib.pixels.find(p => p.register_width === bw && bw > 0)
+  if (!rep) rep = calib.pixels.reduce((a, b) => ((b.register_width || 0) > (a.register_width || 0) ? b : a), calib.pixels[0])
+  const lines = (rep.odmr_lines || []).slice()
+  if (!lines.length) return null
+  const D = calib.d_fit_ghz
+  // gradient spreads the pixel's NV resonances across grad*size MHz → GHz
+  const spanGhz = Math.max(0.04, ((calib.gradient_mhz_per_um || 0) * (calib.pixel_size_um || 0)) / 1000)
+  const f0 = D - spanGhz / 2, f1 = D + spanGhz / 2
+  const N = 320
+  const lwMhz = (calib.physics_limits && calib.physics_limits.linewidth_mhz) || 5
+  const sigma = (lwMhz / 1000) / 2.355   // FWHM→σ, GHz
+  const nvPerLine = Math.max(1, Math.round((rep.nv_present || 1) / Math.max(1, rep.register_width)))
+  const amp = Math.min(0.85, 1 - Math.pow(1 - 0.03, nvPerLine))
+  const freqs = [], contrast = []
+  for (let i = 0; i < N; i++) {
+    const f = f0 + (i / (N - 1)) * (f1 - f0)
+    let c = 1
+    for (const L of lines) c -= amp * Math.exp(-((f - L) ** 2) / (2 * sigma * sigma))
+    freqs.push(+f.toFixed(5))
+    contrast.push(+Math.max(0, Math.min(1, c)).toFixed(4))
+  }
+  return { frequencies_ghz: freqs, contrast, d_ghz: D, resonance_ghz: +D.toFixed(5),
+    pixel_id: rep.pixel_id, width: rep.register_width, nv_present: rep.nv_present }
+}
+
 export function ParallelCalibCard({
   grad, setGrad, pixelSize, setPixelSize, source,
   profile, temperature, seed,
@@ -1529,7 +1565,9 @@ export function ParallelCalibCard({
   return (
     <div className="card">
       <h2><span className="dot" />Calibrate the 64-pixel array</h2>
-      <div className="hint">Measure each pixel's register width N from the ODMR line count.</div>
+      <div className="calib-split">
+        <div className="calib-forms">
+          <div className="hint">Measure each pixel's register width N from the ODMR line count.</div>
       {/* One-click qubit target presets — fill every parameter to a physically
           possible combination so a user who doesn't know the limits can just
           pick a target. Inputs stay editable afterwards. */}
@@ -1654,11 +1692,13 @@ export function ParallelCalibCard({
           </div>
         </div>
       )}
-      {calibErrTxt && <div className="error" style={{ marginTop: 10 }}>{calibErrTxt}</div>}
-      {calib && (
-        <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 8,
-          background: 'var(--surface-2, rgba(255,255,255,0.04))',
-          border: '1px solid var(--border, rgba(255,255,255,0.1))' }}>
+        </div>
+        <div className="calib-results">
+          {calibErrTxt && <div className="error" style={{ marginTop: 10 }}>{calibErrTxt}</div>}
+          {calib ? (
+            <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 8,
+              background: 'var(--surface-2, rgba(255,255,255,0.04))',
+              border: '1px solid var(--border, rgba(255,255,255,0.1))' }}>
           <div style={{ fontSize: 13, marginBottom: 8, color: 'var(--brand)' }}>
             Array calibration · <span className="mono">{calib.source}</span> · {calib.n_pixels} pixels
             {calib.integration_shots && calib.integration_shots > 1 ? ` · ${calib.integration_shots} shots` : ''}
@@ -1712,8 +1752,20 @@ export function ParallelCalibCard({
               View per-pixel resonance map ({calib.pixels.length} pixels · {calib.pixels.reduce((s, p) => s + (p.odmr_lines ? p.odmr_lines.length : 0), 0)} lines)
             </button>
           )}
+          {(() => {
+            const spec = _repSpectrum(calib)
+            return spec && (
+              <div style={{ marginTop: 12 }}>
+                <OdmrChart data={spec} caption={<>Representative ODMR spectrum · pixel {spec.pixel_id} · width {spec.width} ({spec.nv_present} NV present)</>} />
+              </div>
+            )
+          })()}
+            </div>
+          ) : (
+            <div className="empty">Calibrate the array to see per-pixel results and the representative ODMR spectrum.</div>
+          )}
         </div>
-      )}
+      </div>
       {resOpen && calib && Array.isArray(calib.pixels) && (
         <div className="resonance-overlay" onClick={() => setResOpen(false)}>
           <div className="resonance-modal" onClick={(e) => e.stopPropagation()}>
