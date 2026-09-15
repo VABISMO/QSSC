@@ -6,7 +6,7 @@ import {
   SignalChart, CalibrationPanel, CalibrationResults, Verdict, NoiseBudget,
   OpticalChainDiagram, RunPhysics, MeasurementHelp,
   CompassRose, GyroPanel, MagnetoImage, SensorField, TensorPanel,
-  ParallelCalibCard, ParallelCalibResults,
+  ParallelCalibCard, ParallelCalibResults, SignalLab,
 } from './components.jsx'
 
 // Fallback firmware command list (all 17 verbs). Used in the "Reply & readout"
@@ -548,6 +548,7 @@ export default function App() {
   const odmr = useAsync(() => api.odmr(profile, 1e-3, 160), [profile])
   const cal = useAsync(() => api.calibration(profile), [profile])
   const signal = useAsync(() => api.signal({ profile, temperature_k: temperature, sequence: seq, detuning_mhz: detuning, points: 220, hardware: hwMode === 'hardware' }), [profile, temperature, seq, detuning, hwMode])
+  const signalArr = useAsync(() => api.signalArray({ profile, temperature_k: temperature, sequence: seq, detuning_mhz: detuning, points: 140, seed, hardware: hwMode === 'hardware' }), [profile, temperature, seq, detuning, seed, hwMode])
 
   const refreshHistory = useCallback(() => {
     setHistoryLoading(true)
@@ -2151,9 +2152,9 @@ export default function App() {
           </>)}
           {circuitsSub === 'signal' && (<>
           <div className="card">
-            <h2><span className="dot" />Analog detected signal</h2>
-            <div className="hint">Lock-in-demodulated detector photocurrent the on-chip graphene/MoS₂ array records during a pulse sequence.</div>
-            <div className="row" style={{ marginBottom: 10 }}>
+            <h2><span className="dot" />Per-pixel analog signal lab</h2>
+            <div className="hint">Fired emitter drive vs received detector photocurrent for every pixel in the 8×8 array, with per-pixel KPIs and array-level graphs. The animated grid pulses with the AD7616 photocurrent as the time cursor sweeps the pulse sequence — click a pixel for its sent-vs-received overlay.</div>
+            <div className="row" style={{ marginBottom: 12 }}>
               <div className="field">
                 <label>Sequence</label>
                 <select value={seq} onChange={e => setSeq(e.target.value)}>
@@ -2165,6 +2166,11 @@ export default function App() {
                 <input type="number" step="any" value={detuning} onChange={e => setDetuning(+e.target.value)} />
               </div>
             </div>
+            <SignalLab data={signalArr.data} error={signalArr.error} />
+          </div>
+          <div className="card" style={{ marginTop: 16 }}>
+            <h2><span className="dot" />Single-pixel reference trace</h2>
+            <div className="hint">The normalized photoluminescence of pixel 0 — the same pulse sequence, as a single oscilloscope-style trace (T₂ + readout contrast only, no per-pixel scaling).</div>
             <SignalChart data={signal.data} error={signal.error} />
           </div>
           </>)}

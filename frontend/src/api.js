@@ -38,6 +38,7 @@ export const api = {
     get(`/api/odmr?profile=${profile}&b_field=${b_field}&points=${points}`),
   calibration: (profile) => get(`/api/calibration?profile=${profile}`),
   signal: (o) => get(`/api/signal?${q(o)}`),
+  signalArray: (o) => get(`/api/signal/array?${q(o)}`),
   calibrationRun: (o) => post(`/api/calibration/run?${q(o)}`, {}),
   // async circuit execution (Redis + RQ) -> returns {job_id, status}
   run: (body) => post('/api/circuit/run', body),
