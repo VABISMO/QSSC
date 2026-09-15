@@ -3,7 +3,7 @@ import { api } from './api.js'
 import { deriveMeasurement } from './derive.js'
 import {
   QubitGrid, OdmrChart, BarCounts,
-  SignalChart, CalibrationPanel, Verdict, NoiseBudget,
+  SignalChart, CalibrationPanel, CalibrationResults, Verdict, NoiseBudget,
   OpticalChainDiagram, RunPhysics, MeasurementHelp,
   CompassRose, GyroPanel, MagnetoImage, SensorField, TensorPanel,
   ParallelCalibCard, ParallelCalibResults,
@@ -2106,17 +2106,22 @@ export default function App() {
               page's own two-column grid — no nested split inside one cell. */}
           {!parallelMode ? (
           <div className="grid cols-2">
-            <div className="card">
-              <h2><span className="dot" />ODMR spectrum</h2>
-              <div className="hint">Lock-in ODMR — the on-chip graphene/MoS₂ detector array's photocurrent dips at D ± γB (resonant MW flips the spin dark), with hyperfine replicas.</div>
-              <OdmrChart data={odmr.data} error={odmr.error} />
-            </div>
+            {/* LEFT column: the calibration form */}
             <div className="card">
               <h2><span className="dot" />Calibration process</h2>
+              <div className="hint">Set the gradient DAC code, then run the 4-stage calibration. Results and the ODMR spectrum appear on the right.</div>
               <CalibrationPanel
-                profile={profile} temperature={temperature} seed={seed}
-                run={runCalibration} running={calRunning} result={calRun} err={calErr}
+                run={runCalibration} running={calRunning}
               />
+            </div>
+            {/* RIGHT column: measured results, then the ODMR spectrum below */}
+            <div>
+              <CalibrationResults result={calRun} err={calErr} />
+              <div className="card" style={{ marginTop: 16 }}>
+                <h2><span className="dot" />ODMR spectrum</h2>
+                <div className="hint">Lock-in ODMR — the on-chip graphene/MoS₂ detector array's photocurrent dips at D ± γB (resonant MW flips the spin dark), with hyperfine replicas.</div>
+                <OdmrChart data={odmr.data} error={odmr.error} />
+              </div>
             </div>
           </div>
           ) : (

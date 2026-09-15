@@ -748,12 +748,9 @@ function QubitPixelGrid({ counts, cols = 8 }) {
   )
 }
 
-export function CalibrationPanel({ profile, temperature, seed, run, running, result, err }) {
-  const [resOpen, setResOpen] = useState(false)
-  const [gradCode, setGradCode] = useState(1803)  // MCP4921 DAC code (0..4095); 1803 ≈ 2.2 A addressing gradient
-  const perPin = result && result.per_pin
-  const dFit = result && result.d_fit_ghz
-  const qsum = result && result.qubit_summary
+export function CalibrationPanel({ run, running }) {
+  // MCP4921 DAC code (0..4095); 1803 ≈ 2.2 A addressing gradient
+  const [gradCode, setGradCode] = useState(1803)
   const gradOn = gradCode > 0
   // DAC code -> coil current (I = 5V * code/4096 / 1Ω) and spread (0.98 MHz/µm at 2.2 A)
   const coilA = gradOn ? (5.0 * gradCode / 4096) : 0
@@ -774,7 +771,26 @@ export function CalibrationPanel({ profile, temperature, seed, run, running, res
           {running ? <><span className="spinner" /> Calibrating…</> : 'Run calibration'}
         </button>
       </div>
+    </div>
+  )
+}
+
+// Single-pixel calibration results — measured register width, the 4-stage
+// breakdown, and the per-pin resonance-map modal. Right-hand card of the
+// spectroscopy grid; App.jsx renders the ODMR spectrum card directly below it.
+// The form (CalibrationPanel) is the left-hand card.
+export function CalibrationResults({ result, err }) {
+  const [resOpen, setResOpen] = useState(false)
+  const perPin = result && result.per_pin
+  const dFit = result && result.d_fit_ghz
+  const qsum = result && result.qubit_summary
+  return (
+    <div className="card">
+      <h2><span className="dot" />Calibration results</h2>
       {err && <div className="error" style={{ marginTop: 10 }}>{err}</div>}
+      {!result && !err && (
+        <div className="empty">Run the calibration to see the measured register width and per-pin resonance map.</div>
+      )}
       {qsum && (
         <div className="qubit-summary" style={{
           marginTop: 10, padding: '10px 12px', borderRadius: 8,
