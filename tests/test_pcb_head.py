@@ -21,8 +21,9 @@ The 9-wire AD7616 SPI + GND/+3V3/+5V cross J12 (BTB_DAUGHTER) to the main board.
 
 All checks parse the committed ``.kicad_pcb`` / ``.kicad_pro`` sexp/JSON -- no
 regeneration, no re-route, no pcbnew for the structural checks (so they run in
-CI). The DRC check runs the real ``kicad-cli pcb drc`` and is skipped where
-``kicad-cli`` is absent. The main-board checks live in ``test_pcb_stackup.py``,
+CI). The DRC check runs the real ``kicad-cli pcb drc --refill-zones`` (refill:
+the stored fill must never decide the verdict -- see test_pcb_drc.py). The
+main-board checks live in ``test_pcb_stackup.py``,
 ``test_pcb_drc.py``, ``test_pcb_route.py``; this file is the head-board mirror.
 """
 from __future__ import annotations
@@ -32,8 +33,6 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-
-import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 PCB = REPO / "hardware" / "pcb" / "chip_module.kicad_pcb"
@@ -101,6 +100,8 @@ def _footprints(path: Path) -> list[tuple[str, str, str]]:
 
 
 def _has_kicad_cli() -> bool:
+    # Kept for the local convenience check in the module docstring; the tests
+    # themselves no longer skip -- a missing kicad-cli FAILS the DRC test.
     return shutil.which("kicad-cli") is not None
 
 
@@ -220,10 +221,16 @@ def test_head_det_pads_on_bcu():
 
 
 # ---------------------------------------------------------------------------
-# DRC -- the committed head board is clean (skip in CI: no kicad-cli)
+# DRC -- the committed head board is DRC-CLEAN (0 violations), and this test
+# is the RATCHET that keeps it that way: any new or regressed violation fails
+# the build. Documented deviations go into KNOWN_VIOLATIONS (type, net
+# signature) -- today the set is EMPTY; to add one, fix the board first or
+# prove it is locally unfixable and document the constraint analysis here.
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not _has_kicad_cli(), reason="kicad-cli not on PATH")
+KNOWN_VIOLATIONS = set()
+
+
 def test_head_drc_zero_violations(tmp_path):
     dst_pcb = tmp_path / "chip_module.kicad_pcb"
     dst_pro = tmp_path / "chip_module.kicad_pro"
@@ -232,7 +239,7 @@ def test_head_drc_zero_violations(tmp_path):
 
     out = tmp_path / "drc.json"
     res = subprocess.run(
-        ["kicad-cli", "pcb", "drc", "--format", "json",
+        ["kicad-cli", "pcb", "drc", "--refill-zones", "--format", "json",
          "--output", str(out), str(dst_pcb)],
         capture_output=True, text=True, check=False,
     )
@@ -240,10 +247,26 @@ def test_head_drc_zero_violations(tmp_path):
 
     data = json.loads(out.read_text())
     violations = data.get("violations", [])
-    footprints = [v for v in violations
-                  if str(v.get("type", "")).startswith("footprint")]
-    assert violations == [], (
-        f"{len(violations)} head DRC violation(s):\n"
-        + json.dumps(violations[:10], indent=2)
+
+    def signature(v):
+        # Net names are bracketed in the ITEM descriptions ("Leiterbahn
+        # [DET_IN0] auf In3.Cu"); the violation description itself writes them
+        # unbracketed ("Netze DET_IN0 und DET_IN8") -- scan both.
+        text = v.get("description", "") + "".join(
+            it.get("description", "") for it in v.get("items", []))
+        nets = set(re.findall(r"\[([A-Za-z0-9_+/.-]+)\]", text))
+        return (str(v.get("type", "")), tuple(sorted(nets)))
+
+    found = {signature(v) for v in violations}
+    unknown = found - KNOWN_VIOLATIONS
+    stale = KNOWN_VIOLATIONS - found
+    assert not unknown, (
+        f"{len(violations)} head DRC violation(s), {len(unknown)} not in the "
+        f"allowlist (fix the board or document it in KNOWN_VIOLATIONS):\n"
+        + json.dumps([v for v in violations
+                      if signature(v) in unknown][:10], indent=2)
     )
-    assert footprints == [], f"{len(footprints)} head footprint error(s)"
+    assert not stale, (
+        f"stale allowlist entries -- the head board no longer exhibits "
+        f"{stale}: remove them from KNOWN_VIOLATIONS"
+    )
