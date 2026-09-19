@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { deriveMeasurement } from './derive.js'
 
 // ---------------------------------------------------------------------------
@@ -207,7 +207,7 @@ export function ParallelPixelFreqTable({ pixels, dGhz }) {
 // ---------------------------------------------------------------------------
 // OdmrChart — SVG line chart of the ODMR contrast vs frequency.
 // ---------------------------------------------------------------------------
-export function OdmrChart({ data, error }) {
+export function OdmrChart({ data, error, caption }) {
   if (error) return <div className="error">{error}</div>
   if (!data || !data.frequencies_ghz) return <div className="muted">Loading spectrum…</div>
   const f = data.frequencies_ghz
@@ -250,8 +250,8 @@ export function OdmrChart({ data, error }) {
         <text className="axtext" x={W / 2} y={H - 4} textAnchor="middle">frequency (GHz)</text>
       </svg>
       <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-        Resonance dip ≈ <span className="mono" style={{ color: 'var(--brand)' }}>{data.resonance_ghz} GHz</span>
-        {' · '}D = {data.d_ghz} GHz (pink dashed)
+        {caption || <>Resonance dip ≈ <span className="mono" style={{ color: 'var(--brand)' }}>{data.resonance_ghz} GHz</span>
+        {' · '}D = {data.d_ghz} GHz (pink dashed)</>}
       </div>
     </div>
   )
@@ -698,8 +698,305 @@ export function SignalChart({ data, error }) {
 }
 
 // ---------------------------------------------------------------------------
-// CalibrationPanel — runs the 4-stage VABISMO-style calibration on demand.
-// Stage 4 (per-pin resonance sweep) populates the per-pin resonance map,
+// SignalLab — per-pixel analog signal visualizer. For every pixel in the 8×8
+// array it shows the FIRED emitter drive (CQD pump gate) vs the RECEIVED
+// detector photocurrent (AD7616 codes), with per-pixel KPIs and array-level
+// graphs. An animated 8×8 grid pulses with the received photocurrent as a
+// scrubable time cursor sweeps the pulse sequence; click a pixel for its
+// sent-vs-received overlay.
+// ---------------------------------------------------------------------------
+const SIG_ADC_MAX = 65535
+
+function KpiTile({ k, v, unit, accent }) {
+  return (
+    <div className="stat" style={{ minWidth: 96 }}>
+      <div className="k">{k}</div>
+      <div className="v" style={accent ? { color: accent } : undefined}>{v}<small>{unit}</small></div>
+    </div>
+  )
+}
+
+// mini sparkline of a pixel's received trace (for the grid tile tooltip/preview)
+function MiniSpark({ recv, color }) {
+  const W = 100, H = 26
+  const lo = Math.min(...recv), hi = Math.max(...recv)
+  const span = hi - lo || 1
+  const line = recv.map((v, i) => `${i ? 'L' : 'M'}${((i / (recv.length - 1)) * W).toFixed(1)} ${(H - ((v - lo) / span) * H).toFixed(1)}`).join(' ')
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: '100%', height: H, display: 'block', opacity: 0.9 }}>
+      <path d={line} fill="none" stroke={color} strokeWidth="1.4" />
+    </svg>
+  )
+}
+
+export function SignalLab({ data, error }) {
+  const [sel, setSel] = useState(0)
+  const [ti, setTi] = useState(0)
+  const [playing, setPlaying] = useState(false)
+  const raf = useRef(null)
+
+  // auto-advance the time cursor while playing
+  useEffect(() => {
+    if (!playing || !data) return
+    let last = performance.now()
+    const tick = (now) => {
+      if (now - last > 90) {
+        setTi(p => (p + 1) % data.n_points)
+        last = now
+      }
+      raf.current = requestAnimationFrame(tick)
+    }
+    raf.current = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf.current)
+  }, [playing, data])
+
+  // reset cursor + selection when the data changes (new sequence / params)
+  useEffect(() => { setTi(0); setSel(0) }, [data])
+
+  const derived = useMemo(() => {
+    if (!data || !data.received) return null
+    const { received, fired, pixels, n_pixels } = data
+    let recvMax = 1
+    for (let i = 0; i < n_pixels; i++) for (let j = 0; j < received[i].length; j++)
+      if (received[i][j] > recvMax) recvMax = received[i][j]
+    // per-pixel totals for the scatter
+    const totals = pixels.map((_, i) => {
+      let f = 0, r = 0
+      for (let j = 0; j < received[i].length; j++) { f += fired[i][j]; r += received[i][j] }
+      return { f, r }
+    })
+    // SNR histogram buckets
+    const snrs = pixels.map(p => p.snr)
+    const sMax = Math.max(1, ...snrs), sMin = Math.min(0, ...snrs)
+    const nB = 8, bins = new Array(nB).fill(0)
+    for (const s of snrs) {
+      let b = Math.floor(((s - sMin) / (sMax - sMin || 1)) * nB)
+      if (b >= nB) b = nB - 1; if (b < 0) b = 0
+      bins[b]++
+    }
+    return { recvMax, totals, bins, sMax, sMin }
+  }, [data])
+
+  if (error) return <div className="error">{error}</div>
+  if (!data || !data.received || !derived) return <div className="muted">Loading per-pixel signal…</div>
+  const { received, fired, pixels, summary, time_ns, n_points, n_pixels } = data
+  const { recvMax, totals, bins, sMax } = derived
+  const cols = 8
+  const rows = Math.ceil(n_pixels / cols)
+  const seqLabel = { ramsey: 'Ramsey fringes', odmr: 'CW ODMR dip', pulse: 'Spin readout decay' }[data.sequence] || data.sequence
+  const selPx = pixels[sel] || pixels[0]
+
+  // ---- selected-pixel fired vs received overlay (dual axis) ----
+  const OW = 580, OH = 240, OP = 38
+  const t0 = time_ns[0], t1 = time_ns[time_ns.length - 1]
+  const ox = v => OP + ((v - t0) / (t1 - t0 || 1)) * (OW - 2 * OP)
+  const oRecvY = v => OH - OP - (v / SIG_ADC_MAX) * (OH - 2 * OP)            // left axis: codes 0..65535
+  const oFireY = v => OH - OP - v * (OH - 2 * OP)                        // right axis: 0..1
+  const recvLine = received[sel].map((v, i) => `${i ? 'L' : 'M'}${ox(time_ns[i]).toFixed(1)} ${oRecvY(v).toFixed(1)}`).join(' ')
+  const fireLine = fired[sel].map((v, i) => `${i ? 'L' : 'M'}${ox(time_ns[i]).toFixed(1)} ${oFireY(v).toFixed(1)}`).join(' ')
+  const curX = ox(time_ns[ti])
+
+  // ---- per-pixel amplitude bars ----
+  const BW = 560, BH = 150, BP = 28
+  const ampMax = Math.max(1, ...pixels.map(p => p.amplitude))
+  const barW = (BW - 2 * BP) / n_pixels
+
+  // ---- scatter ----
+  const SW = 360, SH = 200, SP = 34
+  const fMax = Math.max(1, ...totals.map(t => t.f))
+  const rMaxT = Math.max(1, ...totals.map(t => t.r))
+  const scx = v => SP + (v / fMax) * (SW - 2 * SP)
+  const scy = v => SH - SP - (v / rMaxT) * (SH - 2 * SP)
+
+  // ---- SNR histogram ----
+  const HW = 320, HH = 200, HP = 30
+  const binMax = Math.max(1, ...bins)
+  const binW = (HW - 2 * HP) / bins.length
+
+  return (
+    <div>
+      {/* KPI summary */}
+      <div className="stats" style={{ flexWrap: 'wrap', marginBottom: 14 }}>
+        <KpiTile k="Alive pixels" v={summary.alive} unit={`/${n_pixels}`} accent="var(--brand)" />
+        <KpiTile k="Dead pixels" v={summary.dead} unit={`/${n_pixels}`} accent="#f87171" />
+        <KpiTile k="Mean SNR" v={summary.mean_snr} accent="var(--brand)" />
+        <KpiTile k="Mean amplitude" v={Math.round(summary.mean_amplitude).toLocaleString()} unit=" codes" />
+        <KpiTile k="Mean dip depth" v={summary.mean_dip_depth} />
+        <KpiTile k="Σ photocurrent" v={Math.round(summary.total_photocurrent).toLocaleString()} unit=" codes" />
+      </div>
+
+      <div className="grid cols-2" style={{ alignItems: 'start' }}>
+        {/* LEFT: animated 8×8 grid + scrubber */}
+        <div>
+          <div style={{ fontSize: 12.5, marginBottom: 6, color: 'var(--brand)' }}>
+            Per-pixel received photocurrent · {seqLabel} · t = <span className="mono">{(time_ns[ti] / 1e3).toFixed(1)} µs</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 4, maxWidth: 420 }}>
+            {pixels.map((p, i) => {
+              const v = p.alive ? received[i][ti] / recvMax : 0
+              const isSel = i === sel
+              return (
+                <div key={i}
+                  onClick={() => setSel(i)}
+                  title={`pixel ${i} (r${p.row} c${p.col}) · ${p.alive ? p.n_nv + ' NV · SNR ' + p.snr : 'dead'}`}
+                  style={{
+                    aspectRatio: '1 / 1',
+                    position: 'relative',
+                    cursor: 'pointer',
+                    display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+                    fontSize: 9.5, fontFamily: 'var(--mono, monospace)',
+                    color: p.alive ? 'rgba(0,0,0,0.55)' : 'var(--dim)',
+                    background: p.alive
+                      ? `rgba(52, 211, 153, ${0.16 + 0.84 * v})`
+                      : 'rgba(255,255,255,0.04)',
+                    border: isSel ? '2px solid var(--brand)' : '1px solid var(--border, rgba(255,255,255,0.1))',
+                    borderRadius: 5,
+                    boxShadow: isSel ? '0 0 0 2px rgba(52,211,153,0.25)' : 'none',
+                    transition: 'background 80ms linear',
+                    padding: 2,
+                  }}>
+                  {p.alive ? Math.round(received[i][ti]) : '·'}
+                </div>
+              )
+            })}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, maxWidth: 420 }}>
+            <button className="pill" onClick={() => setPlaying(p => !p)}
+              style={{ padding: '4px 12px', fontSize: 12.5 }}>
+              {playing ? '⏸ Pause' : '▶ Play'}
+            </button>
+            <input type="range" min={0} max={n_points - 1} value={ti}
+              onChange={e => { setPlaying(false); setTi(+e.target.value) }}
+              style={{ flex: 1 }} />
+          </div>
+          <div className="muted" style={{ fontSize: 11.5, marginTop: 6, maxWidth: 420 }}>
+            Click a pixel to inspect its fired-vs-received overlay →. Green intensity = instantaneous AD7616 code; dead pixels (no diamond) stay dark.
+          </div>
+        </div>
+
+        {/* RIGHT: selected-pixel fired vs received overlay */}
+        <div className="card" style={{ padding: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+            <strong>Pixel {sel} (r{selPx.row} c{selPx.col}) · {selPx.alive ? `${selPx.n_nv} NV` : 'dead'}</strong>
+            <span className="muted" style={{ fontSize: 11.5 }}>{data.source}</span>
+          </div>
+          <div className="chart-wrap">
+            <svg className="chart" viewBox={`0 0 ${OW} ${OH}`} preserveAspectRatio="none">
+              {[0, .25, .5, .75, 1].map((f, i) => {
+                const y = OP + f * (OH - 2 * OP)
+                return <line key={i} className="gridline" x1={OP} y1={y} x2={OW - OP} y2={y} />
+              })}
+              <line className="axis" x1={OP} y1={OH - OP} x2={OW - OP} y2={OH - OP} />
+              <line className="axis" x1={OP} y1={OP} x2={OP} y2={OH - OP} />
+              {/* fired drive (step), behind */}
+              <path d={fireLine} fill="none" stroke="#f59e0b" strokeWidth="1.6" opacity="0.85" />
+              {/* received photocurrent (front) */}
+              <path d={recvLine} fill="none" stroke="url(#slrecv)" strokeWidth="2" />
+              {/* time cursor */}
+              <line x1={curX} y1={OP} x2={curX} y2={OH - OP} stroke="var(--brand)" strokeWidth="1" opacity="0.5" strokeDasharray="3 3" />
+              <defs>
+                <linearGradient id="slrecv" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0" stopColor="#34d399" />
+                  <stop offset="1" stopColor="#22d3ee" />
+                </linearGradient>
+              </defs>
+              <text className="axtext" x={6} y={OH / 2} transform={`rotate(-90 12 ${OH / 2})`}>recv (codes)</text>
+              <text className="axtext" x={OW - 6} y={OH / 2} transform={`rotate(90 ${OW - 12} ${OH / 2})`}>fired (0..1)</text>
+              <text className="axtext" x={OW / 2} y={OH - 4} textAnchor="middle">time (ns)</text>
+            </svg>
+          </div>
+          {/* selected-pixel KPIs */}
+          <div className="stats" style={{ flexWrap: 'wrap', marginTop: 10, gap: 8 }}>
+            <KpiTile k="Amplitude" v={Math.round(selPx.amplitude).toLocaleString()} unit=" codes" />
+            <KpiTile k="SNR" v={selPx.snr} accent="var(--brand)" />
+            <KpiTile k="Dip depth" v={selPx.dip_depth} />
+            <KpiTile k="On/off" v={selPx.on_off_ratio} />
+            <KpiTile k="Noise σ" v={Math.round(selPx.noise_floor)} unit=" codes" />
+            <KpiTile k="Lag" v={selPx.phase_lag_ns} unit=" ns" />
+          </div>
+          <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
+            <span style={{ color: '#f59e0b' }}>━ fired</span> (CQD pump gate, DRIVE_PATTERN) · <span style={{ color: '#34d399' }}>━ received</span> (graphene/MoS₂ → TIA → AD7616 photocurrent). The received trace follows the {seqLabel.toLowerCase()} with the pixel's NV-population amplitude.
+          </div>
+        </div>
+      </div>
+
+      {/* array-level graphs */}
+      <div className="grid cols-2" style={{ marginTop: 16, alignItems: 'start' }}>
+        {/* per-pixel amplitude bars */}
+        <div className="card" style={{ padding: 12 }}>
+          <div style={{ fontSize: 12.5, marginBottom: 6, color: 'var(--brand)' }}>Per-pixel received amplitude (codes)</div>
+          <svg viewBox={`0 0 ${BW} ${BH}`} preserveAspectRatio="none" style={{ width: '100%', height: BH }}>
+            <line className="axis" x1={BP} y1={BH - BP} x2={BW - BP} y2={BH - BP} />
+            <line className="axis" x1={BP} y1={BP} x2={BP} y2={BH - BP} />
+            {pixels.map((p, i) => {
+              const h = (p.amplitude / ampMax) * (BH - 2 * BP)
+              const x = BP + i * barW
+              return <rect key={i} x={x} y={BH - BP - h} width={Math.max(1, barW - 1)} height={h}
+                fill={p.alive ? '#34d399' : '#475569'} opacity={i === sel ? 1 : 0.55} />
+            })}
+            <text className="axtext" x={BW / 2} y={BH - 2} textAnchor="middle">pixel index 0..63</text>
+          </svg>
+          <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>Brighter pixels (larger microdiamond aggregate → more NV) swing higher; dead pixels sit at the noise floor.</div>
+        </div>
+
+        {/* SNR histogram */}
+        <div className="card" style={{ padding: 12 }}>
+          <div style={{ fontSize: 12.5, marginBottom: 6, color: 'var(--brand)' }}>SNR distribution (64 pixels)</div>
+          <svg viewBox={`0 0 ${HW} ${HH}`} preserveAspectRatio="none" style={{ width: '100%', height: HH }}>
+            <line className="axis" x1={HP} y1={HH - HP} x2={HW - HP} y2={HH - HP} />
+            <line className="axis" x1={HP} y1={HP} x2={HP} y2={HH - HP} />
+            {bins.map((b, i) => {
+              const h = (b / binMax) * (HH - 2 * HP)
+              const x = HP + i * binW
+              return <g key={i}>
+                <rect x={x} y={HH - HP - h} width={Math.max(1, binW - 2)} height={h} fill="#22d3ee" opacity="0.7" />
+                <text className="axtext" x={x + binW / 2} y={HH - HP + 12} textAnchor="middle" fontSize="9">{i === bins.length - 1 ? sMax.toFixed(0) : ''}</text>
+              </g>
+            })}
+            <text className="axtext" x={HW / 2} y={HH - 2} textAnchor="middle">SNR</text>
+          </svg>
+          <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>Mean SNR ≈ {summary.mean_snr}; the spread reflects per-pixel NV-population + shot-noise variation.</div>
+        </div>
+
+        {/* fired-vs-received scatter */}
+        <div className="card" style={{ padding: 12 }}>
+          <div style={{ fontSize: 12.5, marginBottom: 6, color: 'var(--brand)' }}>Fired vs received energy (per pixel)</div>
+          <svg viewBox={`0 0 ${SW} ${SH}`} preserveAspectRatio="none" style={{ width: '100%', height: SH }}>
+            <line className="axis" x1={SP} y1={SH - SP} x2={SW - SP} y2={SH - SP} />
+            <line className="axis" x1={SP} y1={SP} x2={SP} y2={SH - SP} />
+            {totals.map((t, i) => (
+              <circle key={i} cx={scx(t.f)} cy={scy(t.r)} r={i === sel ? 4.5 : 3}
+                fill={pixels[i].alive ? '#34d399' : '#f87171'} opacity={i === sel ? 1 : 0.6}
+                stroke={i === sel ? 'var(--brand)' : 'none'} onClick={() => setSel(i)} style={{ cursor: 'pointer' }} />
+            ))}
+            <text className="axtext" x={SW / 2} y={SH - 2} textAnchor="middle">Σ fired (drive)</text>
+            <text className="axtext" x={8} y={SH / 2} transform={`rotate(-90 12 ${SH / 2})`}>Σ received (codes)</text>
+          </svg>
+          <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>Each dot is a pixel; alive (green) cluster above the dead (red) noise-floor cluster.</div>
+        </div>
+
+        {/* dead-pixel map */}
+        <div className="card" style={{ padding: 12 }}>
+          <div style={{ fontSize: 12.5, marginBottom: 6, color: 'var(--brand)' }}>Array health map ({summary.alive} alive · {summary.dead} dead)</div>
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 4, maxWidth: 300 }}>
+            {pixels.map((p, i) => (
+              <div key={i} title={`pixel ${i}: ${p.alive ? 'alive' : 'no diamond detected'}`}
+                style={{
+                  aspectRatio: '1 / 1', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 10, fontFamily: 'var(--mono, monospace)',
+                  color: p.alive ? 'rgba(0,0,0,0.6)' : '#fca5a5',
+                  background: p.alive ? 'rgba(52,211,153,0.55)' : 'rgba(248,113,113,0.25)',
+                  border: '1px solid var(--border, rgba(255,255,255,0.1))', borderRadius: 4,
+                }}>{p.alive ? '' : '✕'}</div>
+            ))}
+          </div>
+          <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>Green = detector saw a microdiamond (armed + read); red ✕ = empty hole (stage-1 scan below threshold).</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // which is shown in a modal -- the map only exists once the calibration has
 // actually swept each pin's ODMR dip, never before.
 // ---------------------------------------------------------------------------
@@ -748,12 +1045,9 @@ function QubitPixelGrid({ counts, cols = 8 }) {
   )
 }
 
-export function CalibrationPanel({ profile, temperature, seed, run, running, result, err }) {
-  const [resOpen, setResOpen] = useState(false)
-  const [gradCode, setGradCode] = useState(1803)  // MCP4921 DAC code (0..4095); 1803 ≈ 2.2 A addressing gradient
-  const perPin = result && result.per_pin
-  const dFit = result && result.d_fit_ghz
-  const qsum = result && result.qubit_summary
+export function CalibrationPanel({ run, running }) {
+  // MCP4921 DAC code (0..4095); 1803 ≈ 2.2 A addressing gradient
+  const [gradCode, setGradCode] = useState(1803)
   const gradOn = gradCode > 0
   // DAC code -> coil current (I = 5V * code/4096 / 1Ω) and spread (0.98 MHz/µm at 2.2 A)
   const coilA = gradOn ? (5.0 * gradCode / 4096) : 0
@@ -774,7 +1068,26 @@ export function CalibrationPanel({ profile, temperature, seed, run, running, res
           {running ? <><span className="spinner" /> Calibrating…</> : 'Run calibration'}
         </button>
       </div>
+    </div>
+  )
+}
+
+// Single-pixel calibration results — measured register width, the 4-stage
+// breakdown, and the per-pin resonance-map modal. Right-hand card of the
+// spectroscopy grid; App.jsx renders the ODMR spectrum card directly below it.
+// The form (CalibrationPanel) is the left-hand card.
+export function CalibrationResults({ result, err }) {
+  const [resOpen, setResOpen] = useState(false)
+  const perPin = result && result.per_pin
+  const dFit = result && result.d_fit_ghz
+  const qsum = result && result.qubit_summary
+  return (
+    <div className="card">
+      <h2><span className="dot" />Calibration results</h2>
       {err && <div className="error" style={{ marginTop: 10 }}>{err}</div>}
+      {!result && !err && (
+        <div className="empty">Run the calibration to see the measured register width and per-pin resonance map.</div>
+      )}
       {qsum && (
         <div className="qubit-summary" style={{
           marginTop: 10, padding: '10px 12px', borderRadius: 8,
@@ -1459,12 +1772,9 @@ function RangeSlider({ label, value, min, max, step, onChange, disabled, unit, f
 export function ParallelCalibCard({
   grad, setGrad, pixelSize, setPixelSize, source,
   profile, temperature, seed,
-  onCalibrate, calibRunning, calibResult, calibErr,
+  onCalibrate, calibRunning,
   antiNoisePresets,
 }) {
-  const calib = calibResult && !calibResult.error ? calibResult : null
-  const calibErrTxt = calibResult && calibResult.error ? calibResult.error : (calibErr || null)
-  const [resOpen, setResOpen] = useState(false)
   // Resolution + readout knobs that change the per-pixel qubit count and the
   // frequencies the calibration measures. Local state (only this card sends
   // them). Defaults reproduce the prior 1-shot / no-resolution behaviour so
@@ -1654,8 +1964,25 @@ export function ParallelCalibCard({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// Calibration results for the 64-pixel array — measured per-pixel register
+// widths, summary stats, and the per-pixel resonance-map modal. This is the
+// RIGHT-hand card of the spectroscopy grid; App.jsx renders the ODMR spectrum
+// card directly below it in the same column. The form (ParallelCalibCard) is
+// the LEFT-hand card. Splitting form from results lets the page's own two-
+// column grid place them side by side without a nested split inside one cell.
+export function ParallelCalibResults({ calibResult, calibErr }) {
+  const calib = calibResult && !calibResult.error ? calibResult : null
+  const calibErrTxt = calibResult && calibResult.error ? calibResult.error : (calibErr || null)
+  const [resOpen, setResOpen] = useState(false)
+  return (
+    <div className="card">
+      <h2><span className="dot" />Calibration results</h2>
       {calibErrTxt && <div className="error" style={{ marginTop: 10 }}>{calibErrTxt}</div>}
-      {calib && (
+      {calib ? (
         <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 8,
           background: 'var(--surface-2, rgba(255,255,255,0.04))',
           border: '1px solid var(--border, rgba(255,255,255,0.1))' }}>
@@ -1713,6 +2040,8 @@ export function ParallelCalibCard({
             </button>
           )}
         </div>
+      ) : (
+        <div className="empty">Calibrate the array to see per-pixel results.</div>
       )}
       {resOpen && calib && Array.isArray(calib.pixels) && (
         <div className="resonance-overlay" onClick={() => setResOpen(false)}>

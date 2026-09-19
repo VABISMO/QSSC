@@ -3,10 +3,10 @@ import { api } from './api.js'
 import { deriveMeasurement } from './derive.js'
 import {
   QubitGrid, OdmrChart, BarCounts,
-  SignalChart, CalibrationPanel, Verdict, NoiseBudget,
+  SignalChart, CalibrationPanel, CalibrationResults, Verdict, NoiseBudget,
   OpticalChainDiagram, RunPhysics, MeasurementHelp,
   CompassRose, GyroPanel, MagnetoImage, SensorField, TensorPanel,
-  ParallelCalibCard,
+  ParallelCalibCard, ParallelCalibResults, SignalLab,
 } from './components.jsx'
 
 // Fallback firmware command list (all 17 verbs). Used in the "Reply & readout"
@@ -548,6 +548,7 @@ export default function App() {
   const odmr = useAsync(() => api.odmr(profile, 1e-3, 160), [profile])
   const cal = useAsync(() => api.calibration(profile), [profile])
   const signal = useAsync(() => api.signal({ profile, temperature_k: temperature, sequence: seq, detuning_mhz: detuning, points: 220, hardware: hwMode === 'hardware' }), [profile, temperature, seq, detuning, hwMode])
+  const signalArr = useAsync(() => api.signalArray({ profile, temperature_k: temperature, sequence: seq, detuning_mhz: detuning, points: 140, seed, hardware: hwMode === 'hardware' }), [profile, temperature, seq, detuning, seed, hwMode])
 
   const refreshHistory = useCallback(() => {
     setHistoryLoading(true)
@@ -2100,42 +2101,60 @@ export default function App() {
           {/* ============================= SPECTROSCOPY + CALIBRATION ============================= */}
           </>)}
           {circuitsSub === 'spectro' && (<>
+          {/* 64-parallel OFF = single-pixel: ODMR left, calibration right.
+              64-parallel ON = 64-array: FORM left, RESULTS + ODMR spectrum
+              stacked right (ODMR below the resonance-map button). Uses the
+              page's own two-column grid — no nested split inside one cell. */}
+          {!parallelMode ? (
           <div className="grid cols-2">
-            <div className="card">
-              <h2><span className="dot" />ODMR spectrum</h2>
-              <div className="hint">Lock-in ODMR — the on-chip graphene/MoS₂ detector array's photocurrent dips at D ± γB (resonant MW flips the spin dark), with hyperfine replicas.</div>
-              <OdmrChart data={odmr.data} error={odmr.error} />
-            </div>
-            {/* 64-parallel OFF = single-pixel ODMR calibration; ON = 64-array
-                calibration in the SAME card slot. One calibrate, same position. */}
-            {!parallelMode ? (
+            {/* LEFT column: the calibration form */}
             <div className="card">
               <h2><span className="dot" />Calibration process</h2>
+              <div className="hint">Set the gradient DAC code, then run the 4-stage calibration. Results and the ODMR spectrum appear on the right.</div>
               <CalibrationPanel
-                profile={profile} temperature={temperature} seed={seed}
-                run={runCalibration} running={calRunning} result={calRun} err={calErr}
+                run={runCalibration} running={calRunning}
               />
             </div>
-            ) : (
-              <ParallelCalibCard
-                grad={parGrad} setGrad={setParGrad}
-                pixelSize={parPixelSize} setPixelSize={setParPixelSize}
-                source={hwMode === 'hardware' ? 'real' : 'sim'}
-                profile={profile} temperature={temperature} seed={seed}
-                onCalibrate={calibrateArray} calibRunning={arrCalibRunning}
-                calibResult={arrCalib} calibErr={arrCalibErr}
-                antiNoisePresets={ANTI_NOISE_PRESETS}
-              />
-            )}
+            {/* RIGHT column: measured results, then the ODMR spectrum below */}
+            <div>
+              <CalibrationResults result={calRun} err={calErr} />
+              <div className="card" style={{ marginTop: 16 }}>
+                <h2><span className="dot" />ODMR spectrum</h2>
+                <div className="hint">Lock-in ODMR — the on-chip graphene/MoS₂ detector array's photocurrent dips at D ± γB (resonant MW flips the spin dark), with hyperfine replicas.</div>
+                <OdmrChart data={odmr.data} error={odmr.error} />
+              </div>
+            </div>
           </div>
+          ) : (
+          <div className="grid cols-2">
+            {/* LEFT column: the calibration form */}
+            <ParallelCalibCard
+              grad={parGrad} setGrad={setParGrad}
+              pixelSize={parPixelSize} setPixelSize={setParPixelSize}
+              source={hwMode === 'hardware' ? 'real' : 'sim'}
+              profile={profile} temperature={temperature} seed={seed}
+              onCalibrate={calibrateArray} calibRunning={arrCalibRunning}
+              antiNoisePresets={ANTI_NOISE_PRESETS}
+            />
+            {/* RIGHT column: measured results, then the ODMR spectrum below */}
+            <div>
+              <ParallelCalibResults calibResult={arrCalib} calibErr={arrCalibErr} />
+              <div className="card" style={{ marginTop: 16 }}>
+                <h2><span className="dot" />ODMR spectrum</h2>
+                <div className="hint">Lock-in ODMR — the on-chip graphene/MoS₂ detector array's photocurrent dips at D ± γB (resonant MW flips the spin dark), with hyperfine replicas.</div>
+                <OdmrChart data={odmr.data} error={odmr.error} />
+              </div>
+            </div>
+          </div>
+          )}
 
           {/* ============================= ANALOG SIGNAL ============================= */}
           </>)}
           {circuitsSub === 'signal' && (<>
           <div className="card">
-            <h2><span className="dot" />Analog detected signal</h2>
-            <div className="hint">Lock-in-demodulated detector photocurrent the on-chip graphene/MoS₂ array records during a pulse sequence.</div>
-            <div className="row" style={{ marginBottom: 10 }}>
+            <h2><span className="dot" />Per-pixel analog signal lab</h2>
+            <div className="hint">Fired emitter drive vs received detector photocurrent for every pixel in the 8×8 array, with per-pixel KPIs and array-level graphs. The animated grid pulses with the AD7616 photocurrent as the time cursor sweeps the pulse sequence — click a pixel for its sent-vs-received overlay.</div>
+            <div className="row" style={{ marginBottom: 12 }}>
               <div className="field">
                 <label>Sequence</label>
                 <select value={seq} onChange={e => setSeq(e.target.value)}>
@@ -2147,6 +2166,11 @@ export default function App() {
                 <input type="number" step="any" value={detuning} onChange={e => setDetuning(+e.target.value)} />
               </div>
             </div>
+            <SignalLab data={signalArr.data} error={signalArr.error} />
+          </div>
+          <div className="card" style={{ marginTop: 16 }}>
+            <h2><span className="dot" />Single-pixel reference trace</h2>
+            <div className="hint">The normalized photoluminescence of pixel 0 — the same pulse sequence, as a single oscilloscope-style trace (T₂ + readout contrast only, no per-pixel scaling).</div>
             <SignalChart data={signal.data} error={signal.error} />
           </div>
           </>)}
