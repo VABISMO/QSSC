@@ -228,7 +228,7 @@ def main() -> None:
     # 3d. control nets -> remaining general IO (prefer SRCC/centre, then rest).
     # (I2C_SDA/I2C_SCL are GONE: the MCP4725 threshold DAC was removed with the
     # comparator/photon-counter chain -- the AD7616 range is HW-pin-strapped.)
-    # Invention 5 adds 4 gradient-coil DAC pins (grad_cs/sclk/mosi/en) for the
+    # The gradient variant adds 4 gradient-coil DAC pins (grad_cs/sclk/mosi/en) for the
     # MCP4921 field-gradient current driver on the extended qssc-grad board.
     # The 3 SPI balls + grad_en are pinned to the FPGA SOUTH edge (row V, the
     # 0.8 mm-pitch BGA's bottom row) -- clear of the base board's SPI/adc

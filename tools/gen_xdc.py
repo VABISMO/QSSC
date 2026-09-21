@@ -13,7 +13,7 @@ top-level ports (fpga/rtl/top_level.v) are:
                         # 4x AD7616 parallel ADC (64 TIA outputs digitised)
     em_sclk, em_sin, em_xlat, em_blank   # 4-wire TLC5947 LED driver (72-ch chain)
     mod_sync, mw_gate, spi_pins[3:0], refclk_out
-    grad_cs, grad_sclk, grad_mosi, grad_en  # Invention 5 gradient-coil DAC (MCP4921)
+    grad_cs, grad_sclk, grad_mosi, grad_en  # gradient-coil DAC (MCP4921)
 
 This maps the JSON signal names (SPI_LE/SPI_CLK/SPI_DATA/ADF_MUXOUT,
 adc_*/em_*) to the RTL port convention and assigns every port to the
@@ -171,8 +171,8 @@ def emit() -> str:
     L.append("set_property DRIVE 8   [get_ports mw_gate]")
     L.append("")
 
-    # ---- gradient coil DAC (Invention 5) ----
-    L.append("# ---- Gradient coil DAC (MCP4921, Invention 5 field gradient) ----------")
+    # ---- gradient coil DAC ----
+    L.append("# ---- Gradient coil DAC (MCP4921, field gradient) ----------")
     L.append("# 3-wire SPI to the MCP4921 12-bit DAC (grad_cs/sclk/mosi) + grad_en,")
     L.append("# which gates the coil supply (high = a nonzero gradient is commanded).")
     L.append("# The DAC sets the gradient-coil current (I = Vdac/Rsense) for per-NV")

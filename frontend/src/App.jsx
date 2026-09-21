@@ -102,9 +102,9 @@ const QUBIT_CFG = {
 // integer N being factored (shor/period = 3·bitlen(N)+1, qftnos = 2·bitlen(N)+1).
 // We keep N editable and show the qubit count as a READ-ONLY derived readout
 // (shor/period = 3·bitlen(N)+1, qftnos = 2·bitlen(N)+1). Editing the qubit
-// count no longer silently snaps N to a semiprime -- that bidirectional
-// coupling made "inputs change by themselves" when the user touched the
-// qubits field.
+// count never silently snaps N to a semiprime -- that bidirectional coupling
+// made "inputs change by themselves" when the operator touched the qubits
+// field.
 const bitLen = (n) => (n <= 1 ? 1 : Math.floor(Math.log2(n)) + 1)
 const derivedQubits = (algo, n) => algo === 'qftnos' ? 2 * bitLen(n) + 1 : 3 * bitLen(n) + 1
 
@@ -201,7 +201,7 @@ function useAsync(fn, deps = []) {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
-  // Guard against the stale-response race: when deps change (e.g. the user
+  // Guard against the stale-response race: when deps change (e.g. the operator
   // switches profile) a new fetch starts while the old one may still be in
   // flight. Tag each invocation; ignore resolutions from any but the latest
   // so a slow old request can never overwrite the fresh data. The unmount
@@ -381,7 +381,7 @@ export default function App() {
   const [currentI, setCurrentI] = useState(0.5); const [currentDepth, setCurrentDepth] = useState(3); const [currentOff, setCurrentOff] = useState(0)
   // shared averages for the four field-imaging sensors
   const [fieldAvg, setFieldAvg] = useState(500)
-  // tensor gradiometer (Invention 19) — 64-pixel B-vector map -> 3x2 Jacobian + dipole fit
+  // tensor gradiometer — 64-pixel B-vector map -> 3x2 Jacobian + dipole fit
   const [tensor, setTensor] = useState(null); const [tensorLoading, setTensorLoading] = useState(false); const [tensorErr, setTensorErr] = useState(null)
   const [tensorMoment, setTensorMoment] = useState(0.002)
   const [tensorX, setTensorX] = useState(2); const [tensorY, setTensorY] = useState(-1); const [tensorZ, setTensorZ] = useState(10)
@@ -439,7 +439,7 @@ export default function App() {
 
   // Probe the real FPGA whenever Hardware-real mode is entered, so the
   // indicator shows a green "FPGA connected — QSSC v1 on /dev/ttyUSB0" or a
-  // red "No FPGA detected" without the user having to run a circuit first.
+  // red "No FPGA detected" without the operator having to run a circuit first.
   useEffect(() => {
     if (hwMode !== 'hardware') { setProbe({ loading: false, data: null }); return }
     let alive = true
@@ -471,7 +471,7 @@ export default function App() {
   const [algo, setAlgo] = useState('custom')
   const [shots, setShots] = useState(1024)
   const [nShor, setNShor] = useState(15)
-  // nShorDraft is the raw text of the N input so the user can clear & retype
+  // nShorDraft is the raw text of the N input so the operator can clear & retype
   // freely (a controlled number snaps empty -> 0 -> 2 and fights typing). The
   // effect below parses+clamps it to the backend's N ceiling and derives the
   // circuit width; nShor (the clamped number) is what buildBody sends.
@@ -507,7 +507,7 @@ export default function App() {
   const [calRunning, setCalRunning] = useState(false)
   const [calErr, setCalErr] = useState(null)
 
-  // ---- 64-parallel computing (Invention 4) + per-pixel array calibration ----
+  // ---- 64-parallel computing + per-pixel array calibration ----
   // Calibrate the array first (measured per-pixel register width), then run
   // one circuit per pixel with use_calibration on. The calibration cache is
   // persisted server-side (hardware/calibration/array_calibration.json) so the
@@ -566,7 +566,7 @@ export default function App() {
   // backend accepts, and derive the circuit width. Guarded to shor/period/
   // qftnos so a non-factoring algo's qubit count (from QUBIT_CFG) is not
   // clobbered. Empty / non-numeric draft -> keep the last valid nShor (lets
-  // the user clear the field and retype without a snap-back).
+  // the operator clear the field and retype without a snap-back).
   useEffect(() => {
     if (algo !== 'shor' && algo !== 'period' && algo !== 'qftnos') return
     const v = parseInt(nShorDraft, 10)
@@ -1759,7 +1759,7 @@ export default function App() {
                            onChange={e => {
                              const cfg = QUBIT_CFG[algo]
                              // enforce the [min,max] clamp: HTML max does not stop
-                             // the user typing a larger value, and a too-large
+                             // the operator typing a larger value, and a too-large
                              // register blows the simulator's qubit cap (mul
                              // uses 4*n qubits -> n=10 = 40q > 28q cap -> the
                              // "nonsensical false error"). math n<=6 = 24q max.

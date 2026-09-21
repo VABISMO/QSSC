@@ -1692,9 +1692,9 @@ export function MeasurementHelp({ algo, result, counts, numClbits, meas }) {
   )
 }
 
-// ---- 64-parallel computing (Invention 4) + per-pixel array calibration -----
+// ---- 64-parallel computing + per-pixel array calibration -----
 // Two cards: (1) calibrate the 64-pixel array's measured register width
-// (Invention 4+5 — gradient makes N ODMR lines resolvable per pixel;
+// (gradient makes N ODMR lines resolvable per pixel;
 // source=sim synthesizes spectra, source=real drives RUN_ALL_ODMR), and
 // (2) run one circuit per pixel across the array and aggregate. Calibrate
 // first, then Run with use_calibration on so each pixel runs at its own
@@ -1738,7 +1738,7 @@ function _ParPixelGrid({ widths, cols = 8 }) {
   )
 }
 
-// 64-parallel computing (Invention 4+5). The single ParallelPanel was split
+// 64-parallel computing. The single ParallelPanel was split
 // into two independent cards so they can drop into the SAME UI slots the
 // single-pixel path uses — the run card replaces "Run a quantum algorithm" and
 // the calibrate card replaces "Calibration process" when the 64-parallel

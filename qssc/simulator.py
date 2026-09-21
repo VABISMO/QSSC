@@ -155,14 +155,14 @@ class SimulatedFPGA:
         self.temperature_k = temperature_k
         self.noise = noise
         self.rng = np.random.default_rng(seed)
-        # Invention 6: optional charge-sharing centroiding model. When set,
+        # Optional charge-sharing centroiding model. When set,
         # _run_all_odmr spreads each pixel's ODMR dip to neighbouring pads via
         # the sheet's charge-share kernel (a real spatial image per frequency
         # point, instead of 64 independent channels). Lazy-typed to avoid a
         # circular import with qssc.detector_centroid (which imports simulator
         # constants). See qssc.detector_centroid.SubPixelModel.
         self.sub_pixel = sub_pixel
-        # Invention 7: N-shot lock-in averaging -> per-point noise drops by
+        # N-shot lock-in averaging -> per-point noise drops by
         # sqrt(N) (uncorrelated thermal/Johnson readout noise). 1 = no averaging.
         self.integration_shots = max(1, int(integration_shots))
         # per-channel 12-bit grayscale (TLC5947 gs register); 0 = off. A channel
@@ -176,7 +176,7 @@ class SimulatedFPGA:
         self.lut: Dict[int, int] = {}
         t1, t2 = coherence_at_temperature(self.profile, temperature_k)
         self.t1, self.t2 = t1, t2
-        # Invention 9: classical anti-noise filter stack. ``noise_env`` models the
+        # Classical anti-noise filter stack. ``noise_env`` models the
         # environmental channels (temp drift, vibration, EMI, pressure) and
         # ``anti_noise`` the filter stack that attenuates them (thermal servo,
         # vibration iso, EMI shield, sensor feed-forward, common-mode rejection)
@@ -204,7 +204,7 @@ class SimulatedFPGA:
         # per-pixel ODMR resonance detuning (drawn lazily by _run_all_odmr to
         # model the gradient spreading the 64 pixel resonances).
         self._pixel_detun_hz: Optional[np.ndarray] = None
-        # Few-NV COMPUTE regime (Invention 5 + the per-pixel register model):
+        # Few-NV COMPUTE regime (field gradient + the per-pixel register model):
         # each pixel holds one microdiamond of ~100-300 NVs whose resonances the
         # field gradient spreads across the pixel into resolvable, linewidth-
         # spaced bins -- DISTINCT frequency-addressed lines (the 2009
@@ -320,7 +320,7 @@ class SimulatedFPGA:
                 return self._odmr_sweep(qubit, f_start, f_stop, n_points)
             if head == "RUN_ALL_ODMR":
                 # RUN_ALL_ODMR <f_start_khz> <f_stop_khz> <n_points>: the
-                # 64-parallel calibration primitive (Invention 4+5). Sweep the
+                # 64-parallel calibration primitive. Sweep the
                 # ADF4351 across the NV resonance and sample ALL 64 AD7616
                 # channels per point -- one ODMR spectrum per pixel from a
                 # single command. Returns n_points lines of 64 space-separated
@@ -426,7 +426,7 @@ class SimulatedFPGA:
             state = self.sim_states.get(site, 0)
             # bright ms=0 (state 0) -> high PL; dark ms=+-1 (state 1) -> ODMR dip
             level = BRIGHT_CODE if state == 0 else DARK_CODE
-        # Invention 9: anti-noise stack sigma (defaults -> READOUT_NOISE).
+        # Anti-noise stack sigma (defaults -> READOUT_NOISE).
         nsigma = effective_noise_sigma(READOUT_NOISE, self.noise_env,
                                        self.anti_noise, 1)
         code = level + int(self.rng.normal(0, nsigma))
@@ -508,7 +508,7 @@ class SimulatedFPGA:
         f0 = self.sim_freq                     # D, Hz
         lw = self.profile.odmr_linewidth_hz    # FWHM, Hz
         fs = np.linspace(f_start_khz * 1e3, f_stop_khz * 1e3, n_points)
-        # Invention 9: per-point noise sigma after the anti-noise stack (defaults
+        # Per-point noise sigma after the anti-noise stack (defaults
         # -> READOUT_NOISE, bit-identical). Single sweep -> integration_shots=1.
         nsigma = effective_noise_sigma(READOUT_NOISE, self.noise_env,
                                        self.anti_noise, 1)
@@ -566,7 +566,7 @@ class SimulatedFPGA:
 
     def _run_all_odmr(self, f_start_khz: int, f_stop_khz: int,
                       n_points: int) -> str:
-        """Sweep the ADF4351 and sample all 64 detectors per point (Invention 4+5).
+        """Sweep the ADF4351 and sample all 64 detectors per point.
 
         Each pixel's ODMR response is a Lorentzian PL dip at D + a per-pixel
         detuning (the field gradient spreads the 64 pixel resonances, so the 64
@@ -577,12 +577,12 @@ class SimulatedFPGA:
         ``RUN_ALL_ODMR`` handler emits, so the host parser is identical for sim
         and real hardware.
 
-        Invention 6 (``self.sub_pixel`` set): each pixel's dip spreads to its
+        With sub-pixel centroiding (``self.sub_pixel`` set): each pixel's dip spreads to its
         neighbours via the graphene/MoS2 sheet charge-share kernel, so the 64
         codes per point are a real spatial image (charge-sharing centroiding
         input) instead of 64 independent channels.
 
-        Invention 7 (``self.integration_shots > 1``): per-point readout noise
+        With N-shot lock-in (``self.integration_shots > 1``): per-point readout noise
         drops by ``sqrt(N)`` (N-shot lock-in averaging of uncorrelated
         thermal/Johnson noise).
         """
@@ -601,14 +601,14 @@ class SimulatedFPGA:
             self._draw_pixel_lines()
         line_freqs = self._pixel_line_freqs       # list of (n_lines,) Hz rel. centre
         line_contrasts = self._pixel_line_contrasts  # list of (n_lines,) dip frac
-        # Invention 7: averaged noise is 1/sqrt(N) of the single-shot noise.
-        # Invention 9: the classical anti-noise stack (thermal servo, vibration
+        # Averaged noise is 1/sqrt(N) of the single-shot noise.
+        # The classical anti-noise stack (thermal servo, vibration
         # iso, EMI shield, feed-forward, common-mode) attenuates the environmental
         # channels on top of the 1/sqrt(N) floor. Defaults (no env) -> the bare
         # READOUT_NOISE/sqrt(N) (bit-identical to the prior model).
         noise = effective_noise_sigma(READOUT_NOISE, self.noise_env,
                                       self.anti_noise, self.integration_shots)
-        # Invention 6: precompute the 64x64 charge-share weight matrix (spot q's
+        # Precompute the 64x64 charge-share weight matrix (spot q's
         # footprint across pads p) so a pixel's dip spills to its neighbours.
         W = None
         if self.sub_pixel is not None:
@@ -963,7 +963,7 @@ def auto_align(profile: DefectProfile | str = "NV",
     # Within-pixel all-to-all dipole coupling is applied by the backend's
     # _neighbor_pairs (complete graph); these NVs are ~3 nm apart.
     #
-    # A field gradient (Invention 5) makes the register width a MEASURED
+    # A field gradient makes the register width a MEASURED
     # quantity: several microdiamonds share a pixel volume, the gradient shifts
     # their ensemble ODMR lines apart, and the resolvable count is set by the
     # Case D rule (separation > linewidth). With gradient_mhz_per_um > 0 the line
@@ -1102,8 +1102,8 @@ def simulate_odmr(profile: DefectProfile | str = "NV",
     Returns frequencies (GHz) and contrast (0..1, dips), with the deepest line at
     ``contrast_depth``.
 
-    **Field gradient (Invention 5):** with ``gradient_mhz_per_um > 0`` the N NVs
-    in one pixel no longer collapse onto a single ensemble line. Each NV at
+    **Field gradient:** with ``gradient_mhz_per_um > 0`` the N NVs
+    in one pixel spread across distinct ensemble lines. Each NV at
     position ``r_i`` (uniform across the ``pixel_size_um`` pixel) sees a
     position-dependent field, so its resonance shifts by
     ``gradient_mhz_per_um * r_i``. The single hyperfine pattern is replicated at
@@ -1149,7 +1149,7 @@ def simulate_odmr(profile: DefectProfile | str = "NV",
     _c = _Counter(round(o, 3) for o in offsets)
     d_max = max(_c.values()) if _c else 1
 
-    # Field-gradient spread (Invention 5). Without a gradient the N NVs share one
+    # Field-gradient spread. Without a gradient the N NVs share one
     # ensemble line (one position -> one shift of 0). With a gradient the NVs sit
     # at uniform positions across the pixel; each copy of the hyperfine pattern is
     # shifted by gradient * position, so the lines spread and resolve.

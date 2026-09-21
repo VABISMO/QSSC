@@ -1,8 +1,8 @@
-"""Invention 4 + 5 — per-pixel array calibration (sim + real).
+"""Per-pixel array calibration (sim + real).
 
 The QSSC die is 64 INDEPENDENT pixels at 300 K. Each pixel's usable qubit
 register width is NOT a fixed constant — it is a MEASURED quantity: the number
-of ODMR lines a field gradient (Invention 5) makes resolvable inside that pixel,
+of ODMR lines a field gradient makes resolvable inside that pixel,
 capped by the NVs physically present. Each microdiamond can carry up to ~100 NVs
 (a user-supplied product spec, NOT a datasheet physics constant); the count
 varies per pixel, so the register width varies per pixel.
@@ -57,7 +57,7 @@ from .noise_filters import (
 # noise (READOUT_NOISE, 16-bit counts) over the bright level (BRIGHT_CODE) -- the
 # datasheet-grounded relative noise. A lone-NV bin has contrast ~0.03, so its
 # single-shot SNR is 0.03 / 0.0125 ~= 2.4, BELOW the min_snr=3 detection bar -> it
-# is NOT resolved at 1 shot. N-shot integration raises SNR by sqrt(N) (Invention 7),
+# is NOT resolved at 1 shot. N-shot integration raises SNR by sqrt(N),
 # so e.g. 16 shots -> SNR 9.6 -> the lone-NV bin is resolved. This is the physical
 # reason integration raises the MEASURED width toward min(resolvable, nv_present).
 READOUT_NOISE_REL: float = READOUT_NOISE / BRIGHT_CODE
@@ -151,7 +151,7 @@ class PixelCalibration:
     microdiamonds: int       # how many microdiamonds were drawn in this pixel
     register_width: int      # MEASURED resolvable line count = usable qubits
     odmr_lines: list[float] = field(default_factory=list)  # resolved line freqs (GHz)
-    # Invention 6 (centroiding): the sub-pixel (x, y) position of this pixel's
+    # Sub-pixel centroiding: the sub-pixel (x, y) position of this pixel's
     # dip on the 64-pad grid (mm, grid-centered), if a SubPixelModel was used.
     # Imaging metadata only -- does NOT change register_width (within-pad spots
     # merge; centroiding localizes one spot, it does not resolve multiple).
@@ -172,18 +172,18 @@ class ArrayCalibration:
     seed: int
     temperature_k: float
     pixels: list[PixelCalibration] = field(default_factory=list)
-    # Invention 7 (integration): N-shot lock-in averaging raises per-line SNR by
+    # N-shot lock-in averaging raises per-line SNR by
     # sqrt(N), so dimmer lone-NV bins clear the min_snr detection bar and the
     # MEASURED width rises toward min(resolvable, nv_present). 1 = no averaging
-    # (identical to the original Invention 4+5 behaviour).
+    # (identical to the default behaviour).
     integration_shots: int = 1
-    # Invention 6 (centroiding): sub-pixel detector model used. Reporting only --
+    # Sub-pixel detector model used. Reporting only --
     # spatial_channels = 64 * S is the detector's imaging resolution; it does NOT
     # change register_width (the per-pixel qubit count).
     sub_pixel_factor: int = 0        # 0 = no sub-pixel model (back-compat)
     spatial_channels: int = 0        # 64 * S when a SubPixelModel was used, else 0
     sub_pixel: Optional[dict] = None  # the SubPixelModel params (JSON round-trip)
-    # Invention 9 (anti-noise stack): the environmental model + filter config the
+    # Anti-noise stack: the environmental model + filter config the
     # calibration was measured under. Recording only on the calibration object --
     # the noise was already applied inside _pixel_odmr_spectrum (sim) / baked into
     # the codes matrix (real). None = no environmental model (back-compat).
@@ -346,12 +346,12 @@ def _pixel_odmr_spectrum(prof: DefectProfile, nv_present: int,
         c_hz = c_ghz * 1e9
         contrast = contrast - amp * np.exp(-((f_hz - c_hz) ** 2) / (2 * sigma_hz ** 2))
     contrast = np.clip(contrast, 0.0, 1.0)
-    # Invention 7: N-shot lock-in averaging raises per-line SNR by sqrt(N) (the
+    # N-shot lock-in averaging raises per-line SNR by sqrt(N) (the
     # noise on the averaged spectrum drops as 1/sqrt(N) for uncorrelated
     # thermal/Johnson readout noise). This lets dimmer lone-NV bins clear the
     # min_snr detection bar in decompose_odmr -> the MEASURED width rises toward
     # min(resolvable, nv_present). integration_shots=1 -> unchanged.
-    # Invention 9: when an environmental model + filter stack is supplied, the
+    # When an environmental model + filter stack is supplied, the
     # per-point sigma is the stack-composed effective sigma (servo/iso/shield/
     # feed-forward/common-mode attenuating the env channels on top of 1/sqrt(N)),
     # converted to the contrast axis (/ BRIGHT_CODE). With no env (None) the bare
@@ -395,12 +395,12 @@ def calibrate_array(profile: DefectProfile | str = "NV",
     the Invention-5 field gradient (the hardware that produces it is the
     ``qssc-grad`` PCB variant); 0 gives one ensemble qubit per pixel.
 
-    ``integration_shots`` (Invention 7): N-shot lock-in averaging raises per-line
+    ``integration_shots``: N-shot lock-in averaging raises per-line
     SNR by sqrt(N), so dimmer lone-NV bins clear the ``min_snr`` bar and the
     MEASURED width rises toward ``min(resolvable, nv_present)``. 1 = no averaging
-    (identical to the original Invention 4+5 behaviour).
+    (identical to the default behaviour).
 
-    ``sub_pixel`` (Invention 6): a :class:`~qssc.detector_centroid.SubPixelModel`
+    ``sub_pixel``: a :class:`~qssc.detector_centroid.SubPixelModel`
     for charge-sharing centroiding. When provided, the calibration reports
     ``spatial_channels = 64 * S`` (the detector's sub-pixel imaging resolution)
     and a per-pixel ``sub_pixel_position`` (the microdiamond's localized (x, y) on
@@ -408,7 +408,7 @@ def calibrate_array(profile: DefectProfile | str = "NV",
     ``register_width`` (within-pad spots merge; centroiding localizes one spot,
     not multiple). See :mod:`qssc.detector_centroid`.
 
-    ``superres`` (Invention 13): when set (a float ``0 < factor ≤ 1``, the
+    ``superres``: when set (a float ``0 < factor ≤ 1``, the
     super-resolution acceptance fraction), the line counter uses sparse OMP
     recovery (:mod:`qssc.superres_odmr`) over the known gradient-bin dictionary
     instead of the hard ``min_snr`` threshold, recovering marginal lone-NV lines
@@ -417,7 +417,7 @@ def calibrate_array(profile: DefectProfile | str = "NV",
     hard-threshold path (back-compat). Stacks with ``integration_shots`` /
     ``noise_env`` / ``anti_noise`` (all lower the noise floor).
 
-    ``bayesian`` (Invention 14): when set (a float ``0 < confidence < 1``, the
+    ``bayesian``: when set (a float ``0 < confidence < 1``, the
     per-family credible level), the line counter uses the Bayesian one-sided
     credible-interval detector (:mod:`qssc.bayesian_readout`) instead of the
     hard ``min_snr`` threshold — the one-sided matched-filter test at the same
@@ -442,7 +442,7 @@ def calibrate_array(profile: DefectProfile | str = "NV",
     linewidth_mhz = prof.odmr_linewidth_hz * 1e-6
     resolvable = resolvable_register_width(
         gradient_mhz_per_um, pixel_size_um, linewidth_mhz)
-    # Invention 6: the 64-pad grid (for per-pixel sub-pixel positions). Drawn
+    # The 64-pad grid (for per-pixel sub-pixel positions). Drawn
     # once, fixed by the SubPixelModel pitch. A SEPARATE rng draws the sub-pixel
     # jitter so it never perturbs the main nv_present draw sequence (which would
     # change register_width and break reproducibility vs. sub_pixel=None).
@@ -467,7 +467,7 @@ def calibrate_array(profile: DefectProfile | str = "NV",
             integration_shots=integration_shots,
             noise_env=noise_env, anti_noise=anti_noise)
         if superres is not None and superres > 0.0:
-            # Invention 13: sparse OMP recovery over the gradient-bin dictionary.
+            # Sparse OMP recovery over the gradient-bin dictionary.
             measured, comps = superres_measured_width(
                 freqs, contrast, n_bins=n_bins,
                 linewidth_hz=prof.odmr_linewidth_hz,
@@ -476,7 +476,7 @@ def calibrate_array(profile: DefectProfile | str = "NV",
                 noise_sigma=max(eff_noise, 1e-6), min_snr=4.0,
                 superres_factor=float(superres))
         elif bayesian is not None and 0.0 < bayesian < 1.0:
-            # Invention 14: Bayesian one-sided credible-interval detector.
+            # Bayesian one-sided credible-interval detector.
             measured, comps = bayesian_measured_width(
                 freqs, contrast, n_bins=n_bins,
                 linewidth_hz=prof.odmr_linewidth_hz,
@@ -499,7 +499,7 @@ def calibrate_array(profile: DefectProfile | str = "NV",
         # linewidth -> envelope, not independent lines), so truncate to the
         # capped width: len(odmr_lines) == register_width always.
         odmr_lines = [round(c.freq_ghz, 6) for c in comps[:register_width]]
-        # Invention 6: a sub-pixel (x, y) offset for this pixel's microdiamond on
+        # A sub-pixel (x, y) offset for this pixel's microdiamond on
         # the pad grid (drawn from the pad center +/- a sub-pixel jitter). The
         # centroiding would localize the pixel's dip here. Imaging metadata only.
         sub_pos: Optional[tuple[float, float]] = None
@@ -566,12 +566,12 @@ def calibrate_array_from_codes(
     measured width / 0 — the usable register width is what matters and is the
     field the backend consumes.
 
-    ``integration_shots`` (Invention 7) is recorded on the calibration (the caller
+    ``integration_shots`` is recorded on the calibration (the caller
     is expected to pass the N-shot-AVERAGED ``codes`` matrix, whose noise is
     already reduced by sqrt(N); the sim path models this internally, the real
     path does the averaging in firmware/host before calling here).
 
-    ``sub_pixel`` (Invention 6): when provided, :func:`~qssc.detector_centroid.localize_spots`
+    ``sub_pixel``: when provided, :func:`~qssc.detector_centroid.localize_spots`
     is run on each frequency-point row (the 64-pad snapshot) to report the
     sub-pixel (x, y) position of each pixel's dip -- the charge-sharing
     centroiding image. This is imaging metadata (``spatial_channels = 64 * S``)
@@ -579,10 +579,9 @@ def calibrate_array_from_codes(
 
     ``cap_to_resolvable`` (default True) truncates each pixel's resolved lines
     to the gradient-register cap ``resolvable_register_width(...)`` -- the
-    number of NVs an ADDRESSING field gradient can separate across the pixel
-    (Invention 5). Set it False for a measurement whose lines do NOT come from
+    number of NVs an ADDRESSING field gradient can separate across the pixel. Set it False for a measurement whose lines do NOT come from
     an addressing gradient, so the cap must not prune them: the tensor
-    gradiometer (Invention 19) reads the 4 NV <111> Zeeman doublets split by
+    gradiometer reads the 4 NV <111> Zeeman doublets split by
     the AMBIENT field (no addressing gradient -> ``gradient_mhz_per_um=0`` ->
     ``resolvable=1``), and those doublets are the lines the B-vector inversion
     needs; capping them to 1 would collapse the reconstruction. The qubit
@@ -605,7 +604,7 @@ def calibrate_array_from_codes(
     # When the caller opts out of the gradient-register cap (tensor gradiometry:
     # ambient-field <111> doublets, not gradient-binned NVs), do not truncate.
     width_cap = resolvable if cap_to_resolvable else n_pixels * 64 + 16
-    # Invention 6: per-frequency-point centroiding on the 64-pad rows. Each row
+    # Per-frequency-point centroiding on the 64-pad rows. Each row
     # is one MW frequency; the dips across the 64 pads are the resonant pixels,
     # localized to sub-pixel (x, y) by charge-sharing centroiding.
     pad_centers = (pad_grid_centers(sub_pixel.pad_pitch_mm)
@@ -639,7 +638,7 @@ def calibrate_array_from_codes(
         bright = float(np.mean(np.concatenate([col[:edge], col[-edge:]]))) or 1.0
         contrast = col / bright  # 1 = bright, dips toward 0
         if superres is not None and superres > 0.0:
-            # Invention 13: estimate the per-column noise from the off-resonance
+            # Estimate the per-column noise from the off-resonance
             # edge (no dip there, just the bright floor) and run sparse OMP.
             edge_std = float(np.std(np.concatenate([col[:edge], col[-edge:]])))
             noise_sigma = max(edge_std / bright, 1e-6)
@@ -652,7 +651,7 @@ def calibrate_array_from_codes(
                 superres_factor=float(superres))
             register_width = max(1, min(measured, width_cap))
         elif bayesian is not None and 0.0 < bayesian < 1.0:
-            # Invention 14: Bayesian one-sided credible-interval detector.
+            # Bayesian one-sided credible-interval detector.
             edge_std = float(np.std(np.concatenate([col[:edge], col[-edge:]])))
             noise_sigma = max(edge_std / bright, 1e-6)
             measured, comps = bayesian_measured_width(

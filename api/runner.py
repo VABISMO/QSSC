@@ -38,7 +38,7 @@ from qssc.crypto import (
 from qssc.qkd import simulate_bb84
 from qssc.noise_filters import AntiNoiseConfig, noise_environment_preset
 
-# Path to the cached per-pixel array calibration (Invention 4). The API's
+# Path to the cached per-pixel array calibration. The API's
 # /api/circuit/calibrate-array endpoint writes it; run_parallel reads it so
 # each pixel runs at its MEASURED register width without the caller re-running
 # the calibration. Repo root = parent of this api/ directory.
@@ -92,7 +92,7 @@ def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
     # calibration -> circuit loop: the register sits on the real addressed
     # frequencies at the applied gradient, not the synthetic 6 MHz grid.
     #
-    # Invention 4 calibrated path: when register_widths_per_pixel is given (a
+    # Calibrated path: when register_widths_per_pixel is given (a
     # per-pixel MEASURED width list from calibrate_array), the backend builds
     # one independent register per pixel and run_array runs each pixel at its
     # own width (skipping narrow pixels). gradient_mhz_per_um / pixel_size_um
@@ -402,7 +402,7 @@ def run_circuit(req: dict) -> dict:
         # (a + b + 2*bits result), so two 4-digit operands -> bits ~ 16 -> a
         # 64-qubit circuit -> Aer hangs; the 120s watchdog cannot kill the
         # thread, so one such job permanently occupies a worker slot and the
-        # whole API stalls ("se deja todo colgado con una multiplicacion").
+        # whole API stalls (a multiplication hangs every worker).
         # Reject up front with a clear limit instead of letting it hang.
         _n1 = abs(int(num1))
         _n2 = abs(int(num2)) if num2 is not None else 0
@@ -869,7 +869,7 @@ def _postprocess_sample(algo, req, qc, counts, shots):
 
 def run_parallel(req: dict) -> dict:
     """Run one circuit per pixel across the 64-pixel array IN PARALLEL and
-    aggregate (Invention 4 — distributed computing).
+    aggregate (distributed computing).
 
     The 64 die pixels are INDEPENDENT ~10-NV processors at 300 K (1/r**3 -> 0
     at the 2.5 mm pitch): the chip's compute throughput is 64x a single pixel,
@@ -892,7 +892,7 @@ def run_parallel(req: dict) -> dict:
     mode = str(req.get("mode", "sample")).lower()
     n_pixels = max(1, min(64, int(req.get("n_pixels", 64))))
     anti_noise = _anti_noise_from_req(req)
-    # Invention 4: when the caller opts in (use_calibration=true), load the
+    # When the caller opts in (use_calibration=true), load the
     # cached per-pixel calibration so each pixel runs at its MEASURED register
     # width (skip-narrow). Default False = the uniform-register back-compat
     # path (the existing behaviour; calibrate first via /api/circuit/calibrate-
@@ -907,7 +907,7 @@ def run_parallel(req: dict) -> dict:
         reg_widths = calib.widths
         grad = calib.gradient_mhz_per_um
         psz = calib.pixel_size_um
-        # Close the calibration -> circuit loop (Invention 4): feed each pixel's
+        # Close the calibration -> circuit loop: feed each pixel's
         # MEASURED ODMR line centres (GHz -> Hz) back so the register sits on the
         # real addressed frequency grid, not auto_align's synthetic 6 MHz grid.
         # The frontend's per-pixel qubits+freqs modal then shows the measured
@@ -1131,7 +1131,7 @@ def run_parallel(req: dict) -> dict:
 
 
 def run_calibrate_array(req: dict) -> dict:
-    """Calibrate the 64-pixel array's per-pixel register width (Invention 4+5).
+    """Calibrate the 64-pixel array's per-pixel register width.
 
     Mirror of the ``/api/circuit/calibrate-array`` endpoint logic, factored out
     so it can run as an async RQ job (the sim path synthesizes 64 ODMR spectra
@@ -1153,15 +1153,15 @@ def run_calibrate_array(req: dict) -> dict:
     profile = req.get("profile", "NV")
     prof = get_profile(profile)
     source = str(req.get("source", "sim")).lower()
-    # Invention 9: build the anti-noise stack from the request. noise_env="none"
+    # Build the anti-noise stack from the request. noise_env="none"
     # -> None (no environmental channels, back-compat); anti_noise empty -> the
     # all-off default config (back-compat).
     noise_env = noise_environment_preset(str(req.get("noise_env", "none")))
     anti_noise = AntiNoiseConfig.from_dict(req.get("anti_noise"))
-    # Invention 6: build the sub-pixel centroiding model if requested.
+    # Build the sub-pixel centroiding model if requested.
     sub_pixel = (SubPixelModel(sigma_sheet_mm=float(req.get("sigma_sheet_mm", 1.0)))
                  if bool(req.get("sub_pixel", False)) else None)
-    # Invention 13/14: line-recovery mode (superres takes precedence over bayesian).
+    # Line-recovery mode (superres takes precedence over bayesian).
     superres = req.get("superres")
     bayesian = req.get("bayesian")
     if superres is not None:
@@ -1184,7 +1184,7 @@ def run_calibrate_array(req: dict) -> dict:
             f_start = d_khz - span_khz
             f_stop = d_khz + span_khz
             n = int(req.get("n_points", 400))
-            # Invention 5: program the gradient coil BEFORE the sweep so each
+            # Program the gradient coil BEFORE the sweep so each
             # pixel's ODMR lines spread across the pixel by grad*pixel_size,
             # which is what makes the lines resolvable (-> per-pixel register
             # width). Without this the 64 pixels all see one collapsed line.
@@ -1203,7 +1203,7 @@ def run_calibrate_array(req: dict) -> dict:
                     gradient_applied_ok = True
                 except Exception:  # noqa: BLE001 - do not abort the sweep
                     gradient_applied_ok = False
-            # Invention 7: N-shot lock-in integration. Average N independent
+            # N-shot lock-in integration. Average N independent
             # RUN_ALL_ODMR sweeps -> per-point readout noise drops by sqrt(N)
             # (uncorrelated thermal/Johnson noise), so dimmer lone-NV ODMR bins
             # clear the min_snr bar and the MEASURED width rises. Cost is
@@ -1254,14 +1254,14 @@ def run_calibrate_array(req: dict) -> dict:
     except Exception:  # noqa: BLE001 - a cache write failure must not break the reply
         pass
     bw = best_uniform_width(calib.widths)
-    # Invention 13/14: which line-recovery mode produced the widths.
+    # Which line-recovery mode produced the widths.
     if superres is not None and superres > 0.0:
         readout_mode = f"superres({superres})"
     elif bayesian is not None and 0.0 < bayesian < 1.0:
         readout_mode = f"bayesian({bayesian})"
     else:
         readout_mode = "hard-threshold"
-    # Invention 9: report the effective noise + per-filter gain breakdown so the
+    # Report the effective noise + per-filter gain breakdown so the
     # frontend can show what each filter bought. Collapses to the prior values
     # when the stack is unset (noise_env="none", anti_noise empty).
     eff_noise = effective_noise_sigma(
@@ -1272,7 +1272,7 @@ def run_calibrate_array(req: dict) -> dict:
         "source": io_label,
         "d_fit_ghz": round(prof.zero_field_splitting / 1e9, 6),
         "gradient_mhz_per_um": calib.gradient_mhz_per_um,
-        # Invention 5: the MCP4921 DAC code programmed into the gradient coil
+        # The MCP4921 DAC code programmed into the gradient coil
         # before the sweep (None for the sim path, which models the gradient
         # analytically and never touches the coil). gradient_applied_ok is only
         # meaningful for source=real; it is True when the board acknowledged
@@ -1289,16 +1289,16 @@ def run_calibrate_array(req: dict) -> dict:
         "best_uniform_width": bw[0],
         "best_uniform_pixels": bw[1],
         "total_working_qubits": bw[0] * bw[1],
-        # Invention 7: N-shot lock-in integration (raises measured width).
+        # N-shot lock-in integration (raises measured width).
         "integration_shots": calib.integration_shots,
-        # Invention 13/14: the per-pixel line-recovery mode that produced the
+        # The per-pixel line-recovery mode that produced the
         # widths (hard-threshold / superres(factor) / bayesian(confidence)).
         "readout_mode": readout_mode,
-        # Invention 6: sub-pixel detector imaging resolution (does NOT change
+        # Sub-pixel detector imaging resolution (does NOT change
         # register_width -- within-pad spots merge; centroiding localizes one).
         "sub_pixel_factor": calib.sub_pixel_factor,
         "spatial_channels": calib.spatial_channels,
-        # Invention 9: classical anti-noise filter stack. effective_noise_rel is
+        # Classical anti-noise filter stack. effective_noise_rel is
         # the post-filter readout noise as a fraction of BRIGHT_CODE; filter_gain
         # is the per-channel residual breakdown; noise_env/anti_noise echo the
         # config. All collapse to back-compat values when the stack is unset.

@@ -3,8 +3,7 @@
 // Mirrors the backend postprocess in qssc/circuits.py + api/runner.py so the
 // dashboard can show, for EVERY algorithm, exactly which measurement bar is the
 // correct result and the concrete chain of steps from the measured bitstring to
-// that result (the user's "que se sepa porqué ese binario es el resultado de esa
-// operacion shor o las otras"). Pure client-side from the run result dict + the
+// that result. Pure client-side from the run result dict + the
 // counts already shown in the histogram -- no extra API call.
 //
 // Each deriveMeasurement(...) returns:
@@ -19,7 +18,7 @@
 //
 // qiskit bitstrings are MSB-first (leftmost char = q_{n-1}); the dashboard
 // reverses them for display so the leftmost char reads q0. We carry BOTH
-// forms in the first derivation step so the user can trace either.
+// forms in the first derivation step so the operator can trace either.
 
 // ---------- tiny bignum helpers (the counts already fit in JS doubles) --------
 function gcd(a, b) { a = Math.abs(a); b = Math.abs(b); while (b) { [a, b] = [b, a % b] } return a || 1 }

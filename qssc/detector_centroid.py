@@ -1,4 +1,4 @@
-"""Invention 6 — sub-pixel detector resolution via charge-sharing centroiding.
+"""Sub-pixel detector resolution via charge-sharing centroiding.
 
 The QSSC detector is a continuous graphene/MoS2+PEDOT sheet on ITO
 (``DET_COMMON``) read by 64 discrete pads on a 2.5 mm pitch (8x8 grid, 1.0x1.0 mm
@@ -12,8 +12,8 @@ delay-line anodes.
 **What this buys:** spatial *imaging* resolution. One pad's spot is localized to
 ~``pitch/(2*SNR)`` ~ 15 um, so the 64-pad grid resolves ``64 * S`` spatial
 positions (``S = floor(SNR/threshold)`` = 8 at the default readout SNR 80). This
-is the detector improvement the user asked for ("sacar mas resolucion de 64
-pixels").
+is the detector imaging-resolution gain (sub-pixel resolution across the 64
+pixels).
 
 **What it does NOT buy** (important, see ``docs/INVENTIONS.md`` §6): more
 per-pixel *qubits*. The 64 pads are on 2.5 mm pitch but each pixel's NV active
@@ -23,7 +23,7 @@ to hit *different* pads. Centroiding *localizes one spot* but cannot *resolve
 two* within a pad (they merge into one blob). So the per-pixel register width
 (``min(freq_bins, nv_present, SNR-detectable lines)`` in
 :mod:`qssc.array_calibration`) is unchanged by centroiding. The qubit-register
-gain comes from Invention 7 (N-shot lock-in integration), not here.
+gain comes from N-shot lock-in integration, not here.
 
 Grounding: ``pad_pitch_mm=2.5`` and ``1.0x1.0 mm`` active pad area from the fab
 docs + ``qssc/magnetometry.py:269``. ``SNR = BRIGHT_CODE/READOUT_NOISE = 80`` from

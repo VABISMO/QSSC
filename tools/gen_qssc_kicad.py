@@ -258,8 +258,7 @@ def fpga_net_map(grad=False):
     nets ~204 of the 324 CSG324 pads -- all the ones that matter for power
     integrity, config boot, and the board's I/O.
 
-    grad=True (extended qssc-grad board only) also nets the 4 Invention 5
-    gradient-coil DAC pins (grad_cs/sclk/mosi/en) so they connect to Ugrad.
+    grad=True (extended qssc-grad board only) also nets the 4 gradient-coil DAC pins (grad_cs/sclk/mosi/en) so they connect to Ugrad.
     On the base board (grad=False) these stay spare/NC -> the base qssc.*
     files are byte-identical whether or not the gradient variant is built."""
     m = {}
@@ -302,7 +301,7 @@ def fpga_pin_list(grad=False):
     grad=False builds the base symbol (qssc:XC7A35T_CSG324) used by the base
     board -- no gradient pins, byte-identical to the pre-variant generator
     output.  grad=True builds the extended symbol (qssc:XC7A35T_CSG324_GRAD)
-    used only by the qssc-grad board, adding the 4 Invention 5 gradient-coil
+    used only by the qssc-grad board, adding the 4 gradient-coil
     DAC pins (grad_cs/sclk/mosi/en) so the FPGA ball labels connect to Ugrad.
     Both symbols share the same Xilinx_CSG324 footprint."""
     nm = fpga_net_map(grad=grad)
@@ -349,7 +348,7 @@ def fpga_pin_list(grad=False):
 
 
 # ---- QSSC_Chip -- the two-faced quantum die (two-PCB sandwich) ---------------
-# The QSSC die is a TRUE two-faced die, NO TSVs (user-confirmed 2026-09-04): 64
+# The QSSC die is a TRUE two-faced die, NO TSVs: 64
 # graphene detector electrodes on the TOP face, 64 CQD emitter cathodes + 1
 # shared anode on the BOTTOM face.  The two faces cannot both be wire-bonded
 # face-up, so the die is clamped as a SANDWICH between two PCBs: the MAIN board
@@ -739,7 +738,7 @@ def conn_02x10_footprint():
 
 
 def grad_coil_footprint():
-    """Invention 5 field-gradient coil -- a real PCB copper trace on F.Cu
+    """Field-gradient coil -- a real PCB copper trace on F.Cu
     running along one edge of the die socket.  Two SMD pads (1 = GRAD_COIL_P
     feed, 2 = coil return GRAD_COIL_N -> MOSFET drain) sit 20 mm apart; a
     filled 1.5 mm fp_poly on F.Cu between them IS the manufactured coil trace
@@ -767,7 +766,7 @@ def grad_coil_footprint():
              L(A("version"), A(20240108)),
              L(A("generator"), S("gen_qssc_kicad")),
              L(A("generator_version"), S("8.0")),
-             L(A("descr"), S("Invention 5 field-gradient coil: 1.5 mm PCB copper trace on F.Cu along the die socket edge (~2.2 A); KiCad net-tie (pads 1,2 tied by the fp_poly)")),
+             L(A("descr"), S("Field-gradient coil: 1.5 mm PCB copper trace on F.Cu along the die socket edge (~2.2 A); KiCad net-tie (pads 1,2 tied by the fp_poly)")),
              L(A("attr"), A("smd"), A("exclude_from_pos_files"),
                A("allow_missing_courtyard")),
              # net tie: pads 1,2 are joined by the footprint's own F.Cu fp_poly;
@@ -865,7 +864,7 @@ def mcp4921_pin_list():
     NOTE: the 8-pin single MCP4921 has NO !SHDN pin -- shutdown is SPI write
     word bit 12 (the dac_ctrl framing {4'b0011, code} keeps bit 12=1 = active;
     the coil is cut by writing code 0 -> VOUTA=0 -> op-amp -> MOSFET off).
-    Drives the Invention 5 field-gradient coil current driver: VOUTA -> LM358
+    Drives the field-gradient coil current driver: VOUTA -> LM358
     -> IRLML2502 MOSFET, I_coil = Vdac/Rsense. !LDAC tied to GND (transparent:
     output updates on CS rising edge); VREF tied to +5V (VDD) for rail-to-rail
     Vout = 5V * code/4096 (1x gain)."""
@@ -1116,8 +1115,7 @@ def authored_symbols():
     # (+ other inputs), the right the 4 em_SPI + control, so the body is tall.
     syms.append(custom_symbol_def("qssc", "XC7A35T_CSG324", "U", fpga_pin_list(),
                                   (-50.8, -55.0, 50.8, 55.0), value="XC7A35T-1CSG324C"))
-    # Extended qssc-grad variant: same FPGA, same footprint, PLUS the 4 Invention 5
-    # gradient-coil DAC pins (grad_cs/sclk/mosi/en) drawn on the right column so
+    # Extended qssc-grad variant: same FPGA, same footprint, PLUS the 4 gradient-coil DAC pins (grad_cs/sclk/mosi/en) drawn on the right column so
     # the grad board's FPGA ball labels connect to Ugrad.  The base symbol above
     # is unchanged (no grad pins) -> base qssc.* stays byte-identical.
     syms.append(custom_symbol_def("qssc", "XC7A35T_CSG324_GRAD", "U",
@@ -1162,7 +1160,7 @@ def authored_symbols():
     # TLC5947 OUT0..23, common anode = +12V_EMIT.  Body spans the 24-wide OUT column.
     syms.append(custom_symbol_def("qssc", "TLC5947", "U", tlc5947_pin_list(),
                                   (-7.62, -16.51, 7.62, 16.51), value="TLC5947"))
-    # ---- Invention 5 field-gradient coil current driver (extended board) ----
+    # ---- Field-gradient coil current driver (extended board) ----
     # MCP4921 12-bit SPI DAC -> LM358 op-amp servo -> IRLML2502 N-MOSFET -> coil.
     # The coil itself is a generic qssc:L inductor with the custom qssc:GradCoil
     # footprint (a 1.5 mm F.Cu trace); no separate coil symbol is needed.
@@ -1919,8 +1917,7 @@ def build_emitter_driver():
 
 
 def build_gradient_board():
-    """EXTENDED MAIN board (qssc-grad): the base main board PLUS the Invention 5
-    field-gradient coil + DAC current driver.  Calls build_main_board() first so
+    """EXTENDED MAIN board (qssc-grad): the base main board PLUS the field-gradient coil + DAC current driver.  Calls build_main_board() first so
     every base component (FPGA, emitter driver, RF, USB, power, die emitter face,
     BTB host) is present unchanged, then adds the 7 gradient parts in a free
     schematic block.  PCB placement is set in assign_pcb_positions_gradient().
@@ -2181,7 +2178,7 @@ def load_footprint_mod(fp_lib_id):
         return chip_footprint_em()
     if fp_lib_id == "qssc:Conn_02x10_BTB":  # board-to-board connector (authored)
         return conn_02x10_footprint()
-    if fp_lib_id == "qssc:GradCoil":        # Invention 5 gradient coil trace (authored)
+    if fp_lib_id == "qssc:GradCoil":        # Gradient coil trace (authored)
         return grad_coil_footprint()
     if fp_lib_id == "qssc:ChipSocket_2.54_EM":  # 2.54 mm female-header emitter socket (authored)
         return chip_socket_footprint_em()
@@ -2306,9 +2303,9 @@ def emit_pcb(cfg):
 
     # Copper layer stack is cfg-driven: the main board is 6-layer HDI
     # (F.Cu sig / In1.Cu GND / In2.Cu PWR / In3.Cu sig / In4.Cu sig / B.Cu sig)
-    # and the detector head is also 6-layer (same stack, commit b41009c: the
-    # 128-net die bus needs the In3.Cu/In4.Cu escape layers a 4-layer stack
-    # could not provide). Each entry: (kicad_id, name, type, user_label_or_None).
+    # and the detector head is also 6-layer (same stack: the 128-net die bus
+    # needs the In3.Cu/In4.Cu escape layers a 4-layer stack could not provide).
+    # Each entry: (kicad_id, name, type, user_label_or_None).
     copper = []
     for idx, name, typ, label in cfg["layer_stack"]:
         if label is not None:
@@ -2589,8 +2586,8 @@ def emit_pro(cfg=None):
 # signal escapes. (A through-via on every power ball -- the original "HDI-lite"
 # plan -- blocked the inner layers solid at 0.5 mm pitch: 117 barrels overlap.)
 # The detector HEAD board uses a separate 6-layer stack (HEAD_LAYER_STACK) -- the
-# same 6-layer schedule as the main board (commit b41009c: the 128-net die bus
-# needs the In3.Cu/In4.Cu escape layers a 4-layer stack could not provide).
+# same 6-layer schedule as the main board (the 128-net die bus needs the
+# In3.Cu/In4.Cu escape layers a 4-layer stack could not provide).
 LAYER_STACK = [
     (0,  "F.Cu",   "signal", None),
     (1,  "In1.Cu", "signal", "GND"),
@@ -2670,14 +2667,13 @@ MAIN_CFG = dict(out_stem="qssc", title="QSSC Main Control Board", project="qssc"
                 # the 0.15 mm design-intent value (netclass > 0.10 mm board min).
                 analog_clearance=0.15)
 # Extended main board (qssc-grad): identical outline / layer stack to MAIN, plus
-# the Invention 5 gradient coil + DAC driver.  The coil trace + 7 SMD parts fit
+# the gradient coil + DAC driver.  The coil trace + 7 SMD parts fit
 # inside the existing 150x118 outline (left of the die socket), so no resize.
 EXT_CFG = dict(out_stem="qssc-grad", title="QSSC Main Control Board + Gradient",
                project="qssc-grad", board_w=150, board_h=118,
                layer_stack=LAYER_STACK, stack_up=STACK_UP,
                analog_clearance=0.15)
-# Head board trimmed 2026-09-09 to fit the user's compressed placement: the
-# outline is anchored at (37,12) so the user's manually-placed components keep
+# Head board outline anchored at (37,12) so the manually-placed components keep
 # their exact saved coordinates and only the Edge.Cuts rectangle shrinks around
 # them (~3.5 mm margin past the furthest component courtyard on each side).
 HEAD_CFG = dict(out_stem="chip_module", title="QSSC Detector Head", project="chip_module",
@@ -2694,7 +2690,7 @@ HEAD_CFG = dict(out_stem="chip_module", title="QSSC Detector Head", project="chi
 
 def assign_pcb_positions():
     # Fixed IC/connector placements (mm) on the MAIN control board (150x118,
-    # 6-layer -- trimmed 2026-09-09 to fit the connectors: right edge at J3,
+    # 6-layer: right edge at J3,
     # bottom edge at J10). The detector front-end is on the HEAD board (see
     # assign_pcb_positions_head); this board carries FPGA + emitter + RF + USB +
     # power + the die EMITTER face (QSSC_Chip_EM).
@@ -2710,8 +2706,7 @@ def assign_pcb_positions():
     #   top-left      BTB HOST J12 (9-wire SPI + power to the detector head)
     #   below die     3x TLC5947 constant-current LED driver (UE0/1/2 + Riref/Cem)
     # Edge-mount connectors sit at the board edge by design (the barrel/USB-C/SMA
-    # opening MUST overhang an edge or the plug cannot insert -- a production
-    # defect the user flagged 2026-09-09):
+    # opening MUST overhang an edge or the plug cannot insert):
     #   J2 5V barrel   -> top edge (10,10) rot 180, barrel overhangs -y (top)
     #   J4 12V barrel  -> left edge (10,72) rot 270, barrel overhangs -x (left)
     #   J10 USB-C      -> bottom edge (32,114) rot 180, mouth overhangs +y (bottom)
@@ -2738,9 +2733,8 @@ def assign_pcb_positions():
         # ---- +12V_EMIT emitter anode supply (left edge, below the 5V chain) ----
         # J4 12V barrel -> F2 1A PTC. J4 sits on the LEFT edge, rot 270 so the
         # barrel opening faces -x (off the left edge, overhanging x=0 ~4.2 mm --
-        # verified empirically: bbox x[-4.22,11.82]). rot 180 (the original
-        # value) made the barrel face -y/up INTO the board at y=72 (blocked --
-        # production defect the user flagged 2026-09-09); rot 90 also points
+        # verified empirically: bbox x[-4.22,11.82]). rot 180 faces the barrel
+        # -y/up INTO the board at y=72 (blocked); rot 90 also points
         # inward (+x) -- only rot 270 launches -x. The +12V rail runs on B.Cu
         # up to y~55 and
         # across to the die EM_ANODE pad (70,55); C85/C86 decouple it at the
@@ -2766,20 +2760,18 @@ def assign_pcb_positions():
         # VREFP decoupling just below-left of the FPGA.
         "U8": (106, 58, 0), "R75": (114, 54, 0), "R76": (114, 58, 0),
         "R77": (114, 62, 0), "C40": (118, 70, 0),
-        # USB (bottom): FT232 + USB-C + CC pulls.  2026-09-08 the user dragged the
-        # whole USB-C + damping cluster UP ~20 mm in KiCad and moved FT232 right to
-        # the y~84 connector row; these are the exact saved coordinates back-ported
-        # so regen preserves the user's manual placement.
+        # USB (bottom): FT232 + USB-C + CC pulls.  The USB-C + damping cluster
+        # sits ~20 mm up with FT232 on the y~84 connector row; these explicit
+        # coordinates preserve the manual placement across regen.
         "J1": (115.9, 83.725, 0), "J10": (32.175, 114, 180), "R71": (24.175, 106, 0), "R72": (28.175, 106, 0),
         "J8": (10, 92, 0),
         # RF chain (top-right): U3 ADF4351 + U5 GVA-84 -> J3 SMA.  J3 is an
         # SMA_Amphenol_132289_EdgeMount edge-launch footprint: its origin (pad 1
         # + GND pads) sits ON the board edge so the jack body overhangs off-board
-        # by ~14.5 mm and the coax launches cleanly off the edge.  The user
-        # (2026-09-09) trimmed the main board to width 150 so J3 sits at the right
-        # edge x=150 (was mid-board at 142.11 on the old 210-wide board -- the
-        # edge-mount had no edge to launch from).  U3/U5 stay at the top-right;
-        # the 50R microstrip from U5 to J3 runs down the right side.
+        # by ~14.5 mm and the coax launches cleanly off the edge.  The 150 mm
+        # board width puts J3 at the right edge x=150 so the edge-mount has an
+        # edge to launch from.  U3/U5 stay at the top-right; the 50R microstrip
+        # from U5 to J3 runs down the right side.
         "U3": (92, 30, 0), "U5": (106, 40, 0), "J3": (150, 83, 0),
         "R67": (84, 26, 0), "C31": (84, 30, 0), "R68": (84, 34, 0),
         "C32": (100, 26, 0), "C33": (100, 30, 0), "R73": (100, 34, 0),
@@ -2795,15 +2787,13 @@ def assign_pcb_positions():
         # C41 was the AP2127K BP cap (deleted -- AP2127K-1.0 pin 4 is NC).
         "C41": (104, 46, 0),
         "J7": (10, 40, 0), "J9": (10, 26, 0),
-        # ---- production-hardening pass 2026-09 (see add() block + §16) ----
+        # ---- production-hardening pass (see add() block + §16) ----
         # USB VBUS Schottky + bulk near the USB-C connector (left of the die).
-        # 2026-09-08 user dragged this cluster up ~20 mm with J10.
         "D_USB": (22.175, 100, 0), "C84": (30.175, 98, 0),
         # USB DP/DM series damping next to the USB-C connector so the USB-C +
         # its VBUS/CC/damping cluster is visible and reachable in a case.
-        # 2026-09-08 user dragged these up ~20 mm with J10; FT232 (J1) now sits
-        # on the same y~84 row (see above).  The DP/DM_F diff pair runs from
-        # FT232 to here.
+        # FT232 (J1) sits on the same y~84 row (see above).  The DP/DM_F diff
+        # pair runs from FT232 to here.
         "R78": (38.175, 102, 0), "R79": (42.175, 102, 0),
         # AMS1117 stability bulk + input bulk (clear of the SOT-223 courtyards
         # x[29.5,38.5]: 22uF output caps at x42, input bulk at x28)
@@ -2822,11 +2812,10 @@ def assign_pcb_positions():
         # Reset pull-down + debounce cap (J7 SW_PUSH pads reach x16.5, courtyard x18 -> x24)
         "R83": (24, 40, 0), "C68": (24, 44, 0),
         # ---- emitter driver cluster (3x TLC5947 + 3x Riref + 3x Cem) ----
-        # 2026-09-08 the user dragged the whole cluster DOWN ~28 mm in KiCad (was
-        # y=78/86 just below the die -> y~106/114) and shifted x from 40/60/100 to
-        # ~56/79/103.  These explicit entries OVERRIDE the procedural UE/Riref/Cem
-        # branches below (the `if c["ref"] in fixed` check is first) so regen
-        # preserves the user's manual placement.
+        # Cluster sits at y~106/114 (shifted from the procedural y=78/86 below),
+        # x ~56/79/103.  These explicit entries OVERRIDE the procedural
+        # UE/Riref/Cem branches below (the `if c["ref"] in fixed` check is first)
+        # so regen preserves the placement.
         "UE0": (56.25, 105.8, 0), "UE1": (78.635, 106.35, 0), "UE2": (103.35, 105.575, 0),
         "Riref0": (56.25, 113.8, 0), "Riref1": (78.635, 114.35, 0), "Riref2": (103.35, 113.575, 0),
         "Cem0": (61.25, 113.8, 0), "Cem1": (83.635, 114.35, 0), "Cem2": (108.35, 113.575, 0),
@@ -2909,25 +2898,24 @@ def assign_pcb_positions_head():
     """PCB placement (mm) for the DETECTOR HEAD board (110x102 at offset 37,12, 6-layer).
 
     The board outline is drawn at x[37,147] y[12,114] (board_x0/board_y0 in
-    HEAD_CFG) so the component coordinate system is UNCHANGED from the original
-    authoring -- only the Edge.Cuts rectangle moved to trim the board to the
-    furthest component courtyard + ~3.5 mm margin on every side.  This lets the
-    user's manual KiCad moves be back-ported verbatim (see `fixed` below)
-    without shifting any footprint coordinates.
+    HEAD_CFG) so the component coordinate system is stable -- only the
+    Edge.Cuts rectangle moves to trim the board to the furthest component
+    courtyard + ~3.5 mm margin on every side.  This lets the manual KiCad
+    placements be reproduced verbatim (see `fixed` below) without shifting any
+    footprint coordinates.
 
-    2026-09-09 the user compressed the head board in KiCad: Uchip + J12 were
-    relocated and the +5V_A ferrite rail (FB_A/C_Abulk/C_ahf) + DET_REF divider
-    (Rref1/Rref2/Cref) moved up off the bottom edge.  Those 8 footprints are
-    pinned in `fixed` so regen reproduces the user's placement exactly; the
-    elif branches below keep the ORIGINAL computed positions for the rest
-    (16x TLV9004 TIA grid, 64x Rf/Cf clustered at each TIA, 4x AD7616 + decoupling
-    columns) which the user did NOT move.
+    The compressed head placement: Uchip + J12 are relocated and the +5V_A
+    ferrite rail (FB_A/C_Abulk/C_ahf) + DET_REF divider (Rref1/Rref2/Cref)
+    moved up off the bottom edge.  Those 8 footprints are pinned in `fixed` so
+    regen reproduces the placement exactly; the elif branches below keep the
+    computed positions for the rest (16x TLV9004 TIA grid, 64x Rf/Cf clustered
+    at each TIA, 4x AD7616 + decoupling columns).
 
-    ALIGNMENT CAVEAT: the user's Uchip(56.23,83.27)/J12(47.54,30.81) NO LONGER
-    match main Uchip(80,55)/J12(110,14) -- the J12-vs-Uchip relative geometry
-    changed, so the two boards will NOT mate as-is.  The main board's Uchip/J12
-    must be reconciled to the head's new geometry before the sandwich assembles.
-    The head board is generated standalone-correct regardless.
+    ALIGNMENT CAVEAT: head Uchip(56.23,83.27)/J12(47.54,30.81) do not match
+    main Uchip(80,55)/J12(110,14) -- the J12-vs-Uchip relative geometry differs,
+    so the two boards will NOT mate as-is.  The main board's Uchip/J12 must be
+    reconciled to the head's geometry before the sandwich assembles.  The head
+    board is generated standalone-correct regardless.
 
     Zones (post-move): die Uchip(56,83) -> 4x4 TLV9004 TIA grid (x84-132,y20-50)
     with each TIA's 4 Rf/Cf feedback pairs clustered BESIDE it (~3mm summing-node
@@ -2937,24 +2925,24 @@ def assign_pcb_positions_head():
     left of the TIA grid; J12(47.54,30.81).  Netlist is unchanged; only
     placement + outline moves."""
     fixed = {
-        # 2026-09-09 the user dragged these 8 in KiCad to compress the head
-        # board: Uchip + J12 relocated, the +5V_A ferrite rail (FB_A/C_Abulk/
-        # C_ahf) and the DET_REF divider (Rref1/Rref2/Cref) moved up off the
-        # bottom edge.  Back-ported verbatim so regen preserves the placement.
-        # NOTE: Uchip + J12 here NO LONGER match main Uchip(80,55)/J12(110,14)
-        # -- the user changed the J12-vs-Uchip relative geometry, so the main
-        # board's Uchip/J12 must be moved to match before the two boards will
-        # mate (J12 BTB + the die-between-sockets alignment).  Flagged for
+        # Compressed head placement: Uchip + J12 relocated, the +5V_A ferrite
+        # rail (FB_A/C_Abulk/C_ahf) and the DET_REF divider (Rref1/Rref2/Cref)
+        # moved up off the bottom edge.  Pinned verbatim so regen preserves the
+        # placement.
+        # NOTE: Uchip + J12 here do not match main Uchip(80,55)/J12(110,14) --
+        # the J12-vs-Uchip relative geometry differs, so the main board's
+        # Uchip/J12 must be moved to match before the two boards will mate
+        # (J12 BTB + the die-between-sockets alignment).  Flagged for
         # reconciliation; the head is generated standalone-correct regardless.
         "Uchip": (56.23, 83.27, 0),      # die TOP/detector face (B.Cu pads face the die)
         "J12": (47.54, 30.81, 0),        # BTB DAUGHTER -- see alignment note above
-        "FB_A": (61.2125, 59.5, 0),      # +5V_A ferrite (was 80,128 -- moved up)
-        "C_5V": (57.2125, 59.5, 0),      # +5V INPUT-side bulk for FB_A (was unplaced @20,70 -> left of ferrite)
-        "C_Abulk": (67.2125, 59.5, 0),   # +5V_A bulk (was 86,128)
-        "C_ahf": (67.2125, 63.5, 0),     # +5V_A HF (was 86,132)
-        "Rref1": (56.175, 20.16, 0),     # DET_REF 1.65V divider (was 40,30)
-        "Rref2": (60.175, 20.16, 0),     # (was 44,30)
-        "Cref": (64.175, 20.16, 0),      # (was 48,30)
+        "FB_A": (61.2125, 59.5, 0),      # +5V_A ferrite
+        "C_5V": (57.2125, 59.5, 0),      # +5V INPUT-side bulk for FB_A (left of ferrite)
+        "C_Abulk": (67.2125, 59.5, 0),   # +5V_A bulk
+        "C_ahf": (67.2125, 63.5, 0),     # +5V_A HF decoupling
+        "Rref1": (56.175, 20.16, 0),     # DET_REF 1.65V divider (upper leg)
+        "Rref2": (60.175, 20.16, 0),     # DET_REF divider (lower leg)
+        "Cref": (64.175, 20.16, 0),      # DET_REF divider filter cap
     }
     for c in COMPONENTS:
         if c["ref"] in fixed:
@@ -3033,7 +3021,7 @@ def assign_sch_positions():
                   for p in ("UT", "UAD", "Cua", "CuaB", "Cud", "Cur", "Crio",
                             "Crgc", "Crgd", "Rf", "Cf", "Cut",
                             "UE", "Riref", "Cem"))]
-    # Invention 5 gradient parts (qssc-grad board only): gridded into the same
+    # Gradient parts (qssc-grad board only): gridded into the same
     # x>=420 free area so they cannot collide with the x<410 RF/USB/FPGA content.
     grad_refs = ("Ugrad", "Udrv", "Qgrad", "Rsense", "Rgrad_feed", "Lgrad",
                  "C_grad1", "C_grad2")
@@ -3080,7 +3068,7 @@ def main():
     build_main_board()
     _emit_board(MAIN_CFG, assign_pcb_positions)
 
-    # ---- EXTENDED main board (qssc-grad): base main + Invention 5 gradient ----
+    # ---- EXTENDED main board (qssc-grad): base main + gradient ----
     # coil + DAC current driver.  Base qssc.*/chip_module.* files are regenerated
     # byte-identically above and below this block; this only adds qssc-grad.*.
     COMPONENTS.clear()

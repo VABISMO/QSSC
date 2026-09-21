@@ -1,6 +1,6 @@
 """Hardware-real mode: the genuine FPGA path is distinct from the simulator.
 
-These tests pin the contract the user asked for:
+These tests pin the hardware-real contract:
   * ``hardware=True`` with no board (``QSSC_FPGA_PORT`` unset) raises
     :class:`NoFPGADetected` / returns a ``no-fpga-detected`` body — never a
     silent simulation.

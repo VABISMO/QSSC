@@ -769,8 +769,8 @@ P1_PIN_START = (P1_SUPPORT - (P1_PIN_N - 1) * P1_PIN_PITCH) / 2.0   # 1.11 mm
 P1_PIN_CENTRES = [P1_PIN_START + k * P1_PIN_PITCH for k in range(P1_PIN_N)]
 
 # --- P1 holes + mold: a 2x4 grid of the pin-array footprint, NO through-cut ---
-# The user asked for 2 rows of 4 pieces of EACH type (holes + mold), no through-
-# cut ("los rebordes no los quiero"): a single 2-row x 4-col grid -- row 1 =
+# Layout: 2 rows of 4 pieces of EACH type (holes + mold), no through-cut
+# (edges not wanted): a single 2-row x 4-col grid -- row 1 =
 # 4 HOLES pieces (64 holes each, blind 2 mm), row 2 = 4 MOLD pieces (17.78x17.78
 # 1 mm pocket). 3 mm gap between copies; each holes array is FLUSH at the copy
 # origin (first pin at the corner) so it aligns with the mold cell below/above.

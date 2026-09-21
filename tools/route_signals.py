@@ -194,7 +194,7 @@ BGA_VIA_DRILL_NM = 100_000         # 0.10 mm HDI drill
 #   * signals/config/JTAG/VREFP: THROUGH via-in-pad escaping on In3/In4 (pad-
 #     free under the BGA), column parity (even col -> In3, odd -> In4) so a +X
 #     escape passes under same-row neighbours that sit on the OTHER inner layer.
-#     EVERY netted signal ball gets a VIP (the old unshadowed-skip is gone);
+#     EVERY netted signal ball gets a VIP;
 #     keeping them all (even if the line router fails) lets FreeRouting close
 #     the net from the via later (via_dangling is ignore).
 # In3/In4/B.Cu thus carry the power VIPs + every signal VIP; the line router
@@ -498,8 +498,8 @@ def _free(cell, master, own_keepout, routed, allowed):
 def _via_footprint_free(vix, viy, vr, master, own_keepout, routed, allowed):
     """True if the FULL via mark-footprint -- a (2*vr+1)^2 block of cells on every
     signal layer -- is free, so placing a THROUGH via at (vix, viy) cannot claim
-    cells another net already holds. The centre-only check the via-placement
-    helpers used previously only tested (vix, viy) per layer: a track 0.1-0.6 mm
+    cells another net already holds. The centre-only check tests only
+    (vix, viy) per layer: a track 0.1-0.6 mm
     off-centre (an adjacent cell) was invisible, the via was placed, and _add_via
     then marked the r3 block over it -> a short / 0.10 mm clearance (the
     CONF_DONE via vs CONF_INIT track on In4.Cu; the TIA_ADC via vs VREFP track on
@@ -1152,8 +1152,7 @@ def _bga_fanout(board, x0, y0, routed, fps=None):
       * +1V0/+1V8 -> through via-in-pad tying to the rail layer (In3/In4)
       * signal/config/JTAG/VREFP -> through via-in-pad escaping on In3.Cu
         (even column) / In4.Cu (odd column). EVERY netted signal ball gets one
-        (the old "unshadowed rightmost-column -> F.Cu escape" skip is gone --
-        F.Cu escape is impossible under the 0.8 mm pad field).
+        (F.Cu escape is impossible under the 0.8 mm pad field).
 
     Returns (vip_net, pad_vip, vip_vias):
 
@@ -1354,7 +1353,7 @@ def _chip_fanout(board, x0, y0, routed, fps=None):
     here.  The through-via barrel ties the pad to the OPPOSITE surface (B.Cu for
     EM, F.Cu for DET), which is CLEAR of die pads (the die sits on one layer per
     board), so the line router escapes via->target (TLC5947 sink / TIA / ADC
-    input) on that clear layer.  Unlike the old code, NO fixed 3 mm escape is
+    input) on that clear layer.  NO fixed 3 mm escape is
     pre-routed: that fixed escape was the short source (adjacent-row escapes on
     the same column overlapped on the escape layer).  The line router (_route_pair,
     via the via_pads pseudo-pad + pad_vip entry) routes from the via on the clear

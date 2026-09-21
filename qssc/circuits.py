@@ -118,7 +118,7 @@ def create_period_finding_circuit(n: int, a: int) -> QuantumCircuit:
     qr_a = QuantumRegister(l, "anc")
     # Measure ALL qubits (counting register + ancilla) so the readout width
     # equals the qubit count: the dashboard histogram and 8x8 grid then show
-    # one bit per chosen qubit (the user's "13 qubits but only 9 bits shown"
+    # one bit per chosen qubit (the operator's "13 qubits but only 9 bits shown"
     # complaint -- the 4 ancilla were never measured). The phase lives in the
     # counting register; the ancilla holds |a^x mod n> and is read out for
     # display only. Counting -> LOW classical bits so the phase peaks light the
@@ -537,7 +537,7 @@ class _UserAstValidator(_ast.NodeVisitor):
         self.generic_visit(node)
 
 
-# numpy file-IO entry points the user script must not reach. The AST sandbox
+# numpy file-IO entry points the operator's script must not reach. The AST sandbox
 # blocks `open`/dunder escapes, but numpy's own ``np.load``/``np.fromfile``/
 #``np.savetxt`` read and write the host filesystem directly, so strip them
 # from the exposed ``np``. This is defense in depth for a localhost lab tool,
@@ -594,7 +594,7 @@ def build_user_circuit(code: str, max_qubits: int = 64) -> QuantumCircuit:
     # --- OpenQASM 2.0 path -------------------------------------------------
     if "OPENQASM" in text or text.startswith(("qreg", "creg", "gate ", "opaque")):
         # qiskit 2.x qasm2 does not auto-include the standard gate library,
-        # so inject qelib1.inc when the user omitted it (lets plain `h`/`cx`
+        # so inject qelib1.inc when the operator omitted it (lets plain `h`/`cx`
         # QASM "just work").
         if "qelib1.inc" not in text and "include" not in text:
             lines = text.splitlines()
@@ -640,7 +640,7 @@ def build_user_circuit(code: str, max_qubits: int = 64) -> QuantumCircuit:
         return mod
 
     namespace = {
-        # primitives the user script may use directly (no import needed)
+        # primitives the operator's script may use directly (no import needed)
         "QuantumCircuit": QuantumCircuit,
         "QuantumRegister": QuantumRegister,
         "ClassicalRegister": ClassicalRegister,

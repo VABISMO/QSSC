@@ -155,11 +155,11 @@ class RunRequest(BaseModel):
     # pixel all-to-all dipole 2q, the default) or ensemble (64 chip pixels,
     # no within-pixel 2q). n_nv_per_pixel / register_line_freqs_hz override
     # the register width (the measured resolvable ODMR line count from the
-    # calibration's decompose_odmr). gradient_mhz_per_um (Invention 5, the
-    # applied field gradient) + register_line_freqs_hz close the calibration
+    # calibration's decompose_odmr). gradient_mhz_per_um (the applied field
+    # gradient) + register_line_freqs_hz close the calibration
     # -> circuit loop: the register sits on the real addressed frequencies at
     # that gradient, not the synthetic 6 MHz grid. prime_readout toggles the
-    # prime-coprime lock-in denoiser (Invention 2+, default on at the panel).
+    # prime-coprime lock-in denoiser (default on at the panel).
     pixel_mode: str = "register"          # register | ensemble
     n_nv_per_pixel: Optional[int] = Field(None, ge=1, le=64)
     register_nv_spacing_nm: float = Field(2.75, gt=0)
@@ -168,7 +168,7 @@ class RunRequest(BaseModel):
     register_line_freqs_hz: Optional[List[int]] = None
     prime_readout: bool = False
     n_noise_bins: int = Field(64, ge=1, le=4096)
-    # Invention 9: classical anti-noise filter stack (300 K, SNR-protective).
+    # Classical anti-noise filter stack (300 K, SNR-protective).
     # noise_env presets the environmental noise channels ("none"=off -> back-
     # compat); anti_noise is the filter config dict (empty/None -> back-compat).
     # A DD sequence extends the spin T2 used for coherence survival.
@@ -190,7 +190,7 @@ class CustomCircuitRequest(BaseModel):
     # circuits wider than the backend's SIM_MAX_QUBITS (28) are rejected with a
     # clear error rather than silently faked. See qssc.backend.SIM_MAX_QUBITS.
     max_qubits: int = Field(20, ge=1, le=20)
-    # Pixel mode + invention toggles (see RunRequest).
+    # Pixel mode + noise toggles (see RunRequest).
     pixel_mode: str = "register"
     n_nv_per_pixel: Optional[int] = Field(None, ge=1, le=64)
     register_nv_spacing_nm: float = Field(2.75, gt=0)
@@ -199,13 +199,13 @@ class CustomCircuitRequest(BaseModel):
     register_line_freqs_hz: Optional[List[int]] = None
     prime_readout: bool = False
     n_noise_bins: int = Field(64, ge=1, le=4096)
-    # Invention 9: classical anti-noise filter stack (see RunRequest).
+    # Classical anti-noise filter stack (see RunRequest).
     noise_env: str = "none"
     anti_noise: Optional[dict] = None
 
 
 class ParallelRunRequest(BaseModel):
-    """Invention 4 — 64-parallel distributed computing.
+    """64-parallel distributed computing.
 
     Run one circuit per pixel across the 64-pixel array (64 INDEPENDENT ~10-NV
     processors at 300 K) and aggregate. The chip's throughput is 64x a single
@@ -233,7 +233,7 @@ class ParallelRunRequest(BaseModel):
     qasm: Optional[str] = None  # sample: a QASM circuit (else uniform H+measure)
     # custom mode
     circuits: Optional[list] = None  # list of QASM strings, one per pixel
-    # Pixel mode + invention toggles (see RunRequest).
+    # Pixel mode + noise toggles (see RunRequest).
     pixel_mode: str = "register"
     n_nv_per_pixel: Optional[int] = Field(None, ge=1, le=64)
     register_nv_spacing_nm: float = Field(2.75, gt=0)
@@ -242,18 +242,18 @@ class ParallelRunRequest(BaseModel):
     register_line_freqs_hz: Optional[list] = None
     prime_readout: bool = False
     n_noise_bins: int = Field(64, ge=1, le=4096)
-    # Invention 4: opt in to the cached per-pixel calibration (each pixel runs
+    # Opt in to the cached per-pixel calibration (each pixel runs
     # at its MEASURED register width, narrow pixels skipped). Default False =
     # the uniform-register back-compat path. Calibrate first via
     # /api/circuit/calibrate-array, then set use_calibration=true here.
     use_calibration: bool = False
-    # Invention 9: classical anti-noise filter stack (see RunRequest).
+    # Classical anti-noise filter stack (see RunRequest).
     noise_env: str = "none"
     anti_noise: Optional[dict] = None
 
 
 class CalibrateArrayRequest(BaseModel):
-    """Invention 4+5 — calibrate the 64-pixel array's per-pixel qubit register
+    """Calibrate the 64-pixel array's per-pixel qubit register
     width (a MEASURED quantity: the number of ODMR lines the field gradient
     makes resolvable in each pixel, capped by the NVs present).
 
@@ -278,17 +278,17 @@ class CalibrateArrayRequest(BaseModel):
     source: str = "sim"          # sim | real
     max_nv_per_microdiamond: int = Field(300, ge=1, le=1000)  # compute-stone NVs (100-300)
     n_points: int = Field(400, ge=32, le=4096)  # real path sweep points
-    # Invention 6: charge-sharing centroiding (sub-pixel detector resolution).
+    # Charge-sharing centroiding (sub-pixel detector resolution).
     # When true, build a SubPixelModel (sigma_sheet_mm sheet spreading length)
     # and report spatial_channels = 64*S + per-pixel sub_pixel_position. This is
     # detector imaging metadata; it does NOT change register_width.
     sub_pixel: bool = False
     sigma_sheet_mm: float = Field(1.0, gt=0.0, le=10.0)
-    # Invention 7: N-shot lock-in averaging raises per-line SNR by sqrt(N), so
+    # N-shot lock-in averaging raises per-line SNR by sqrt(N), so
     # dimmer lone-NV ODMR lines clear the detection bar -> the MEASURED
     # register_width rises toward min(resolvable, nv_present). 1 = no averaging.
     integration_shots: int = Field(1, ge=1, le=10000)
-    # Invention 9: classical anti-noise filter stack (300 K, SNR-protective).
+    # Classical anti-noise filter stack (300 K, SNR-protective).
     # noise_env presets the environmental channels: "lab"/"quiet"/"noisy"/"none"
     # (none = off -> bit-identical to the prior model). anti_noise is the filter
     # config dict (thermal_servo_gain, vibration_iso_residual, emi_shield_residual,
@@ -296,12 +296,12 @@ class CalibrateArrayRequest(BaseModel):
     # dd_sequence, dd_n_blocks); empty/None -> all-off -> back-compat.
     noise_env: str = "none"
     anti_noise: Optional[dict] = None
-    # Invention 13: compressed-sensing super-resolution ODMR. When > 0, recover
+    # Compressed-sensing super-resolution ODMR. When > 0, recover
     # each pixel's line set by OMP sparse recovery over the gradient-bin
     # dictionary with superres_factor = this value (0.6 typical; 1.0 = hard-
     # threshold behaviour). Deconvolves overlapping lines + lowers the SNR bar.
     superres: Optional[float] = Field(None, ge=0.0, le=1.0)
-    # Invention 14: Bayesian quantum-limited readout. When 0 < value < 1, recover
+    # Bayesian quantum-limited readout. When 0 < value < 1, recover
     # lines by the one-sided Bonferroni-corrected matched-filter detector at this
     # confidence (0.99 typical). Extracts marginal lone-NV lines the hard bar
     # misses. Mutually exclusive with superres (superres takes precedence).
@@ -341,7 +341,7 @@ def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
     # close the calibration -> circuit loop: the register sits on the real
     # addressed frequencies at the applied gradient, not the synthetic 6 MHz
     # grid. prime_readout toggles the coprime matched-filter denoiser
-    # (Invention 2+): when on, the effective readout error is reduced by the
+    # When on, the effective readout error is reduced by the
     # prime SNR factor (n_noise_bins / n_symbols). See QSSCBackend.
     from qssc.backend import N_NV_PER_PIXEL
     return QSSCBackend(profile=profile, seed=seed,
@@ -886,7 +886,7 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
     splitting D + linewidth, (4) per-pin resonance + Ramsey/Hahn coherence.
     Returns every stage's data so the dashboard can render the calibration.
 
-    **Invention 5 field gradient:** ``gradient_code`` (0..4095) programs the
+    **Field gradient:** ``gradient_code`` (0..4095) programs the
     MCP4921 DAC that sets the gradient-coil current *before* the ODMR sweep. In
     hardware mode this sends ``SET_GRADIENT <code>`` to the board; in sim mode
     it feeds ``gradient_mhz_per_um`` into the ODMR model so the ensemble line
@@ -895,7 +895,7 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
     register width N at that gradient. With no gradient the ensemble collapses
     to one line (N=1, ensemble mode); with a strong enough gradient the lines
     resolve (N>1, register mode). N is therefore a *measured* function of the
-    applied gradient -- the whole point of Invention 5.
+    applied gradient -- the whole point of the field gradient.
 
     With ``hardware=True`` the sweep runs against a real board selected by
     ``QSSC_FPGA_PORT``: stage 1 reads real AD7616 codes (every emitter armed +
@@ -910,7 +910,7 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
     grid = max(1, min(int(grid), 16))
     n_nv_per_pixel = max(1, min(int(n_nv_per_pixel), 64))
 
-    # Invention 5: map the DAC code to a field gradient. grad_mhz_per_um is the
+    # Map the DAC code to a field gradient. grad_mhz_per_um is the
     # line spread per micron of pixel position; 0 = no gradient (ensemble).
     grad_mhz_per_um, coil_current_a, grad_code = _gradient_from_code(gradient_code)
     grad_spread_mhz = grad_mhz_per_um * GRAD_PIXEL_UM
@@ -955,7 +955,7 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
                     "intensity": round(s.intensity, 1)} for s in sites]
 
         # Stage 3 — real ODMR sweep + fit D (same doublet-midpoint fit as sim).
-        # Invention 5: program the gradient coil BEFORE the sweep so the ODMR
+        # Program the gradient coil BEFORE the sweep so the ODMR
         # lines spread by grad_spread_mhz; widen the sweep span to cover them.
         # Track whether the board actually accepted the gradient (G6): a failed
         # write must not abort the sweep, but the response must NOT claim the
@@ -997,7 +997,7 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
 
         f0 = prof.d_ghz
         span = max(0.08, abs(prof.hyperfine_coupling) / 1e9 * prof.n_equivalent_nuclei * 1.15 + 0.03)
-        # Invention 5: a field gradient spreads the ensemble line across the
+        # A field gradient spreads the ensemble line across the
         # pixel by grad_spread_mhz; widen the sweep so the resolved lines stay
         # in-window, and feed the gradient into the ODMR model so the lines
         # actually separate (each NV at a different pixel position shifts by
@@ -1163,7 +1163,7 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
     t2_mean = float(np.mean(t2_us_vals)) if t2_us_vals else 0.0
     t2_star_mean = float(np.mean(t2_star_vals)) if t2_star_vals else 0.0
 
-    # Invention 5 -- the qubit count is a MEASURED function of the applied
+    # The qubit count is a MEASURED function of the applied
     # gradient. register_width = the resolvable ODMR line count in one pixel
     # (decompose_odmr); the chip has n_pixels independent pixels, so the total
     # on-chip register is register_width * n_pixels. With no gradient the
@@ -1295,7 +1295,7 @@ def run_custom_circuit(req: CustomCircuitRequest, sync: bool = False,
 @app.post("/api/circuit/run-parallel")
 def run_parallel_circuits(req: ParallelRunRequest, sync: bool = False,
                           request: Request = None):
-    """64-parallel distributed computing (Invention 4).
+    """64-parallel distributed computing.
 
     Run one circuit per pixel across the 64-pixel array -- 64 INDEPENDENT
     ~10-NV processors at 300 K (1/r**3 -> zero at the 2.5 mm pitch, so the
@@ -1333,9 +1333,9 @@ def run_parallel_circuits(req: ParallelRunRequest, sync: bool = False,
 @app.post("/api/circuit/calibrate-array")
 def calibrate_array_endpoint(req: CalibrateArrayRequest, sync: bool = False,
                              request: Request = None):
-    """Calibrate the 64-pixel array's per-pixel register width (Invention 4+5).
+    """Calibrate the 64-pixel array's per-pixel register width.
 
-    The width is the number of ODMR lines the field gradient (Invention 5) makes
+    The width is the number of ODMR lines the field gradient makes
     resolvable in each pixel, capped by the NVs physically present — a MEASURED
     quantity, not a fixed knob. ``source="sim"`` synthesizes each pixel's
     spectrum and counts the lines; ``source="real"`` runs the ``RUN_ALL_ODMR``
@@ -1468,7 +1468,7 @@ _FPGA_PROTOCOL = [
      "desc": "sweep the ADF4351 across the NV resonance, one AD7616 sample per point"},
     {"cmd": "RUN_ALL_ODMR", "args": "f_start_khz f_stop_khz n_points",
      "reply": "n × (64 × 0..65535) + OK / ERR",
-     "desc": "64-parallel calibration sweep (Invention 4+5): sweep the ADF4351 "
+     "desc": "64-parallel calibration sweep: sweep the ADF4351 "
              "and read all 64 AD7616 channels per point → one ODMR spectrum per "
              "pixel; the host runs decompose_odmr per column to count each "
              "pixel's resolved lines = its calibrated register width"},
@@ -1970,7 +1970,7 @@ def api_sensor_magneto(
     average: bool = True,
     seed: Optional[int] = None,
 ):
-    """64-pixel VECTOR magnetometer (Invention 1).
+    """64-pixel VECTOR magnetometer.
 
     Unlike the simple /api/magneto |B.n| projection, each of the 64 pixels
     recovers the full B-VECTOR from its 4 NV <111> doublets (4-axis
@@ -2031,12 +2031,12 @@ def api_sensor_tensor(
     differential: bool = True,
     seed: Optional[int] = None,
 ):
-    """64-pixel TENSOR gradiometer (Invention 19) + dipole localization.
+    """64-pixel TENSOR gradiometer + dipole localization.
 
     The per-pixel 3x2 B-gradient Jacobian (µT/mm) of the 8x8 B-VECTOR map,
     plus a point-dipole source fit. The B-vector map is the RECOVERED field
     each pixel measures from its 4 NV <111> Zeeman doublets (the same 4-axis
-    reconstruction as the vector magnetometer, Invention 1):
+    reconstruction as the vector magnetometer):
 
     * ``source='real'`` (default): the 4-axis doublet reconstruction is
       shot-noise-limited at the linewidth floor for ``n_avg`` averages -- the

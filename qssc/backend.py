@@ -729,7 +729,7 @@ class QSSCBackend(BackendV2):
           N = len(register_line_freqs_hz) and the NVs sit on that measured
           frequency grid; otherwise N defaults to ``n_nv_per_pixel`` on the
           synthetic 6 MHz grid (a sim-only fallback, not a physics assertion).
-          A field gradient (Invention 5, HW-fits on the qssc-grad variant) caps
+          A field gradient (HW-fits on the qssc-grad variant) caps
           N at the resolvable count (Case D: separation > linewidth).
         * ``"ensemble"``: the 64 chip pixels ARE the circuit qubits (one
           ensemble qubit per pixel -- the bulk-microdiamond collapse to a single
@@ -751,7 +751,7 @@ class QSSCBackend(BackendV2):
         6 MHz grid -- closing the calibration -> circuit loop. None falls back
         to the nominal width + uniform grid.
 
-        ``register_widths_per_pixel`` (Invention 4 — calibrated 64-parallel): a
+        ``register_widths_per_pixel`` (calibrated 64-parallel): a
         per-pixel list of MEASURED register widths (from
         :func:`qssc.array_calibration.calibrate_array`). When provided, the
         backend builds one independent register per pixel
@@ -796,7 +796,7 @@ class QSSCBackend(BackendV2):
             else None)
         if self._register_line_freqs_hz is not None:
             self.n_nv_per_pixel = len(self._register_line_freqs_hz)
-        # Prime-coprime readout denoiser (Invention 2+): when on, the lock-in
+        # Prime-coprime readout denoiser: when on, the lock-in
         # matched-filter rejects the OUT-of-band noise fraction (the energy
         # outside the prime frequency bins), improving the readout SNR by the
         # factor prime_noise_rejection = n_noise_bins / n_symbols. The EFFECTIVE
@@ -842,8 +842,7 @@ class QSSCBackend(BackendV2):
                 # readout. N is the MEASURED resolvable ODMR line count when
                 # register_line_freqs_hz is given (the truth from
                 # decompose_odmr); otherwise the default/cap n_nv_per_pixel on
-                # the synthetic 6 MHz grid. A field gradient (Invention 5,
-                # HW-fits on the qssc-grad variant) caps the register width at
+                # the synthetic 6 MHz grid. A field gradient (HW-fits on the qssc-grad variant) caps the register width at
                 # the resolvable count.
                 sites = auto_align(prof, n_nv_per_pixel=self.n_nv_per_pixel,
                                    register=True, temperature_k=temperature_k,
@@ -872,7 +871,7 @@ class QSSCBackend(BackendV2):
             self.n_nv_per_pixel = len(sites)
         self.sites = list(sites)
         self._n_qubits = len(self.sites)
-        # Nuclear-spin memory (Invention 3): when enabled, append one 13C memory
+        # Nuclear-spin memory: when enabled, append one 13C memory
         # qubit per electron NV (paired by index). The 13C carries nuclear_t2
         # (seconds, vs the electron's ~1.8 ms) so a circuit can STORE a state on
         # its 13C (SWAP i -> i+n_electron) and RECALL it (SWAP back) ~500x past
@@ -895,7 +894,7 @@ class QSSCBackend(BackendV2):
             self.sites = self.sites + self._nuclear_sites(self.sites)
             self._n_qubits = len(self.sites)
             self.n_nv_per_pixel = self._n_electron  # electron width unchanged
-        # Invention 4 — calibrated 64-parallel: build one independent register
+        # Calibrated 64-parallel: build one independent register
         # per pixel at its MEASURED width. run_array swaps these in per pixel
         # and skips pixels narrower than the circuit. Each pixel's register is
         # drawn with its own seed so the per-pixel site positions/frequencies
@@ -933,7 +932,7 @@ class QSSCBackend(BackendV2):
                     register_line_freqs_hz=pf)
         t1, t2 = coherence_at_temperature(prof, temperature_k)
         self._t1, self._t2 = t1, t2
-        # Invention 9 — classical anti-noise stack: when a dynamical-decoupling
+        # Classical anti-noise stack: when a dynamical-decoupling
         # sequence is configured, extend the spin T2 used for coherence survival
         # and the dipole/thermal error models. DD refocuses low-frequency
         # dephasing (T2*->T2) but is hard-capped at 2*T1 (energy relaxation is
@@ -942,7 +941,7 @@ class QSSCBackend(BackendV2):
         if anti_noise is not None and (anti_noise.dd_sequence or "none") != "none":
             self._t2 = effective_t2(self._t2, anti_noise.dd_sequence,
                                     anti_noise.dd_n_blocks, self._t1)
-        # Invention 9 — environmental noise + filter stack on the readout floor.
+        # Environmental noise + filter stack on the readout floor.
         # noise_env models the lab environment (temperature drift, vibration,
         # EMI, pressure); the anti_noise filter stack attenuates each channel.
         # Both enter the EFFECTIVE readout error (see _effective_readout_err):
@@ -1370,7 +1369,7 @@ class QSSCBackend(BackendV2):
     def run_array(self, circuits, shots: int | None = None,
                   max_pixels: int = N_SITES) -> dict:
         """Run one circuit per pixel across the 64-pixel array IN PARALLEL and
-        aggregate (Invention 4 — distributed computing).
+        aggregate (distributed computing).
 
         The 64 die pixels are INDEPENDENT ~10-NV processors at 300 K (1/r**3
         -> zero at the 2.5 mm pitch, so there is no cross-pixel coupling): the
@@ -1379,7 +1378,7 @@ class QSSCBackend(BackendV2):
         -- one per pixel -- each an independent noise realization (per-pixel
         seed offset), and returns per-pixel counts plus the aggregate.
 
-        Calibrated per-pixel width (Invention 4+5): when the backend was built
+        Calibrated per-pixel width: when the backend was built
         with ``register_widths_per_pixel`` (a measured width per pixel from
         :func:`qssc.array_calibration.calibrate_array`), each pixel runs at its
         OWN width. A circuit WIDER than a pixel's calibrated width is SKIPPED
@@ -1778,7 +1777,7 @@ class QSSCBackend(BackendV2):
             "within_coherence": within,
             "within_optical_coherence": within_optical,
             "verdict": verdict,
-            # Invention 9 anti-noise stack echo (None when unset -> back-compat).
+            # Anti-noise stack echo (None when unset -> back-compat).
             "anti_noise": (self.anti_noise.to_dict()
                            if self.anti_noise is not None else None),
         }
@@ -2274,7 +2273,7 @@ class QSSCBackend(BackendV2):
             # and the 64-channel readout see. The circuit register NVs are the
             # ``num_qubits`` (~10) above.
             "sites": [self._site_view(s) for s in self._chip_sites],
-            # Invention 4 — calibrated per-pixel register drill-down. When a
+            # Calibrated per-pixel register drill-down. When a
             # calibration is loaded, each pixel's MEASURED register width (the
             # resolvable ODMR line count under the gradient) is reported; the
             # uniform fallback reports the single n_nv_per_pixel for all 64.
