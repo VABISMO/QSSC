@@ -38,7 +38,7 @@ from qssc.array_calibration import (
     nv_ceiling_for_size, PIXEL_SIZE_MAX_UM, PIXEL_SIZE_MIN_UM,
     calibrate_array_from_codes,
 )
-from qssc.backend import _fit_t2_from_codes
+from qssc.backend_fits import _fit_t2_from_codes
 from qssc.protocol import (
     protocol_as_dict, protocol_summary, protocol_platforms,
 )

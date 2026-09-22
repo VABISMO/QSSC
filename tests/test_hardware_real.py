@@ -61,7 +61,7 @@ class _FakeSerial:
 def _make_fpga_with_replies(monkeypatch, replies):
     """Build a real FPGAConnection whose pyserial layer is a fake loopback."""
     import serial
-    import qssc.backend as backend
+    import qssc.backend_fpga as backend_fpga
 
     fake = _FakeSerial(replies)
 
@@ -69,8 +69,9 @@ def _make_fpga_with_replies(monkeypatch, replies):
         return fake
 
     monkeypatch.setattr(serial, "Serial", _fake_serial)
-    # Skip the 2 s board-settle sleep so the test is fast.
-    monkeypatch.setattr(backend.time, "sleep", lambda *_a, **_k: None)
+    # Skip the 2 s board-settle sleep so the test is fast. ``time`` and
+    # ``FPGAConnection`` live in backend_fpga after the M3 split.
+    monkeypatch.setattr(backend_fpga.time, "sleep", lambda *_a, **_k: None)
     # A non-empty port triggers the real-connection branch in make_connection.
     return make_connection(port="/dev/ttyFAKE0", profile="NV",
                            temperature_k=300.0, seed=42)
@@ -290,10 +291,10 @@ def _patch_cmd_serial(monkeypatch, **fake_kw):
     """Monkeypatch pyserial so make_connection() builds a real FPGAConnection
     backed by a :class:`_CmdFakeSerial`."""
     import serial
-    import qssc.backend as backend
+    import qssc.backend_fpga as backend_fpga
     fake = _CmdFakeSerial(**fake_kw)
     monkeypatch.setattr(serial, "Serial", lambda *a, **k: fake)
-    monkeypatch.setattr(backend.time, "sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(backend_fpga.time, "sleep", lambda *_a, **_k: None)
     return fake
 
 
