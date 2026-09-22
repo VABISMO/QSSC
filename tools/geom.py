@@ -90,6 +90,36 @@ def seg_rect_dist2(x1, y1, x2, y2, rx0, ry0, rx1, ry1):
     return d
 
 
+def pt_rect_center_dist2(px, py, cx, cy, hw, hh):
+    """Squared distance from point (px,py) to a rectangle given by its centre
+    (cx,cy) and half-extents (hw,hh). Exact transform of :func:`pt_rect_dist2`
+    (the copper-pad model used by the plane builder: pads are stored as centre +
+    GetSize half-extents, not corners)."""
+    return pt_rect_dist2(px, py, cx - hw, cy - hh, cx + hw, cy + hh)
+
+
+def seg_rect_center_dist2(x1, y1, x2, y2, cx, cy, hw, hh):
+    """Squared distance from segment (x1,y1)-(x2,y2) to a rectangle (centre +
+    half-extents), by sampling the segment at ~0.1 mm steps (a tie trace is
+    <= 3 mm, so <= 30 samples). The via endpoint already cleared the pad; this
+    guards the trace body against skirting a different-net pad's long side.
+
+    Sampling (not Liang-Barsky) is kept to match the plane builder's original
+    behaviour exactly: the sample step and point-to-rect formula are identical
+    to the inlined helper it replaced, so via/trace placement is unchanged."""
+    length = int(((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5)
+    n = max(2, length // 100_000 + 1)
+    best = 9_000_000_000_000_000
+    for i in range(n + 1):
+        t = i / n
+        px = x1 + t * (x2 - x1)
+        py = y1 + t * (y2 - y1)
+        d = pt_rect_center_dist2(px, py, cx, cy, hw, hh)
+        if d < best:
+            best = d
+    return best
+
+
 def seg_bbox(x1, y1, x2, y2, pad):
     """Inflated axis-aligned bounding box of segment (x1,y1)-(x2,y2) by `pad`."""
     return (min(x1, x2) - pad, min(y1, y2) - pad, max(x1, x2) + pad, max(y1, y2) + pad)
