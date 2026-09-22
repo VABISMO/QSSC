@@ -30,7 +30,7 @@ from qssc import make_connection  # noqa: F401 — re-exported as the test patch
 from ._guards import (  # noqa: F401 — re-exported for api.main.* callers
     GRAD_COIL_VDD, GRAD_SENSE_OHM, GRAD_ADDRESSING_A,
     GRAD_ADDRESSING_MHZ_PER_UM, GRAD_PIXEL_UM, ODMR_LINEWIDTH_MHZ,
-    GRAD_COIL_MAX_MHZ_PER_UM,
+    GRAD_COIL_MAX_MHZ_PER_UM, _real_odmr_sweep,
 )
 from .routes_calibration import router as calibration_router, calibration_run
 from .routes_signal import router as signal_router, signal_array
