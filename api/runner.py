@@ -8,6 +8,7 @@ fallback) **and** from an RQ worker process (asynchronous path).
 """
 from __future__ import annotations
 
+import logging
 import math
 import os
 import time
@@ -16,6 +17,8 @@ from typing import Optional
 from pathlib import Path
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 from qssc import (
     QSSCBackend, SimulatedFPGA, FPGAConnection,
@@ -50,7 +53,8 @@ def _load_cached_calibration() -> ArrayCalibration | None:
     try:
         if _CALIB_FILE.exists():
             return ArrayCalibration.from_json(_CALIB_FILE)
-    except Exception:  # noqa: BLE001 - a corrupt cache must never break a run
+    except Exception as exc:  # noqa: BLE001 - a corrupt cache must never break a run
+        logger.warning("calibration cache unreadable (%s); ignoring cached state", exc)
         return None
     return None
 
@@ -780,8 +784,9 @@ def run_calibrate_array(req: dict) -> dict:
                 try:
                     fpga.send_command(f"SET_GRADIENT {grad_code}")
                     gradient_applied_ok = True
-                except Exception:  # noqa: BLE001 - do not abort the sweep
+                except Exception as exc:  # noqa: BLE001 - do not abort the sweep
                     gradient_applied_ok = False
+                    logger.debug("gradient coil write failed in run_parallel: %s", exc)
             # N-shot lock-in integration. Average N independent
             # RUN_ALL_ODMR sweeps -> per-point readout noise drops by sqrt(N)
             # (uncorrelated thermal/Johnson noise), so dimmer lone-NV ODMR bins
@@ -830,8 +835,8 @@ def run_calibrate_array(req: dict) -> dict:
     try:
         _CALIB_FILE.parent.mkdir(parents=True, exist_ok=True)
         calib.to_json(_CALIB_FILE)
-    except Exception:  # noqa: BLE001 - a cache write failure must not break the reply
-        pass
+    except Exception as exc:  # noqa: BLE001 - a cache write failure must not break the reply
+        logger.debug("calibration cache write failed: %s", exc)
     bw = best_uniform_width(calib.widths)
     # Which line-recovery mode produced the widths.
     if superres is not None and superres > 0.0:

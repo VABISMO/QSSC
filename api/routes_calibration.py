@@ -7,12 +7,15 @@ invoke ``calibration_run(...)`` directly with kwargs.
 """
 from __future__ import annotations
 
-import os
+import logging
 import math
+import os
 from typing import Optional
 
 import numpy as np
 from fastapi import APIRouter
+
+logger = logging.getLogger(__name__)
 
 from qssc import (
     get_profile, coherence_at_temperature,
@@ -256,8 +259,9 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
             try:
                 fpga.send_command(f"SET_GRADIENT {grad_code}")
                 gradient_applied_ok = True
-            except Exception:
+            except Exception as exc:
                 gradient_applied_ok = False  # do not abort the sweep
+                logger.debug("gradient coil write failed: %s", exc)
         f0 = prof.d_ghz
         span = max(0.08, abs(prof.hyperfine_coupling) / 1e9 * prof.n_equivalent_nuclei * 1.15 + 0.03)
         span = max(span, grad_spread_mhz / 1e3 + 0.04)
@@ -414,8 +418,9 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
                 ramsey_codes = fpga.run_sequence(s.qubit_id, 0, n_seq, seq_t_step)
                 t2_fit = _fit_t2_from_codes(hahn_codes, seq_t_step)
                 t2_star_fit = _fit_t2_from_codes(ramsey_codes, seq_t_step)
-            except Exception:
+            except Exception as exc:
                 t2_fit = t2_star_fit = float("nan")
+                logger.debug("per-pin T2 fit failed (ill-conditioned codes): %s", exc)
             # Fall back to the model value when the fit is ill-conditioned
             # (flat codes / no decay visible in the window).
             t2_meas = (t2_fit * 1e-6) if math.isfinite(t2_fit) else max(

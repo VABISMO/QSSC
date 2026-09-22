@@ -34,12 +34,15 @@ NV datasheet values). ``max_nv_per_microdiamond`` is a user-supplied model input
 from __future__ import annotations
 
 import json
+import logging
 import math
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Optional, Sequence
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 from .defects import DefectProfile, get_profile
 from .odmr_decompose import decompose_odmr
@@ -138,7 +141,9 @@ def _linewidth_mhz_for(profile: str) -> float:
     """ODMR linewidth (MHz) for a profile short-name; 5.0 fallback."""
     try:
         return float(get_profile(profile).odmr_linewidth_hz * 1e-6)
-    except Exception:
+    except Exception as exc:
+        logger.debug("ODMR linewidth for %r unavailable, using 5.0 MHz: %s",
+                     profile, exc)
         return 5.0
 
 

@@ -1222,8 +1222,10 @@ class QSSCBackend(BackendV2):
             # block width (qubits): scale cost quadratically with width.
             try:
                 w = int(inst.operation.num_qubits)
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
                 w = len(inst.qubits)
+                logger.debug("operation num_qubits unavailable for %r: %s",
+                             name, exc)
             w = max(2, w)
             n_compiled += 1
             decomp_2q += factor * (w * w) / 16.0

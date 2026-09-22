@@ -14,6 +14,7 @@ chokepoint every route uses for the FPGA connection, so a test patch of
 """
 from __future__ import annotations
 
+import os
 import time
 from typing import Optional
 
@@ -106,13 +107,18 @@ def _client_ip(request: Request) -> str:
 
 
 def _is_local(request: Request) -> bool:
-    # "testclient" is the Starlette TestClient connection host (tests); it is
-    # the connection peer, not a spoofable header, so it is safe to treat as
-    # local. Behind Render's proxy request.client.host is the proxy, so real
-    # public callers are never local here — sync stays blocked for them.
-    return (request.client.host if request.client else "") in (
-        "127.0.0.1", "::1", "localhost", "testclient",
-    )
+    # Loopback peers are always local. "testclient" is the Starlette TestClient
+    # connection host (tests only); it is the connection peer, not a spoofable
+    # header, but we still gate it behind QSSC_TESTING so a deploy behind a
+    # proxy can never treat a spoofed peer as local. Behind Render's proxy
+    # request.client.host is the proxy, so real public callers are never local
+    # here — sync stays blocked for them.
+    peer = request.client.host if request.client else ""
+    if peer in ("127.0.0.1", "::1", "localhost"):
+        return True
+    if peer == "testclient" and os.environ.get("QSSC_TESTING"):
+        return True
+    return False
 
 
 def _rate_limited(request: Request) -> bool:

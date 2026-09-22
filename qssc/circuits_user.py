@@ -8,6 +8,18 @@ gates the ``/api/circuit/custom`` endpoint (API key + localhost only).
 ``qssc.circuits`` re-exports :class:`UserCircuitError` and
 :func:`build_user_circuit` so ``from qssc.circuits import build_user_circuit``
 keeps resolving unchanged.
+
+Security note -- this is a documented, NOT absolute, sandbox. The AST validator
+rejects dunder-attribute access (the classic ``obj.__init__.__globals__`` escape
+to the real builtins / ``os.system``) and calls to dangerous builtins, on top of
+an import whitelist. It is NOT a capability-secure isolation boundary: a novel
+escape via an allowed object's non-dunder surface cannot be ruled out. The
+endpoint is therefore reachable ONLY behind the ``QSSC_ENABLE_CUSTOM_CIRCUIT``
+flag + an optional ``X-API-Key`` AND a localhost check (see
+:func:`api._guards._is_local` / :func:`api._guards._check_custom_circuit`), so
+the trust model is "the local operator may run their own Qiskit snippet" -- not
+"untrusted remote code". Do not expose ``/api/circuit/custom`` on a public
+deploy without an additional isolation layer (container/process jail).
 """
 from __future__ import annotations
 

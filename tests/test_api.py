@@ -2,11 +2,12 @@
 """Integration tests for the QSSC FastAPI backend (``api.main``).
 
 Every endpoint is exercised through Starlette's ``TestClient`` (no network).
-Circuit runs use ``?sync=true`` so the result comes back inline -- TestClient's
-connection host ``"testclient"`` is treated as local by ``_is_local``, so sync
-is allowed (on a public deploy sync is blocked for non-localhost callers). The
-async job path is exercised end-to-end too: enqueue, poll ``GET /api/jobs/{id}``
-until terminal, then ``list`` + ``delete``.
+Circuit runs use ``?sync=true`` so the result comes back inline -- the ``_hermetic``
+fixture sets ``QSSC_TESTING=1`` so ``_is_local`` treats TestClient's connection
+host ``"testclient"`` as local and sync is allowed (on a public deploy the
+testclient peer is NOT gated, so sync stays blocked for non-localhost callers).
+The async job path is exercised end-to-end too: enqueue, poll
+``GET /api/jobs/{id}`` until terminal, then ``list`` + ``delete``.
 """
 from __future__ import annotations
 
@@ -34,6 +35,8 @@ GHZ_QASM = ("OPENQASM 2.0;\n"
 
 @pytest.fixture(autouse=True)
 def _hermetic(monkeypatch):
+    # QSSC_TESTING=1 is set session-wide by tests/conftest.py so _is_local
+    # treats the TestClient peer ("testclient") as local (sync + FPGA endpoints).
     # lift the per-IP circuit rate limit so a full test run never trips a 429.
     monkeypatch.setattr(main_mod, "RATE_LIMIT_PER_MIN", 10_000)
     # force the in-process job fallback (no rq worker / no Mongo in the test
