@@ -37,8 +37,12 @@ diagonal chord).  Work zero = disk centre (0,0).  Stock: any MDF sheet > 82 mm.
 from __future__ import annotations
 
 import math
+import sys
+from pathlib import Path
 
-from tools.gen_qssc_gcode import (
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from tools.gcode.emitter import (
     CUT_FEED,
     PLUNGE_FEED,
     SAFE_Z,

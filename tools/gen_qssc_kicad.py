@@ -21,89 +21,16 @@ available headless), so FPGA pads are placed but left unnetted.
 from __future__ import annotations
 
 import json
-import re
-import uuid
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from tools.sexp import A, L, S, emit, parse, u
 
 ROOT = Path(__file__).resolve().parent.parent
 PCB_DIR = ROOT / "hardware" / "pcb"
 SYM_LIB = "/usr/share/kicad/symbols"
 FP_LIB = "/usr/share/kicad/footprints"
-
-# --------------------------------------------------------------------------
-# Minimal s-expression parser / printer (KiCad tolerant of whitespace)
-# --------------------------------------------------------------------------
-TOK = re.compile(r'\s*(\(|\)|"[^"]*"|[^\s()]+)')
-
-
-def tokenize(s):
-    return TOK.findall(s)
-
-
-def parse(s):
-    toks = tokenize(s)
-    pos = 0
-
-    def plist():
-        nonlocal pos
-        assert toks[pos] == "(", toks[pos]
-        pos += 1
-        items = []
-        while toks[pos] != ")":
-            if toks[pos] == "(":
-                items.append(plist())
-            else:
-                items.append(atom(toks[pos]))
-                pos += 1
-        pos += 1
-        return items
-
-    return plist()
-
-
-def atom(t):
-    if t.startswith('"'):
-        return ("str", t[1:-1])
-    return ("atom", t)
-
-
-def emit(node, depth=0):
-    if isinstance(node, tuple):
-        k, v = node
-        return '"' + v + '"' if k == "str" else v
-    if not node:
-        return "()"
-    sym = emit(node[0])
-    children = node[1:]
-    if not any(isinstance(c, list) for c in children):
-        return "(" + sym + (" " + " ".join(emit(c) for c in children) if children else "") + ")"
-    out = "(" + sym
-    for c in children:
-        if isinstance(c, list):
-            out += "\n" + "\t" * (depth + 1) + emit(c, depth + 1)
-        else:
-            out += " " + emit(c)
-    out += "\n" + "\t" * depth + ")"
-    return out
-
-
-def A(v):
-    return ("atom", str(v))
-
-
-def S(v):
-    return ("str", str(v))
-
-
-def L(*items):
-    return list(items)
-
-
-# --------------------------------------------------------------------------
-# UUID helper (deterministic-ish via uuid4 is fine for uniqueness)
-# --------------------------------------------------------------------------
-def u():
-    return str(uuid.uuid4())
 
 
 # --------------------------------------------------------------------------

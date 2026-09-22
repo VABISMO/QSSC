@@ -22,17 +22,33 @@ Usage: python3 tools/close_residuals.py <board.kicad_pcb> [net1,net2,...]
 System python3 (pcbnew).  No .venv.
 """
 from __future__ import annotations
-import sys, math, os, signal
+import argparse, sys, math, os, signal
 from pathlib import Path
 import numpy as np
 
-bp = Path(sys.argv[1]).resolve()
-only = set(sys.argv[2].split(",")) if len(sys.argv) > 2 else None
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tests"))
 import pcbnew
 import test_pcb_connectivity as tc
+from tools.geom import (
+    seg_dist2 as _seg_dist2,
+    seg_seg_dist2 as _seg_seg_dist2,
+    seg_rect_dist2 as _seg_rect_dist2,
+    seg_bbox as _seg_bbox,
+)
+from tools._kicad_compat import patch_swig_iterators, track_width_nm
 
-B = pcbnew.LoadBoard(str(bp))
+patch_swig_iterators()
+
+# Board handle + grid geometry are populated by main() at run time; defined as
+# module-level None/empty so the helper functions below resolve their globals
+# on import without loading a board.
+B = None
+BX0 = BY0 = BX1 = BY1 = 0
+_GX0 = _GY0 = _GX1 = _GY1 = 0
+_NCOL = _NROW = 0
+_CXS = _CYS = np.array([])
+_all_blocked_cache = {}
 NM = 1_000_000
 F_Cu = pcbnew.F_Cu; B_Cu = pcbnew.B_Cu
 # 4 signal layers (In1=GND, In2=+3V3 are poured planes -- never route here).
@@ -45,84 +61,6 @@ KEEP = REAL_CLEAR + TRK_W // 2
 
 
 # ---- geometry helpers (segment/rect distance) ----
-def _seg_dist2(px, py, ax, ay, bx, by):
-    dx, dy = bx - ax, by - ay
-    if dx == 0 and dy == 0:
-        return (px - ax) ** 2 + (py - ay) ** 2
-    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)))
-    cx, cy = ax + t * dx, ay + t * dy
-    return (px - cx) ** 2 + (py - cy) ** 2
-
-
-def _orient(ax, ay, bx, by, cx, cy):
-    v = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
-    return 1 if v > 0 else (-1 if v < 0 else 0)
-
-
-def _on_seg(px, py, ax, ay, bx, by):
-    return min(ax, bx) <= px <= max(ax, bx) and min(ay, by) <= py <= max(ay, by)
-
-
-def _seg_seg_dist2(ax, ay, bx, by, cx, cy, dx, dy):
-    o1 = _orient(ax, ay, bx, by, cx, cy); o2 = _orient(ax, ay, bx, by, dx, dy)
-    o3 = _orient(cx, cy, dx, dy, ax, ay); o4 = _orient(cx, cy, dx, dy, bx, by)
-    if o1 != o2 and o3 != o4:
-        return 0
-    if o1 == 0 and _on_seg(cx, cy, ax, ay, bx, by): return 0
-    if o2 == 0 and _on_seg(dx, dy, ax, ay, bx, by): return 0
-    if o3 == 0 and _on_seg(ax, ay, cx, cy, dx, dy): return 0
-    if o4 == 0 and _on_seg(bx, by, cx, cy, dx, dy): return 0
-    return min(_seg_dist2(ax, ay, cx, cy, dx, dy), _seg_dist2(bx, by, cx, cy, dx, dy),
-               _seg_dist2(cx, cy, ax, ay, bx, by), _seg_dist2(dx, dy, ax, ay, bx, by))
-
-
-def _pt_rect_dist2(px, py, rx0, ry0, rx1, ry1):
-    ddx = max(rx0 - px, 0, px - rx1); ddy = max(ry0 - py, 0, py - ry1)
-    return ddx * ddx + ddy * ddy
-
-
-def _seg_rect_dist2(x1, y1, x2, y2, rx0, ry0, rx1, ry1):
-    # Liang-Barsky: if the segment CROSSES the rect, distance is 0. The
-    # endpoint + corner checks below miss exactly this case -- a track that
-    # passes straight THROUGH a pad (both endpoints outside, no corner the
-    # closest point), e.g. two same-net pads straddling a collinear other-net
-    # pad (UT13 DET_REF pad3/pad5 with +3V3 pad4 between). That returned
-    # 0.45^2 here instead of 0 -> _trk_clear called it clear -> a shorting
-    # track was added -> 8 DRC shorting_items. Intersection -> 0 -> rejected.
-    dx, dy = x2 - x1, y2 - y1
-    t0, t1 = 0.0, 1.0
-    for p, q in ((-dx, x1 - rx0), (dx, rx1 - x1), (-dy, y1 - ry0), (dy, ry1 - y1)):
-        if p == 0:
-            if q < 0:          # parallel to this slab, entirely outside
-                t0 = 2.0      # mark "no intersection"; fall through to dist
-                break
-        else:
-            r = q / p
-            if p < 0:
-                if r > t1:
-                    t0 = 2.0; break
-                if r > t0:
-                    t0 = r
-            else:
-                if r < t0:
-                    t0 = 2.0; break
-                if r < t1:
-                    t1 = r
-    if t0 <= t1:
-        return 0              # segment crosses (or touches) the rect
-    d = min(_pt_rect_dist2(x1, y1, rx0, ry0, rx1, ry1),
-            _pt_rect_dist2(x2, y2, rx0, ry0, rx1, ry1))
-    for cx, cy in ((rx0, ry0), (rx1, ry0), (rx0, ry1), (rx1, ry1)):
-        dd = _seg_dist2(cx, cy, x1, y1, x2, y2)
-        if dd < d:
-            d = dd
-    return d
-
-
-def _seg_bbox(x1, y1, x2, y2, pad):
-    return (min(x1, x2) - pad, min(y1, y2) - pad, max(x1, x2) + pad, max(y1, y2) + pad)
-
-
 # ---- clearance checks (other-net copper only) ----
 def _trk_clear(x1, y1, x2, y2, layer, nc):
     """Track on `layer` clear of all OTHER-net copper on that layer (0.17 mm)."""
@@ -136,7 +74,7 @@ def _trk_clear(x1, y1, x2, y2, layer, nc):
             top, bot = t.TopLayer(), t.BottomLayer()
             if not (top <= layer <= bot):
                 continue
-            rr = hw + t.GetWidth() // 2
+            rr = hw + track_width_nm(t) // 2
             if _seg_dist2(pos.x, pos.y, x1, y1, x2, y2) < rr * rr:
                 return False
         else:
@@ -149,7 +87,7 @@ def _trk_clear(x1, y1, x2, y2, layer, nc):
                 tb0y = min(s.y, e.y) - hw; tb1y = max(s.y, e.y) + hw
                 if tb1y < by0 or tb0y > by1:
                     continue
-            rr = hw + t.GetWidth() // 2
+            rr = hw + track_width_nm(t) // 2
             if _seg_seg_dist2(x1, y1, x2, y2, s.x, s.y, e.x, e.y) < rr * rr:
                 return False
     for fp in B.GetFootprints():
@@ -174,11 +112,11 @@ def _via_clear(x, y, nc):
         if t.GetNetCode() == nc:
             continue
         if t.GetClass() == "PCB_VIA":
-            pos = t.GetPosition(); rr = vr + t.GetWidth() // 2
+            pos = t.GetPosition(); rr = vr + track_width_nm(t) // 2
             if (pos.x - x) ** 2 + (pos.y - y) ** 2 < rr * rr:
                 return False
         else:
-            s = t.GetStart(); e = t.GetEnd(); rr = vr + t.GetWidth() // 2
+            s = t.GetStart(); e = t.GetEnd(); rr = vr + track_width_nm(t) // 2
             if _seg_dist2(x, y, s.x, s.y, e.x, e.y) < rr * rr:
                 return False
     for fp in B.GetFootprints():
@@ -204,9 +142,6 @@ def _board_rect():
     return bb.GetX(), bb.GetY(), bb.GetX() + bb.GetWidth(), bb.GetY() + bb.GetHeight()
 
 
-BX0, BY0, BX1, BY1 = _board_rect()
-
-
 def _in_board(x, y, marg=KEEP):
     return BX0 + marg <= x <= BX1 - marg and BY0 + marg <= y <= BY1 - marg
 
@@ -229,11 +164,11 @@ def _cluster(nc):
         if t.GetClass() == "PCB_VIA":
             pos = t.GetPosition()
             items.append(("via", {"kind": "via", "x": pos.x, "y": pos.y,
-                "layers": tc._via_layer_set(B, t), "r": t.GetWidth() // 2, "it": t}))
+                "layers": tc._via_layer_set(B, t), "r": track_width_nm(t) // 2, "it": t}))
         elif t.Type() == pcbnew.PCB_TRACE_T:
             s = t.GetStart(); e = t.GetEnd()
             items.append(("trk", {"kind": "trk", "ax": s.x, "ay": s.y, "bx": e.x, "by": e.y,
-                "hw": t.GetWidth() // 2, "layers": {t.GetLayer()}, "it": t}))
+                "hw": track_width_nm(t) // 2, "layers": {t.GetLayer()}, "it": t}))
     n = len(items); uf = tc._UF(n)
     for i in range(n):
         for j in range(i + 1, n):
@@ -266,10 +201,6 @@ def _add_via(x, y, nc):
 # ---- single-layer 2D A* (winds around obstacles; no via needed) ----
 CELL = int(0.10 * NM)
 _MARG = int(0.4 * NM)
-_GX0, _GY0 = BX0 + _MARG, BY0 + _MARG
-_GX1, _GY1 = BX1 - _MARG, BY1 - _MARG
-_NCOL = (_GX1 - _GX0) // CELL + 1
-_NROW = (_GY1 - _GY0) // CELL + 1
 
 
 def _to_cell(x, y):
@@ -279,12 +210,6 @@ def _to_cell(x, y):
 def _to_xy(cx, cy):
     return _GX0 + cx * CELL, _GY0 + cy * CELL
 
-
-# Cell-center coordinate arrays (constant) for numpy rasterization. Cell (cx,cy)
-# center is at (_GX0 + cx*CELL, _GY0 + cy*CELL); the grid is row-major [cy, cx] so
-# .tobytes() matches the flat index `ci = cy*_NCOL + cx` the A* uses.
-_CXS = _GX0 + np.arange(_NCOL) * CELL
-_CYS = _GY0 + np.arange(_NROW) * CELL
 
 
 def _mark_seg_np(grid, sx, sy, ex, ey, rad):
@@ -358,10 +283,10 @@ def _build_all_blocked_2d(layer):
             top, bot = t.TopLayer(), t.BottomLayer()
             if not (top <= layer <= bot):
                 continue
-            _mark_disc_np(grid, pos.x, pos.y, keep + t.GetWidth() // 2)
+            _mark_disc_np(grid, pos.x, pos.y, keep + track_width_nm(t) // 2)
         elif t.GetLayer() == layer:
             s = t.GetStart(); e = t.GetEnd()
-            _mark_seg_np(grid, s.x, s.y, e.x, e.y, keep + t.GetWidth() // 2)
+            _mark_seg_np(grid, s.x, s.y, e.x, e.y, keep + track_width_nm(t) // 2)
     return grid
 
 
@@ -387,7 +312,7 @@ def _unblock_net_np(grid, layer, nc):
             top, bot = t.TopLayer(), t.BottomLayer()
             if not (top <= layer <= bot):
                 continue
-            rad = keep + t.GetWidth() // 2
+            rad = keep + track_width_nm(t) // 2
             j0 = max(0, int((pos.x - rad - _GX0) // CELL)); j1 = min(_NCOL - 1, int((pos.x + rad - _GX0) // CELL))
             i0 = max(0, int((pos.y - rad - _GY0) // CELL)); i1 = min(_NROW - 1, int((pos.y + rad - _GY0) // CELL))
             if i1 >= i0 and j1 >= j0:
@@ -397,7 +322,7 @@ def _unblock_net_np(grid, layer, nc):
                 grid[i0:i1 + 1, j0:j1 + 1] &= ~(d <= rad).astype(np.uint8)
         elif t.GetLayer() == layer:
             s = t.GetStart(); e = t.GetEnd()
-            rad = keep + t.GetWidth() // 2
+            rad = keep + track_width_nm(t) // 2
             dx, dy = e.x - s.x, e.y - s.y; L2 = dx * dx + dy * dy
             j0 = max(0, int((min(s.x, e.x) - rad - _GX0) // CELL)); j1 = min(_NCOL - 1, int((max(s.x, e.x) + rad - _GX0) // CELL))
             i0 = max(0, int((min(s.y, e.y) - rad - _GY0) // CELL)); i1 = min(_NROW - 1, int((max(s.y, e.y) + rad - _GY0) // CELL))
@@ -484,9 +409,6 @@ def _simplify(cells):
         p = c
     segs.append((s[0], s[1], p[0], p[1]))
     return segs
-
-
-_all_blocked_cache = {}
 
 
 def _get_all_blocked(layer):
@@ -750,7 +672,32 @@ def _connect_net(nc, nm):
 
 
 # ---- target net selection ----
-if __name__ == "__main__":
+def main():
+    """Parse args, load the board, populate the grid geometry, then close nets."""
+    global B, BX0, BY0, BX1, BY1, _GX0, _GY0, _GX1, _GY1, _NCOL, _NROW, _CXS, _CYS, _all_blocked_cache
+
+    ap = argparse.ArgumentParser(
+        description="Close residual split/dangling nets with direct Manhattan tracks.")
+    ap.add_argument("board", type=Path, help="<board>.kicad_pcb to close nets on")
+    ap.add_argument("--only", default=None,
+                    help="comma-separated net names to close (default: all non-plane split nets)")
+    args = ap.parse_args()
+
+    bp = args.board
+    only = None
+    if args.only is not None and args.only.strip():
+        only = sorted({s.strip() for s in args.only.split(",") if s.strip()})
+
+    B = pcbnew.LoadBoard(str(bp))
+    BX0, BY0, BX1, BY1 = _board_rect()
+    _GX0, _GY0 = BX0 + _MARG, BY0 + _MARG
+    _GX1, _GY1 = BX1 - _MARG, BY1 - _MARG
+    _NCOL = (_GX1 - _GX0) // CELL + 1
+    _NROW = (_GY1 - _GY0) // CELL + 1
+    _CXS = _GX0 + np.arange(_NCOL) * CELL
+    _CYS = _GY0 + np.arange(_NROW) * CELL
+    _all_blocked_cache = {}
+
     netnames = {}
     for nm_str, n in B.GetNetsByName().items():
         if n:
@@ -810,3 +757,7 @@ if __name__ == "__main__":
     B.Save(str(out))
     print(f"== added {total_segs} track seg(s) + {total_vias} via(s) -> {out.name} ==")
     print("NEXT: re-pour planes + DRC + connectivity-check the .closed board.")
+
+
+if __name__ == "__main__":
+    main()

@@ -21,24 +21,21 @@ already-poured planes -- used by the gradient-variant pipeline where +5V is a
 poured plane on the base board but must also reach the gradient coil as a routed
 spur on qssc-grad. With no `=NET,..` list, keeps +5V (the grad-coil supply).
 """
-import sys, math, heapq, os
+import argparse, sys, math, heapq, os
 from pathlib import Path
-_keep_power_arg = [a for a in sys.argv if a.startswith("--keep-power")]
-argv = [a for a in sys.argv if not a.startswith("--keep-power")]
-KEEP_POWER = set()
-if _keep_power_arg:
-    spec = _keep_power_arg[-1]
-    if "=" in spec:
-        KEEP_POWER = {n.strip() for n in spec.split("=", 1)[1].split(",") if n.strip()}
-    else:
-        KEEP_POWER = {"+5V"}  # default: the gradient-coil supply
-bp = Path(argv[1]).resolve()
-only = set(argv[2].split(",")) if len(argv) > 2 else None
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tests"))
 import pcbnew
 import test_pcb_connectivity as tc
+from tools.geom import (
+    seg_dist2 as _seg_dist2,
+    seg_seg_dist2 as _seg_seg_dist2,
+    seg_rect_dist2 as _seg_rect_dist2,
+)
+from tools._kicad_compat import patch_swig_iterators, track_width_nm
 
-b = pcbnew.LoadBoard(str(bp))
+patch_swig_iterators()
+
 NM = 1_000_000
 F_Cu = pcbnew.F_Cu; B_Cu = pcbnew.B_Cu
 # 4 signal layers (In1=GND, In2=+3V3 are planes -- skip)
@@ -54,31 +51,20 @@ KEEP = CLEAR + HALF_W
 REAL_CLEAR = int(float(os.environ.get("MAZE_REAL_CLEAR", "0.17")) * NM)
 CELL = int(float(os.environ.get("MAZE_CELL", "0.10")) * NM)
 VIA_COST = 4.0   # penalty for one layer transition (a through-hole via)
-
-bb = b.GetBoardEdgesBoundingBox()
-X0, Y0 = bb.GetX(), bb.GetY()
-X1, Y1 = X0 + bb.GetWidth(), Y0 + bb.GetHeight()
 MARG = int(0.5 * NM)
-GX0, GY0 = X0 + MARG, Y0 + MARG
-GX1, GY1 = X1 - MARG, Y1 - MARG
-NCOL = (GX1 - GX0) // CELL + 1
-NROW = (GY1 - GY0) // CELL + 1
+
+# Board handle + grid geometry + per-net index are populated by main() at run
+# time; defined as module-level None/empty so the helpers below resolve their
+# globals on import without loading a board.
+b = None
+GX0 = GY0 = GX1 = GY1 = 0
+NCOL = NROW = 0
+by_net = {}
+netnames = {}
+KEEP_POWER = set()
 
 def to_cell(x, y): return (x - GX0) // CELL, (y - GY0) // CELL
 def to_xy(cx, cy): return GX0 + cx * CELL, GY0 + cy * CELL
-
-# ---- group items by netcode ----
-by_net = {}
-for fp in b.GetFootprints():
-    for p in fp.Pads():
-        nc = p.GetNetCode()
-        if nc <= 0: continue
-        by_net.setdefault(nc, []).append(("pad", p))
-for t in b.GetTracks():
-    nc = t.GetNetCode()
-    if nc <= 0: continue
-    by_net.setdefault(nc, []).append(("via", t) if t.GetClass() == "PCB_VIA" else ("trk", t))
-netnames = {c: ni.GetNetname() for c, ni in b.GetNetInfo().NetsByNetcode().items()}
 
 def _ref(pad):
     fp = pad.GetParentFootprint() if hasattr(pad, "GetParentFootprint") else pad.GetParent()
@@ -98,11 +84,11 @@ def cluster_pads_and_vias(items):
         elif kind == "via":
             pos = it.GetPosition()
             geom.append({"kind": "via", "x": pos.x, "y": pos.y, "layers": tc._via_layer_set(b, it),
-                "r": it.GetWidth() // 2, "it": it})
+                "r": track_width_nm(it) // 2, "it": it})
         else:
             s = it.GetStart(); e = it.GetEnd()
             geom.append({"kind": "trk", "ax": s.x, "ay": s.y, "bx": e.x, "by": e.y,
-                "hw": it.GetWidth() // 2, "layers": {it.GetLayer()}, "it": it})
+                "hw": track_width_nm(it) // 2, "layers": {it.GetLayer()}, "it": it})
     for i in range(n):
         for j in range(i + 1, n):
             if tc._layers_share(geom[i].get("layers"), geom[j].get("layers")) and tc._touch(geom[i], geom[j]):
@@ -124,43 +110,16 @@ def add_trk(board, x1, y1, x2, y2, layer, nc):
     t.SetStart(pcbnew.VECTOR2I(x1, y1)); t.SetEnd(pcbnew.VECTOR2I(x2, y2))
     t.SetWidth(TRK_W); t.SetLayer(layer); t.SetNetCode(nc); board.Add(t); return t
 
-def _seg_dist2(px, py, ax, ay, bx, by):
-    dx, dy = bx - ax, by - ay
-    if dx == 0 and dy == 0: return (px - ax) ** 2 + (py - ay) ** 2
-    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)))
-    cx, cy = ax + t * dx, ay + t * dy
-    return (px - cx) ** 2 + (py - cy) ** 2
-
-def _orient(ax, ay, bx, by, cx, cy):
-    v = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
-    if v > 0: return 1
-    if v < 0: return -1
-    return 0
-
-def _on_seg(px, py, ax, ay, bx, by):
-    return min(ax, bx) <= px <= max(ax, bx) and min(ay, by) <= py <= max(ay, by)
-
-def _seg_seg_dist2(ax, ay, bx, by, cx, cy, dx, dy):
-    o1 = _orient(ax, ay, bx, by, cx, cy); o2 = _orient(ax, ay, bx, by, dx, dy)
-    o3 = _orient(cx, cy, dx, dy, ax, ay); o4 = _orient(cx, cy, dx, dy, bx, by)
-    if o1 != o2 and o3 != o4: return 0
-    if o1 == 0 and _on_seg(cx, cy, ax, ay, bx, by): return 0
-    if o2 == 0 and _on_seg(dx, dy, ax, ay, bx, by): return 0
-    if o3 == 0 and _on_seg(ax, ay, cx, cy, dx, dy): return 0
-    if o4 == 0 and _on_seg(bx, by, cx, cy, dx, dy): return 0
-    return min(_seg_dist2(ax, ay, cx, cy, dx, dy), _seg_dist2(bx, by, cx, cy, dx, dy),
-               _seg_dist2(cx, cy, ax, ay, bx, by), _seg_dist2(dx, dy, ax, ay, bx, by))
-
 def _via_clear(x, y, nc):
     """Through-hole via at (x,y) clear of all OTHER-net copper on all layers?"""
     vr = VIA_DIA // 2 + KEEP; vr2 = vr * vr
     for t in b.GetTracks():
         if t.GetNetCode() == nc: continue
         if t.GetClass() == "PCB_VIA":
-            pos = t.GetPosition(); rr = vr + t.GetWidth() // 2
+            pos = t.GetPosition(); rr = vr + track_width_nm(t) // 2
             if (pos.x - x) ** 2 + (pos.y - y) ** 2 < rr * rr: return False
         else:
-            s = t.GetStart(); e = t.GetEnd(); rr = vr + t.GetWidth() // 2
+            s = t.GetStart(); e = t.GetEnd(); rr = vr + track_width_nm(t) // 2
             if _seg_dist2(x, y, s.x, s.y, e.x, e.y) < rr * rr: return False
     for fp in b.GetFootprints():
         for p in fp.Pads():
@@ -176,18 +135,6 @@ def _via_clear(x, y, nc):
                 if ddx * ddx + ddy * ddy < vr2: return False
     return True
 
-def _pt_rect_dist2(px, py, rx0, ry0, rx1, ry1):
-    dx = max(rx0 - px, 0, px - rx1); dy = max(ry0 - py, 0, py - ry1)
-    return dx * dx + dy * dy
-
-def _seg_rect_dist2(x1, y1, x2, y2, rx0, ry0, rx1, ry1):
-    d = min(_pt_rect_dist2(x1, y1, rx0, ry0, rx1, ry1),
-            _pt_rect_dist2(x2, y2, rx0, ry0, rx1, ry1))
-    for cx, cy in ((rx0, ry0), (rx1, ry0), (rx0, ry1), (rx1, ry1)):
-        dd = _seg_dist2(cx, cy, x1, y1, x2, y2)
-        if dd < d: d = dd
-    return d
-
 def _trk_clear(x1, y1, x2, y2, layer, nc):
     """Track on `layer` clear of other-net copper on that layer (REAL DRC clearance)."""
     hw = TRK_W // 2 + REAL_CLEAR; hw2 = hw * hw
@@ -196,11 +143,11 @@ def _trk_clear(x1, y1, x2, y2, layer, nc):
         if t.GetClass() == "PCB_VIA":
             pos = t.GetPosition(); top, bot = t.TopLayer(), t.BottomLayer()
             if not (top <= layer <= bot): continue
-            rr = hw + t.GetWidth() // 2
+            rr = hw + track_width_nm(t) // 2
             if _seg_dist2(pos.x, pos.y, x1, y1, x2, y2) < rr * rr: return False
         else:
             if t.GetLayer() != layer: continue
-            s = t.GetStart(); e = t.GetEnd(); rr = hw + t.GetWidth() // 2
+            s = t.GetStart(); e = t.GetEnd(); rr = hw + track_width_nm(t) // 2
             if _seg_seg_dist2(x1, y1, x2, y2, s.x, s.y, e.x, e.y) < rr * rr: return False
     for fp in b.GetFootprints():
         for p in fp.Pads():
@@ -291,11 +238,11 @@ def build_blocked_layer(netcode, layer, endpoint_xy_set):
             pos = t.GetPosition(); top, bot = t.TopLayer(), t.BottomLayer()
             if not (top <= layer <= bot): continue
             cx, cy = to_cell(pos.x, pos.y)
-            block_disc(cx, cy, (t.GetWidth() / 2 + KEEP) / CELL)
+            block_disc(cx, cy, (track_width_nm(t) / 2 + KEEP) / CELL)
         else:
             if t.GetLayer() != layer: continue
             s = t.GetStart(); e = t.GetEnd()
-            block_seg(s.x, s.y, e.x, e.y, t.GetWidth() / 2)
+            block_seg(s.x, s.y, e.x, e.y, track_width_nm(t) / 2)
     for (ex, ey) in endpoint_xy_set:
         cx, cy = to_cell(ex, ey)
         if 0 <= cx < NCOL and 0 <= cy < NROW:
@@ -345,13 +292,13 @@ def build_via_clearable(netcode):
         if t.GetNetCode() == netcode: continue
         if t.GetClass() == "PCB_VIA":
             pos = t.GetPosition()
-            block_disc(*to_cell(pos.x, pos.y), (t.GetWidth() / 2 + VIA_R) / CELL)
+            block_disc(*to_cell(pos.x, pos.y), (track_width_nm(t) / 2 + VIA_R) / CELL)
         else:
             # a through-hole via penetrates EVERY copper layer (incl. the In1/In2
             # planes), so a track on ANY layer blocks a via at that xy. _via_clear
             # checks all tracks regardless of layer; the grid must match it.
             s = t.GetStart(); e = t.GetEnd()
-            block_seg(s.x, s.y, e.x, e.y, t.GetWidth() / 2)
+            block_seg(s.x, s.y, e.x, e.y, track_width_nm(t) / 2)
     # invert: clearable = where clear==0
     for i in range(NCOL * NROW):
         g[i] = 0 if clear[i] == 0 else 1
@@ -425,99 +372,150 @@ def simplify3d(path):
     out.append(path[-1])
     return out
 
-report = []
-n_nets = len(by_net)
-_maze_out = bp.with_suffix(".maze3d.kicad_pcb")
-for idx, (nc, items) in enumerate(by_net.items(), 1):
-    nm = netnames.get(nc, "")
-    if not nm or (nm in tc.PLANE_NETS and nm not in KEEP_POWER): continue
-    if only and nm not in only: continue
-    clusters, _ = cluster_pads_and_vias(items)
-    if len(clusters) < 2:
-        print(f"[{idx}/{n_nets}] {nm}: single-cluster (skip)", flush=True); continue
-    print(f"[{idx}/{n_nets}] {nm}: routing...", flush=True)
-    best = None
-    for a in clusters:
-        for bb_ in clusters:
-            if a is bb_: continue
-            for pa in a["pads"]:
-                for pb in bb_["pads"]:
-                    d = (pa["x"] - pb["x"]) ** 2 + (pa["y"] - pb["y"]) ** 2
-                    if best is None or d < best[0]: best = (d, a, bb_)
-    _, ca, cb = best
-    e1 = endpoint_plan(ca, nc)
-    e2 = endpoint_plan(cb, nc)
-    if e1 is None or e2 is None:
-        print(f"   SKIP no clear via spot", flush=True)
-        report.append((nm, None, 0, 0, 0, 0, "no clear via spot")); continue
-    eps = [(e1["x"], e1["y"]), (e2["x"], e2["y"])]
-    # build per-layer blocked grids + via-clearable grid
-    blocked_layers = [build_blocked_layer(nc, L, eps) for L in SIG_LAYERS]
-    via_clear = build_via_clearable(nc)
-    # starts/goals: endpoint cells on EVERY layer (through-hole vias reach all)
-    sc = to_cell(e1["x"], e1["y"]); gc_ = to_cell(e2["x"], e2["y"])
-    if not (0 <= sc[0] < NCOL and 0 <= sc[1] < NROW and 0 <= gc_[0] < NCOL and 0 <= gc_[1] < NROW):
-        print(f"   SKIP endpoint via spot outside grid", flush=True)
-        report.append((nm, None, e1["x"], e1["y"], e2["x"], e2["y"], "endpoint via spot outside grid")); continue
-    starts = [(li, sc[0], sc[1]) for li in range(NL)]
-    goals = [(li, gc_[0], gc_[1]) for li in range(NL)]
-    # ensure endpoint cells are open on every layer
-    for li in range(NL):
-        if blocked_layers[li][sc[1] * NCOL + sc[0]]: blocked_layers[li][sc[1] * NCOL + sc[0]] = 0
-        if blocked_layers[li][gc_[1] * NCOL + gc_[0]]: blocked_layers[li][gc_[1] * NCOL + gc_[0]] = 0
-    path = astar3d(blocked_layers, via_clear, starts, goals)
-    if not path:
-        print(f"   SKIP no 3D path", flush=True)
-        report.append((nm, None, e1["x"], e1["y"], e2["x"], e2["y"], "no 3D path")); continue
-    path = simplify3d(path)
-    # VALIDATE every same-layer segment at REAL_CLEAR + every via-transition spot
-    segs = []; vias_needed = []; bad = False; fail_info = ""
-    prev = path[0]
-    for cell in path[1:]:
-        if cell[0] == prev[0]:   # same-layer segment
-            x1, y1 = to_xy(prev[1], prev[2]); x2, y2 = to_xy(cell[1], cell[2])
-            if not _trk_clear(x1, y1, x2, y2, SIG_LAYERS[cell[0]], nc):
-                bad = True; fail_info = f"trk {LNAME[SIG_LAYERS[cell[0]]]} ({x1/NM:.2f},{y1/NM:.2f})->({x2/NM:.2f},{y2/NM:.2f})"; break
-            segs.append(("trk", x1, y1, x2, y2, SIG_LAYERS[cell[0]]))
-        else:
-            # layer transition: place a through-hole via at this xy
-            vx, vy = to_xy(cell[1], cell[2])
-            if not _via_clear(vx, vy, nc):
-                bad = True; fail_info = f"via ({vx/NM:.2f},{vy/NM:.2f}) {LNAME[SIG_LAYERS[prev[0]]]}->{LNAME[SIG_LAYERS[cell[0]]]}"; break
-            vias_needed.append((vx, vy))
-        prev = cell
-    if bad:
-        print(f"   SKIP 3D fails: {fail_info}", flush=True)
-        report.append((nm, None, e1["x"], e1["y"], e2["x"], e2["y"], f"3D fails: {fail_info}")); continue
-    # COMMIT
-    endpoint_commit(e1, nc)
-    endpoint_commit(e2, nc)
-    placed_vias = set()
-    for (vx, vy) in vias_needed:
-        if (vx, vy) not in placed_vias:
-            add_via(b, vx, vy, nc); placed_vias.add((vx, vy))
-    for (kind, x1, y1, x2, y2, layer) in segs:
-        add_trk(b, x1, y1, x2, y2, layer, nc)
-    plen = sum(math.hypot(path[i + 1][1] - path[i][1], path[i + 1][2] - path[i][2])
-               for i in range(len(path) - 1)) * CELL / NM
-    layers_used = sorted({LNAME[SIG_LAYERS[c[0]]] for c in path})
-    report.append((nm, plen, e1["x"], e1["y"], e2["x"], e2["y"],
-                   f"ok layers={','.join(layers_used)} vias={len(placed_vias)}"))
-    print(f"   ok layers={','.join(layers_used)} vias={len(placed_vias)} len={plen:.1f}mm", flush=True)
-    # checkpoint every 16 routed nets: a crash/kill never loses more than 16
-    if idx % 16 == 0:
-        b.Save(str(_maze_out))
-        print(f"   [checkpoint {idx}/{n_nets} -> {_maze_out.name}]", flush=True)
 
-out = _maze_out
-b.Save(str(out))
-print(f"== 3D maze-bridged -> {out.name} ==")
-ok = 0
-for nm, plen, x1, y1, x2, y2, reason in report:
-    if plen is None:
-        print(f"  {nm}: SKIP ({reason})  ({x1/NM:.1f},{y1/NM:.1f})->({x2/NM:.1f},{y2/NM:.1f})")
+def main():
+    """Parse args, load the board, build the per-net index + grid, then maze-bridge."""
+    global b, GX0, GY0, GX1, GY1, NCOL, NROW, by_net, netnames, KEEP_POWER
+
+    ap = argparse.ArgumentParser(
+        description="3D (multi-layer) A* maze bridge for residual split nets.")
+    ap.add_argument("board", type=Path, help="<board>.kicad_pcb to maze-bridge")
+    ap.add_argument("nets", nargs="?", default=None,
+                    help="comma-separated net names to bridge (default: all non-plane nets)")
+    ap.add_argument("--keep-power", nargs="?", const="+5V", default=None,
+                    metavar="NET,..",
+                    help="let these plane nets through the maze instead of skipping them "
+                         "(bare flag keeps +5V, the gradient-coil supply)")
+    args = ap.parse_args()
+
+    bp = args.board.resolve()
+    only = set(args.nets.split(",")) if args.nets else None
+    if args.keep_power is not None and args.keep_power.strip():
+        KEEP_POWER = {n.strip() for n in args.keep_power.split(",") if n.strip()}
+    elif args.keep_power is not None:
+        KEEP_POWER = {"+5V"}
     else:
-        print(f"  {nm}: 3D path {plen:.1f}mm {reason}  ({x1/NM:.1f},{y1/NM:.1f})->({x2/NM:.1f},{y2/NM:.1f})"); ok += 1
-print(f"bridged {ok}/{len(report)}; saved {out}")
-print("NEXT: refill + DRC the .maze3d board in a project context.")
-print("DONE")
+        KEEP_POWER = set()
+
+    b = pcbnew.LoadBoard(str(bp))
+    bb = b.GetBoardEdgesBoundingBox()
+    X0, Y0 = bb.GetX(), bb.GetY()
+    X1, Y1 = X0 + bb.GetWidth(), Y0 + bb.GetHeight()
+    GX0, GY0 = X0 + MARG, Y0 + MARG
+    GX1, GY1 = X1 - MARG, Y1 - MARG
+    NCOL = (GX1 - GX0) // CELL + 1
+    NROW = (GY1 - GY0) // CELL + 1
+
+    # ---- group items by netcode ----
+    by_net = {}
+    for fp in b.GetFootprints():
+        for p in fp.Pads():
+            nc = p.GetNetCode()
+            if nc <= 0: continue
+            by_net.setdefault(nc, []).append(("pad", p))
+    for t in b.GetTracks():
+        nc = t.GetNetCode()
+        if nc <= 0: continue
+        by_net.setdefault(nc, []).append(("via", t) if t.GetClass() == "PCB_VIA" else ("trk", t))
+    netnames = {c: ni.GetNetname() for c, ni in b.GetNetInfo().NetsByNetcode().items()}
+
+    report = []
+    n_nets = len(by_net)
+    _maze_out = bp.with_suffix(".maze3d.kicad_pcb")
+    for idx, (nc, items) in enumerate(by_net.items(), 1):
+        nm = netnames.get(nc, "")
+        if not nm or (nm in tc.PLANE_NETS and nm not in KEEP_POWER): continue
+        if only and nm not in only: continue
+        clusters, _ = cluster_pads_and_vias(items)
+        if len(clusters) < 2:
+            print(f"[{idx}/{n_nets}] {nm}: single-cluster (skip)", flush=True); continue
+        print(f"[{idx}/{n_nets}] {nm}: routing...", flush=True)
+        best = None
+        for a in clusters:
+            for bb_ in clusters:
+                if a is bb_: continue
+                for pa in a["pads"]:
+                    for pb in bb_["pads"]:
+                        d = (pa["x"] - pb["x"]) ** 2 + (pa["y"] - pb["y"]) ** 2
+                        if best is None or d < best[0]: best = (d, a, bb_)
+        _, ca, cb = best
+        e1 = endpoint_plan(ca, nc)
+        e2 = endpoint_plan(cb, nc)
+        if e1 is None or e2 is None:
+            print(f"   SKIP no clear via spot", flush=True)
+            report.append((nm, None, 0, 0, 0, 0, "no clear via spot")); continue
+        eps = [(e1["x"], e1["y"]), (e2["x"], e2["y"])]
+        # build per-layer blocked grids + via-clearable grid
+        blocked_layers = [build_blocked_layer(nc, L, eps) for L in SIG_LAYERS]
+        via_clear = build_via_clearable(nc)
+        # starts/goals: endpoint cells on EVERY layer (through-hole vias reach all)
+        sc = to_cell(e1["x"], e1["y"]); gc_ = to_cell(e2["x"], e2["y"])
+        if not (0 <= sc[0] < NCOL and 0 <= sc[1] < NROW and 0 <= gc_[0] < NCOL and 0 <= gc_[1] < NROW):
+            print(f"   SKIP endpoint via spot outside grid", flush=True)
+            report.append((nm, None, e1["x"], e1["y"], e2["x"], e2["y"], "endpoint via spot outside grid")); continue
+        starts = [(li, sc[0], sc[1]) for li in range(NL)]
+        goals = [(li, gc_[0], gc_[1]) for li in range(NL)]
+        # ensure endpoint cells are open on every layer
+        for li in range(NL):
+            if blocked_layers[li][sc[1] * NCOL + sc[0]]: blocked_layers[li][sc[1] * NCOL + sc[0]] = 0
+            if blocked_layers[li][gc_[1] * NCOL + gc_[0]]: blocked_layers[li][gc_[1] * NCOL + gc_[0]] = 0
+        path = astar3d(blocked_layers, via_clear, starts, goals)
+        if not path:
+            print(f"   SKIP no 3D path", flush=True)
+            report.append((nm, None, e1["x"], e1["y"], e2["x"], e2["y"], "no 3D path")); continue
+        path = simplify3d(path)
+        # VALIDATE every same-layer segment at REAL_CLEAR + every via-transition spot
+        segs = []; vias_needed = []; bad = False; fail_info = ""
+        prev = path[0]
+        for cell in path[1:]:
+            if cell[0] == prev[0]:   # same-layer segment
+                x1, y1 = to_xy(prev[1], prev[2]); x2, y2 = to_xy(cell[1], cell[2])
+                if not _trk_clear(x1, y1, x2, y2, SIG_LAYERS[cell[0]], nc):
+                    bad = True; fail_info = f"trk {LNAME[SIG_LAYERS[cell[0]]]} ({x1/NM:.2f},{y1/NM:.2f})->({x2/NM:.2f},{y2/NM:.2f})"; break
+                segs.append(("trk", x1, y1, x2, y2, SIG_LAYERS[cell[0]]))
+            else:
+                # layer transition: place a through-hole via at this xy
+                vx, vy = to_xy(cell[1], cell[2])
+                if not _via_clear(vx, vy, nc):
+                    bad = True; fail_info = f"via ({vx/NM:.2f},{vy/NM:.2f}) {LNAME[SIG_LAYERS[prev[0]]]}->{LNAME[SIG_LAYERS[cell[0]]]}"; break
+                vias_needed.append((vx, vy))
+            prev = cell
+        if bad:
+            print(f"   SKIP 3D fails: {fail_info}", flush=True)
+            report.append((nm, None, e1["x"], e1["y"], e2["x"], e2["y"], f"3D fails: {fail_info}")); continue
+        # COMMIT
+        endpoint_commit(e1, nc)
+        endpoint_commit(e2, nc)
+        placed_vias = set()
+        for (vx, vy) in vias_needed:
+            if (vx, vy) not in placed_vias:
+                add_via(b, vx, vy, nc); placed_vias.add((vx, vy))
+        for (kind, x1, y1, x2, y2, layer) in segs:
+            add_trk(b, x1, y1, x2, y2, layer, nc)
+        plen = sum(math.hypot(path[i + 1][1] - path[i][1], path[i + 1][2] - path[i][2])
+                   for i in range(len(path) - 1)) * CELL / NM
+        layers_used = sorted({LNAME[SIG_LAYERS[c[0]]] for c in path})
+        report.append((nm, plen, e1["x"], e1["y"], e2["x"], e2["y"],
+                       f"ok layers={','.join(layers_used)} vias={len(placed_vias)}"))
+        print(f"   ok layers={','.join(layers_used)} vias={len(placed_vias)} len={plen:.1f}mm", flush=True)
+        # checkpoint every 16 routed nets: a crash/kill never loses more than 16
+        if idx % 16 == 0:
+            b.Save(str(_maze_out))
+            print(f"   [checkpoint {idx}/{n_nets} -> {_maze_out.name}]", flush=True)
+
+    out = _maze_out
+    b.Save(str(out))
+    print(f"== 3D maze-bridged -> {out.name} ==")
+    ok = 0
+    for nm, plen, x1, y1, x2, y2, reason in report:
+        if plen is None:
+            print(f"  {nm}: SKIP ({reason})  ({x1/NM:.1f},{y1/NM:.1f})->({x2/NM:.1f},{y2/NM:.1f})")
+        else:
+            print(f"  {nm}: 3D path {plen:.1f}mm {reason}  ({x1/NM:.1f},{y1/NM:.1f})->({x2/NM:.1f},{y2/NM:.1f})"); ok += 1
+    print(f"bridged {ok}/{len(report)}; saved {out}")
+    print("NEXT: refill + DRC the .maze3d board in a project context.")
+    print("DONE")
+
+
+if __name__ == "__main__":
+    main()
