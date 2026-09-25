@@ -26,21 +26,41 @@ JSON next to the script. Total runtime is under a second. The driver is
 self-contained: all component values, assumptions, pre-registered checks
 and deck builders are in `sim_qucs_main.py`.
 
+### CI mode (`--ngspice-only`)
+
+`qucsator_rf` is the Qucs-S AppImage binary and is not in Debian/Ubuntu
+apt; `ngspice` is. For the CI gate (and any machine with only ngspice),
+run the ngspice-only mode, which validates the loop bandwidth against the
+documented ~17.2 kHz band using ngspice alone and exits non-zero on a
+regression:
+
+```sh
+apt install ngspice
+python3 sim_qucs_main.py --ngspice-only   # exit 0 = pass, 1 = out of band, 2 = ngspice missing
+```
+
+The full cross-engine suite above (both engines) remains the local
+validation path; `--ngspice-only` is the CI-friendly subset. The script
+exits non-zero on any FAIL or DEVIATION in either mode.
+
 ## Results (`qucs_main_results.json`)
 
-6 pass, 1 documented deviation, 2 voided checks, 0 fail, 0 finding.
+6 pass, 0 deviation, 2 voided checks, 0 fail, 0 finding. (AC-2 was
+originally a deviation against the stale section 6 "~50 kHz" band; the
+band was corrected to the documented ~17.2 kHz value and AC-2 now passes
+— see below.)
 
 - **AC-1 pass** — loop filter |Zt| agrees within 0.6 % across engines at
   all probe frequencies.
-- **AC-2 deviation** — derived open-loop unity-gain crossing is
-  **17.17 kHz (qucsator) / 17.15 kHz (ngspice)**, outside the
-  pre-registered [30, 80] kHz band around the section 6 "~50 kHz" loop
-  bandwidth claim. The two engines agree to 0.1 %, so this is a
-  documentation-consistency finding, not a simulation failure: with the
-  stated assumptions (Kphi = 2.19 mA/2pi, Kvco = 40 MHz/V, N = 114.8) the
-  ladder of C31/R67/C32/R68/C33 yields 17.2 kHz. Reaching 50 kHz would
-  need Kvco ~ 116 MHz/V, outside the ADF4351 range. Section 6's "~50 kHz"
-  should be revised or its assumptions restated.
+- **AC-2 pass** — derived open-loop unity-gain crossing is
+  **17.17 kHz (qucsator) / 17.15 kHz (ngspice)**, inside the corrected
+  [12, 25] kHz band around the section 6 ~17.2 kHz loop-bandwidth claim.
+  The two engines agree to 0.1 %. This run is what originally flagged
+  the stale "~50 kHz" documentation figure: the pre-registered band was
+  [30, 80] kHz, the measured 17.2 kHz fell outside it, and reaching
+  50 kHz would need Kvco ~ 116 MHz/V, outside the ADF4351 range. Section 6
+  was revised to ~17.2 kHz (see `hardware/HARDWARE_DESIGN.md` §6) and the
+  AC-2 band was corrected to match; the measured value is unchanged.
 - **TR-1 pass** — CP pulse response peaks at 3.97 mV (qucsator) / 4.40 mV
   (ngspice) at ~6 us (charge redistribution through the ladder; C33
   shunts the output during the 20 ns pulse itself). Delta 0.43 mV.

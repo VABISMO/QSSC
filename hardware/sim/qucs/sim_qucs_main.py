@@ -28,6 +28,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 
 # Resolve qucsator from $QUCSATOR, else PATH lookup (qucsator_rf then qucsator).
@@ -140,9 +141,9 @@ CHECKS = [
     {
         "id": "AC-2",
         "claim": "Derived open-loop unity-gain frequency falls inside the "
-                 "section 6 ~50 kHz loop-bandwidth claim band.",
-        "band": "30 kHz <= fc <= 80 kHz; outside -> documented DEVIATION "
-                "(documentation-consistency finding, not a design fail)",
+                 "section 6 ~17.2 kHz loop-bandwidth claim band.",
+        "band": "12 kHz <= fc <= 25 kHz; outside -> DEVIATION (loop filter "
+                "no longer matches the documented ~17.2 kHz bandwidth)",
         "method": "|L(f)| = Kphi*|Zt(f)|*Kvco/(N*2*pi*f) from the measured "
                   "|Zt| curve; fc = crossing of |L| = 1 (log interpolation).",
     },
@@ -626,6 +627,23 @@ def cross_engine_db(freqs_q, sq, freqs_n, sn, probes):
     return out
 
 
+def loop_bandwidth_hz(freqs, mags):
+    """Open-loop unity-gain crossing from a measured |Zt(f)| curve.
+
+    |L(f)| = Kphi*|Zt(f)|*Kvco/(N*2*pi*f); fc = the frequency where |L|
+    crosses 1 (log-log interpolation). Returns None if no crossing is
+    found in the swept band.
+    """
+    for i in range(len(freqs) - 1):
+        fq_ = KPHI * mags[i] * KVCO / (N_DIV * 2 * math.pi * freqs[i])
+        fn_ = KPHI * mags[i + 1] * KVCO / (N_DIV * 2 * math.pi * freqs[i + 1])
+        if fq_ >= 1 >= fn_:
+            l0, l1 = math.log10(freqs[i]), math.log10(freqs[i + 1])
+            frac = (fq_ - 1) / (fq_ - fn_) if fq_ != fn_ else 0
+            return 10 ** (l0 + frac * (l1 - l0))
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -674,19 +692,9 @@ def main():
     })
 
     # open-loop gain curve and unity-gain frequency
-    def crossing(freqs, mags):
-        for i in range(len(freqs) - 1):
-            fq_ = KPHI * mags[i] * KVCO / (N_DIV * 2 * math.pi * freqs[i])
-            fn_ = KPHI * mags[i + 1] * KVCO / (N_DIV * 2 * math.pi * freqs[i + 1])
-            if fq_ >= 1 >= fn_:
-                l0, l1 = math.log10(freqs[i]), math.log10(freqs[i + 1])
-                frac = (fq_ - 1) / (fq_ - fn_) if fq_ != fn_ else 0
-                return 10 ** (l0 + frac * (l1 - l0))
-        return None
-
-    fc_q, fc_n = crossing(fq, zq), crossing(fn, zn)
+    fc_q, fc_n = loop_bandwidth_hz(fq, zq), loop_bandwidth_hz(fn, zn)
     fc = fc_q if fc_q is not None else fc_n
-    in_band = fc is not None and 30e3 <= fc <= 80e3
+    in_band = fc is not None and 12e3 <= fc <= 25e3
     results["checks"].append({
         "id": "AC-2",
         "metric": {"fc_qucsator_hz": fc_q, "fc_ngspice_hz": fc_n,
@@ -824,7 +832,48 @@ def main():
                 else "FINDING" if c.get("finding")
                 else "VOID" if c.get("void") else "FAIL")
         print(f"  [{flag}] {c['id']}")
+    return results["checks"]
+
+
+def ngspice_only():
+    """CI-friendly mode: validate the loop bandwidth with ngspice alone.
+
+    qucsator_rf is not in Debian/Ubuntu apt (it is the Qucs-S AppImage
+    binary); ngspice is. This mode runs only the ngspice LF-AC deck,
+    derives the open-loop unity-gain crossing from the measured |Zt|
+    curve, and checks it against the documented ~17.2 kHz band. It is the
+    CI gate; the full cross-engine suite (run by main()) is for local
+    validation with both engines installed.
+    """
+    os.makedirs(BUILD, exist_ok=True)
+    if not shutil.which(NGSPICE) and not os.path.exists(NGSPICE):
+        print(f"ngspice not found ({NGSPICE}); install with `apt install "
+              f"ngspice` or set NGSPICE=<path>", file=sys.stderr)
+        return 2
+    res = run_ngspice("lf_ac", ngspice_lf_ac())
+    fn, zn = ngspice_zt(res)
+    fc = loop_bandwidth_hz(fn, zn)
+    band_lo, band_hi = 12e3, 25e3
+    if fc is None:
+        print("AC-2 [FAIL] no open-loop unity-gain crossing found in the "
+              "ngspice LF-AC sweep", file=sys.stderr)
+        return 1
+    in_band = band_lo <= fc <= band_hi
+    verdict = "PASS" if in_band else "FAIL"
+    print(f"AC-2 [{verdict}] loop bandwidth = {fc/1e3:.2f} kHz "
+          f"(ngspice); band [{band_lo/1e3:.0f}, {band_hi/1e3:.0f}] kHz "
+          f"(section 6 ~17.2 kHz)")
+    return 0 if in_band else 1
+
+
+def _exit_code(checks):
+    """1 if any check is a real failure (not pass, not void)."""
+    return 1 if any(not c.get("pass") and not c.get("void")
+                    for c in checks) else 0
 
 
 if __name__ == "__main__":
-    main()
+    if "--ngspice-only" in sys.argv[1:]:
+        sys.exit(ngspice_only())
+    checks = main()
+    sys.exit(_exit_code(checks))

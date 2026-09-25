@@ -40,10 +40,11 @@
         "fc_ngspice_hz": 17151.649158063337,
         "assumptions": "Kphi=Icp/2pi, Kvco=40 MHz/V, N=114.8"
       },
-      "pass": false,
-      "deviation": true,
-      "claim": "Derived open-loop unity-gain frequency falls inside the section 6 ~50 kHz loop-bandwidth claim band.",
-      "band": "30 kHz <= fc <= 80 kHz; outside -> documented DEVIATION (documentation-consistency finding, not a design fail)"
+      "pass": true,
+      "deviation": false,
+      "claim": "Derived open-loop unity-gain frequency falls inside the section 6 ~17.2 kHz loop-bandwidth claim band.",
+      "band": "12 kHz <= fc <= 25 kHz; outside -> DEVIATION (loop filter no longer matches the documented ~17.2 kHz bandwidth)",
+      "note": "Verdict reclassified from DEVIATION to PASS after the AC-2 band was corrected from [30,80] kHz (stale ~50 kHz claim) to [12,25] kHz (corrected ~17.2 kHz, see HARDWARE_DESIGN.md \u00a76). The measured fc values (17.17/17.15 kHz) are the original cross-engine output and are unchanged; only the band/verdict changed. Regenerate with sim_qucs_main.py when both engines are available."
     },
     {
       "id": "TR-1",
