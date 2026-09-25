@@ -180,8 +180,8 @@ def prime_orthogonality(prime_a: int, prime_b: int,
     t = np.arange(n)
     ref_a = np.cos(2.0 * np.pi * t / prime_a)
     ref_b = np.cos(2.0 * np.pi * t / prime_b)
-    # both are zero-mean with RMS 1/sqrt(2) over the window
-    rms = 0.5
+    # both are zero-mean with RMS 1/sqrt(2) over a whole number of periods
+    rms = math.sqrt(0.5)
     return float(np.dot(ref_a, ref_b) / (n * rms))
 
 
@@ -275,4 +275,4 @@ def cross_talk_residual(prime_a: int, prime_b: int, window_ticks: int) -> float:
     t = np.arange(n)
     ref_a = np.cos(2.0 * np.pi * t / prime_a)
     ref_b = np.cos(2.0 * np.pi * t / prime_b)
-    return abs(float(np.dot(ref_a, ref_b) / (n * 0.5)))
+    return abs(float(np.dot(ref_a, ref_b) / (n * math.sqrt(0.5))))

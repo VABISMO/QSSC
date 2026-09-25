@@ -163,7 +163,7 @@ the host-side demodulation.
 
 ```mermaid
 flowchart TD
-    subgraph Main["QSSC MAIN board (6-layer HDI, 210x140 mm) -- below die"]
+    subgraph Main["QSSC MAIN board (6-layer HDI, 150x118 mm) -- below die"]
         J2["J2 Barrel 5V / J10 USB-C VBUS"] --> F1["F1 PTC 2A"] --> REG1["REG1 LDO 3.3V"]
         REG1 --> REG2["REG2 LDO 1.8V"]
         REG1 --> REG3["REG3 AP2127K-1.0V"]
@@ -183,7 +183,7 @@ flowchart TD
         U1 -->|"adc_convst/sclk/miso/busy/resetn/cs0..3"| J12H["J12 BTB_HOST 2x10"]
         J12H -->|"+3V3 / +5V / GND"| J12H
     end
-    subgraph Head["QSSC DETECTOR HEAD (6-layer, 150x140 mm) -- above die"]
+    subgraph Head["QSSC DETECTOR HEAD (6-layer, 110x102 mm) -- above die"]
         J12D["J12 BTB_DAUGHTER 2x10"] --> ADC["4x AD7616 16-ch 16-bit ADC (LQFP-80)"]
         J12D -->|"+5V"| FBA["FB_A ferrite -> +5V_A"]
         FBA --> ADC
@@ -877,8 +877,9 @@ toward the die; F.Cu carries the SMD analog.
 > **Current build — re-verified 2026-09-04.** Both boards are DRC/ERC-clean.
 > Main: `GetCopperLayerCount()==6`, In1.Cu="GND", In2.Cu="PWR"=+3V3, planes
 > + first-pass routing committed, `kicad-cli pcb drc` = **0/0/0**. Head:
-> `GetCopperLayerCount()==4`, In1.Cu="GND", In2.Cu="PWR", QSSC_Chip_DET on
-> B.Cu + 4× AD7616 + 16× TLV9004 + J12, also **0/0/0**. The router is
+> `GetCopperLayerCount()==6`, In1.Cu="GND", In2.Cu="PWR", In3.Cu/In4.Cu as
+> pad-free signal escape layers (see §12.1), QSSC_Chip_DET on B.Cu + 4× AD7616
+> + 16× TLV9004 + J12, also **0/0/0**. The router is
 > DRC-clean by construction (per-netclass pad keepout + via-footprint check +
 > multi_keepout/multi_vip guards — cannot short by construction). What is not
 > yet routed is a line-router completeness limit handed to FreeRouting, not a
@@ -1174,7 +1175,7 @@ headlessly:
 >   disconnection; the **real connectivity bar is the per-IC power/ground audit
 >   above + DRC 0 violations**, both met.
 
-Consistent with the README honesty note, the FPGA RTL and these two PCBs are
+Consistent with the README design-status note, the FPGA RTL and these two PCBs are
 **design artefacts** (synthesised / placed-and-netted, routed first-pass +
 FreeRouting-closed, but not fabricated), not a finished hardware product.
 
@@ -1635,7 +1636,7 @@ verb. The host API (`/api/fpga/qrng`) derives Ed25519 key material from it
 after an entropy sanity gate. This section states *what the entropy actually
 is* — and what it is not — with the same physics rigor as §15C.
 
-> **Honest sourcing.** The entropy is **classical analog noise**:
+> **Sourcing note.** The entropy is **classical analog noise**:
 > Johnson (thermal) noise of the TIA feedback resistor plus ADC
 > quantization/input dither. Thermal noise is the standard physical TRNG
 > source (fluctuation–dissipation: a resistor at temperature T is a noise
@@ -1793,7 +1794,7 @@ cell library (LUT/FF/CARRY4/BRAM/DSP/IOBUF/BUFG) the same way Vivado's
 synthesis would, producing a Vivado-compatible EDIF netlist and a resource +
 logic-quality report. This is a **synthesis-level** check; it is **not**
 place-and-route and carries **no timing closure** (no Vivado is available in
-this environment — see the README honesty note).
+this environment — see the README design-status note).
 
 **How to run (local):**
 
