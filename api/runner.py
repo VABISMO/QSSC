@@ -8,22 +8,24 @@ fallback) **and** from an RQ worker process (asynchronous path).
 """
 from __future__ import annotations
 
+import logging
 import math
 import os
 import time
-from fractions import Fraction
-from math import gcd
+from dataclasses import dataclass
 from typing import Optional
 from pathlib import Path
 
 import numpy as np
 
+logger = logging.getLogger(__name__)
+
 from qssc import (
     QSSCBackend, SimulatedFPGA, FPGAConnection,
     make_connection, NoFPGADetected,
-    create_period_finding_circuit, create_shor_circuit, create_qft_nos_circuit,
+    create_shor_circuit,
     create_math_circuit, grover_search, postprocess_period,
-    postprocess_period_swapless, select_coprime, is_prime, perfect_power,
+    select_coprime, is_prime, perfect_power,
     build_user_circuit, UserCircuitError,
 )
 from qssc.array_calibration import (
@@ -32,13 +34,13 @@ from qssc.array_calibration import (
     PIXEL_SIZE_MIN_UM, PIXEL_SIZE_MAX_UM, _linewidth_mhz_for,
     gradient_dac_code_from_mhz,
 )
-from qssc.crypto import (
-    derive_keypair, von_neumann_extract, bits_to_bytes, entropy_health,
-)
-from qssc.qkd import simulate_bb84
 from qssc.noise_filters import AntiNoiseConfig, noise_environment_preset
+# Re-exported so tests can monkeypatch api.runner.von_neumann_extract (the
+# qrand runner resolves it through this module at call time -- see
+# api.runner_algorithms._run_qrand).
+from qssc.crypto import von_neumann_extract  # noqa: F401
 
-# Path to the cached per-pixel array calibration (Invention 4). The API's
+# Path to the cached per-pixel array calibration. The API's
 # /api/circuit/calibrate-array endpoint writes it; run_parallel reads it so
 # each pixel runs at its MEASURED register width without the caller re-running
 # the calibration. Repo root = parent of this api/ directory.
@@ -51,7 +53,8 @@ def _load_cached_calibration() -> ArrayCalibration | None:
     try:
         if _CALIB_FILE.exists():
             return ArrayCalibration.from_json(_CALIB_FILE)
-    except Exception:  # noqa: BLE001 - a corrupt cache must never break a run
+    except Exception as exc:  # noqa: BLE001 - a corrupt cache must never break a run
+        logger.warning("calibration cache unreadable (%s); ignoring cached state", exc)
         return None
     return None
 
@@ -92,7 +95,7 @@ def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
     # calibration -> circuit loop: the register sits on the real addressed
     # frequencies at the applied gradient, not the synthetic 6 MHz grid.
     #
-    # Invention 4 calibrated path: when register_widths_per_pixel is given (a
+    # Calibrated path: when register_widths_per_pixel is given (a
     # per-pixel MEASURED width list from calibrate_array), the backend builds
     # one independent register per pixel and run_array runs each pixel at its
     # own width (skipping narrow pixels). gradient_mhz_per_um / pixel_size_um
@@ -204,29 +207,78 @@ def _circuit_meta(qc) -> dict:
             "depth": qc.depth()}
 
 
-def run_circuit(req: dict) -> dict:
-    """Execute a demo algorithm. ``req`` mirrors :class:`RunRequest`."""
-    profile = req.get("profile", "NV")
-    temperature_k = float(req.get("temperature_k", 300.0))
-    seed = int(req.get("seed", 42))
-    shots = int(req.get("shots", 2048))
-    noise_mode = req.get("noise_mode", "real")
-    hardware = bool(req.get("hardware", False))
-    anti_noise = _anti_noise_from_req(req)
-    algo = str(req.get("algorithm", "shor")).lower()
-    try:
+@dataclass
+class RunContext:
+    """Per-run shared state for :func:`run_circuit` and the per-algorithm
+    runners in :mod:`api.runner_algorithms`.
+
+    Holds the backend (``backend``, mutable -- the ``qrand`` runner rebuilds it
+    to reseed the readout noise) plus the run-level scalars every algorithm
+    branch reads (``shots`` / ``noise_mode`` / ``seed`` / ``profile`` /
+    ``temperature_k`` / ``hardware`` / ``anti_noise``). ``build`` is the factory
+    that replaces the repeated ``_backend(...)`` / ``_anti_noise_from_req(...)``
+    / ``_pixel_kwargs(...)`` preamble at the top of the former god-function; it
+    raises :class:`NoFPGADetected` (caught by the dispatcher -> the no-fpga
+    result body) exactly as the inlined ``_backend`` call did.
+    """
+    profile: str
+    temperature_k: float
+    seed: int
+    shots: int
+    noise_mode: str
+    hardware: bool
+    anti_noise: object
+    backend: QSSCBackend
+
+    @classmethod
+    def build(cls, req: dict) -> "RunContext":
+        """Build the run context from a request payload.
+
+        Raises :class:`NoFPGADetected` when ``hardware=True`` and no board
+        answers (the dispatcher catches it and returns the no-fpga body)."""
+        profile = req.get("profile", "NV")
+        temperature_k = float(req.get("temperature_k", 300.0))
+        seed = int(req.get("seed", 42))
+        shots = int(req.get("shots", 2048))
+        noise_mode = req.get("noise_mode", "real")
+        hardware = bool(req.get("hardware", False))
+        anti_noise = _anti_noise_from_req(req)
         b = _backend(profile, temperature_k, seed, noise_mode,
                      hardware=hardware, anti_noise=anti_noise,
                      **_pixel_kwargs(req))
+        return cls(profile=profile, temperature_k=temperature_k, seed=seed,
+                   shots=shots, noise_mode=noise_mode, hardware=hardware,
+                   anti_noise=anti_noise, backend=b)
+
+
+# Per-algorithm runners -- mechanical extraction of the former run_circuit
+# branches. Imported after the helpers above so the runners can in turn
+# import ``_backend`` / ``_pixel_kwargs`` / ``_circuit_meta`` from this module
+# without a circular-import gap.
+from api.runner_algorithms import _DISPATCH
+
+
+def run_circuit(req: dict) -> dict:
+    """Execute a demo algorithm. ``req`` mirrors :class:`RunRequest`.
+
+    Builds the :class:`RunContext` + the partial result dict, then dispatches
+    to the per-algorithm runner in :mod:`api.runner_algorithms`. The runner
+    mutates ``result`` in place and returns the qiskit result object (for the
+    assessment / noise / timing finalizer) or an ``{"error": ...}`` dict on an
+    early-return. ``NoFPGADetected`` from ``RunContext.build`` -> the no-fpga
+    result body, matching the former inlined ``_backend`` call.
+    """
+    algo = str(req.get("algorithm", "shor")).lower()
+    try:
+        ctx = RunContext.build(req)
     except NoFPGADetected as exc:
         return _no_fpga_result(exc)
-    src = _source_label(b.hardware)
-    result = {"algorithm": algo, "profile": profile,
-              "temperature_k": temperature_k, "shots": shots,
-              "noise_mode": noise_mode,
+    src = _source_label(ctx.backend.hardware)
+    result = {"algorithm": algo, "profile": ctx.profile,
+              "temperature_k": ctx.temperature_k, "shots": ctx.shots,
+              "noise_mode": ctx.noise_mode,
               "source": src, "io": "real" if src == "hardware" else "simulated"}
     t0 = time.perf_counter()
-    res = None
 
     # Hard cap on the integer N for the period-finding / factoring algorithms.
     # This is a TIME cap on the QUBIT COUNT (not memory, not an N value): Shor's
@@ -241,484 +293,15 @@ def run_circuit(req: dict) -> dict:
     # in ideal/no-noise mode) it factors. Let the physics show, not an arbitrary
     # rejection.
 
-    if algo == "bell":
-        from qiskit import QuantumCircuit
-        n = max(2, int(req.get("num_qubits", 2)))
-        qc = QuantumCircuit(n, n)
-        qc.h(0)
-        for i in range(n - 1):
-            qc.cx(i, i + 1)
-        qc.measure(range(n), range(n))
-        res = b.run(qc, shots=shots).result()
-        result["counts"] = res.get_counts()
-        result.update(_circuit_meta(qc))
-
-    elif algo == "shor":
-        n = int(req.get("n", 15))
-        if n < 2 or is_prime(n):
-            return {"error": "n must be a composite integer > 1"}
-        nq = (3 * n.bit_length() + 1) if algo in ("shor", "period") else (2 * n.bit_length() + 1)
-        if nq > 19:
-            return {"error": f"N={n} -> {nq} qubits is too large for the in-browser "
-                             f"simulator (>19 qubits -> each Aer run takes minutes "
-                             f"and may hang). Use N <= 63 (shor/period) or <= 511 "
-                             f"(qftnos)."}
-        # Shor classical preprocessing step 1: N = p^k (a prime power). For
-        # every coprime base a, a^(r/2) = +/- 1 mod p^k, so the quantum gcd step
-        # yields only trivial factors (1, N) -- the quantum circuit "runs but
-        # returns no factors" (9=3^2, 25=5^2, 27=3^3 ...). Factor it classically
-        # and still run ONE quantum attempt so the histogram + phase peak are
-        # shown (the derivation explains why the quantum gcd is trivial here).
-        pp = perfect_power(n)
-        rng = np.random.default_rng(seed)
-        chosen_a = req.get("a")
-        a = r = factors = qc = counts = None
-        attempt = 0
-        recovered = None
-        marginal_counts = None
-        # fewer retries for larger N: each attempt's Aer run grows ~exponentially
-        # with qubit count. N<=15 (<=13q) is fast -> 8; 16-31 (16q) -> 2; 32-63
-        # (19q) -> 1 (a single ~60-90 s run, well under the 120 s worker timeout).
-        max_attempts = 8 if n <= 15 else (2 if n <= 31 else 1)
-        for attempt in range(max_attempts):
-            a = (chosen_a if (chosen_a is not None and attempt == 0)
-                 else select_coprime(n, rng))
-            qc = create_shor_circuit(n, a=a, rng=rng)[0]
-            res = b.run(qc, shots=shots).result()
-            counts = res.get_counts()
-            # ideal/no-noise mode skips the signal_retention gate: there is no
-            # noise to reject, so the analytic retention (coherence x depol,
-            # which can underflow toward 0 for a deep circuit) must not hide a
-            # real period that the noise-free Aer counts clearly show
-            # (postprocess_period docstring: ideal inputs pass None, skip gate).
-            _ret = (None if noise_mode == "none"
-                    else float(res.assessment.get("signal_retention", 0.0) or 0.0))
-            _reveal = {}
-            r, factors = postprocess_period(counts,
-                                            qc.metadata["counting_bits"], a, n,
-                                            signal_retention=_ret, reveal=_reveal)
-            marginal_counts = _reveal.get("marginal_counts")
-            if factors[0] and factors[0] * factors[1] == n:
-                recovered = _reveal
-                break
-            # prime power: one attempt is enough -- the quantum gcd is trivial
-            # (factors come from the classical preprocessing below), so keep the
-            # measured phase peak for the histogram (only if one was recovered)
-            # and stop retrying.
-            if pp is not None:
-                recovered = _reveal if (_reveal and _reveal.get("bitstring")) else None
-                break
-            chosen_a = None
-        ok = bool(factors[0]) and factors[0] * factors[1] == n
-        # Prime power N = p^k: the quantum gcd step is trivial here, so take
-        # the factor from the classical preprocessing. Keep the measured counts
-        # + recovered phase peak (if any) for the histogram / derivation, and
-        # flag prime_power so the derivation can explain the classical step.
-        if pp is not None:
-            pbase, pexp = pp
-            factors = (pbase, n // pbase)
-            ok = True
-            result["prime_power"] = {"base": pbase, "exp": pexp}
-        _retention = float(getattr(res, "assessment", {}).get(
-            "signal_retention", 0.0) or 0.0)
-        _hom = float(getattr(res, "assessment", {}).get(
-            "hom_visibility", 1.0) or 1.0)
-        result.update({"n": n, "a": a, "counts": counts,
-                       "marginal_counts": marginal_counts,
-                       "period": r,
-                       "factors": list(factors) if factors[0] else None,
-                       "success": ok, "attempts": attempt + 1,
-                       "signal_retention": round(_retention, 4),
-                       "hom_visibility": round(_hom, 6)})
-        if recovered:
-            result["recovered"] = {
-                "bitstring": recovered["bitstring"],
-                "phase": round(float(recovered["phase"]), 6),
-                "count": recovered["count"],
-                "period": recovered["period"],
-                "factors": list(recovered["factors"]) if recovered["factors"][0] else None,
-            }
-        if pp is not None and recovered:
-            # carry the classically-recovered factors into the derivation peak
-            result["recovered"]["factors"] = list(factors)
-            result["recovered"]["prime_power"] = {"base": pp[0], "exp": pp[1]}
-        result.update(_circuit_meta(qc))
-
-    elif algo == "period":
-        n = int(req.get("n", 15))
-        nq = (3 * n.bit_length() + 1) if algo in ("shor", "period") else (2 * n.bit_length() + 1)
-        if nq > 19:
-            return {"error": f"N={n} -> {nq} qubits is too large for the in-browser "
-                             f"simulator (>19 qubits -> each Aer run takes minutes "
-                             f"and may hang). Use N <= 63 (shor/period) or <= 511 "
-                             f"(qftnos)."}
-        rng = np.random.default_rng(seed)
-        a = req.get("a") or select_coprime(n, rng)
-        if gcd(a, n) != 1:
-            a = select_coprime(n, rng)
-        qc = create_period_finding_circuit(n, a)
-        res = b.run(qc, shots=shots).result()
-        counts = res.get_counts()
-        # recover the period by iterating the top phase peaks (not just the
-        # single top state): the k=0 peak (phase 0 -> denominator 1) ties with
-        # the k/r peaks, so a naive max-counts lookup would wrongly report
-        # period 1. postprocess_period skips trivial / odd candidates, and the
-        # signal_retention gate rejects noise-dominated runs so a starved run
-        # cannot report a noise-artifact period (audit issue #8).
-        # ideal/no-noise mode skips the signal_retention gate (no noise to
-        # reject -- see the shor branch for the rationale).
-        _ret = (None if noise_mode == "none"
-                else float(res.assessment.get("signal_retention", 0.0) or 0.0))
-        _cb = qc.metadata["counting_bits"]
-        _reveal = {}
-        r, _ = postprocess_period(counts, _cb, a, n,
-                                  signal_retention=_ret, reveal=_reveal)
-        bs = max(counts, key=counts.get)
-        phase = (int(bs.replace(" ", ""), 2) & ((1 << _cb) - 1)) / 2 ** _cb
-        frac = Fraction(phase).limit_denominator(n - 1)
-        result.update({"n": n, "a": a, "counts": counts,
-                       "marginal_counts": _reveal.get("marginal_counts"),
-                       "top_state": bs, "phase": round(phase, 6),
-                       "fraction": str(frac), "period": r})
-        if _reveal:
-            result["recovered"] = {
-                "bitstring": _reveal["bitstring"],
-                "phase": round(float(_reveal["phase"]), 6),
-                "count": _reveal["count"],
-                "period": _reveal["period"],
-            }
-        result.update(_circuit_meta(qc))
-
-    elif algo == "math":
-        op = req.get("op", "add")
-        num1 = float(req.get("a") if req.get("a") is not None
-                     else req.get("num1", 2.0))
-        raw_b = req.get("b") if req.get("b") is not None else req.get("num2")
-        # sqrt/log only take one operand; a missing second arg must not crash
-        # with float(None). create_math_circuit accepts num2=None (defaults 0).
-        num2 = float(raw_b) if raw_b is not None else None
-        # Cap the word so the circuit cannot outgrow the Aer simulator and wedge
-        # the in-process worker. mul builds an RGQFTMultiplier on 4*bits qubits
-        # (a + b + 2*bits result), so two 4-digit operands -> bits ~ 16 -> a
-        # 64-qubit circuit -> Aer hangs; the 120s watchdog cannot kill the
-        # thread, so one such job permanently occupies a worker slot and the
-        # whole API stalls ("se deja todo colgado con una multiplicacion").
-        # Reject up front with a clear limit instead of letting it hang.
-        _n1 = abs(int(num1))
-        _n2 = abs(int(num2)) if num2 is not None else 0
-        _req_bits = req.get("bits")
-        _min_bits = max(1, math.ceil(math.log2(max(_n1, _n2, 1)))) + 2
-        _bits = max(_min_bits, int(_req_bits)) if _req_bits else _min_bits
-        _op = op.lower()
-        _nq = {"add": 2 * _bits, "sub": 2 * _bits, "mul": 4 * _bits,
-               "sqrt": _bits + 1, "log": _bits + 1}.get(_op, 2 * _bits)
-        # 36 qubits lets the demo mul run at Word=8 (4*8=32 qubits, a legitimate
-        # MPS run) while rejecting the 64-qubit mul (Word=16) that hangs Aer and
-        # stalls the in-process worker. RAISE (do not return {"error"}) so the
-        # sync /api/circuit/run?sync=true path reports status="failed" -- the
-        # sync wrapper only flips to "failed" on an exception, while the async
-        # worker treats both a raise and an {"error"} dict as failed.
-        _MATH_MAX_QUBITS = 36
-        if _nq > _MATH_MAX_QUBITS:
-            raise ValueError(
-                f"{op}({int(num1)}" + (f", {int(num2)}" if num2 is not None else "")
-                + f") needs {_nq} qubits -- wider than the "
-                f"{_MATH_MAX_QUBITS}-qubit math demo cap (Aer would hang and "
-                f"stall the API). Use smaller operands or a smaller Word.")
-        qc = create_math_circuit(op, num1, num2, bits=req.get("bits"))
-        res = b.run(qc, shots=shots).result()
-        counts = res.get_counts()
-        bs = max(counts, key=counts.get)
-        _rw = qc.metadata.get("result_width", qc.num_clbits)
-        out = int(bs.replace(" ", ""), 2) & ((1 << _rw) - 1)
-        if op in ("sqrt", "log"):
-            out = (out / 2 ** _rw) * num1
-        result.update({"op": op, "a": num1, "b": num2,
-                       "counts": counts, "result": out,
-                       "result_width": _rw})
-        result.update(_circuit_meta(qc))
-
-    elif algo == "grover":
-        from qiskit import QuantumCircuit, QuantumRegister
-        nq = max(2, min(8, int(req.get("n_items") or 3)))
-        marked = int(req.get("marked") or 0) % (2 ** nq)
-        qr_o = QuantumRegister(nq, "o")
-        oracle = QuantumCircuit(qr_o)
-        for i in range(nq):
-            if not ((marked >> i) & 1):
-                oracle.x(qr_o[i])
-        oracle.h(qr_o[-1])
-        oracle.mcx(list(range(nq - 1)), qr_o[-1])
-        oracle.h(qr_o[-1])
-        for i in range(nq):
-            if not ((marked >> i) & 1):
-                oracle.x(qr_o[i])
-        iters = max(1, int(round(math.pi / 4 * math.sqrt(2 ** nq))))
-        qc = grover_search(nq, oracle, iterations=iters)
-        res = b.run(qc, shots=shots).result()
-        counts = res.get_counts()
-        bs = max(counts, key=counts.get)
-        found = int(bs, 2) if qc.num_clbits else 0
-        result.update({"n_items": nq, "marked": marked, "counts": counts,
-                       "found": found, "success": found == marked,
-                       "iterations": iters})
-        result.update(_circuit_meta(qc))
-
-    elif algo == "qft":
-        from qiskit import QuantumCircuit
-        n = max(2, min(64, int(req.get("num_qubits", 4))))
-        x = int(req.get("x", 1)) % (2 ** n)
-        qc = QuantumCircuit(n, n)
-        for i in range(n):
-            if (x >> i) & 1:
-                qc.x(i)
-        # QFT of a computational-basis state |x> is an equal-amplitude
-        # superposition (with a phase gradient) -> measurement is ~uniform
-        # across all 2^n basis states. That uniformity is the QFT signature.
-        try:
-            from qiskit.circuit.library import QFTGate
-            gate = QFTGate(n)
-        except Exception:  # noqa: BLE001 - fallback for older qiskit
-            from qiskit.circuit.library import QFT
-            gate = QFT(n).to_gate()
-        qc.append(gate, range(n))
-        qc.measure(range(n), range(n))
-        res = b.run(qc, shots=shots).result()
-        counts = res.get_counts()
-        states = 2 ** n
-        expected = shots / states
-        observed = list(counts.values())
-        chi2_norm = (sum((c - expected) ** 2 / expected
-                         for c in observed) / max(1, states))
-        result.update({"n": n, "x": x, "counts": counts,
-                       "basis_states": states,
-                       "expected_per_state": round(expected, 2),
-                       "uniformity_chi2": round(chi2_norm, 3),
-                       "uniform": bool(chi2_norm < 2.0),
-                       "qft": "forward"})
-        result.update(_circuit_meta(qc))
-
-    elif algo == "qrand":
-        # Quantum random-number / cryptographic key generation. Prepare n
-        # qubits in |+>, measure many times, and treat the measurement
-        # outcomes as a (biased, because of readout error / decoherence at the
-        # chosen temperature) random bitstream. A von Neumann extractor
-        # removes the bias, the uniform bits seed an Ed25519 keypair + a
-        # self-signed X.509 device certificate. Cooling the chip -> less
-        # bias -> higher extraction rate.
-        from qiskit import QuantumCircuit
-        n = max(2, min(64, int(req.get("num_qubits", 8))))
-        num_bytes = max(16, min(64, int(req.get("num_bytes", 32))))
-        cn = str(req.get("common_name") or "QSSC-quantum-device")
-        need_bits = num_bytes * 8
-        qc = QuantumCircuit(n, n)
-        qc.h(range(n))
-        qc.measure(range(n), range(n))
-        # plenty of shots so the VN extractor has raw bits even when biased
-        raw_shots = max(int(shots), 8192)
-        # Entropy path (issue #45): the fixed default seed must NOT apply
-        # here — seed=42 makes every default call return the same entropy
-        # and the same Ed25519 private key. Without an explicit seed the
-        # run uses OS entropy (seed=None, which SimulatedFPGA and Aer both
-        # accept); an explicit seed still yields a deterministic stream for
-        # tests. The backend is rebuilt with the entropy seed so the
-        # simulated readout noise contributes to the randomness too.
-        qrng_seed = seed if "seed" in req else None
-        # Rebuild only for the simulator path (re-seed its readout noise). On
-        # the real-hardware path the readout is live ADC noise (no seed) and
-        # re-opening the serial port would collide with the already-open
-        # connection, so reuse the existing backend.
-        if qrng_seed != seed and not hardware:
-            b = _backend(profile, temperature_k, qrng_seed, noise_mode,
-                         hardware=hardware, anti_noise=anti_noise,
-                         **_pixel_kwargs(req))
-        res = b.run(qc, shots=raw_shots).result()
-        counts = res.get_counts()
-        # expand the measured outcomes into a flat list and shuffle so that
-        # adjacent pairs are ~independent samples (the backend returns a
-        # histogram, not the per-shot sequence; on hardware the raw
-        # per-shot sequence is used directly).
-        rng = np.random.default_rng(qrng_seed)
-        flat = []
-        for k, v in counts.items():
-            s = k.replace(" ", "")
-            flat.extend([s] * int(v))
-        # Harvest + health gate with retry (issue #46). The qiskit run is the
-        # expensive part and stays outside the loop; only the shuffle +
-        # von-Neumann extract + gate retry. A fair iid stream passes the
-        # frequency / lag-1 sanity gate ~99.8% of the time per 128-bit block,
-        # so the rare false reject -- a legitimate fair draw that lands >3.3
-        # sigma from 0.5 -- must not fail the whole request: re-shuffle the raw
-        # pool (reshaping the adjacent pairs the extractor consumes) and
-        # re-extract a fresh block, up to N times. A genuinely degenerate or
-        # correlated stream fails every attempt and still replies ERR, so the
-        # gate is not weakened -- only the false-reject rate is. Mirrors the
-        # retry already in SimulatedFPGA._harvest_entropy (READ_RNG verb).
-        bits: list[int] = []
-        vstats: dict = {}
-        health: dict = {"passed": False}
-        raw: list[int] = []
-        insufficient = True
-        for _attempt in range(64):
-            rng.shuffle(flat)
-            raw = [1 if c == "1" else 0 for s in flat for c in s]
-            bits, vstats = von_neumann_extract(raw, need_bits)
-            if not vstats["sufficient"]:
-                continue
-            insufficient = False
-            health = entropy_health(bits)
-            if health["passed"]:
-                break
-        if insufficient:
-            return {"error": "insufficient quantum entropy from this run "
-                             "(increase shots or cool the chip to reduce "
-                             "readout bias)"}
-        if not health["passed"]:
-            return {"error": "extracted entropy failed the health gate "
-                             "(frequency / lag-1 correlation sanity check)",
-                    "health": health}
-        p1 = (sum(raw) / len(raw)) if raw else 0.0
-        entropy = bits_to_bytes(bits[:need_bits])
-        # pad to >=52 bytes so derive_keypair has a serial-number source
-        seed_block = entropy + bytes(entropy.hex().encode()[:40])
-        key = derive_keypair(seed_block, common_name=cn, days=365)
-        result.update({
-            "n": n, "num_bytes": num_bytes, "counts": counts,
-            "entropy_hex": entropy.hex(),
-            "raw_bias_p1": round(p1, 4),
-            "extraction": vstats,
-            "health": health,
-            "symmetric_key_hex": key["symmetric_key_hex"],
-            "public_key_pem": key["public_key_pem"],
-            "private_key_pem": key["private_key_pem"],
-            "certificate_pem": key["certificate_pem"],
-            "common_name": key["common_name"],
-            "serial": key["serial"],
-            "key_algorithm": key["algorithm"],
-        })
-        result.update(_circuit_meta(qc))
-
-    elif algo == "qftnos":
-        # QFT-NOS: lightweight QFT-based period finding (reduced counting
-        # register + swapless inverse QFT + precomputed controlled mod-mult),
-        # then direct classical factoring from the period. Far fewer gates /
-        # qubits than full Shor. We also report a gate-count comparison against
-        # the full Shor circuit for the same (n, a).
-        n = int(req.get("n", 15))
-        if n < 2 or is_prime(n):
-            return {"error": "n must be a composite integer > 1"}
-        nq = (3 * n.bit_length() + 1) if algo in ("shor", "period") else (2 * n.bit_length() + 1)
-        if nq > 19:
-            return {"error": f"N={n} -> {nq} qubits is too large for the in-browser "
-                             f"simulator (>19 qubits -> each Aer run takes minutes "
-                             f"and may hang). Use N <= 63 (shor/period) or <= 511 "
-                             f"(qftnos)."}
-        # Prime power N = p^k: same trivial-gcd issue as full Shor (see the shor
-        # branch). Factor classically; run one QFT-NOS attempt for the histogram.
-        pp = perfect_power(n)
-        rng = np.random.default_rng(seed)
-        chosen_a = req.get("a")
-        a = r = factors = qc = counts = None
-        attempt = 0
-        recovered = None
-        marginal_counts = None
-        # fewer retries for larger N: each attempt's Aer run grows ~exponentially
-        # with qubit count. N<=15 (<=13q) is fast -> 8; 16-31 (16q) -> 2; 32-63
-        # (19q) -> 1 (a single ~60-90 s run, well under the 120 s worker timeout).
-        max_attempts = 8 if n <= 15 else (2 if n <= 31 else 1)
-        for attempt in range(max_attempts):
-            a = (chosen_a if (chosen_a is not None and attempt == 0)
-                 else select_coprime(n, rng))
-            qc, a = create_qft_nos_circuit(n, a=a, rng=rng)
-            res = b.run(qc, shots=shots).result()
-            counts = res.get_counts()
-            # ideal/no-noise mode skips the signal_retention gate (no noise to
-            # reject -- see the shor branch for the rationale).
-            _ret = (None if noise_mode == "none"
-                    else float(res.assessment.get("signal_retention", 0.0) or 0.0))
-            _reveal = {}
-            r, factors = postprocess_period_swapless(counts,
-                                                     qc.metadata["counting_bits"],
-                                                     a, n,
-                                                     signal_retention=_ret,
-                                                     reveal=_reveal)
-            marginal_counts = _reveal.get("marginal_counts")
-            if factors[0] and factors[0] * factors[1] == n:
-                recovered = _reveal
-                break
-            # prime power: one attempt is enough -- the quantum gcd is trivial
-            # (factors come from the classical preprocessing below), so keep the
-            # measured phase peak for the histogram (only if one was recovered)
-            # and stop retrying.
-            if pp is not None:
-                recovered = _reveal if (_reveal and _reveal.get("bitstring")) else None
-                break
-            chosen_a = None
-        ok = bool(factors[0]) and factors[0] * factors[1] == n
-        # Prime power N = p^k: take the factor from the classical preprocessing
-        # (the quantum gcd step is trivial here). See the shor branch.
-        if pp is not None:
-            pbase, pexp = pp
-            factors = (pbase, n // pbase)
-            ok = True
-            result["prime_power"] = {"base": pbase, "exp": pexp}
-        comparison = None
-        try:
-            full_qc, _ = create_shor_circuit(n, a=a)
-            comparison = {
-                "num_qubits": full_qc.num_qubits, "depth": full_qc.depth(),
-                "size": full_qc.size(), "ops": dict(full_qc.count_ops()),
-            }
-        except Exception:  # noqa: BLE001
-            comparison = None
-        _retention = float(getattr(res, "assessment", {}).get(
-            "signal_retention", 0.0) or 0.0)
-        _hom = float(getattr(res, "assessment", {}).get(
-            "hom_visibility", 1.0) or 1.0)
-        result.update({"n": n, "a": a, "counts": counts,
-                       "marginal_counts": marginal_counts, "period": r,
-                       "factors": list(factors) if factors[0] else None,
-                       "success": ok, "attempts": attempt + 1,
-                       "counting_qubits": qc.metadata["counting_bits"],
-                       "shor_comparison": comparison,
-                       "signal_retention": round(_retention, 4),
-                       "hom_visibility": round(_hom, 6)})
-        if recovered:
-            result["recovered"] = {
-                "bitstring": recovered["bitstring"],
-                "phase": round(float(recovered["phase"]), 6),
-                "count": recovered["count"],
-                "period": recovered["period"],
-                "factors": list(recovered["factors"]) if recovered["factors"][0] else None,
-            }
-        if pp is not None and recovered:
-            result["recovered"]["factors"] = list(factors)
-            result["recovered"]["prime_power"] = {"base": pp[0], "exp": pp[1]}
-        result.update(_circuit_meta(qc))
-
-    elif algo == "bb84":
-        # BB84 quantum key distribution. Single-qubit prepare-and-measure over
-        # the QSSC backend (the chip's readout/decoherence is the channel
-        # noise). Optional intercept-resend eavesdropper raises the QBER above
-        # the 11% security threshold.
-        from types import SimpleNamespace
-        from qiskit import QuantumCircuit as _QC
-        num_bits = int(req.get("num_bits", 128))
-        eavesdrop = bool(req.get("eavesdrop", False))
-        info = simulate_bb84(b, num_bits=num_bits, eavesdrop=eavesdrop,
-                             shots=max(int(shots), 256), seed=seed)
-        result.update(info)
-        result.update({"num_qubits": 1, "num_clbits": 1, "depth": 1})
-        # bb84 never assigns `res` (it runs many 1-qubit combos inside
-        # simulate_bb84); build a representative assessment of the 1-qubit
-        # channel circuit so the dashboard verdict is not empty/NaN. A single
-        # H+measure is the deepest BB84 op and always fits the T2 window.
-        _chan = _QC(1, 1); _chan.h(0); _chan.measure(0, 0)
-        res = SimpleNamespace(assessment=b.assess_circuit(_chan),
-                              approximate=False)
-
-    else:
+    fn = _DISPATCH.get(algo)
+    if fn is None:
         return {"error": f"unknown algorithm '{algo}'"}
+    res = fn(ctx, req, result)
+    # An early-return runner yields an {"error": ...} dict -- return it
+    # immediately, skipping the assessment / noise / timing finalizer
+    # (matching the original branches' early ``return {"error": ...}``).
+    if isinstance(res, dict) and "error" in res:
+        return res
 
     result["assessment"] = getattr(res, "assessment", {})
     result["approximate"] = getattr(res, "approximate", False)
@@ -728,7 +311,7 @@ def run_circuit(req: dict) -> dict:
     # off: the base optical readout error, the prime SNR improvement factor,
     # and the EFFECTIVE readout error after the coprime matched-filter denoiser
     # (equal to the base when prime_readout is off).
-    result["noise"] = b.noise_summary()
+    result["noise"] = ctx.backend.noise_summary()
     result["elapsed_ms"] = round((time.perf_counter() - t0) * 1000, 2)
     return result
 
@@ -869,7 +452,7 @@ def _postprocess_sample(algo, req, qc, counts, shots):
 
 def run_parallel(req: dict) -> dict:
     """Run one circuit per pixel across the 64-pixel array IN PARALLEL and
-    aggregate (Invention 4 — distributed computing).
+    aggregate (distributed computing).
 
     The 64 die pixels are INDEPENDENT ~10-NV processors at 300 K (1/r**3 -> 0
     at the 2.5 mm pitch): the chip's compute throughput is 64x a single pixel,
@@ -892,7 +475,7 @@ def run_parallel(req: dict) -> dict:
     mode = str(req.get("mode", "sample")).lower()
     n_pixels = max(1, min(64, int(req.get("n_pixels", 64))))
     anti_noise = _anti_noise_from_req(req)
-    # Invention 4: when the caller opts in (use_calibration=true), load the
+    # When the caller opts in (use_calibration=true), load the
     # cached per-pixel calibration so each pixel runs at its MEASURED register
     # width (skip-narrow). Default False = the uniform-register back-compat
     # path (the existing behaviour; calibrate first via /api/circuit/calibrate-
@@ -907,7 +490,7 @@ def run_parallel(req: dict) -> dict:
         reg_widths = calib.widths
         grad = calib.gradient_mhz_per_um
         psz = calib.pixel_size_um
-        # Close the calibration -> circuit loop (Invention 4): feed each pixel's
+        # Close the calibration -> circuit loop: feed each pixel's
         # MEASURED ODMR line centres (GHz -> Hz) back so the register sits on the
         # real addressed frequency grid, not auto_align's synthetic 6 MHz grid.
         # The frontend's per-pixel qubits+freqs modal then shows the measured
@@ -1131,7 +714,7 @@ def run_parallel(req: dict) -> dict:
 
 
 def run_calibrate_array(req: dict) -> dict:
-    """Calibrate the 64-pixel array's per-pixel register width (Invention 4+5).
+    """Calibrate the 64-pixel array's per-pixel register width.
 
     Mirror of the ``/api/circuit/calibrate-array`` endpoint logic, factored out
     so it can run as an async RQ job (the sim path synthesizes 64 ODMR spectra
@@ -1153,15 +736,15 @@ def run_calibrate_array(req: dict) -> dict:
     profile = req.get("profile", "NV")
     prof = get_profile(profile)
     source = str(req.get("source", "sim")).lower()
-    # Invention 9: build the anti-noise stack from the request. noise_env="none"
+    # Build the anti-noise stack from the request. noise_env="none"
     # -> None (no environmental channels, back-compat); anti_noise empty -> the
     # all-off default config (back-compat).
     noise_env = noise_environment_preset(str(req.get("noise_env", "none")))
     anti_noise = AntiNoiseConfig.from_dict(req.get("anti_noise"))
-    # Invention 6: build the sub-pixel centroiding model if requested.
+    # Build the sub-pixel centroiding model if requested.
     sub_pixel = (SubPixelModel(sigma_sheet_mm=float(req.get("sigma_sheet_mm", 1.0)))
                  if bool(req.get("sub_pixel", False)) else None)
-    # Invention 13/14: line-recovery mode (superres takes precedence over bayesian).
+    # Line-recovery mode (superres takes precedence over bayesian).
     superres = req.get("superres")
     bayesian = req.get("bayesian")
     if superres is not None:
@@ -1184,7 +767,7 @@ def run_calibrate_array(req: dict) -> dict:
             f_start = d_khz - span_khz
             f_stop = d_khz + span_khz
             n = int(req.get("n_points", 400))
-            # Invention 5: program the gradient coil BEFORE the sweep so each
+            # Program the gradient coil BEFORE the sweep so each
             # pixel's ODMR lines spread across the pixel by grad*pixel_size,
             # which is what makes the lines resolvable (-> per-pixel register
             # width). Without this the 64 pixels all see one collapsed line.
@@ -1201,9 +784,10 @@ def run_calibrate_array(req: dict) -> dict:
                 try:
                     fpga.send_command(f"SET_GRADIENT {grad_code}")
                     gradient_applied_ok = True
-                except Exception:  # noqa: BLE001 - do not abort the sweep
+                except Exception as exc:  # noqa: BLE001 - do not abort the sweep
                     gradient_applied_ok = False
-            # Invention 7: N-shot lock-in integration. Average N independent
+                    logger.debug("gradient coil write failed in run_parallel: %s", exc)
+            # N-shot lock-in integration. Average N independent
             # RUN_ALL_ODMR sweeps -> per-point readout noise drops by sqrt(N)
             # (uncorrelated thermal/Johnson noise), so dimmer lone-NV ODMR bins
             # clear the min_snr bar and the MEASURED width rises. Cost is
@@ -1251,17 +835,17 @@ def run_calibrate_array(req: dict) -> dict:
     try:
         _CALIB_FILE.parent.mkdir(parents=True, exist_ok=True)
         calib.to_json(_CALIB_FILE)
-    except Exception:  # noqa: BLE001 - a cache write failure must not break the reply
-        pass
+    except Exception as exc:  # noqa: BLE001 - a cache write failure must not break the reply
+        logger.debug("calibration cache write failed: %s", exc)
     bw = best_uniform_width(calib.widths)
-    # Invention 13/14: which line-recovery mode produced the widths.
+    # Which line-recovery mode produced the widths.
     if superres is not None and superres > 0.0:
         readout_mode = f"superres({superres})"
     elif bayesian is not None and 0.0 < bayesian < 1.0:
         readout_mode = f"bayesian({bayesian})"
     else:
         readout_mode = "hard-threshold"
-    # Invention 9: report the effective noise + per-filter gain breakdown so the
+    # Report the effective noise + per-filter gain breakdown so the
     # frontend can show what each filter bought. Collapses to the prior values
     # when the stack is unset (noise_env="none", anti_noise empty).
     eff_noise = effective_noise_sigma(
@@ -1272,7 +856,7 @@ def run_calibrate_array(req: dict) -> dict:
         "source": io_label,
         "d_fit_ghz": round(prof.zero_field_splitting / 1e9, 6),
         "gradient_mhz_per_um": calib.gradient_mhz_per_um,
-        # Invention 5: the MCP4921 DAC code programmed into the gradient coil
+        # The MCP4921 DAC code programmed into the gradient coil
         # before the sweep (None for the sim path, which models the gradient
         # analytically and never touches the coil). gradient_applied_ok is only
         # meaningful for source=real; it is True when the board acknowledged
@@ -1289,16 +873,16 @@ def run_calibrate_array(req: dict) -> dict:
         "best_uniform_width": bw[0],
         "best_uniform_pixels": bw[1],
         "total_working_qubits": bw[0] * bw[1],
-        # Invention 7: N-shot lock-in integration (raises measured width).
+        # N-shot lock-in integration (raises measured width).
         "integration_shots": calib.integration_shots,
-        # Invention 13/14: the per-pixel line-recovery mode that produced the
+        # The per-pixel line-recovery mode that produced the
         # widths (hard-threshold / superres(factor) / bayesian(confidence)).
         "readout_mode": readout_mode,
-        # Invention 6: sub-pixel detector imaging resolution (does NOT change
+        # Sub-pixel detector imaging resolution (does NOT change
         # register_width -- within-pad spots merge; centroiding localizes one).
         "sub_pixel_factor": calib.sub_pixel_factor,
         "spatial_channels": calib.spatial_channels,
-        # Invention 9: classical anti-noise filter stack. effective_noise_rel is
+        # Classical anti-noise filter stack. effective_noise_rel is
         # the post-filter readout noise as a fraction of BRIGHT_CODE; filter_gain
         # is the per-channel residual breakdown; noise_env/anti_noise echo the
         # config. All collapse to back-compat values when the stack is unset.

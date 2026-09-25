@@ -615,10 +615,10 @@ def test_von_neumann_and_keypair():
 
 def test_qrand_result_bson_serialisable():
     """The async qrand job persists the runner result to MongoDB; the
-    ``serial`` field used to be a ~159-bit int that overflows BSON
+    ``serial`` field must stay BSON-serialisable: a ~159-bit int overflows BSON
     (``OverflowError: MongoDB can only handle up to 8-byte ints``), so the
-    finished record never persisted and the frontend showed a blank result.
-    Encode the runner result with BSON to lock the fix in."""
+    finished record would never persist and the frontend would show a blank
+    result. Encode the runner result with BSON to lock the contract in."""
     from api.runner import run_circuit
     r = run_circuit({"algorithm": "qrand", "profile": "hBN-VB",
                      "temperature_k": 300.0, "seed": 42, "noise_mode": "real",

@@ -1,4 +1,4 @@
-"""Invention 14 — Bayesian / quantum-limited readout (300 K).
+"""Bayesian / quantum-limited readout (300 K).
 
 The default line counter (:func:`qssc.odmr_decompose.decompose_odmr`) uses a
 hard **two-sided** per-line SNR threshold (``min_snr=4``): a line is accepted
@@ -9,7 +9,7 @@ true SNR sits in the 2–4 band are discarded as noise even though they carry
 real information.
 
 This module replaces the hard bar with a **Bayesian per-bin credible-interval
-detector** over the same known gradient-bin dictionary used by Invention 13.
+detector** over the same known gradient-bin dictionary used by the sparse OMP estimator.
 For each bin it computes the matched-filter amplitude estimate and its posterior
 standard deviation (the noise averaged over the line profile, ``σ/‖A_j‖``), then
 declares a line when the **one-sided** posterior probability ``P(contrast > 0)``
@@ -29,8 +29,8 @@ photon statistics carry, instead of a conservative point-estimate cut.
 What this does NOT do: recover lines whose matched-filter SNR is below the
 (z-corrected) noise floor. A line at matched-filter SNR < ~2.3 is still
 indistinguishable from noise — that is the information limit, not a threshold
-choice. Stacks with Invention 7 (1/√N, lowers σ) and Invention 9 (anti-noise,
-lowers σ); complementary to Invention 13 (OMP jointly deconvolves overlaps,
+choice. Stacks with N-shot lock-in (1/√N, lowers σ) and the anti-noise stack
+(lowers σ); complementary to the sparse OMP estimator (OMP jointly deconvolves overlaps,
 this detector tests bins independently).
 """
 from __future__ import annotations

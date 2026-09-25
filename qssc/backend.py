@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import logging
 import math
-import time
 from typing import Dict, List, Optional, Sequence
 
 import numpy as np
@@ -86,464 +85,38 @@ _MPS_BASIS = ["u", "u1", "u2", "u3", "cx", "x", "h", "s", "t",
 # ---------------------------------------------------------------------------
 # Hardware abstractions (real serial + simulator share one interface)
 # ---------------------------------------------------------------------------
-
-class NoFPGADetected(RuntimeError):
-    """Raised when hardware-real mode is requested but no live FPGA answers.
-
-    The board-present test is the ``ID`` firmware verb: a flashed QSSC board
-    replies ``QSSC v1``. An empty/unprogrammed port, a wrong device, or a
-    ``readline`` timeout all surface as this exception so the runner/API can
-    return a clear "no FPGA detected" result instead of silently simulating.
-    """
-
-    def __init__(self, port: str, reason: str = ""):
-        self.port = port
-        self.reason = reason
-        msg = f"no FPGA detected on {port}"
-        if reason:
-            msg += f" — {reason}"
-        super().__init__(msg)
-
-
-# Identity string a flashed QSSC board returns on the ``ID`` verb. The host
-# board-present probe (FPGAConnection.__init__) requires a reply that starts
-# with this token. Implemented in fpga/rtl/command_parser.v (PR2).
-FPGA_ID_TOKEN = "QSSC"
-
-
-class FPGAConnection:
-    """Thin wrapper over a pyserial link to the Artix-7 board.
-
-    pyserial is imported lazily so the package works without it installed.
-    """
-
-    def __init__(self, port: str = "/dev/ttyUSB0", baudrate: int = 115200):
-        import serial  # local import
-        try:
-            self.ser = serial.Serial(port, baudrate, timeout=5)
-        except Exception as exc:  # port absent / permission denied / busy
-            raise NoFPGADetected(port, f"cannot open serial port: {exc}") from exc
-        time.sleep(2)
-        # Board-present handshake: a flashed QSSC board answers ``ID`` with
-        # ``QSSC v1``. An unprogrammed FPGA, a wrong device, or a silent port
-        # must surface as NoFPGADetected here so the caller never mistakes a
-        # dead link for a working board and silently falls back to simulation.
-        try:
-            reply = self.send_command("ID")
-        except Exception as exc:
-            self.ser.close()
-            raise NoFPGADetected(port, f"ID probe failed: {exc}") from exc
-        if not reply.startswith(FPGA_ID_TOKEN):
-            self.ser.close()
-            raise NoFPGADetected(
-                port, f"ID reply {reply!r} did not start with {FPGA_ID_TOKEN!r}")
-
-    def send_command(self, command: str) -> str:
-        self.ser.write((command + "\n").encode())
-        return self.ser.readline().decode().strip()
-
-    def close(self):
-        self.ser.close()
-
-    # ---- PR3b pulse-sequence engine + lock-in host methods ---------------
-    # The RTL (fpga/rtl/command_parser.v, PR3a) returns RAW 16-bit ADC codes
-    # / raw on-off accumulations; the host does every physics fit (rate, T2,
-    # SNR). These three methods parse the real integer wire format and return
-    # the SAME structured shapes as the SimulatedFPGA wrappers below, so the
-    # /api endpoints are mode-agnostic (one call site, two backends).
-
-    def run_sequence(self, site: int, kind, n_windows: int,
-                     t_step_ns: int = 0) -> np.ndarray:
-        """``RUN_SEQUENCE <site> <kind> <n> <t_step>`` -> n raw ADC readout codes.
-
-        kind: 0=Ramsey, 1=Hahn, 2=CPMG (int or case-insensitive name). The
-        firmware replies ``"<n> c0 c1 ... cN-1"`` (dec-padded, NO ``OK``). The
-        host fits T2 / rate on the returned codes. Returns an ``int32`` array
-        of length ``n_windows``.
-        """
-        kind_num = _seq_kind_num(kind)
-        if not (0 <= int(site) < N_SITES):
-            raise ValueError("site out of range 0..63")
-        if not (1 <= int(n_windows) <= 1024):
-            raise ValueError("n_windows out of range 1..1024")
-        reply = self.send_command(
-            f"RUN_SEQUENCE {int(site)} {kind_num} {int(n_windows)} {int(t_step_ns)}")
-        toks = reply.split()
-        if len(toks) < 1 or int(toks[0]) != int(n_windows):
-            raise IOError(f"RUN_SEQUENCE reply mismatch: {reply!r}")
-        return np.array([int(t) for t in toks[1:1 + int(n_windows)]], dtype=np.int32)
-
-    def read_lockin(self, site: int, n_cycles: int) -> dict:
-        """``READ_LOCKIN <site> <n>`` -> on/off accumulations -> lock-in result.
-
-        The firmware replies ``"<sum_on> <sum_off> <n_on> <n_off>"`` (NO
-        ``OK``): ``sum_on`` is the MW-on (ODMR dip, dark) accumulation,
-        ``sum_off`` the MW-off (bright) accumulation. The RTL does no
-        division; the host computes the bright-minus-dark differential and
-        SNR. Returns the same dict shape as
-        :func:`qssc.sensors.lockin_integrated_readout`.
-        """
-        if not (0 <= int(site) < N_SITES) or not (1 <= int(n_cycles) <= 100000):
-            raise ValueError("site/n_cycles out of range")
-        reply = self.send_command(f"READ_LOCKIN {int(site)} {int(n_cycles)}")
-        return self._parse_lockin_reply(reply)
-
-    def read_lockinp(self, site: int, n_cycles: int, half_ns: int) -> dict:
-        """``READ_LOCKINP <site> <n> <half_ns>`` -> prime-period lock-in result.
-
-        Same accumulator + reply shape as :meth:`read_lockin`, but the on/off
-        half-period is the host-supplied ``half_ns`` (= ``p * tau / 2`` for the
-        prime ``p`` that :mod:`qssc.prime_readout` assigned to this NV channel),
-        instead of the fixed 200 us default. The prime-coprime orthogonality
-        (zero cross-talk over the LCM) lives in the Python readout model; the
-        RTL just demodulates at the requested half-period. Returns the same
-        dict shape as :meth:`read_lockin`.
-        """
-        if not (0 <= int(site) < N_SITES) or not (1 <= int(n_cycles) <= 100000):
-            raise ValueError("site/n_cycles out of range")
-        if int(half_ns) < 2000:
-            raise ValueError("half_ns must be >= 2000 (>= 20 clk cycles)")
-        reply = self.send_command(
-            f"READ_LOCKINP {int(site)} {int(n_cycles)} {int(half_ns)}")
-        return self._parse_lockin_reply(reply)
-
-    def _parse_lockin_reply(self, reply: str) -> dict:
-        """Parse the four-int lock-in reply (shared by READ_LOCKIN/READ_LOCKINP)."""
-        toks = reply.split()
-        if len(toks) != 4:
-            raise IOError(f"READ_LOCKIN(P) reply mismatch: {reply!r}")
-        sum_on, sum_off, n_on, n_off = (int(t) for t in toks)
-        n_on = max(1, n_on)
-        n_off = max(1, n_off)
-        mean_on = sum_on / n_on            # MW on  -> dark (ODMR dip)
-        mean_off = sum_off / n_off         # MW off -> bright
-        diff = mean_off - mean_on          # bright - dark (matches the sim path)
-        # The 4 accumulation ints carry no per-frame variance, so use the known
-        # single-frame readout noise floor as sigma (the same assumption
-        # lockin_integrated_readout makes); the integrated sigma shrinks as
-        # sqrt(N). This is the lock-in SNR gain, not a measured variance.
-        single_sigma = float(READOUT_NOISE)
-        n_eff = max(n_on, n_off)
-        sigma = single_sigma / math.sqrt(n_eff) if n_eff else single_sigma
-        return {
-            "n_frames": n_on + n_off,
-            "differential_code": round(diff, 2),
-            "sigma_code": round(sigma, 2),
-            "single_frame_snr": round(abs(diff) / single_sigma, 2) if single_sigma else 0.0,
-            "integrated_snr": round(abs(diff) / sigma, 2) if sigma else 0.0,
-            "snr_gain": round(math.sqrt(n_eff), 2),
-            "bright_code": round(mean_off, 2),
-            "dark_code": round(mean_on, 2),
-        }
-
-    def run_all_odmr(self, f_start_khz: int, f_stop_khz: int,
-                     n_points: int) -> np.ndarray:
-        """``RUN_ALL_ODMR <f_start> <f_stop> <n>`` -> ``(n, 64)`` ADC code matrix.
-
-        The firmware sweeps the ADF4351 across [f_start, f_stop] in ``n`` steps
-        ON-CHIP (one command, not n serial round-trips); at each step it gates
-        the MW for the ODMR window and reads all 64 AD7616 channels
-        simultaneously, emitting one line of 64 space-separated 16-bit codes per
-        frequency point, then a final ``OK``. Row ``i`` is the 64-pixel
-        photocurrent at freq point ``i``. The host runs
-        :func:`qssc.odmr_decompose.decompose_odmr` per column (pixel) to count
-        each pixel's resolved ODMR lines = its calibrated register width.
-        Returns an ``int32`` array of shape ``(n_points, 64)``.
-        """
-        if n_points <= 0 or n_points > 4096:
-            raise ValueError("n_points out of range 1..4096")
-        cmd = f"RUN_ALL_ODMR {int(f_start_khz)} {int(f_stop_khz)} {int(n_points)}\n"
-        self.ser.write(cmd.encode())
-        rows = []
-        for _ in range(n_points):
-            line = self.ser.readline().decode().strip()
-            toks = line.split()
-            if len(toks) != N_SITES:
-                raise IOError(f"RUN_ALL_ODMR row mismatch: {line!r}")
-            rows.append([int(t) for t in toks])
-        ok = self.ser.readline().decode().strip()
-        if ok != "OK":
-            raise IOError(f"RUN_ALL_ODMR missing OK: {ok!r}")
-        return np.array(rows, dtype=np.int32)
-
-    def read_gyro(self, site: int, t_ns: int, n_windows: int = 64) -> dict:
-        """Ramsey pi/2-T-pi/2 -> rotation rate (dps) from real ADC codes.
-
-        There is no ``READ_GYRO`` RTL verb: the host runs ``RUN_SEQUENCE``
-        (Ramsey) and fits the fringe rate on the returned codes
-        (:func:`_fit_gyro_from_codes`). Returns the same dict shape as
-        :func:`qssc.sensors.gyro_measure` (a GyroResult asdict).
-        """
-        if not (0 <= int(site) < N_SITES) or t_ns <= 0 or n_windows < 4:
-            raise ValueError("site/t_ns/n_windows out of range")
-        t_step = max(1, int(t_ns) // int(n_windows))
-        codes = self.run_sequence(site, 0, n_windows, t_step)   # 0 = Ramsey
-        return _fit_gyro_from_codes(codes, t_step, t_ns)
-
-
-# ---- host-side fits on raw ADC codes (PR3b) -------------------------------
-# The RTL pulse engine returns raw readout codes; these numpy-only helpers fit
-# the physics the /api endpoints need (Ramsey fringe rate -> rotation rate,
-# fringe envelope decay -> T2). No scipy dependency: an FFT rate estimate plus
-# a log-linear envelope fit is enough for the on-host fit, and degrades
-# gracefully (nan / 0) when the codes are flat or the fit is ill-conditioned.
-
-_SEQ_KIND_NAMES = {"ramsey": 0, "hahn": 1, "cpmg": 2}
-
-
-def _seq_kind_num(kind) -> int:
-    """Normalise a sequence kind to its 0/1/2 RTL code (int or name)."""
-    if isinstance(kind, (int, np.integer)):
-        k = int(kind)
-    else:
-        k = _SEQ_KIND_NAMES.get(str(kind).lower(), -1)
-    if k not in (0, 1, 2):
-        raise ValueError(f"kind must be 0=Ramsey/1=Hahn/2=CPMG, got {kind!r}")
-    return k
-
-
-def _log_linear_slope(x: np.ndarray, y: np.ndarray) -> float:
-    """Least-squares slope of log(y) vs x (y > 0). Returns nan if undefined."""
-    y = np.asarray(y, dtype=float)
-    x = np.asarray(x, dtype=float)
-    mask = y > 1e-9
-    if int(mask.sum()) < 2:
-        return float("nan")
-    lx = np.log(y[mask])
-    xs = x[mask]
-    slope = float(np.polyfit(xs, lx, 1)[0]) if np.ptp(xs) > 0 else float("nan")
-    return slope
-
-
-def _fit_t2_from_codes(codes: np.ndarray, t_step_ns: int) -> float:
-    """Fit T2 (us) from the decay envelope of a Ramsey/Hahn fringe.
-
-    Models ``c(t) = A + B * fringe(t) * exp(-t/T2)``: takes the upper envelope
-    of the detrended codes (local maxima of |c - mean|) and fits
-    ``log(amp) = a - t/T2``. Returns T2 in microseconds, or ``nan`` when the
-    codes are flat / the envelope is not decaying (coherence not the limiter
-    within the sampled window).
-    """
-    codes = np.asarray(codes, dtype=float)
-    n = codes.size
-    if n < 4 or t_step_ns <= 0:
-        return float("nan")
-    t_ns = np.arange(n) * float(t_step_ns)
-    y = codes - codes.mean()
-    amp = np.abs(y)
-    if amp.max() < 1.0:                       # flat -> no fringe -> no decay
-        return float("nan")
-    peaks = [i for i in range(1, n - 1)
-             if amp[i] >= amp[i - 1] and amp[i] >= amp[i + 1]]
-    if len(peaks) < 2:                        # too few maxima -> use all samples
-        peaks = list(range(n))
-    slope = _log_linear_slope(t_ns[peaks], amp[peaks])
-    if not math.isfinite(slope) or slope >= 0:
-        return float("nan")
-    t2_ns = -1.0 / slope
-    return float(t2_ns / 1000.0)              # ns -> us
-
-
-def _fit_gyro_from_codes(codes: np.ndarray, t_step_ns: int,
-                         t_ns: int) -> dict:
-    """Ramsey fringe -> rotation rate (dps) + T2 (us) from raw ADC codes.
-
-    FFT on the detrended codes gives the fringe frequency; the Sagnac relation
-    makes the rotation rate equal to the precession frequency
-    (``rate_dps = degrees(omega)``). T2 comes from the envelope decay
-    (:func:`_fit_t2_from_codes`). Returns a dict shaped like
-    :func:`qssc.sensors.gyro_measure` so the GyroPanel frontend is unchanged.
-    """
-    codes = np.asarray(codes, dtype=float)
-    n = codes.size
-    t_s = (np.arange(n) * float(t_step_ns)) * 1e-9
-    T_s = max(float(t_s[-1]) if n else 0.0, 1e-9)
-    y = codes - codes.mean()
-    sigma = float(y.std())
-    t2_us = _fit_t2_from_codes(codes, t_step_ns)
-    # normalised PL trace for the GyroPanel fringe chart (0..1)
-    lo, hi = float(codes.min()), float(codes.max())
-    sig = ((codes - lo) / (hi - lo)) if hi > lo else np.zeros(n)
-    trace = {"time_us": [round(float(x), 3) for x in (np.arange(n) * t_step_ns / 1000.0)],
-             "signal": [round(float(x), 5) for x in sig]}
-    if n < 4 or t_step_ns <= 0 or sigma < 1.0:
-        # Flat / too-short trace: no fringe is resolvable. Report zero rate
-        # with a noise floor set by the readout noise over the precession
-        # window (rate-grade: Earth-rate is below this floor for short T2).
-        rate_noise = math.degrees(float(READOUT_NOISE) / T_s)
-        return _gyro_result_dict(0.0, rate_noise, t2_us, T_s * 1e6, n, trace)
-    win = np.hanning(n)
-    Y = np.abs(np.fft.rfft(y * win))
-    freqs = np.fft.rfftfreq(n, d=float(t_step_ns) * 1e-9)   # Hz
-    peak = 1 + int(np.argmax(Y[1:])) if Y.size > 1 else 0
-    f0_hz = float(freqs[peak]) if peak < freqs.size else 0.0
-    omega = 2.0 * math.pi * f0_hz                            # rad/s
-    rate_dps = math.degrees(omega)                           # Sagnac rate
-    fringe_amp = float(Y[peak]) / (n / 2.0) if Y.size > 1 else sigma
-    phase_noise = sigma / max(fringe_amp, 1.0) / math.sqrt(n)
-    rate_noise = math.degrees(phase_noise / T_s)
-    return _gyro_result_dict(rate_dps, rate_noise, t2_us, T_s * 1e6, n, trace)
-
-
-def _gyro_result_dict(rate_dps: float, rate_noise_dps: float,
-                      t2_us: float, free_precession_us: float,
-                      n_avg: int, trace: dict) -> dict:
-    """Shape a gyro result dict to match qssc.sensors.GyroResult (asdict)."""
-    earth_rate = 15.0 / 3600.0                               # deg/s
-    grade = bool(rate_noise_dps > earth_rate)
-    return {
-        "profile": "hardware",
-        "temperature_k": 0.0,                                # not measured here
-        "t2_us": round(t2_us, 4) if math.isfinite(t2_us) else None,
-        "rotation_rate_dps": round(rate_dps, 6),
-        "measured_rate_dps": round(rate_dps, 6),
-        "free_precession_us": round(free_precession_us, 3),
-        "n_averages": int(n_avg),
-        "phase_noise_rad": round(math.radians(rate_noise_dps), 6),
-        "rate_noise_dps": round(rate_noise_dps, 4),
-        "rate_grade": grade,
-        "trace": trace,
-        "note": ("Ramsey pi/2-T-pi/2 run via RUN_SEQUENCE; rate from FFT of "
-                 "the on-chip ADC codes, T2 from the fringe envelope decay."),
-    }
-
-
-class EmitterController:
-    """Drive the 64-channel on-chip CQD ASE/LED emitter array over the FPGA UART link.
-
-    The FPGA drives 3x TLC5947 constant-current LED drivers over a 4-wire SPI;
-    each of the 64 channels has its own 12-bit grayscale word, so multiple
-    emitters light simultaneously at independent intensities. The wire commands
-    (matching ``fpga/rtl/command_parser.v`` exactly)::
-
-        DRIVE_EMITTER <index> <duration_ms>   pump one channel at full (gs=4095)
-        SET_EMITTER <index> <level 0..4095>   arm one channel's grayscale
-        DRIVE_PATTERN <duration_ms>           fire ALL armed channels in parallel
-        CLEAR_EMITTERS                        disarm all channels (gs=0)
-
-    There is no 8x8 row/col crossbar: every channel is independent and addressed
-    by a single linear index 0..63. ``drive`` is the single-channel convenience
-    wrapper; ``set_emitter`` + ``drive_pattern`` is the parallel multi-emitter
-    path used by the per-run optical readout.
-    """
-
-    N_SITES = N_SITES
-
-    def __init__(self, fpga):
-        self.fpga = fpga
-
-    def drive(self, index: int, duration_ms: int = 50):
-        if not (0 <= index < self.N_SITES):
-            raise ValueError("emitter index out of range")
-        return self.fpga.send_command(f"DRIVE_EMITTER {index} {duration_ms}")
-
-    def set_emitter(self, index: int, level: int):
-        """Arm one channel's 12-bit grayscale (0..4095); fires on DRIVE_PATTERN."""
-        if not (0 <= index < self.N_SITES):
-            raise ValueError("emitter index out of range")
-        if not (0 <= level <= 4095):
-            raise ValueError("emitter level out of range 0..4095")
-        return self.fpga.send_command(f"SET_EMITTER {index} {level}")
-
-    def drive_pattern(self, duration_ms: int = 50):
-        """Fire every armed (gs>0) channel simultaneously for duration_ms."""
-        return self.fpga.send_command(f"DRIVE_PATTERN {duration_ms}")
-
-    def clear_emitters(self):
-        """Disarm all channels (gs=0)."""
-        return self.fpga.send_command("CLEAR_EMITTERS")
-
-
-class DetectorInterface:
-    """Read the on-chip graphene/MoS2 photodetector array over the FPGA UART link.
-
-    Each electrode's TIA output is digitised in parallel by 4x AD7616 16-bit
-    simultaneous-sampling ADCs. ``READ_DETECTOR <site>`` returns one 16-bit
-    sample (0..65535); ``READ_DETECTORS`` streams all 64 samples
-    (space-separated) in a single reply -- the 4 ADCs sample together, so all
-    64 channels are captured simultaneously, not scanned.
-    """
-
-    N_SITES = N_SITES
-
-    def __init__(self, fpga):
-        self.fpga = fpga
-
-    def read(self, site: int) -> int:
-        reply = self.fpga.send_command(f"READ_DETECTOR {int(site)}")
-        return int(reply)
-
-    def read_all(self) -> np.ndarray:
-        reply = self.fpga.send_command("READ_DETECTORS")
-        codes = [int(tok) for tok in reply.split()]
-        return np.array(codes, dtype=np.int32)
-
-    def read_odmr(self, site: int) -> int:
-        """Convenience: single-site 16-bit sample (alias of ``read``)."""
-        return self.read(site)
-
-
-class MicrowaveController:
-    """Microwave pulse driver over the FPGA UART link.
-
-    The wire protocol matches ``fpga/rtl/command_parser.v`` and
-    ``hardware/HARDWARE_DESIGN.md`` §5 exactly::
-
-        APPLY_PULSE <qubit:int> <freq_khz:int> <amp:int> <duration_ns:int> <phase:int>\\n
-
-    All five fields are decimal integers — the firmware parser rejects decimal
-    points and underscores, so a float GHz value or a ``r_c`` two-qubit token
-    would be answered ``ERR``.  This class keeps the Python-facing API in the
-    natural Qiskit units (GHz / fraction / radians) and converts to the integer
-    wire format on the way out, so the *same call* drives the
-    :class:`~qssc.simulator.SimulatedFPGA` and a real Artix-7 board.
-
-    Field encoding on the wire:
-
-    * ``qubit``       — site index 0..63 (single int; two-qubit gates are not a
-                        hardware primitive — see ``QSSCBackend.limitations()``).
-    * ``freq_khz``    — RF frequency in kHz, e.g. ``3460000`` for 3.46 GHz.
-    * ``amp``         — ADF4351 output power index 0..3 (``amp`` fraction × 3).
-    * ``duration_ns`` — pulse duration in ns. The firmware arms an RF-switch
-                        gate timer (100 MHz -> 10 ns/tick) for exactly
-                        ``duration_ns`` after the ADF4351 locks, so the pulse
-                        width is faithful to the request (the iverilog
-                        testbench verifies a 500 ns APPLY_PULSE gates mw_gate
-                        for exactly 50 clk cycles).
-    * ``phase``       — pulse phase in **milliradians** (0 = +X, 3142 ≈ π).
-    """
-
-    def __init__(self, fpga, ref_hz: float = 25e6):
-        self.fpga = fpga
-        self.ref_hz = ref_hz
-
-    def apply_pulse(self, qubit, freq_ghz: float, amp: float,
-                    duration_ns: int, phase: float = 0.0):
-        if not isinstance(qubit, (int, np.integer)):
-            raise ValueError(
-                "qubit must be a single site index (int 0..63); two-qubit "
-                "gates are not a hardware primitive — see QSSCBackend.limitations()")
-        if not (0.0 <= amp <= 1.0):
-            raise ValueError("amp out of [0,1]")
-        freq_khz = int(round(freq_ghz * 1e6))            # GHz  -> kHz (int)
-        amp_idx = int(round(max(0.0, min(1.0, amp)) * 3))  # [0,1] -> 0..3 power index
-        phase_mrad = int(round(phase * 1000))            # radians -> milliradians (int)
-        return self.fpga.send_command(
-            f"APPLY_PULSE {int(qubit)} {freq_khz} {amp_idx} {int(duration_ns)} {phase_mrad}"
-        )
-
-
-def make_connection(port: Optional[str] = None, *, profile="NV",
-                    temperature_k: float = 300.0, seed: Optional[int] = None):
-    """Return a real or simulated FPGA connection.
-
-    ``port=None`` (or ``--mock``) yields a :class:`SimulatedFPGA`; otherwise a
-    real :class:`FPGAConnection` is opened on ``port``.
-    """
-    if port is None:
-        return SimulatedFPGA(profile=profile, temperature_k=temperature_k, seed=seed)
-    return FPGAConnection(port)
-
+# Split into backend_fpga (FPGAConnection + make_connection + NoFPGADetected),
+# backend_controllers (Emitter/Detector/Microwave) and backend_fits (host-side
+# fits on raw ADC codes). Re-exported here so `from qssc.backend import X` keeps
+# resolving for every consumer (api, runner, tests, __init__).
+from .backend_fpga import (
+    NoFPGADetected, FPGA_ID_TOKEN, FPGAConnection, make_connection,
+)
+from .backend_controllers import (
+    EmitterController, DetectorInterface, MicrowaveController,
+)
+from .backend_fits import (
+    _seq_kind_num, _log_linear_slope, _fit_t2_from_codes,
+    _fit_gyro_from_codes, _gyro_result_dict,
+)
+
+# Explicit re-export list: every name below stays importable from
+# ``qssc.backend`` after the split. ``__all__`` also marks the pure re-exports
+# (not referenced elsewhere in this module) as intentional, so ruff F401
+# does not flag them.
+__all__ = [
+    # defined in this module
+    "QSSCBackend", "QSSCJob", "QSSCResult",
+    "CalibrationManager", "QubitReadoutProcessor",
+    "SIM_MAX_QUBITS", "SV_MAX_QUBITS",
+    # re-exported from backend_fpga
+    "NoFPGADetected", "FPGA_ID_TOKEN", "FPGAConnection", "make_connection",
+    # re-exported from backend_controllers
+    "EmitterController", "DetectorInterface", "MicrowaveController",
+    # re-exported from backend_fits (private but consumed cross-module)
+    "_fit_t2_from_codes", "_fit_gyro_from_codes",
+    "_seq_kind_num", "_log_linear_slope", "_gyro_result_dict",
+]
 
 # ---------------------------------------------------------------------------
 # Calibration + on-chip readout
@@ -729,7 +302,7 @@ class QSSCBackend(BackendV2):
           N = len(register_line_freqs_hz) and the NVs sit on that measured
           frequency grid; otherwise N defaults to ``n_nv_per_pixel`` on the
           synthetic 6 MHz grid (a sim-only fallback, not a physics assertion).
-          A field gradient (Invention 5, HW-fits on the qssc-grad variant) caps
+          A field gradient (HW-fits on the qssc-grad variant) caps
           N at the resolvable count (Case D: separation > linewidth).
         * ``"ensemble"``: the 64 chip pixels ARE the circuit qubits (one
           ensemble qubit per pixel -- the bulk-microdiamond collapse to a single
@@ -751,7 +324,7 @@ class QSSCBackend(BackendV2):
         6 MHz grid -- closing the calibration -> circuit loop. None falls back
         to the nominal width + uniform grid.
 
-        ``register_widths_per_pixel`` (Invention 4 — calibrated 64-parallel): a
+        ``register_widths_per_pixel`` (calibrated 64-parallel): a
         per-pixel list of MEASURED register widths (from
         :func:`qssc.array_calibration.calibrate_array`). When provided, the
         backend builds one independent register per pixel
@@ -796,7 +369,7 @@ class QSSCBackend(BackendV2):
             else None)
         if self._register_line_freqs_hz is not None:
             self.n_nv_per_pixel = len(self._register_line_freqs_hz)
-        # Prime-coprime readout denoiser (Invention 2+): when on, the lock-in
+        # Prime-coprime readout denoiser: when on, the lock-in
         # matched-filter rejects the OUT-of-band noise fraction (the energy
         # outside the prime frequency bins), improving the readout SNR by the
         # factor prime_noise_rejection = n_noise_bins / n_symbols. The EFFECTIVE
@@ -842,8 +415,7 @@ class QSSCBackend(BackendV2):
                 # readout. N is the MEASURED resolvable ODMR line count when
                 # register_line_freqs_hz is given (the truth from
                 # decompose_odmr); otherwise the default/cap n_nv_per_pixel on
-                # the synthetic 6 MHz grid. A field gradient (Invention 5,
-                # HW-fits on the qssc-grad variant) caps the register width at
+                # the synthetic 6 MHz grid. A field gradient (HW-fits on the qssc-grad variant) caps the register width at
                 # the resolvable count.
                 sites = auto_align(prof, n_nv_per_pixel=self.n_nv_per_pixel,
                                    register=True, temperature_k=temperature_k,
@@ -872,7 +444,7 @@ class QSSCBackend(BackendV2):
             self.n_nv_per_pixel = len(sites)
         self.sites = list(sites)
         self._n_qubits = len(self.sites)
-        # Nuclear-spin memory (Invention 3): when enabled, append one 13C memory
+        # Nuclear-spin memory: when enabled, append one 13C memory
         # qubit per electron NV (paired by index). The 13C carries nuclear_t2
         # (seconds, vs the electron's ~1.8 ms) so a circuit can STORE a state on
         # its 13C (SWAP i -> i+n_electron) and RECALL it (SWAP back) ~500x past
@@ -895,7 +467,7 @@ class QSSCBackend(BackendV2):
             self.sites = self.sites + self._nuclear_sites(self.sites)
             self._n_qubits = len(self.sites)
             self.n_nv_per_pixel = self._n_electron  # electron width unchanged
-        # Invention 4 — calibrated 64-parallel: build one independent register
+        # Calibrated 64-parallel: build one independent register
         # per pixel at its MEASURED width. run_array swaps these in per pixel
         # and skips pixels narrower than the circuit. Each pixel's register is
         # drawn with its own seed so the per-pixel site positions/frequencies
@@ -933,7 +505,7 @@ class QSSCBackend(BackendV2):
                     register_line_freqs_hz=pf)
         t1, t2 = coherence_at_temperature(prof, temperature_k)
         self._t1, self._t2 = t1, t2
-        # Invention 9 — classical anti-noise stack: when a dynamical-decoupling
+        # Classical anti-noise stack: when a dynamical-decoupling
         # sequence is configured, extend the spin T2 used for coherence survival
         # and the dipole/thermal error models. DD refocuses low-frequency
         # dephasing (T2*->T2) but is hard-capped at 2*T1 (energy relaxation is
@@ -942,7 +514,7 @@ class QSSCBackend(BackendV2):
         if anti_noise is not None and (anti_noise.dd_sequence or "none") != "none":
             self._t2 = effective_t2(self._t2, anti_noise.dd_sequence,
                                     anti_noise.dd_n_blocks, self._t1)
-        # Invention 9 — environmental noise + filter stack on the readout floor.
+        # Environmental noise + filter stack on the readout floor.
         # noise_env models the lab environment (temperature drift, vibration,
         # EMI, pressure); the anti_noise filter stack attenuates each channel.
         # Both enter the EFFECTIVE readout error (see _effective_readout_err):
@@ -1370,7 +942,7 @@ class QSSCBackend(BackendV2):
     def run_array(self, circuits, shots: int | None = None,
                   max_pixels: int = N_SITES) -> dict:
         """Run one circuit per pixel across the 64-pixel array IN PARALLEL and
-        aggregate (Invention 4 — distributed computing).
+        aggregate (distributed computing).
 
         The 64 die pixels are INDEPENDENT ~10-NV processors at 300 K (1/r**3
         -> zero at the 2.5 mm pitch, so there is no cross-pixel coupling): the
@@ -1379,7 +951,7 @@ class QSSCBackend(BackendV2):
         -- one per pixel -- each an independent noise realization (per-pixel
         seed offset), and returns per-pixel counts plus the aggregate.
 
-        Calibrated per-pixel width (Invention 4+5): when the backend was built
+        Calibrated per-pixel width: when the backend was built
         with ``register_widths_per_pixel`` (a measured width per pixel from
         :func:`qssc.array_calibration.calibrate_array`), each pixel runs at its
         OWN width. A circuit WIDER than a pixel's calibrated width is SKIPPED
@@ -1650,8 +1222,10 @@ class QSSCBackend(BackendV2):
             # block width (qubits): scale cost quadratically with width.
             try:
                 w = int(inst.operation.num_qubits)
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
                 w = len(inst.qubits)
+                logger.debug("operation num_qubits unavailable for %r: %s",
+                             name, exc)
             w = max(2, w)
             n_compiled += 1
             decomp_2q += factor * (w * w) / 16.0
@@ -1778,7 +1352,7 @@ class QSSCBackend(BackendV2):
             "within_coherence": within,
             "within_optical_coherence": within_optical,
             "verdict": verdict,
-            # Invention 9 anti-noise stack echo (None when unset -> back-compat).
+            # Anti-noise stack echo (None when unset -> back-compat).
             "anti_noise": (self.anti_noise.to_dict()
                            if self.anti_noise is not None else None),
         }
@@ -2274,7 +1848,7 @@ class QSSCBackend(BackendV2):
             # and the 64-channel readout see. The circuit register NVs are the
             # ``num_qubits`` (~10) above.
             "sites": [self._site_view(s) for s in self._chip_sites],
-            # Invention 4 — calibrated per-pixel register drill-down. When a
+            # Calibrated per-pixel register drill-down. When a
             # calibration is loaded, each pixel's MEASURED register width (the
             # resolvable ODMR line count under the gradient) is reported; the
             # uniform fallback reports the single n_nv_per_pixel for all 64.

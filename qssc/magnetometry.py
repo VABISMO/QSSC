@@ -1,4 +1,4 @@
-"""64-pixel vector magnetometer (Invention 1).
+"""64-pixel vector magnetometer.
 
 The chip's 8x8 detector array is 64 parallel ODMR magnetometers: each pixel
 sweeps its NV <111> doublet through the global MW antenna and recovers the
@@ -121,7 +121,7 @@ def b_vector_from_odmr_lines(lines_ghz: Sequence[float],
                              reference_t: Optional[Sequence[float]] = None
                              ) -> tuple[np.ndarray, int, list, float]:
     """Reconstruct the B-VECTOR of ONE pixel from its MEASURED ODMR line
-    frequencies -- the real-hardware path (Invention 1 real / Invention 19).
+    frequencies -- the real-hardware path (vector / tensor gradiometry).
 
     This is the host-side calculation the simulator's :func:`measure_pixel`
     replaces: instead of simulating the 4 <111> doublet splits from a known B,
@@ -226,7 +226,7 @@ def b_vector_map_from_array_calibration(calib, profile: DefectProfile | str = "N
                                         linewidth_mhz: Optional[float] = None
                                         ) -> np.ndarray:
     """Build the (grid, grid, 3) per-pixel B-VECTOR map (Tesla) the tensor
-    gradiometer (Invention 19) consumes, from a cached
+    gradiometer consumes, from a cached
     :class:`qssc.array_calibration.ArrayCalibration`'s per-pixel measured
     ``odmr_lines``. Each pixel's lines are inverted to a B-vector by
     :func:`b_vector_from_odmr_lines`; pixels with too few resolved doublets get

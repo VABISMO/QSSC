@@ -236,7 +236,7 @@ NV_PROTOCOL: List[Section] = [
     Section(
         id="assembly", title="4 · Waveguides, bulk stacking, filter, thermal",
         goal="SU-8/PDMS waveguides on the diamond (planarize first; diamond "
-             "n≈2.4 is high), 650 nm red long-pass filter (UNCHANGED from hBN), "
+             "n≈2.4 is high), 650 nm red long-pass filter, "
              "Peltier at 295 K, CPW for MW at 2.87 GHz.",
         steps=[
             Step("Waveguides on diamond", "1–2 h",

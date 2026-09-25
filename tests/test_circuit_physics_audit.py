@@ -1,8 +1,8 @@
 """Physics-implementation audit tests for the QSSC qiskit backend.
 
 These are the pass/fail companion to the measured parameter-sweep benchmark
-(``tools/benchmark_circuits.py``). They assert the three things the user asked
-to be confirmed about the implementation:
+(``tools/benchmark_circuits.py``). They assert three properties of the
+implementation:
 
 1. **Within-pixel all-to-all dipole coupling** -- the circuit qubits are ONE
    pixel's ~10-NV register: the NVs sit a few nm apart in one microdiamond, so

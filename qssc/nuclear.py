@@ -1,4 +1,4 @@
-"""Nuclear-spin memory (Invention 3): NV + ¹³C memory qubits.
+"""Nuclear-spin memory: NV + ¹³C memory qubits.
 
 Each NV electron spin in the pixel register can be paired with a nearby ¹³C
 nucleus -- an engineered single-¹³C, since the 12C-enriched stone has few

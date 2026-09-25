@@ -1,7 +1,7 @@
-"""Invention 19 — tensor-gradient magnetic imaging (300 K).
+"""Tensor-gradient magnetic imaging (300 K).
 
-Invention 1 recovers a **vector** B per pixel (the 4-axis NV⟨111⟩ doublet
-reconstruction). With the on-PCB gradient coil (Invention 5) and the 8×8 pixel
+The vector magnetometer recovers a **vector** B per pixel (the 4-axis NV⟨111⟩ doublet
+reconstruction). With the on-PCB gradient coil and the 8×8 pixel
 grid at a known 2.5 mm pitch, the **spatial derivative** of that vector field is
 also measurable: finite-differencing the recovered B-vectors across neighbouring
 pixels yields the magnetic-field gradient **tensor** ``G_ij = ∂B_i/∂x_j`` (the
@@ -14,8 +14,8 @@ This module computes the per-pixel gradient tensor from a measured B-vector map
 and provides a **dipole localizer** — a nonlinear least-squares fit of the
 point-dipole field model to the measured B-map, returning the source position
 and moment. That is the application: magnetic-anomaly / current-source imaging
-through the tensor, on top of the Invention-1 vector magnetometer, using the
-Invention-5 gradient coil (already on the PCB, PR #79).
+through the tensor, on top of the vector magnetometer, using the on-PCB
+gradient coil.
 
 Physics grounding: the dipole field
 ``B(r) = (μ₀/4π) (3(m·r̂)r̂ − m) / |r|³`` with ``μ₀/4π = 1e-7 T·m/A``; pixel
@@ -308,7 +308,7 @@ def tensor_gradient_sweep(profile: DefectProfile | str = "NV",
     ``b_field_map_ut`` is the ``(8, 8, 3)`` true B-field in µT (e.g. from
     :func:`qssc.magnetometry.synthetic_field_map`); when ``None`` a default
     gradient + dipole map is synthesized. ``n_avg`` is the per-pixel averaging
-    (Invention 7, 1/√N noise).
+    (1/√N noise).
 
     ``differential`` (default True) is the physically correct mode for imaging a
     small anomaly against a large background: a baseline map is measured first,
