@@ -165,3 +165,22 @@ jobs:
           name: frontend-dist
           path: frontend/dist
           if-no-files-found: error
+  # ──────────────────────────────────────────────────────────────────────
+  # Analog loop-filter bandwidth gate (issue #85)
+  # Validates the ADF4351 loop bandwidth stays at the documented ~17.2 kHz
+  # (band 12-25 kHz). ngspice-only mode: qucsator_rf is the Qucs-S AppImage
+  # and not in apt, but ngspice is. The full cross-engine suite
+  # (sim_qucs_main.py with both engines) is the local validation path.
+  # ──────────────────────────────────────────────────────────────────────
+  analog-loop-filter:
+    name: Analog loop-filter bandwidth (ngspice)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ngspice
+        run: sudo apt-get update && sudo apt-get install -y ngspice
+      - name: Loop-BW gate (~17.2 kHz, band 12-25 kHz)
+        run: python3 hardware/sim/qucs/sim_qucs_main.py --ngspice-only
