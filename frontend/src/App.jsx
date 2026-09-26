@@ -472,10 +472,10 @@ export default function App() {
       // error instead of spinning indefinitely. A transient fetch error
       // (e.g. a 404 while the job record is still being written) retries up to
       // the same cap rather than aborting the whole run on the first blip.
-      // 300 polls = 180 s, matching the backend JOB_TIMEOUT_S so the 19-qubit
-      // Shor band (N=32..63, a single ~115 s attempt) finishes inside the window
+      // 1000 polls = 600 s, matching the backend JOB_TIMEOUT_S so the
+      // 16-qubit parallel Shor band (N=16..31) finishes inside the window
       // instead of the UI giving up first.
-      const MAX_POLLS = 300
+      const MAX_POLLS = 1000
       const poll = async (n = 0) => {
         try {
           const rec = await api.job(jobId)

@@ -420,4 +420,3 @@ def synthetic_field_map(grid: int = 8,
         out += _dipole_field(pts, dipole_x_mm, dipole_y_mm, dipole_z_mm,
                             [0.0, 0.0, dipole_moment_am2])
     return out.reshape(grid, grid, 3)
-    return out
