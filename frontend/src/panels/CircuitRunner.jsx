@@ -110,10 +110,13 @@ export default function CircuitRunner() {
                            onChange={e => setNShorDraft(e.target.value)} />
                     {nShor > 15 && (
                       <div className="warn" style={{ fontSize: '11px', marginTop: 4, color: 'var(--warn)' }}>
-                        N&gt;15 (16 qubits) runs in ~22-50 s in any mode. At 300 K
-                        real mode it decoheres to no factors (the real T2 physics);
-                        lower the Temperature or use ideal mode to factor it.
-                        N&gt;31 (19 qubits) runs in ~60-90 s (single attempt).
+                        N&gt;15 (16 qubits) races 4 coprime bases across pixels and
+                        finishes in ~1.5 min (measured ~81 s, 4 px @ ~20 s/px on the
+                        real run_array path via a single clean rq worker; base 2 wins
+                        for N=21, factors [7,3]). At 300 K real mode it may decohere to
+                        no factors (the real T2 physics); lower the Temperature or use
+                        ideal mode to factor it.
+                        N&gt;31 (19 qubits) races 4 bases, ~1.5-2 min (single attempt).
                         N&gt;{algo === 'qftnos' ? 511 : 63} is capped (would hang the API).
                       </div>
                     )}
