@@ -66,7 +66,11 @@ def run_custom_circuit(req: CustomCircuitRequest, sync: bool = False,
     payload["algorithm"] = "custom"
     if sync:
         from api.runner import run_custom as _run
-        return {"job_id": None, "status": "finished", "result": _run(payload)}
+        try:
+            return {"job_id": None, "status": "finished", "result": _run(payload)}
+        except Exception as exc:  # noqa: BLE001 - surface sim errors, not a 500
+            return {"job_id": None, "status": "failed",
+                    "result": {"error": str(exc)}}
     job_id = jobs.enqueue("custom", payload)
     return {"job_id": job_id, "status": "queued"}
 

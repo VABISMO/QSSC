@@ -166,7 +166,7 @@ class FPGAConnection:
         return int(toks[0]), int(toks[1]), int(toks[2])
 
     def _parse_lockin_reply(self, reply: str) -> dict:
-        """Parse the four-int lock-in reply (shared by READ_LOCKIN/READ_LOCKINP)."""
+        """Parse the four-int lock-in reply from READ_LOCKIN."""
         toks = reply.split()
         if len(toks) != 4:
             raise IOError(f"READ_LOCKIN(P) reply mismatch: {reply!r}")

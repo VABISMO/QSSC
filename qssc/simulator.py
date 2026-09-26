@@ -392,9 +392,14 @@ class SimulatedFPGA:
         self.sim_states.setdefault(q, 0)
         # phase arrives in radians (converted from integer milliradians on the
         # wire). Tolerance ~1 mrad matches the integer-mrad quantisation.
-        if abs(phase_rad - math.pi) < 1e-3:          # X gate (phase ~= pi) flips the spin
+        # A resonant π pulse flips the spin population for +X (phase 0) and -X
+        # (phase π) alike -- a 2-level readout is insensitive to the XY axis of a
+        # π rotation, so both must flip. (apply_pulse defaults phase=0.0 and the
+        # real-ODMR sweep calls it with no phase, so phase==0 is the common +X
+        # case and MUST flip, not no-op.)
+        if abs(abs(phase_rad) - math.pi) < 1e-3 or abs(phase_rad) < 1e-3:
             self.sim_states[q] = 1 - self.sim_states[q]
-        elif abs(phase_rad) > 1e-3:                  # RZ/RY: stochastic error
+        elif abs(phase_rad) > 1e-3:                  # off-axis RZ/RY: stochastic error
             if self.rng.random() < self.noise:
                 self.sim_states[q] = 1 - self.sim_states[q]
         return "OK"
@@ -481,7 +486,7 @@ class SimulatedFPGA:
         """Sweep the ADF4351 across the NV resonance, one AD7616 sample per point.
 
         Models the ODMR lineshape the compass/thermometry fit on top of: a
-        Lorentzian PL dip at D (``self.sim_freq``) with the profile linewidth,
+        Gaussian PL dip at D (``self.sim_freq``) with the profile linewidth,
         plus photocurrent noise. Returns ``"<n> f0 c0 f1 c1 ..."``
         (freq_khz, 16-bit code) -- the same flat space-separated form as
         READ_DETECTORS, count-prefixed so the host parser knows the arity.
@@ -554,7 +559,7 @@ class SimulatedFPGA:
                       n_points: int) -> str:
         """Sweep the ADF4351 and sample all 64 detectors per point.
 
-        Each pixel's ODMR response is a Lorentzian PL dip at D + a per-pixel
+        Each pixel's ODMR response is a Gaussian PL dip at D + a per-pixel
         detuning (the field gradient spreads the 64 pixel resonances, so the 64
         columns dip at slightly different frequencies -- the raw form
         :func:`qssc.odmr_decompose.decompose_odmr` fits per pixel to count its

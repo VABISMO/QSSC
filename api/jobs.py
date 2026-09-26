@@ -35,7 +35,7 @@ MONGO_COLL = "jobs"
 # surfaces a real error instead of an indefinite "queued". (Python cannot
 # hard-kill the worker thread, so the thread may keep running in the background
 # -- the larger worker pool below + the runner N/qubit cap keep that rare.)
-# 600 s (not 180) gives the 16-qubit parallel Shor band (N=16..31, 64 coprime
+# 600 s (not 180) gives the 16-qubit parallel Shor band (N=16..31, 4 coprime
 # bases raced across pixels) headroom to finish under the cap. The 19-qubit
 # band (N=32..63) is capped to 4 race pixels so a single ~115 s attempt also
 # fits. The qubit cap (shor <=19q, math <=36q) prevents the truly-unbounded
@@ -132,6 +132,26 @@ def _record(job_id: str, **fields):
         _fallback_store[job_id] = {**_fallback_store.get(job_id, {}), **rec}
 
 
+def _current_status(job_id: str):
+    """Read the currently-stored status of a job (mongo or fallback), or None.
+
+    Used by the worker to detect the watchdog race: the in-process fallback's
+    ``_watch`` thread marks a job ``failed`` at ``JOB_TIMEOUT_S`` but cannot
+    hard-kill the worker thread, so a worker that finishes *after* the timeout
+    must NOT overwrite that ``failed`` record with a stale ``finished``."""
+    coll = _get_mongo()
+    if coll is not None:
+        try:
+            rec = coll.find_one({"job_id": job_id}, {"status": 1})
+            if rec is not None:
+                return rec.get("status")
+        except Exception:  # noqa: BLE001
+            pass
+    with _fallback_lock:
+        rec = _fallback_store.get(job_id)
+        return rec.get("status") if rec else None
+
+
 # --- worker entrypoints (executed by `rq worker`, or in-process fallback) ----
 
 # Secret fields a qrand run produces. These are stripped from the result before
@@ -169,6 +189,13 @@ def _worker_run(kind: str, job_id: str, payload: dict) -> dict:
         ok = "error" not in result
         if ok:
             _stash_secrets(job_id, result)
+        # Watchdog race guard: the _watch thread may have already marked this
+        # job failed at JOB_TIMEOUT_S while the worker was still running (Python
+        # cannot hard-kill the thread). Do not let a late finish overwrite that
+        # with a stale "finished" -- the user already saw a timeout, and a later
+        # refresh must not flip the record back.
+        if _current_status(job_id) == "failed":
+            return {"job_id": job_id, "status": "failed"}
         _record(job_id, status="finished" if ok else "failed",
                 finished_at=_now_ms(), result=result, success=ok)
         return {"job_id": job_id, "status": "finished" if ok else "failed"}

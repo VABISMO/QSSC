@@ -24,6 +24,18 @@ router = APIRouter()
 
 _FPGA_ROOT = _Path(__file__).resolve().parent.parent / "fpga"
 
+
+def _count_iverilog_scenarios() -> int:
+    """Count ``def test_`` in ``tests/test_fpga_sim.py`` so the dashboard's
+    scenario count tracks the real iverilog suite instead of a hardcoded
+    number that drifts whenever a test is added or removed."""
+    f = _FPGA_ROOT.parent / "tests" / "test_fpga_sim.py"
+    try:
+        return sum(1 for ln in f.read_text(errors="replace").splitlines()
+                   if ln.startswith("def test_"))
+    except OSError:
+        return 0
+
 # Static, stable descriptions of the 10 RTL modules + the 10 firmware commands.
 # These match fpga/rtl/*.v and qssc/simulator.py / qssc/backend.py exactly.
 _RTL_DESC = {
@@ -169,7 +181,7 @@ def _compute_fpga_info() -> dict:
         "total_cells": 0,
         "quality": {"latches": None, "blackboxes": None, "width": None, "fits": None},
         "modules": [],
-        "sim": {"status": "pass", "scenarios": 10, "tool": "iverilog (FAST_SIM behavioral AD7616)"},
+        "sim": {"status": "pass", "scenarios": _count_iverilog_scenarios(), "tool": "iverilog (FAST_SIM behavioral AD7616)"},
         "protocol": _FPGA_PROTOCOL,
     }
     rtl_dir = _FPGA_ROOT / "rtl"

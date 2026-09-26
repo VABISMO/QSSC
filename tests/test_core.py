@@ -120,6 +120,51 @@ def test_odmr_field_splitting():
     assert abs(dip0 - HBN_VB.d_ghz) < 0.06
 
 
+def test_simulate_odmr_fwhm_matches_linewidth():
+    # Regression: simulate_odmr must treat ``linewidth_mhz`` as the Gaussian
+    # FWHM (sigma = FWHM / 2.355), NOT as sigma directly.  The old code used
+    # sigma = linewidth, which rendered the ODMR curves 2.355x too wide (actual
+    # FWHM ~= 11.77 MHz instead of the 5 MHz profile linewidth).  Use a
+    # linewidth large enough that the NV 14N hyperfine triplet (+/-2.18 MHz)
+    # blends into one Gaussian dip, b_field=0 (no Zeeman doublet), so the
+    # measured FWHM of the blended envelope ~= linewidth_mhz and NOT ~=
+    # 2.355 * linewidth_mhz.
+    lw = 20.0
+    f, c = simulate_odmr("NV", b_field_t=0.0, linewidth_mhz=lw,
+                         contrast_depth=0.1, gradient_mhz_per_um=0.0,
+                         n_nv_per_pixel=1)
+    idx = int(np.argmin(c))
+    depth = 1.0 - float(c[idx])          # dip below the bright baseline (1.0)
+    half = float(c[idx]) + depth / 2.0   # half-dip threshold
+    lo = idx
+    while lo > 0 and c[lo] < half:
+        lo -= 1
+    hi = idx
+    while hi < len(c) - 1 and c[hi] < half:
+        hi += 1
+    fwhm_mhz = (float(f[hi]) - float(f[lo])) * 1e3   # GHz -> MHz
+    # correct: FWHM ~= lw (~=20).  The 2.355x bug would give ~=47.
+    assert 14.0 < fwhm_mhz < 28.0, f"FWHM {fwhm_mhz:.1f} MHz != linewidth {lw} MHz"
+
+
+def test_perfect_power_classical_factoring():
+    # Shor classical preprocessing step 1: N = p**k (a prime power) is factored
+    # classically (the quantum gcd step is trivial for every coprime base).
+    # Pins the prime-power path for 9/25/27/49 and the non-prime-power composites
+    # that MUST fall through to the quantum circuit.
+    from qssc import perfect_power
+    assert perfect_power(9) == (3, 2)
+    assert perfect_power(25) == (5, 2)
+    assert perfect_power(27) == (3, 3)
+    assert perfect_power(49) == (7, 2)
+    # composites that are NOT prime powers -> None (quantum path handles them)
+    for n in (15, 21, 35, 77):
+        assert perfect_power(n) is None
+    # primes and small N -> None
+    for n in (2, 3, 5, 7, 11):
+        assert perfect_power(n) is None
+
+
 def test_xy8():
     seq = xy8_decoupling(1)
     assert len(seq) == 8
