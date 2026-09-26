@@ -1,6 +1,6 @@
-"""Invention 13 — compressed-sensing / sparse super-resolution ODMR (300 K).
+"""Compressed-sensing / sparse super-resolution ODMR (300 K).
 
-The per-pixel ODMR spectrum under a field gradient (Invention 5) is **sparse**:
+The per-pixel ODMR spectrum under a field gradient is **sparse**:
 ``nv_present`` NVs (≤ 300) are dropped into ``n_bins`` gradient-shifted
 frequency bins (``n_bins`` can reach ~300 at a steep gradient), so the line-
 amplitude vector is k-sparse with ``k ≪ n_bins`` once the gradient is wider than
@@ -26,8 +26,8 @@ What this does NOT do: recover lines whose SNR is below the noise floor
 (``< ~2``). No estimator pulls a line out of pure noise — that is an
 information-theoretic limit, not a threshold choice. The gain is the *marginal*
 band (SNR ~2.4–4.0) plus deconvolution of overlapping lines, which is real and
-grounded in the known dictionary. Stacks with Invention 7 (1/√N averaging) and
-Invention 9 (anti-noise): both lower the noise floor, so more lines clear even
+grounded in the known dictionary. Stacks with N-shot lock-in averaging (1/√N) and
+the anti-noise stack: both lower the noise floor, so more lines clear even
 the lowered super-res threshold.
 """
 from __future__ import annotations

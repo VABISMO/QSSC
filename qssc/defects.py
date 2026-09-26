@@ -140,7 +140,7 @@ class DefectProfile:
     # symmetric ``readout_error`` ``ro`` into p_bright_to_dark = ro*(1-asym) and
     # p_dark_to_bright = ro*(1+asym). Default 0 = symmetric (back-compat).
     readout_asymmetry: float = 0.0
-    # --- Nuclear-spin memory (NV + 13C) -- Invention 3 compute enabler --------
+    # --- Nuclear-spin memory (NV + 13C) -- compute enabler --------
     # A 13C nucleus next to an NV is a long-lived MEMORY qubit: its spin T2 is
     # ~seconds (vs the electron's ~ms), so a circuit can STORE an intermediate
     # result on the 13C, keep computing on the electron, and RECALL it later --
@@ -300,7 +300,7 @@ NV_DIAMOND = DefectProfile(
     # single-shot readout keeps the bright/dark bias small).
     frequency_detuning_spread_hz=2.0e6,
     readout_asymmetry=0.10,
-    # Nuclear-spin memory (Invention 3): an ENGINEERED single-13C next to each
+    # Nuclear-spin memory: an ENGINEERED single-13C next to each
     # NV is a ~1 s memory qubit (vs the electron's 1.8 ms), extending the
     # coherence window ~500x. 13C nuclear T2 ~1 s without decoupling in
     # 12C-enriched diamond (Reimer 2016, Cramer 2016 report 1-2 s; >80 s with

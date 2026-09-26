@@ -43,8 +43,8 @@ export const api = {
   // async circuit execution (Redis + RQ) -> returns {job_id, status}
   run: (body) => post('/api/circuit/run', body),
   runCustom: (body) => post('/api/circuit/custom', body),
-  // 64-parallel distributed computing (Invention 4) + per-pixel array
-  // calibration (Invention 4+5). Calibrate first, then run-parallel with
+  // 64-parallel distributed computing + per-pixel array
+  // calibration. Calibrate first, then run-parallel with
   // use_calibration=true so each pixel runs at its measured register width.
   runParallel: (body) => post('/api/circuit/run-parallel', body),
   calibrateArray: (body) => post('/api/circuit/calibrate-array', body),
@@ -71,6 +71,6 @@ export const api = {
   nav: (o) => get(`/api/nav?${q(o)}`),
   thermal: (o) => get(`/api/thermal?${q(o)}`),
   current: (o) => get(`/api/current?${q(o)}`),
-  // tensor gradiometer (Invention 19) + dipole source localization
+  // tensor gradiometer + dipole source localization
   tensor: (o) => get(`/api/sensor/tensor?${q(o)}`),
 }

@@ -17,7 +17,7 @@ from qssc import SimulatedFPGA
 from qssc.crypto import (
     bits_to_bytes, bytes_to_bits, entropy_health, von_neumann_extract,
 )
-import api.main as main_mod
+import api.routes_fpga as fpga_mod
 from api.runner import run_circuit
 
 
@@ -167,7 +167,7 @@ def test_qrng_endpoint_accepts_rtl_zero_stats_reply(monkeypatch):
     rng = np.random.default_rng(7)
     entropy = rng.integers(0, 256, size=32, dtype=np.uint8).tobytes()
     monkeypatch.setattr(
-        main_mod, "_fpga",
+        fpga_mod, "_fpga",
         lambda: _StubDevice(f"{entropy.hex()} 0 0 0"))
     with _client() as c:
         r = c.get("/api/fpga/qrng")
@@ -191,7 +191,7 @@ def test_qrng_endpoint_accepts_simulator_stats_reply(monkeypatch):
     rng = np.random.default_rng(8)
     entropy = rng.integers(0, 256, size=32, dtype=np.uint8).tobytes()
     monkeypatch.setattr(
-        main_mod, "_fpga",
+        fpga_mod, "_fpga",
         lambda: _StubDevice(f"{entropy.hex()} 128 32 0.25"))
     with _client() as c:
         r = c.get("/api/fpga/qrng")
@@ -208,7 +208,7 @@ def test_qrng_endpoint_gates_degenerate_entropy(monkeypatch):
     on the hardware path either -- the endpoint refuses with 502 + health
     breakdown and leaks no key material."""
     monkeypatch.setattr(
-        main_mod, "_fpga",
+        fpga_mod, "_fpga",
         lambda: _StubDevice("55" * 32 + " 128 32"))   # alternating bits
     with _client() as c:
         r = c.get("/api/fpga/qrng")

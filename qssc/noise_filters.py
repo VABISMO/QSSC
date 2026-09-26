@@ -1,4 +1,4 @@
-"""Classical anti-noise filter stack for the 300 K QSSC readout (Invention 9).
+"""Classical anti-noise filter stack for the 300 K QSSC readout.
 
 This module models the **separable, classical** environmental noise channels at
 the chip (temperature drift, vibration, EMI, pressure) and the **filter stack**
@@ -158,7 +158,7 @@ def effective_noise_sigma(base_counts: float,
     """Effective per-point noise sigma (ADC counts) after the filter stack.
 
     The uncorrelated Johnson/readout floor (``base_counts``) averages down by
-    ``1/sqrt(N)`` (Invention 7).  The **fast** environmental channels (vibration,
+    ``1/sqrt(N)``.  The **fast** environmental channels (vibration,
     EMI) are also uncorrelated shot-to-shot at the lock-in cadence, so they
     average down by ``1/sqrt(N)`` too, on top of their iso/shield attenuation.
     The **slow** channels (temperature drift, pressure) are correlated across

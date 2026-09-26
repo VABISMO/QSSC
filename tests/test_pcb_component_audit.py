@@ -2,9 +2,9 @@
 """Pure-Python PCB component-usage + BOM + netlist audit for both QSSC boards.
 
 This is the **CI-runnable** audit (no ``pcbnew``, no ``kicad-cli``): it parses
-the committed ``.kicad_pcb`` files as S-expressions and answers the questions
-the user asked -- *"all resistors used for something, all capacitors used, all
-voltages correct, all components present"*:
+the committed ``.kicad_pcb`` files as S-expressions and answers: *"all
+resistors used for something, all capacitors used, all voltages correct, all
+components present"*:
 
   1. **Every passive has a job.** Every R/C/L/D/Q has >=2 distinct, non-empty
      nets on its pads. A resistor with an empty pad is floating (doing

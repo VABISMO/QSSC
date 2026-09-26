@@ -1,4 +1,4 @@
-"""Prime-coprime frequency-multiplexed readout (Invention 2+).
+"""Prime-coprime frequency-multiplexed readout.
 
 Each addressable qubit channel in a pixel is driven by a pulse train whose
 modulation period is a DISTINCT PRIME number of base-clock ticks ``tau``:

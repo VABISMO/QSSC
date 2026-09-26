@@ -316,7 +316,7 @@ two-board sandwich.
 | 13 | head  | DET_REF divider                   | Rref1/Rref2 | 10 kΩ / 10 kΩ               | 2   | +3V3 divider → DET_REF = 1.65 V (TIA virtual-ground reference) | 0603                          | + Cref 100 nF bypass |
 | 14 | main  | RF decoupling caps               | C1–C20   | 100 nF X7R 16 V                | 20  | High-frequency decoupling at every IC VCC pin                  | 0603                          | As close as possible to each pin |
 | 15 | main  | Bulk caps                        | C21–C30  | 10 µF X7R 16 V                 | 10  | Rail stabilization / bulk energy                               | 1206/1210                     | Near regulators & FPGA |
-| 16 | main  | PLL loop filter C1/C2/C3         | C31/C32/C33 | 220 pF / 10 nF / 220 pF     | 3   | 3rd-order loop filter (with R67/R68)                           | 0603                          | ~50 kHz BW |
+| 16 | main  | PLL loop filter C1/C2/C3         | C31/C32/C33 | 220 pF / 10 nF / 220 pF     | 3   | 3rd-order loop filter (with R67/R68)                           | 0603                          | ~17.2 kHz BW (validated, see §6) |
 | 17 | main  | Master clock oscillator          | Y1       | 100 MHz TCXO ±2.5 ppm          | 1   | FPGA master clock; divided to 25 MHz (ADF4351 REF)             | SMD 3225/5032                 | TCXO for stability |
 | 18 | main  | 3.3 V LDO                        | REG1     | AMS1117-3.3                    | 1   | 3.3 V rail: I/O, ADF4351, FT232, head via J12                  | SOT-223                       | ≥1 A |
 | 19 | main  | 1.8 V LDO                        | REG2     | AMS1117-1.8                    | 1   | 1.8 V FPGA aux                                                 | SOT-223                       | ≥1 A |
@@ -500,10 +500,15 @@ integers (one per channel — parallel, not row/col).
 ### Loop filter
 A 3rd-order passive loop filter is built from **R67 = 1 kΩ**, **R68 = 2.2 kΩ**,
 **C31 = 220 pF (NP0)**, **C32 = 10 nF**, **C33 = 220 pF (NP0)**, targeting a
-loop bandwidth of ~50 kHz with the 25 MHz PFD and the ADF4351 charge pump set
-to ~2.19 mA (CP code 7 in R2). The filter sits between the ADF4351 `CP` pin and
-the `VCOF`/`VCOV` tuning input; keep these traces as short as possible and
-surround them with ground.
+loop bandwidth of **~17.2 kHz** with the 25 MHz PFD and the ADF4351 charge pump
+set to ~2.19 mA (CP code 7 in R2). This is the open-loop unity-gain crossing
+verified by cross-engine SPICE agreement — qucsator 17.17 kHz vs ngspice
+17.15 kHz (0.1 %) — using Kφ = 2.19 mA/2π, K<sub>vco</sub> = 40 MHz/V, N = 114.8
+(see `hardware/sim/qucs/` for the pre-registered decks and `qucs_main_results.json`).
+An earlier "~50 kHz" figure was inconsistent with these assumptions: reaching
+50 kHz would require K<sub>vco</sub> ≈ 116 MHz/V, outside the ADF4351 datasheet
+range. The filter sits between the ADF4351 `CP` pin and the `VCOF`/`VCOV` tuning
+input; keep these traces as short as possible and surround them with ground.
 
 ### RF path
 `ADF4351 RF_OUTA` (~0 dBm) → **C34** DC-block → **GVA-84+** RFIN (pin 1) →

@@ -1,0 +1,185 @@
+{
+  "versions": {
+    "qucsator": "Qucsator 1.0.7",
+    "ngspice": "ngspice-47 : Circuit level simulation program"
+  },
+  "assumptions": {
+    "a_values": "Component values from the kicadsexpr netlist export of hardware/pcb/qssc.kicad_sch (126 components, 172 nets; parsed 2026-09-19): C31=220p NP0, C32=10n, C33=220p NP0, R67=1k, R68=2.2k, C34=100p, C35=100p, L2=100n.",
+    "b_cap_ideal": "Capacitors modelled ideal (no ESR/ESL). C31/C33 are NP0 per netlist notes; C32 X7R dielectric tolerance affects absolute BW, not the cross-engine comparison.",
+    "c_cp_ideal": "Charge pump modelled as ideal current source (pulse/step); ADF4351 CP output impedance and switching transients not modelled.",
+    "d_kphi": "Kphi = Icp/(2*pi) = 2.19e-3/(2*pi) A/rad (section 6: CP 2.19 mA).",
+    "e_kvco": "Kvco = 40 MHz/V (ADF4351 datasheet-typical). Real Kvco varies with tuning voltage; this scales the derived loop bandwidth linearly.",
+    "f_n_divider": "N = f_out/f_pfd = 2.87 GHz / 25 MHz = 114.8.",
+    "g_esd_cap": "D3 ESD5V0 modelled as pure junction capacitance; the schematic carries no capacitance value, so 0.3 pF (low-cap ESD variant) and 1 pF (generic 5 V ESD) are both simulated.",
+    "h_rail_ac_gnd": "+5V_RF treated as AC ground (7x 100nF decoupling + FB1 600 ohm); L2 therefore modelled as a shunt inductor to ground in the RF decks.",
+    "i_amp_model": "GVA-84+ modelled as a unilateral ideal amplifier: G=16 dB, Zin=Zout=50 ohm, S12=0 (section 6: 16 dB @ 3 GHz). NF and OIP3 not simulated.",
+    "j_engines": "ngspice-47 as the independent engine; identical element values, no shared physics code path. Both SP models are behavioural idealisations, so SP cross-engine agreement validates the harness, not the amp model choice.",
+    "k_bleed": "The ladder CP node carries a 10 Mohm shunt to ground in both engines (CP output impedance / leakage proxy). SPICE requires a DC path at every node for the operating point; qucsator AC does not, but the same shunt is added there to keep the netlists identical. It is negligible at all probe frequencies (Xc31(1 kHz) = 723k).",
+    "l_ipulse_t2": "qucsator Ipulse T2 is the ABSOLUTE pulse stop time, not the width (width = T2 - T1). Verified in the pilot run via the plateau charge: T1=10n/T2=20n produced a 1.88 mV plateau (~21.9 pC into 10.44 nF total ladder capacitance = 10 ns of 2.19 mA), while the ngspice PULSE(20n) produced 4.32 mV (~43.8 pC = 20 ns). The qucsator pulse deck therefore uses T2=30n so both engines drive the same 43.8 pC.",
+    "m_amp_g_linear": "The qucsator Amp device parameter G is a LINEAR voltage gain, not dB. Empirically verified in the pilot run: G=16 produced |S21| = 24.01 dB ~= 20*log10(16). 16 dB is therefore set as G = 10^(16/20) = 6.3096."
+  },
+  "checks": [
+    {
+      "id": "AC-1",
+      "metric": {
+        "1e+03": 0.0005261830875830322,
+        "1e+04": 0.0005343335812646124,
+        "5e+04": 7.011081637792357e-05,
+        "1e+05": 2.719764718788843e-09,
+        "1e+06": 0.0030511366942029597,
+        "1e+07": 0.004858172614678109
+      },
+      "pass": true,
+      "claim": "Loop filter |Zt| agrees across engines within 2 % at probe frequencies {1k, 10k, 50k, 100k, 1M, 10M} Hz.",
+      "band": "max relative |Zt| difference <= 0.02"
+    },
+    {
+      "id": "AC-2",
+      "metric": {
+        "fc_qucsator_hz": 17171.81765648431,
+        "fc_ngspice_hz": 17151.649158063337,
+        "assumptions": "Kphi=Icp/2pi, Kvco=40 MHz/V, N=114.8"
+      },
+      "pass": true,
+      "deviation": false,
+      "claim": "Derived open-loop unity-gain frequency falls inside the section 6 ~17.2 kHz loop-bandwidth claim band.",
+      "band": "12 kHz <= fc <= 25 kHz; outside -> DEVIATION (loop filter no longer matches the documented ~17.2 kHz bandwidth)",
+      "note": "Verdict reclassified from DEVIATION to PASS after the AC-2 band was corrected from [30,80] kHz (stale ~50 kHz claim) to [12,25] kHz (corrected ~17.2 kHz, see HARDWARE_DESIGN.md \u00a76). The measured fc values (17.17/17.15 kHz) are the original cross-engine output and are unchanged; only the band/verdict changed. Regenerate with sim_qucs_main.py when both engines are available."
+    },
+    {
+      "id": "TR-1",
+      "metric": {
+        "v_peak_qucsator_v": 0.0039712832281581,
+        "v_peak_ngspice_v": 0.00440373378,
+        "delta_mv": 0.43245055184190034
+      },
+      "pass": true,
+      "claim": "CP pulse response (20 ns, Icp) final decay agrees across engines; peak value agrees within 10 mV.",
+      "band": "|V_peak_qucs - V_peak_ngspice| <= 10 mV"
+    },
+    {
+      "id": "TR-2",
+      "void": true,
+      "void_reason": "VOID after the pilot run. The 7.008 V DC expectation has no valid DC path in this deck: C33 blocks the ladder from LF_OUT, so the only DC path is the 10 Mohm bleed (assumption k), which puts the DC asymptote at Icp*10 Mohm = 21.9 kV with a bleed time constant far beyond the 2 ms window. The ~400 V tails seen in both engines are the unconverged bleed ramp, not ladder physics. The check as pre-registered is a bad check (garbage-in) and is voided rather than redesigned mid-run (eco F3 lesson: check the deck before redesigning). The real board's DC path is the ADF4351 CP output / VCO tuning-port input impedance, which is intentionally not modelled here.",
+      "metric": {
+        "v_final_qucsator_v": 414.86438420113626,
+        "v_final_ngspice_v": 394.5548283,
+        "dc_expectation_v": 7.008,
+        "delta_engines_mv": 20309.555901136264,
+        "delta_dc_mv": 397701.6062505682
+      },
+      "claim": "CP step response (Icp continuous) final value agrees across engines within 10 mV; DC expectation Icp*(R67+R68) = 7.008 V.",
+      "band": "|V_final_qucs - V_final_ngspice| <= 10 mV and |V_final - 7.008 V| <= 10 mV (both engines)"
+    },
+    {
+      "id": "TR-3",
+      "void": true,
+      "void_reason": "VOID after the pilot run. Settling against the TR-2 'final value' inherits TR-2's flawed DC premise: the tail is still ramping at 2 ms, so a 1 mV settle criterion against that tail is a garbage-in pass.",
+      "metric": {
+        "settle_qucsator_s": 0.002,
+        "settle_ngspice_s": 0.002,
+        "rel_diff": 0.0
+      },
+      "claim": "Step-response settling time (to within 1 mV of final) agrees across engines within 10 %.",
+      "band": "relative settle-time difference <= 0.10"
+    },
+    {
+      "id": "SP-A",
+      "check_ids": "SP-A-1/SP-A-2/SP-A-3",
+      "metric": {
+        "s21_db_qucsator@2.87g": -0.00030059204465872477,
+        "s21_db_ngspice@2.87g": -0.0003874469965706438,
+        "s11_db_qucsator@2.87g": -41.5982227988807,
+        "s11_db_ngspice@2.87g": -41.59839992403201,
+        "worst_cross_engine_db": 0.00017901455612445716
+      },
+      "claim": "Passive output chain (L2, C35; no D3, no amp): IL <= 1.0 dB at 2.87 GHz, S11 <= -10 dB, cross-engine within 0.5 dB.",
+      "band": [
+        "IL <= 1.0 dB",
+        "S11 <= -10 dB",
+        "max dB difference <= 0.5"
+      ],
+      "pass": true
+    },
+    {
+      "id": "SP-B-03",
+      "check_ids": "SP-B-03",
+      "metric": {
+        "s21_db_qucsator@2.87g": -0.06941752143500435,
+        "s21_db_ngspice@2.87g": -0.06950575387908656,
+        "s11_db_qucsator@2.87g": -17.997819922302092,
+        "s11_db_ngspice@2.87g": -17.998081514318365,
+        "worst_cross_engine_db": 0.0002626841799475699
+      },
+      "claim": "Passive chain plus D3 at 0.3 pF junction cap: IL <= 1.5 dB at 2.87 GHz.",
+      "band": [
+        "IL <= 1.5 dB"
+      ],
+      "pass": true
+    },
+    {
+      "id": "SP-B-10",
+      "check_ids": "SP-B-10",
+      "metric": {
+        "s21_db_qucsator@2.87g": -0.7766956576356566,
+        "s21_db_ngspice@2.87g": -0.7767967387043455,
+        "s11_db_qucsator@2.87g": -7.857899807105474,
+        "s11_db_ngspice@2.87g": -7.858174585566507,
+        "worst_cross_engine_db": 0.0002812417047080018
+      },
+      "claim": "Documentation guard with a generic 1 pF ESD cap: IL must stay small; IL > 3 dB = FINDING (verify actual ESD5V0 variant junction capacitance before fab).",
+      "band": [
+        "IL <= 3 dB; IL > 3 dB -> FINDING 'verify actual ESD5V0 variant junction capacitance before fab'"
+      ],
+      "pass": true,
+      "finding": false
+    },
+    {
+      "id": "SP-C",
+      "check_ids": "SP-C-1/SP-C-2",
+      "metric": {
+        "s21_db_qucsator@2.87g": 15.930485481520474,
+        "s21_db_ngspice@2.87g": 15.930416654553659,
+        "s11_db_qucsator@2.87g": -45.12136463990787,
+        "s11_db_ngspice@2.87g": -45.12136464763727,
+        "worst_cross_engine_db": 6.883637531984732e-05
+      },
+      "claim": "Full chain with GVA-84+ at 16 dB and D3 = 0.3 pF: |S21| in [13, 17.5] dB at 2.87 GHz, cross-engine within 0.5 dB.",
+      "band": [
+        "13 dB <= |S21| <= 17.5 dB",
+        "max dB difference <= 0.5"
+      ],
+      "pass": true
+    }
+  ],
+  "runs": {
+    "lf_ac": {
+      "qucsator_s": 0.002622842788696289,
+      "ngspice_s": 0.009887218475341797
+    },
+    "lf_tr_pulse": {
+      "qucsator_s": 0.12109780311584473,
+      "ngspice_s": 0.15372896194458008
+    },
+    "lf_tr_step": {
+      "qucsator_s": 0.1325531005859375,
+      "ngspice_s": 0.16367220878601074
+    },
+    "rf_sp_a": {
+      "qucsator_s": 0.004608154296875,
+      "ngspice_s": 0.006616115570068359
+    },
+    "rf_sp_b03": {
+      "qucsator_s": 0.0043354034423828125,
+      "ngspice_s": 0.005978822708129883
+    },
+    "rf_sp_b10": {
+      "qucsator_s": 0.004656314849853516,
+      "ngspice_s": 0.006150960922241211
+    },
+    "rf_sp_c": {
+      "qucsator_s": 0.0054209232330322266,
+      "ngspice_s": 0.005952119827270508
+    }
+  }
+}

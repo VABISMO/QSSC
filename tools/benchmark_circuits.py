@@ -16,10 +16,9 @@ the exact Aer density-matrix path or the analytic decoherence limit
 (approximate).
 
 The output is a table to stdout + a JSON file (benchmark_circuits.json) so
-the report artifact can render it. This is the "decent tests of all circuits
-that measure how well each does while changing parameters" the user asked
-for -- it is not a pass/fail pytest (that lives in
-test_circuit_physics_audit.py); it is a measured characterization.
+the report artifact can render it. This is a measured characterization of
+every circuit across a parameter sweep -- not a pass/fail pytest (that lives
+in test_circuit_physics_audit.py).
 
 Run:  .venv/bin/python tools/benchmark_circuits.py
 """

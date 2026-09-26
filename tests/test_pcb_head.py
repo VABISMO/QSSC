@@ -8,7 +8,7 @@ analog front-end and contacts the die TOP (detector) face on B.Cu via a
 standard 2.54 mm female-header socket (ChipSocket_2.54_DET; the P1-style
 pin-scaffold chip module plugs its male detector pins up into it).  Two extra
 inner signal layers (In3.Cu/In4.Cu) carry the 128-net die bus that a
-4-layer stackup could not escape (commit b41009c):
+4-layer stackup could not escape:
 
     F.Cu   signal + components (16x TLV9004 TIA + 4x AD7616 ADC + 64x Rf/Cf + J12)
     In1.Cu GND plane
@@ -111,7 +111,7 @@ def _has_kicad_cli() -> bool:
 
 def test_head_six_layer_stackup():
     """The head board is 6-layer: F.Cu + In1.Cu(GND) + In2.Cu(PWR) + In3.Cu +
-    In4.Cu (two extra signal layers for the 128-net die bus, commit b41009c) +
+    In4.Cu (two extra signal layers for the 128-net die bus) +
     B.Cu. A 4-layer stackup could not escape the 64 DET + 64 EM die nets."""
     layers = _copper_layers(PCB)
     names = [l[0] for l in layers]
@@ -194,7 +194,7 @@ def test_head_det_pads_on_bcu():
     """ChipSocket_2.54_DET's 65 detector pads are through-hole on *.Cu (the
     standard 2.54 mm female-header socket the P1-style pin-scaffold chip module
     plugs into): 64 DET electrodes + 1 DET_COMMON (the ITO common electrode,
-    netted to DET_REF since commit ea2fa2a to close the detector common
+    netted to DET_REF to close the detector common
     electrode).  THT pads sit on every copper layer (*.Cu), so they contact the
     die on B.Cu (the head's bottom face) and solder from F.Cu (the head's top
     face).  No paste -- a THT socket, not a solder-stencilled SMD contact."""

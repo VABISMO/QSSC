@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Per-datasheet connection audit for both QSSC boards.
 
-NO routing -- this is the pre-routing bar the user demanded: every component
+NO routing -- this is the pre-routing bar: every component
 present, every IC pin netted per its datasheet (or explicitly no_connect),
 nothing missing or extra. Loads each board via pcbnew and reports:
 
