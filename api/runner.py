@@ -568,13 +568,22 @@ def run_parallel(req: dict) -> dict:
         if nq > 19:
             return {"error": f"N={n} -> {nq} qubits too large (>19). Use N <= 63."}
         # Scale the race width down for larger N: each pixel runs a full
-        # 3*bitlen(N)+1-qubit Shor statevector, so 64 pixels @ 16q cannot
+        # 3*bitlen(N)+1-qubit Shor statevector SEQUENTIALLY (run_array has no
+        # short-circuit -- it builds+runs every base then post-processes), so
+        # wall-clock ~= race_pixels * per-pixel cost. 64 pixels @ 16q cannot
         # finish inside the job timeout (and 64 @ 19q is hopeless). Shor only
         # needs a few coprime bases to find a factor (P(success) > 1/2 per
-        # non-trivial base), so 16 bases @ 16q and 4 @ 19q are plenty and keep
-        # the wall-clock inside the 600 s cap. The full 64-pixel race stays
-        # available for the fast 13q band (N <= 15).
-        race_pixels = min(n_pixels, 64 if nq <= 13 else 16 if nq <= 16 else 4)
+        # non-trivial base -> 4 bases give ~94%, 8 give ~99.6%). Measured
+        # 2026-09-26 on the real run_array path via a SINGLE clean rq worker:
+        # ~20 s/pixel at nq=16 (RGQFTMultiplier build + per-pixel register/
+        # readout/noise), so 4 px @ 16q finished N=21 -> [7,3] in 81 s wall-
+        # clock (base 2 wins) -- well under the 600 s frontend watchdog AND the
+        # 900 s rq job_timeout. CAUTION: stale rq workers from other trees
+        # (e.g. /tmp checkouts) stealing the queue run OLD race_pixels and
+        # balloon this to 500-900 s; keep exactly one worker on the live tree.
+        # The full 64-pixel race stays available for the fast 13q band (N<=15);
+        # 19q keeps 4 bases.
+        race_pixels = min(n_pixels, 64 if nq <= 13 else 4 if nq <= 16 else 4)
         out["race_pixels"] = race_pixels
         rng = np.random.default_rng(seed)
         circuits = []
