@@ -380,6 +380,26 @@ def _build_pixel_circuit(algo: str, req: dict):
                      else req.get("num1", 2.0))
         raw_b = req.get("b") if req.get("b") is not None else req.get("num2")
         num2 = float(raw_b) if raw_b is not None else None
+        # Mirror the _run_math qubit cap (runner_algorithms._MATH_MAX_QUBITS):
+        # the parallel sample path must not bypass it -- a raw POST to
+        # run-parallel with mode=sample, algorithm=math, bits=16 builds a
+        # 64-qubit RGQFTMultiplier and runs it n_pixels x shots via run_array,
+        # hanging Aer and stalling the RQ worker (the watchdog cannot kill the
+        # thread). Reject up front with the same 36-qubit limit.
+        _n1 = abs(int(num1))
+        _n2 = abs(int(num2)) if num2 is not None else 0
+        _req_bits = req.get("bits")
+        _min_bits = max(1, math.ceil(math.log2(max(_n1, _n2, 1)))) + 2
+        _bits = max(_min_bits, int(_req_bits)) if _req_bits else _min_bits
+        _op = op.lower()
+        _nq = {"add": 2 * _bits, "sub": 2 * _bits, "mul": 4 * _bits,
+               "sqrt": _bits + 1, "log": _bits + 1}.get(_op, 2 * _bits)
+        if _nq > 36:
+            raise ValueError(
+                f"{op}({int(num1)}" + (f", {int(num2)}" if num2 is not None else "")
+                + f") needs {_nq} qubits -- wider than the "
+                f"36-qubit math demo cap (Aer would hang and stall the API). "
+                f"Use smaller operands or a smaller Word.")
         qc = create_math_circuit(op, num1, num2, bits=req.get("bits"))
         return qc, "math"
     if algo == "qrand":
@@ -547,15 +567,24 @@ def run_parallel(req: dict) -> dict:
         nq = 3 * n.bit_length() + 1
         if nq > 19:
             return {"error": f"N={n} -> {nq} qubits too large (>19). Use N <= 63."}
+        # Scale the race width down for larger N: each pixel runs a full
+        # 3*bitlen(N)+1-qubit Shor statevector, so 64 pixels @ 16q cannot
+        # finish inside the job timeout (and 64 @ 19q is hopeless). Shor only
+        # needs a few coprime bases to find a factor (P(success) > 1/2 per
+        # non-trivial base), so 16 bases @ 16q and 4 @ 19q are plenty and keep
+        # the wall-clock inside the 600 s cap. The full 64-pixel race stays
+        # available for the fast 13q band (N <= 15).
+        race_pixels = min(n_pixels, 64 if nq <= 13 else 16 if nq <= 16 else 4)
+        out["race_pixels"] = race_pixels
         rng = np.random.default_rng(seed)
         circuits = []
         bases = []
-        for _ in range(n_pixels):
+        for _ in range(race_pixels):
             a = select_coprime(n, rng)
             qc, _ = create_shor_circuit(n, a=a, rng=rng)
             circuits.append(qc)
             bases.append(a)
-        res = b.run_array(circuits, shots=shots, max_pixels=n_pixels)
+        res = b.run_array(circuits, shots=shots, max_pixels=race_pixels)
         # Prime power N = p^k: the quantum gcd step is trivial (a^(r/2) = +/-1
         # mod p^k -> gcd is 1 or N), so the factor is recovered classically.
         # Mirrors run_circuit's shor branch so the 64-shor derivation can show

@@ -491,9 +491,14 @@ class SimulatedFPGA:
         # -> READOUT_NOISE, bit-identical). Single sweep -> integration_shots=1.
         nsigma = effective_noise_sigma(READOUT_NOISE, self.noise_env,
                                        self.anti_noise, 1)
-        # Lorentzian dip: PL = bright * (1 - contrast * L(f)); L(0) = 1.
-        lor = (lw / 2.0) ** 2 / ((fs - f0) ** 2 + (lw / 2.0) ** 2)
-        codes = BRIGHT_CODE * (1.0 - ODMR_CONTRAST * lor)
+        # Gaussian dip (FWHM = lw, matching simulate_odmr/odmr_decompose which
+        # model the ODMR line as a Gaussian): PL = bright * (1 - contrast * G(f)).
+        # FWHM-matched to the former Lorentzian so the on-resonance contrast
+        # and the line width are unchanged; the wings now match the resolver
+        # PSF (Lorentzian wings were biasing CLEAN on overlapping Case-D lines).
+        sigma = lw / (2.0 * math.sqrt(2.0 * math.log(2.0)))  # FWHM lw -> sigma
+        gauss = np.exp(-((fs - f0) ** 2) / (2.0 * sigma ** 2))
+        codes = BRIGHT_CODE * (1.0 - ODMR_CONTRAST * gauss)
         codes += self.rng.normal(0, nsigma, size=n_points)
         codes = np.clip(codes, 0, ADC_MAX).astype(int)
         # make the addressed channel reflect its pumped/bright state off-resonance
@@ -596,14 +601,17 @@ class SimulatedFPGA:
             W = np.vstack([charge_share_weights(tuple(centers[q]), centers,
                                                 self.sub_pixel.sigma_sheet_mm)
                            for q in range(self.N_SITES)])  # (64, 64): W[q, p]
-        hw2 = (lw / 2.0) ** 2
+        # Gaussian line (FWHM = lw), matching _odmr_sweep / simulate_odmr /
+        # odmr_decompose so the sim-FPGA ODMR shape matches the resolver PSF.
+        sigma = lw / (2.0 * math.sqrt(2.0 * math.log(2.0)))  # FWHM lw -> sigma
+        s2 = 2.0 * sigma ** 2
 
         def _pixel_dip_frac(q: int, fi: float) -> float:
             """Total ODMR dip fraction (of BRIGHT) for pixel q at frequency fi:
-            sum of its NV-line Lorentzians, each weighted by its bin contrast."""
+            sum of its NV-line Gaussians, each weighted by its bin contrast."""
             lf = f0 + detun[q] + line_freqs[q]      # absolute line freqs (Hz)
-            lor = hw2 / ((fi - lf) ** 2 + hw2)      # (n_lines,) peak-1 Lorentzian
-            return float(np.sum(line_contrasts[q] * lor))
+            gauss = np.exp(-((fi - lf) ** 2) / s2)  # (n_lines,) peak-1 Gaussian
+            return float(np.sum(line_contrasts[q] * gauss))
 
         lines = []
         for fi in fs:
@@ -696,19 +704,30 @@ class SimulatedFPGA:
         return (f"{res['differential_code']:.1f} {res['sigma_code']:.1f} "
                 f"{res['single_frame_snr']:.2f} {res['integrated_snr']:.2f}")
 
-    def _run_sequence(self, kind: str, n_windows: int) -> str:
+    def _run_sequence(self, kind: str, n_windows: int,
+                      t_step_ns: int = 0) -> str:
         """Sim-side model of the RTL pulse-sequence engine (RUN_SEQUENCE, PR3a).
 
         Models the optical readout of ``n_windows`` windows for a Ramsey / Hahn
         echo / CPMG sequence as a decaying fringe of photocurrent codes, so the
         host can exercise the on-host fit path without a physical board. Reply:
         ``"<n> c0 c1 ... cN-1"``.
+
+        When ``t_step_ns > 0`` the window grid is ``arange(n) * t_step_ns`` so
+        it matches the host fit's time axis (``backend_fits._fit_t2_from_codes``
+        uses the same ``arange(n) * t_step_ns``); otherwise it falls back to a
+        fixed ``linspace(0, 2*T2, n)`` grid. The Ramsey fringe carries the
+        ``exp(-t/T2)`` decay envelope (the profile has no separate T2*, so
+        decaying Ramsey at T2 is the conservative choice; real T2* < T2).
         """
         t2_us = self.t2 * 1e6
-        # window times spread over ~2*T2 so the decay is visible
-        ts = np.linspace(0, 2 * t2_us, n_windows)
+        if t_step_ns and t_step_ns > 0:
+            ts = np.arange(n_windows) * (t_step_ns / 1000.0)   # ns -> us
+        else:
+            # window times spread over ~2*T2 so the decay is visible
+            ts = np.linspace(0, 2 * t2_us, n_windows)
         if kind == "ramsey":
-            fringe = 0.5 + 0.5 * np.cos(ts * 0.3)
+            fringe = 0.5 + 0.5 * np.cos(ts * 0.3) * np.exp(-ts / t2_us)
         elif kind == "hahn":
             fringe = 0.5 + 0.5 * np.cos(ts * 0.2) * np.exp(-ts / t2_us)
         else:  # cpmg
@@ -728,13 +747,16 @@ class SimulatedFPGA:
         """Ramsey/Hahn/CPMG -> n readout codes (int array).
 
         Mirrors ``FPGAConnection.run_sequence``; the simulator models the
-        fringe from its own T2 (``site`` / ``t_step_ns`` are accepted for
-        signature parity but the sim window grid is fixed by ``n_windows``).
+        fringe from its own T2. ``t_step_ns`` sets the window grid so the
+        sim's time axis matches the host fit
+        (:func:`qssc.backend_fits._fit_t2_from_codes`); when 0 the grid
+        falls back to a fixed ``linspace(0, 2*T2, n)``.
         """
         from .backend import _seq_kind_num
         kind_num = _seq_kind_num(kind)
         names = {0: "ramsey", 1: "hahn", 2: "cpmg"}
-        reply = self._run_sequence(names[kind_num], int(n_windows))
+        reply = self._run_sequence(names[kind_num], int(n_windows),
+                                   int(t_step_ns or 0))
         toks = reply.split()
         return np.array([int(t) for t in toks[1:1 + int(toks[0])]], dtype=np.int32)
 

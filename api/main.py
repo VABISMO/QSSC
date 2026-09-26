@@ -94,7 +94,12 @@ __all__ = [
 
 
 if __name__ == "__main__":
+    import os
     import uvicorn
     # Bind 127.0.0.1 for the local lab run so the exec sandbox is not exposed to
     # the LAN. The Dockerfile binds 0.0.0.0 (required by Render's health check).
-    uvicorn.run("api.main:app", host="127.0.0.1", port=8000, reload=False)
+    # Default port 8011 matches the Vite dev proxy (frontend/vite.config.js) so
+    # `python -m api.main` + `npm run dev` line up without an extra flag; override
+    # with QSSC_API_PORT.
+    uvicorn.run("api.main:app", host="127.0.0.1",
+                port=int(os.environ.get("QSSC_API_PORT", "8011")), reload=False)

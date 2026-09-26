@@ -974,9 +974,11 @@ class QSSCBackend(BackendV2):
         per-pixel MW to run *different* circuits on different pixels. So
         ``run_array`` in ensemble mode is 64x-replica sampling of ONE circuit
         (independent seeds = 64x the shots), NOT 64 independent processors.
-        True independent-per-pixel compute needs a per-pixel MW antenna (a PCB
-        addition tracked as a GitHub issue); the 64-channel *readout* is still
-        parallel (READ_DETECTORS reads all 64 at once).
+        True independent-per-pixel compute uses the field gradient (Invention 5,
+        qssc-grad) to shift each pixel's NV resonance to a distinct frequency,
+        so a single global MW antenna addresses pixels by frequency -- no
+        per-pixel antenna needed (see the closed issue #77); the 64-channel
+        *readout* is still parallel (READ_DETECTORS reads all 64 at once).
 
         Returns ``{"per_pixel": [...], "aggregate_counts": {...}, "n_pixels":
         n, "throughput_x": n_run}``. With a calibration loaded, also includes

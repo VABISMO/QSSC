@@ -337,7 +337,9 @@ def gyro_measure(
         note=(f"Ramsey pi/2-T-pi/2 over T={T_us:.1f} us (T2={t2_us:.1f} us). "
               f"Phase accumulated = Omega*T = {phase:.3e} rad; rate noise floor "
               f"{rate_noise_dps:.2e} deg/s. "
-              f"RATE-GRADE with the as-built microdiamond sensor (T2~us): "
-              f"Earth-rate ({earth_rate:.2e} deg/s) needs bulk-CVD T2~ms or a "
-              f"Sagnac loop for inertial-grade. No supplier sensitivity spec."),
+              f"Default uses the profile (compute-grade) T2~{t2_us:.1f} us; pass "
+              f"a shorter free_precession_us for the as-built sensor-grade array "
+              f"(T2~us-tens-of-us). RATE-GRADE either way: Earth-rate "
+              f"({earth_rate:.2e} deg/s) is below the floor and needs bulk-CVD "
+              f"T2~ms or a Sagnac loop for inertial-grade. No supplier sensitivity spec."),
     )

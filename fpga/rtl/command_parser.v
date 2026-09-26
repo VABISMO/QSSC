@@ -1908,6 +1908,12 @@ module command_parser #(
                     sweep_line[11] <= sweep_c_pad[15:8];
                     sweep_line[12] <= sweep_c_pad[7:0];
                     sweep_line[13] <= 8'h0A;          // '\n'
+                    // sweep_line[14..15] are never streamed (the sweep line is
+                    // 14 bytes; S_SWEEP_SEND stops at str_idx==13) but the array
+                    // is 16-wide, so tie the unused words off to silence the
+                    // "used but has no driver" width warnings.
+                    sweep_line[14] <= 8'h00;
+                    sweep_line[15] <= 8'h00;
                     sweep_len      <= 6'd14;
                     str_idx        <= 7'd0;
                     fsm            <= S_SWEEP_SEND;
@@ -2034,6 +2040,13 @@ module command_parser #(
                     seq_line[3] <= seq_count_pad[15:8];
                     seq_line[4] <= seq_count_pad[7:0];
                     seq_line[5] <= 8'h20;            // ' '
+                    // seq_line[6..7] are never streamed (the count reply is 6
+                    // bytes: 5-digit dec + space; S_SEQ_COUNT_SEND stops at
+                    // str_idx==5) but the array is 8-wide so the unused words
+                    // need an explicit driver or yosys flags 16 "used but has
+                    // no driver" width warnings on these bits.
+                    seq_line[6] <= 8'h00;
+                    seq_line[7] <= 8'h00;
                     str_idx     <= 7'd0;
                     fsm         <= S_SEQ_COUNT_SEND;
                 end
@@ -2181,6 +2194,10 @@ module command_parser #(
                     seq_line[3] <= seq_code_pad[15:8];
                     seq_line[4] <= seq_code_pad[7:0];
                     seq_line[5] <= seq_sep;
+                    // tie off the unused 8-wide words (see S_SEQ_COUNT_ENC): the
+                    // code reply is 6 bytes, S_SEQ_CODE_SEND stops at str_idx==5.
+                    seq_line[6] <= 8'h00;
+                    seq_line[7] <= 8'h00;
                     str_idx     <= 7'd0;
                     fsm         <= S_SEQ_CODE_SEND;
                 end

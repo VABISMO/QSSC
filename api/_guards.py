@@ -65,27 +65,31 @@ def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
              register_line_freqs_hz: Optional[list] = None,
              prime_readout: bool = False,
              n_noise_bins: int = 64) -> QSSCBackend:
-    # pixel_mode selects the circuit-qubit model: register (one pixel's N-NV
-    # register, within-pixel all-to-all dipole 2q) or ensemble (64 chip pixels,
-    # no within-pixel 2q). N is the MEASURED resolvable ODMR line count when
-    # register_line_freqs_hz is given (from decompose_odmr in the calibration),
-    # else the nominal default. gradient_mhz_per_um + register_line_freqs_hz
-    # close the calibration -> circuit loop: the register sits on the real
-    # addressed frequencies at the applied gradient, not the synthetic 6 MHz
-    # grid. prime_readout toggles the coprime matched-filter denoiser
-    # When on, the effective readout error is reduced by the
-    from qssc.backend import N_NV_PER_PIXEL
-    return QSSCBackend(profile=profile, seed=seed,
-                       temperature_k=temperature_k, noise_mode=noise_mode,
-                       pixel_mode=pixel_mode,
-                       n_nv_per_pixel=(n_nv_per_pixel if n_nv_per_pixel is not None
-                                       else N_NV_PER_PIXEL),
-                       register_nv_spacing_nm=register_nv_spacing_nm,
-                       gradient_mhz_per_um=gradient_mhz_per_um,
-                       pixel_size_um=pixel_size_um,
-                       register_line_freqs_hz=register_line_freqs_hz,
-                       prime_readout=prime_readout,
-                       n_noise_bins=n_noise_bins)
+    # Delegate to the canonical ``api.runner._backend`` (the superset factory
+    # that also wires hardware / register_widths_per_pixel / anti_noise / etc.).
+    # There used to be a second, divergent copy of this factory here that drifted
+    # from the runner one (no ``hardware=`` -> no SimulatedFPGA, no calibrated
+    # per-pixel widths); keeping two copies was a maintenance hazard and meant
+    # the calibration ``backend_info`` route built a subtly different backend
+    # than the run routes. The single source of truth now lives in runner.py;
+    # this thin wrapper keeps the existing ``from ._guards import _backend``
+    # import sites (routes_calibration) working with an identical backend.
+    #
+    # ``hardware`` defaults to False inside runner._backend, so the calibration
+    # path still gets a SimulatedFPGA (describe() does not reflect the FPGA
+    # object, so the /api/backend/info response is unchanged).
+    from .runner import _backend as _runner_backend
+    return _runner_backend(
+        profile=profile, temperature_k=temperature_k, seed=seed,
+        noise_mode=noise_mode,
+        n_nv_per_pixel=n_nv_per_pixel,
+        pixel_mode=pixel_mode,
+        register_nv_spacing_nm=register_nv_spacing_nm,
+        gradient_mhz_per_um=gradient_mhz_per_um,
+        pixel_size_um=pixel_size_um,
+        register_line_freqs_hz=register_line_freqs_hz,
+        prime_readout=prime_readout,
+        n_noise_bins=n_noise_bins)
 
 
 def _req_dict(model) -> dict:
