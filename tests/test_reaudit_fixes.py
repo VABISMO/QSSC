@@ -378,3 +378,105 @@ def test_client_ip_uses_rightmost_xff_for_trusted_proxy(monkeypatch):
     monkeypatch.setenv("QSSC_TRUSTED_PROXY_CIDR", "10.0.0.0/8")
     req = _FakeRequest("10.0.0.1", xff="9.9.9.9, 203.0.113.5")
     assert _client_ip(req) == "203.0.113.5"
+
+
+# ---------------------------------------------------------------------------
+# #135: crit_path must not double-count parallel 2q gates as serial
+# ---------------------------------------------------------------------------
+
+def test_crit_path_parallel_2q_not_double_counted():
+    """#135: two 2q gates on DISJOINT qubit pairs share one qiskit layer, so the
+    critical-path (wall-clock) time must NOT charge each as a serial layer. The
+    prior ``depth*g1q + n2q*(g2q-g1q)`` form charged ``2*g2q - g1q`` for a
+    depth-1 / 2-parallel-2q circuit; the fix charges
+    ``max(depth, sqrt(est_2q))*g2q`` (~1.414*g2q here). A serial 2-cz chain
+    (depth 2) is genuinely slower than the parallel pair, proving the fix
+    preserves ordering while removing the double-count."""
+    import math
+    from qiskit import QuantumCircuit
+    from qssc.backend import QSSCBackend
+
+    be = QSSCBackend("NV", seed=0, noise_mode="none")
+    # parallel: 2 cz on disjoint pairs -> qiskit depth 1, n2q 2
+    par = QuantumCircuit(4)
+    par.cz(0, 1)
+    par.cz(2, 3)
+    assert par.depth() == 1
+    n1q_p, n2q_p, _, _, est_2q_p, _, crit_p = be._decomposed_cost(par)
+    assert n2q_p == 2 and est_2q_p == 2
+    expected_p = max(1, math.sqrt(2)) * be._g2q
+    assert abs(crit_p - expected_p) < 1e-12
+    # the old double-counted value would be 2*g2q - g1q (strictly larger)
+    assert crit_p < 2 * be._g2q - be._g1q
+
+    # serial: 2 cz chained on overlapping qubits -> qiskit depth 2
+    ser = QuantumCircuit(3)
+    ser.cz(0, 1)
+    ser.cz(1, 2)
+    assert ser.depth() == 2
+    _, _, _, _, _, _, crit_s = be._decomposed_cost(ser)
+    expected_s = max(2, math.sqrt(2)) * be._g2q
+    assert abs(crit_s - expected_s) < 1e-12
+    # parallel is faster (less decoherence) than serial -- ordering preserved
+    assert crit_p < crit_s
+
+
+# ---------------------------------------------------------------------------
+# #131: send_command must serialize I/O on the shared cached handle
+# ---------------------------------------------------------------------------
+
+def test_send_command_serializes_concurrent_io(monkeypatch):
+    """#131: the runner caches ONE FPGAConnection per (port,profile,T,seed) and
+    reuses it across concurrent hardware jobs. send_command must hold a
+    per-instance lock across the write+readline pair so two jobs cannot
+    interleave on the serial port -- without the lock, job B's write between
+    job A's write+readline makes A read B's reply. 50 threads each issue a
+    distinct command and must each receive their own reply."""
+    import threading
+    from qssc import backend_fpga
+    import serial as _serial_mod
+
+    class _FakeSerial:
+        def __init__(self, port, baudrate, timeout=5):
+            self._last = "ID"
+            self._gate = threading.Event()
+
+        def write(self, data):
+            self._last = data.decode().strip()
+
+        def readline(self):
+            # yield so a competing thread can run. With the _io_lock held no
+            # other send_command can interleave (they block on the lock), so
+            # _last is stable; without the lock this window lets a second
+            # write corrupt _last before the first read returns.
+            self._gate.wait(0.005)
+            return (f"QSSC {self._last}\n").encode()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(_serial_mod, "Serial", _FakeSerial)
+    # skip the 2s board-reset sleep in FPGAConnection.__init__
+    monkeypatch.setattr(backend_fpga.time, "sleep", lambda *_: None)
+
+    conn = backend_fpga.FPGAConnection(port="/dev/fakeUSB")
+    assert conn.send_command("ID").startswith("QSSC")
+
+    errors = []
+
+    def worker(i):
+        try:
+            reply = conn.send_command(f"CMD{i}")
+            if reply != f"QSSC CMD{i}":
+                errors.append((i, reply))
+        except Exception as exc:  # noqa: BLE001
+            errors.append((i, repr(exc)))
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(50)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, f"interleaving corrupted replies: {errors[:5]}"
+    conn.close()

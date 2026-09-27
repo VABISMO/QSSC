@@ -18,6 +18,7 @@ QSSC board answers the ``ID`` handshake — so the runner/API surfaces a clear
 from __future__ import annotations
 
 import math
+import threading
 import time
 from typing import Optional
 
@@ -59,6 +60,14 @@ class FPGAConnection:
 
     def __init__(self, port: str = "/dev/ttyUSB0", baudrate: int = 115200):
         import serial  # local import
+        # Per-instance I/O lock: the runner caches ONE FPGAConnection per
+        # (port,profile,T,seed) and reuses it across runs. When the in-process
+        # fallback pool runs two hardware jobs concurrently they share this
+        # handle -- without a lock their send_command calls interleave on the
+        # serial port (job B's write between job A's write+readline corrupts
+        # both replies). The lock makes each write+readline atomic, fully
+        # serializing I/O on the shared port (audit #131).
+        self._io_lock = threading.Lock()
         try:
             self.ser = serial.Serial(port, baudrate, timeout=5)
         except Exception as exc:  # port absent / permission denied / busy
@@ -79,8 +88,13 @@ class FPGAConnection:
                 port, f"ID reply {reply!r} did not start with {FPGA_ID_TOKEN!r}")
 
     def send_command(self, command: str) -> str:
-        self.ser.write((command + "\n").encode())
-        return self.ser.readline().decode().strip()
+        # Hold the I/O lock across the write+readline pair so concurrent jobs
+        # sharing this cached handle cannot interleave on the serial port
+        # (audit #131). Each command is atomic; the next caller's command only
+        # starts after this reply is fully read.
+        with self._io_lock:
+            self.ser.write((command + "\n").encode())
+            return self.ser.readline().decode().strip()
 
     def close(self):
         self.ser.close()
