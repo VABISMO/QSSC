@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import importlib.util as _ilu
+import threading
 from pathlib import Path as _Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -267,18 +268,25 @@ def _fpga_info() -> dict:
 # QSSC_FPGA_PORT this is a SimulatedFPGA; set QSSC_FPGA_PORT=/dev/ttyUSB0 to
 # drive a real Artix-7 board over pyserial.
 _FPGA = None
+_FPGA_LOCK = threading.Lock()
 
 
 def _fpga():
     global _FPGA
-    if _FPGA is None:
-        port = os.getenv("QSSC_FPGA_PORT", "").strip()
-        if port:
-            _FPGA = FPGAConnection(port)
-        else:
-            from qssc.simulator import SimulatedFPGA
-            _FPGA = SimulatedFPGA(profile=os.getenv("QSSC_FPGA_PROFILE", "NV"))
-    return _FPGA
+    # Guard the check-then-create: FastAPI runs sync endpoints in a threadpool,
+    # so two concurrent localhost calls could both see _FPGA is None and both
+    # create (a real serial.Serial open fails for the loser; a SimulatedFPGA
+    # is silently shadowed + its unguarded state machine interleaves).
+    # Mirrors the runner's _HW_FPGA_LOCK pattern (audit #152).
+    with _FPGA_LOCK:
+        if _FPGA is None:
+            port = os.getenv("QSSC_FPGA_PORT", "").strip()
+            if port:
+                _FPGA = FPGAConnection(port)
+            else:
+                from qssc.simulator import SimulatedFPGA
+                _FPGA = SimulatedFPGA(profile=os.getenv("QSSC_FPGA_PROFILE", "NV"))
+        return _FPGA
 
 
 @router.get("/api/fpga/info")

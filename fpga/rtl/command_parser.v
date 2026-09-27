@@ -1913,8 +1913,14 @@ module command_parser #(
                     // timeout before arming the RF gate. Arming on !pll_busy
                     // alone fires MW while the VCO is still slewing -> wrong-freq
                     // MW for the first ~ms -> missing ODMR dips (issue #98).
-                    if (pll_busy_seen && !pll_busy &&
-                        (pll_locked || settle_cnt >= SETTLE_TIMEOUT)) begin
+                    // The second clause is a watchdog: if pll_busy NEVER asserts
+                    // (adf4351_ctrl stuck in reset / pll_start glitched) the
+                    // original `pll_busy_seen && ...` condition hung forever;
+                    // arm once SPI is idle and the settle budget has elapsed
+                    // (audit #154).
+                    if ((pll_busy_seen && !pll_busy &&
+                         (pll_locked || settle_cnt >= SETTLE_TIMEOUT)) ||
+                        (!pll_busy_seen && !pll_busy && settle_cnt >= SETTLE_TIMEOUT)) begin
                         mw_gate_load <= 1'b1;
                         reply_ok     <= 1'b1;
                         fsm          <= S_REPLY_LOAD;
@@ -2089,8 +2095,13 @@ module command_parser #(
                     if (pll_busy)
                         sweep_pll_seen <= 1'b1;
                     settle_cnt <= settle_cnt + 20'd1;
-                    if (sweep_pll_seen && !pll_busy &&
-                        (pll_locked || settle_cnt >= SETTLE_TIMEOUT)) begin
+                    // Arm on (busy-seen + SPI-done + lock-or-settle) OR (busy
+                    // never asserted + SPI idle + settle elapsed) -- the second
+                    // clause is a watchdog for a PLL sub-block that never flags
+                    // busy, so the FSM cannot hang forever (audit #154).
+                    if ((sweep_pll_seen && !pll_busy &&
+                         (pll_locked || settle_cnt >= SETTLE_TIMEOUT)) ||
+                        (!sweep_pll_seen && !pll_busy && settle_cnt >= SETTLE_TIMEOUT)) begin
                         mw_gate_load  <= 1'b1;        // arm the ODMR gate (mw_gate_ns set at dispatch)
                         gate_seen     <= 1'b0;
                         seq_wdog      <= 32'd0;
@@ -2223,8 +2234,12 @@ module command_parser #(
                     if (pll_busy)
                         sweep_pll_seen <= 1'b1;
                     settle_cnt <= settle_cnt + 20'd1;
-                    if (sweep_pll_seen && !pll_busy &&
-                        (pll_locked || settle_cnt >= SETTLE_TIMEOUT)) begin
+                    // Arm on (busy-seen + SPI-done + lock-or-settle) OR (busy
+                    // never asserted + SPI idle + settle elapsed) -- watchdog
+                    // so the FSM cannot hang if pll_busy never rises (audit #154).
+                    if ((sweep_pll_seen && !pll_busy &&
+                         (pll_locked || settle_cnt >= SETTLE_TIMEOUT)) ||
+                        (!sweep_pll_seen && !pll_busy && settle_cnt >= SETTLE_TIMEOUT)) begin
                         mw_gate_load  <= 1'b1;        // arm the ODMR gate
                         gate_seen     <= 1'b0;
                         seq_wdog      <= 32'd0;
@@ -2340,7 +2355,12 @@ module command_parser #(
                     end else if (!gate_seen) begin
                         if (mw_gate) gate_seen <= 1'b1;
                         seq_wdog <= seq_wdog + 32'd1;
-                    end else if (!mw_gate) begin
+                    end else if (!mw_gate || seq_wdog >= GATE_WDOG_CYC) begin
+                        // gate fell, OR the gate-fall watchdog expired (mw_gate
+                        // stuck high after gate_seen) -> count down T. Same
+                        // pattern as S_SWEEP_GATE_FALL (audit #153); without
+                        // the `|| seq_wdog >= GATE_WDOG_CYC` term a stuck-high
+                        // mw_gate hung the pulse engine forever.
                         if (seq_dcnt == 32'd0) begin
                             fsm <= (seq_kind == 2'd0) ? S_SEQ_PI2B : S_SEQ_PI;
                         end else begin
@@ -2369,7 +2389,10 @@ module command_parser #(
                     end else if (!gate_seen) begin
                         if (mw_gate) gate_seen <= 1'b1;
                         seq_wdog <= seq_wdog + 32'd1;
-                    end else if (!mw_gate) begin
+                    end else if (!mw_gate || seq_wdog >= GATE_WDOG_CYC) begin
+                        // gate fell, OR gate-fall watchdog expired (mw_gate
+                        // stuck high) -> count down T. Mirrors S_SWEEP_GATE_FALL
+                        // (audit #153).
                         if (seq_dcnt == 32'd0)
                             fsm <= S_SEQ_PI2B;
                         else

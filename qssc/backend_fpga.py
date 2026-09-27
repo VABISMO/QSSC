@@ -137,7 +137,7 @@ class FPGAConnection:
         SNR. Returns the same dict shape as
         :func:`qssc.sensors.lockin_integrated_readout`.
         """
-        if not (0 <= int(site) < N_SITES) or not (1 <= int(n_cycles) <= 100000):
+        if not (0 <= int(site) < N_SITES) or not (1 <= int(n_cycles) <= 10000):
             raise ValueError("site/n_cycles out of range")
         reply = self.send_command(f"READ_LOCKIN {int(site)} {int(n_cycles)}")
         return self._parse_lockin_reply(reply)
@@ -222,20 +222,26 @@ class FPGAConnection:
         each pixel's resolved ODMR lines = its calibrated register width.
         Returns an ``int32`` array of shape ``(n_points, 64)``.
         """
-        if n_points <= 0 or n_points > 4096:
-            raise ValueError("n_points out of range 1..4096")
+        if n_points <= 0 or n_points > 256:
+            raise ValueError("n_points out of range 1..256 (RTL CMD_ALL_SWEEP cap)")
         cmd = f"RUN_ALL_ODMR {int(f_start_khz)} {int(f_stop_khz)} {int(n_points)}\n"
-        self.ser.write(cmd.encode())
-        rows = []
-        for _ in range(n_points):
-            line = self.ser.readline().decode().strip()
-            toks = line.split()
-            if len(toks) != N_SITES:
-                raise IOError(f"RUN_ALL_ODMR row mismatch: {line!r}")
-            rows.append([int(t) for t in toks])
-        ok = self.ser.readline().decode().strip()
-        if ok != "OK":
-            raise IOError(f"RUN_ALL_ODMR missing OK: {ok!r}")
+        # Hold the I/O lock across the whole write + n_points readlines + OK
+        # readline so a concurrent send_command (e.g. SET_GRADIENT) on the same
+        # cached handle cannot interleave between this write and the streaming
+        # rows (audit #147 -- same #131 class; run_all_odmr is the longest
+        # serial exchange so it is the most exposed to interleaving).
+        with self._io_lock:
+            self.ser.write(cmd.encode())
+            rows = []
+            for _ in range(n_points):
+                line = self.ser.readline().decode().strip()
+                toks = line.split()
+                if len(toks) != N_SITES:
+                    raise IOError(f"RUN_ALL_ODMR row mismatch: {line!r}")
+                rows.append([int(t) for t in toks])
+            ok = self.ser.readline().decode().strip()
+            if ok != "OK":
+                raise IOError(f"RUN_ALL_ODMR missing OK: {ok!r}")
         return np.array(rows, dtype=np.int32)
 
     def read_gyro(self, site: int, t_ns: int, n_windows: int = 64) -> dict:

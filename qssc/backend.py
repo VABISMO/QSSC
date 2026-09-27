@@ -444,6 +444,21 @@ class QSSCBackend(BackendV2):
             self.n_nv_per_pixel = len(sites)
         self.sites = list(sites)
         self._n_qubits = len(self.sites)
+        # auto_align / explicit sites may have set a register width different
+        # from the constructor-arg n_nv_per_pixel (the gradient caps the
+        # register to the resolvable count); re-derive the prime-symbol count
+        # + SNR from the ACTUAL width so the noise model and noise_summary
+        # report the real prime-denoiser improvement (audit #156). The original
+        # derivation above ran before sites was determined, so it used the
+        # requested width, not the capped one.
+        if self._register_line_freqs_hz is not None:
+            self._n_prime_symbols = max(1, len(self._register_line_freqs_hz))
+        else:
+            self._n_prime_symbols = max(1, min(self.n_nv_per_pixel,
+                                               len(PRIME_SYMBOLS)))
+        self._prime_snr = (
+            prime_noise_rejection(self._n_prime_symbols, self._n_noise_bins)
+            if self._prime_readout else 1.0)
         # Nuclear-spin memory: when enabled, append one 13C memory
         # qubit per electron NV (paired by index). The 13C carries nuclear_t2
         # (seconds, vs the electron's ~1.8 ms) so a circuit can STORE a state on
@@ -809,11 +824,15 @@ class QSSCBackend(BackendV2):
         ros = [float(s.readout_err) for s in self.sites]
         base_ro = (float(np.mean(ros)) if ros
                    else float(self.profile.readout_error))
-        env_ro = float(np.clip(base_ro * self._readout_noise_factor, 0.0,
-                               base_ro * 4.0))
-        eff_ro = (float(np.clip(env_ro / self._prime_snr, 0.0, env_ro))
-                  if self._prime_readout and self._prime_snr > 1.0
-                  else env_ro)
+        # Match _effective_readout_err exactly: base * env_factor, then / prime
+        # SNR, then clip the FINAL result to [0, base*4]. The prior code clipped
+        # env_ro to base*4 first and then divided by prime_snr, which disagrees
+        # with the noise model when env_factor > 4 and prime_snr > 1 (the panel
+        # reported base*4/prime_snr while the model used base*4) -- audit #157.
+        raw_err = base_ro * self._readout_noise_factor
+        if self._prime_readout and self._prime_snr > 1.0:
+            raw_err = raw_err / self._prime_snr
+        eff_ro = float(np.clip(raw_err, 0.0, base_ro * 4.0))
         return {
             "readout_error": round(base_ro, 6),
             "effective_readout_error": round(eff_ro, 6),

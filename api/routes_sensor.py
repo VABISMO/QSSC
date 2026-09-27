@@ -324,6 +324,11 @@ def api_sensor_tensor(
     grid = 8
     prof = get_profile(profile)
     lw = prof.odmr_linewidth_hz / 1e6
+    # Bound n_avg: the source=real path loops n_shots = n_avg serial
+    # RUN_ALL_ODMR round-trips (each a 256-point sweep), so an unbounded value
+    # holds the single uvicorn worker + the board for minutes. Mirrors the
+    # api_gyro / api_signal `min(..., 1024)` clamp (audit #151).
+    n_avg = max(1, min(int(n_avg), 1024))
     # sim mode averages freely (n_avg x8); real is shot-noise-limited (n_avg).
     n_eff = int(n_avg) * (8 if source == "sim" else 1)
     sens_ut = (lw * 1e6) / (2.0 * prof.gyromagnetic_ratio) * 1e6 / math.sqrt(

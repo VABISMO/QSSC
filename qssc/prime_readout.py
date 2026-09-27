@@ -209,7 +209,11 @@ def prime_decompose(signal: np.ndarray, tau_ns: float,
         usable = n_cycles * period
         t = np.arange(usable)
         ref = np.cos(2.0 * np.pi * t / period)
-        out[p] = 2.0 * float(np.dot(s[:usable], ref) / usable)
+        # p==2: cos(pi*t) = +-1, so sum cos^2 = usable (not usable/2) -> the
+        # uniform 2x normalization over-counts the amplitude by 2. Use factor
+        # 1 for p==2 to match lockin_iq_result's p==2 branch (audit #158).
+        factor = 2.0 if p > 2 else 1.0
+        out[p] = factor * float(np.dot(s[:usable], ref) / usable)
     return out
 
 
