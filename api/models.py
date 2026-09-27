@@ -224,7 +224,7 @@ class CalibrateArrayRequest(BaseModel):
 
 class ScriptRequest(BaseModel):
     name: str
-    code: str
+    code: str = Field(..., max_length=100_000)  # bound the stored blob (audit #107)
     id: Optional[str] = None
 
 

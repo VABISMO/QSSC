@@ -383,6 +383,15 @@ module top_level (
     assign mw_gate = mw_gate_r;
 
     // ---- 25 MHz reference clock for ADF4351 (100 MHz / 4) ------------------
+    // The 2-bit counter divides clk_100mhz by 4. The divided edge is forwarded
+    // to the A8 REF_IN pin through an ODDR2 on the N-side MRCC pair so REF_IN
+    // sees a low-jitter edge via the dedicated clock-forwarding IOB path,
+    // not a plain fabric flop through general routing (audit #110). The
+    // division ratio is unchanged; the improvement is edge placement / jitter
+    // on the ADF4351 PFD reference (directly lowers RF phase noise).
+`ifdef FAST_SIM
+    // iverilog has no ODDR2 primitive -> use the plain fabric assign for the
+    // self-checking testbench (functionally identical, no timing implication).
     reg [1:0] refclk_div;
     initial refclk_div = 2'd0;
     always @(posedge clk_100mhz) begin
@@ -390,4 +399,17 @@ module top_level (
         else            refclk_div <= refclk_div + 2'd1;
     end
     assign refclk_out = refclk_div[1];
+`else
+    reg [1:0] refclk_div;
+    initial refclk_div = 2'd0;
+    always @(posedge clk_100mhz) begin
+        if (reset_sync) refclk_div <= 2'd0;
+        else            refclk_div <= refclk_div + 2'd1;
+    end
+    wire refclk_25m = refclk_div[1];
+    ODDR2 #(.DDR_ALIGNMENT("C0"), .INIT(1'b0), .SRTYPE("SYNC")) refclk_oddr (
+        .C0 (clk_100mhz), .C1 (~clk_100mhz), .CE (1'b1),
+        .D0 (refclk_25m), .D1 (refclk_25m),
+        .R  (reset_sync), .S  (1'b0), .Q (refclk_out));
+`endif
 endmodule

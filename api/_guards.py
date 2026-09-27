@@ -103,11 +103,35 @@ def _req_dict(model) -> dict:
 # ---------------------------------------------------------------------------
 
 def _client_ip(request: Request) -> str:
-    # trust the first hop only when a proxy (Render) sets the header
+    # The RIGHTMOST X-Forwarded-For entry is the one the immediate trusted
+    # proxy appended (the real client IP); the LEFTMOST is client-controlled
+    # and spoofable -- a public attacker rotating the leftmost value used to
+    # get a fresh _rate_buckets entry per request and never trip the 20/min
+    # limit. Honour XFF only when the immediate peer is a trusted proxy
+    # (loopback, or a CIDR the operator set in QSSC_TRUSTED_PROXY_CIDR); a
+    # DIRECT public client's XFF is fully forged, so fall back to the
+    # connection peer (audit #105). For a localhost lab tool the rate limit
+    # is best-effort regardless -- this just stops trivial XFF spoofing on a
+    # public deploy.
+    peer = request.client.host if request.client else ""
     fwd = request.headers.get("x-forwarded-for", "")
-    if fwd:
-        return fwd.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    if fwd and (_is_local(request) or _is_trusted_proxy(peer)):
+        rightmost = fwd.split(",")[-1].strip()
+        if rightmost:
+            return rightmost
+    return peer or "unknown"
+
+
+def _is_trusted_proxy(peer: str) -> bool:
+    """True if the immediate peer is in the operator-configured proxy CIDR."""
+    cidr = os.environ.get("QSSC_TRUSTED_PROXY_CIDR", "").strip()
+    if not peer or not cidr:
+        return False
+    import ipaddress
+    try:
+        return ipaddress.ip_address(peer) in ipaddress.ip_network(cidr, strict=False)
+    except ValueError:
+        return False
 
 
 def _is_local(request: Request) -> bool:
@@ -166,6 +190,31 @@ def _check_custom_circuit(request: Request) -> None:
         raise HTTPException(
             401, "A valid X-API-Key header is required for the custom-circuit endpoint.",
         )
+
+
+def _check_write(request: Request) -> None:
+    """Gate destructive / persistence endpoints (delete_job, save_script,
+    delete_script) so a public deploy can't be griefed (history wiped or
+    Mongo filled with unbounded scripts). Allowed from localhost (the lab
+    tool's normal use) OR with the custom-circuit ``X-API-Key`` (audit #107).
+    Read endpoints (list_scripts, get_job) stay open."""
+    from api import main as _m
+    if _is_local(request):
+        return
+    key = _m.CUSTOM_CIRCUIT_API_KEY
+    if key and request.headers.get("x-api-key", "") == key:
+        return
+    if key:
+        raise HTTPException(
+            401, "A valid X-API-Key header is required for this write endpoint "
+                 "from a non-localhost peer.",
+        )
+    # No key configured: block the write from a non-localhost peer rather
+    # than leave it open on a public deploy.
+    raise HTTPException(
+        403, "This write endpoint is localhost-only on this deployment "
+             "(set CUSTOM_CIRCUIT_API_KEY to enable X-API-Key access).",
+    )
 
 
 def _clamp_points(points: int, lo: int = 1, hi: int = 2000) -> int:
