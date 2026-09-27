@@ -605,8 +605,25 @@ export default function App() {
     } catch (e) { setParErr(e.message); setParRunning(false); setParJob(null) }
   }
 
-  const loadFromHistory = (rec) => {
-    setResult(rec.result || null)
+  const loadFromHistory = async (rec) => {
+    // Fetch the FULL job record -- list_jobs excludes `result`/`code`, so the
+    // list row only carries the summary fields. Without this the loaded
+    // result is null and the Hardware tab shows nothing.
+    let full = rec
+    if (rec && rec.job_id) {
+      try { full = await api.job(rec.job_id) } catch (e) { full = rec }
+    }
+    const r = (full && full.result) || null
+    // Restore the algorithm BEFORE the derivation runs. deriveMeasurement uses
+    // the current `algo` state, so a loaded Shor result rendered with the
+    // dropdown still on 'bell' would show the bell derivation over Shor counts
+    // (audit #104). summary.algorithm (set at enqueue) is the source of
+    // truth; only restore it for single-circuit algos -- parallel-* /
+    // calibrate-array records carry a parRun / calibration, not a circuit
+    // result, so the dropdown is left untouched for those.
+    const savedAlgo = (r && r.algorithm) || (full && full.algorithm)
+    if (savedAlgo && ALGOS.includes(savedAlgo)) setAlgo(savedAlgo)
+    setResult(r)
     setRunErr(null)
     setJob(null)
     setMainTab('hardware')

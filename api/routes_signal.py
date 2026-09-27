@@ -165,7 +165,10 @@ def signal_array(profile: str = "NV", temperature_k: float = 300.0,
 
     # Hardware mode without a board returns no-fpga-detected (no silent sim).
     # A real per-pixel trace needs 64 serial RUN_SEQUENCE round trips and is not
-    # wired here; with a board the sim model is returned and labelled as such.
+    # wired here; even with QSSC_FPGA_PORT set this endpoint returns the SIM
+    # model (it never opens a board connection), so the source label must say
+    # "simulated" -- stamping it "hardware" when no board was touched would
+    # mislead an operator debugging a dead channel (audit #103).
     if hardware:
         port = os.getenv("QSSC_FPGA_PORT", "").strip()
         if not port:
@@ -288,5 +291,8 @@ def signal_array(profile: str = "NV", temperature_k: float = 300.0,
         "gate_duty": duty, "n_gates": n_gates,
         "fired": fired, "received": received,
         "pixels": pixels, "summary": summary,
-        "source": "hardware" if (hardware and os.getenv("QSSC_FPGA_PORT", "").strip()) else "simulated",
+        # The 64-serial RUN_SEQUENCE hardware path is not wired here, so this
+        # endpoint always returns the sim model -- never claim "hardware"
+        # when no board was touched (audit #103).
+        "source": "simulated",
     }
