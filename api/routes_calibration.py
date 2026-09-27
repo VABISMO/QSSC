@@ -224,58 +224,67 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
                                 temperature_k=temperature_k, seed=seed)
         except NoFPGADetected as exc:
             return {"error": "no-fpga-detected", "message": str(exc)}
-        em = EmitterController(fpga)
-        det = DetectorInterface(fpga)
-        mw = MicrowaveController(fpga)
-        n_sites = grid * grid
-        # Cap the real sweep small — one serial round-trip per point.
-        points = max(4, min(_clamp_points(points), 64))
+        try:
+            em = EmitterController(fpga)
+            det = DetectorInterface(fpga)
+            mw = MicrowaveController(fpga)
+            n_sites = grid * grid
+            # Cap the real sweep small — one serial round-trip per point.
+            points = max(4, min(_clamp_points(points), 64))
 
-        # Stage 1 — real detector-array scan: arm every channel, fire in
-        # parallel, read all 64 ADC codes in one simultaneous-sampling reply.
-        em.clear_emitters()
-        for idx in range(n_sites):
-            em.set_emitter(idx, 4095)
-        em.drive_pattern(50)
-        codes = det.read_all()[:n_sites]
-        response = codes.reshape(grid, grid).astype(np.float64)
-        threshold = DETECT_THRESHOLD
-        n_detected = int(np.count_nonzero(response > threshold))
+            # Stage 1 — real detector-array scan: arm every channel, fire in
+            # parallel, read all 64 ADC codes in one simultaneous-sampling reply.
+            em.clear_emitters()
+            for idx in range(n_sites):
+                em.set_emitter(idx, 4095)
+            em.drive_pattern(50)
+            codes = det.read_all()[:n_sites]
+            response = codes.reshape(grid, grid).astype(np.float64)
+            threshold = DETECT_THRESHOLD
+            n_detected = int(np.count_nonzero(response > threshold))
 
-        # Stage 2 — auto-align is host geometry, identical to the sim path.
-        sites = auto_align(prof, grid=grid, temperature_k=temperature_k, rng=rng)
-        aligned = [{"qubit_id": s.qubit_id, "row": s.row, "col": s.col,
-                    "x_um": round(s.x_um, 2), "y_um": round(s.y_um, 2),
-                    "intensity": round(s.intensity, 1)} for s in sites]
+            # Stage 2 — auto-align is host geometry, identical to the sim path.
+            sites = auto_align(prof, grid=grid, temperature_k=temperature_k, rng=rng)
+            aligned = [{"qubit_id": s.qubit_id, "row": s.row, "col": s.col,
+                        "x_um": round(s.x_um, 2), "y_um": round(s.y_um, 2),
+                        "intensity": round(s.intensity, 1)} for s in sites]
 
-        # Stage 3 — real ODMR sweep + fit D (same doublet-midpoint fit as sim).
-        # Program the gradient coil BEFORE the sweep so the ODMR
-        # lines spread by grad_spread_mhz; widen the sweep span to cover them.
-        # Track whether the board actually accepted the gradient (G6): a failed
-        # write must not abort the sweep, but the response must NOT claim the
-        # gradient was applied when it was not -- the register-width measurement
-        # is only valid at the applied gradient.
-        gradient_applied_ok = False
-        if grad_code > 0:
-            try:
-                fpga.send_command(f"SET_GRADIENT {grad_code}")
-                gradient_applied_ok = True
-            except Exception as exc:
-                gradient_applied_ok = False  # do not abort the sweep
-                logger.debug("gradient coil write failed: %s", exc)
-        f0 = prof.d_ghz
-        span = max(0.08, abs(prof.hyperfine_coupling) / 1e9 * prof.n_equivalent_nuclei * 1.15 + 0.03)
-        span = max(span, grad_spread_mhz / 1e3 + 0.04)
-        f, c = _real_odmr_sweep(mw, det, f0, span, points, site=0)
-        em.clear_emitters()
-        io_label = "real"
-        # Stage 4 is now MEASURED on-hardware: the per-pin Ramsey/Hahn T2/T2*
-        # coherence fit runs RUN_SEQUENCE on the real board and the host fits
-        # the fringe envelope decay (see the per-pin loop below). The per-pin
-        # resonance *frequency* still comes from the stage-3 ODMR fit (a
-        # per-pin ODMR sweep is a later refinement); the T2/T2* numbers are
-        # real measurements, so label them measured, not model-estimated.
-        stage4_source = "measured (Ramsey/Hahn via RUN_SEQUENCE)"
+            # Stage 3 — real ODMR sweep + fit D (same doublet-midpoint fit as sim).
+            # Program the gradient coil BEFORE the sweep so the ODMR
+            # lines spread by grad_spread_mhz; widen the sweep span to cover them.
+            # Track whether the board actually accepted the gradient (G6): a failed
+            # write must not abort the sweep, but the response must NOT claim the
+            # gradient was applied when it was not -- the register-width measurement
+            # is only valid at the applied gradient.
+            gradient_applied_ok = False
+            if grad_code > 0:
+                try:
+                    fpga.send_command(f"SET_GRADIENT {grad_code}")
+                    gradient_applied_ok = True
+                except Exception as exc:
+                    gradient_applied_ok = False  # do not abort the sweep
+                    logger.debug("gradient coil write failed: %s", exc)
+            f0 = prof.d_ghz
+            span = max(0.08, abs(prof.hyperfine_coupling) / 1e9 * prof.n_equivalent_nuclei * 1.15 + 0.03)
+            span = max(span, grad_spread_mhz / 1e3 + 0.04)
+            f, c = _real_odmr_sweep(mw, det, f0, span, points, site=0)
+            em.clear_emitters()
+            io_label = "real"
+            # Stage 4 is now MEASURED on-hardware: the per-pin Ramsey/Hahn T2/T2*
+            # coherence fit runs RUN_SEQUENCE on the real board and the host fits
+            # the fringe envelope decay (see the per-pin loop below). The per-pin
+            # resonance *frequency* still comes from the stage-3 ODMR fit (a
+            # per-pin ODMR sweep is a later refinement); the T2/T2* numbers are
+            # real measurements, so label them measured, not model-estimated.
+            stage4_source = "measured (Ramsey/Hahn via RUN_SEQUENCE)"
+        finally:
+            # Every hardware route closes its FPGA handle in a finally
+            # (api_gyro / api_signal / api_tensor). connect_fpga returns a NEW
+            # FPGAConnection per call (not the runner cache), so without this
+            # the /dev/ttyUSB0 handle leaks on every calibration request AND on
+            # any mid-sweep exception -- the next calibration then fails with a
+            # spurious NoFPGADetected.
+            fpga.close()
     else:
         # Simulator path -------------------------------------------------
         points = _clamp_points(points)

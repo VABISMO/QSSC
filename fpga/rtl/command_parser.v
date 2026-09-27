@@ -92,6 +92,7 @@ module command_parser #(
     output reg [31:0] pll_freq_khz,
     output reg        pll_phase_only,   // 1 = R1-only phase step (no re-lock)
     input             pll_busy,
+    input             pll_locked,   // ADF4351 MUXOUT digital lock-detect (synced+deglitched in top_level)
     // ADC reader (64-ch parallel readout via 4x AD7616; same handshake the
     // photon_counter_array used, but `det_code` is a 16-bit intensity sample)
     output reg        det_read_one,
@@ -322,6 +323,14 @@ module command_parser #(
     reg        pll_busy_seen;
     reg        em_busy_seen;
     reg        grad_busy_seen;
+
+    // Settle budget for the PLL lock wait (issue #98): after the SPI sequencer
+    // finishes (!pll_busy), count up to SETTLE_TIMEOUT (5 ms @ 100 MHz) waiting
+    // for the real ADF4351 lock-detect (pll_locked). Arm the RF gate on lock OR
+    // timeout -- the timeout is the fallback if MUXOUT is unwired, so the design
+    // still runs (at a 5 ms/point cost) without the lock signal.
+    localparam [19:0] SETTLE_TIMEOUT = 20'd500_000;   // 5 ms at 100 MHz
+    reg [19:0] settle_cnt;
 
     // ---- Calibration helpers ----------------------------------------------
     reg [15:0] cal_max_code;
@@ -838,6 +847,7 @@ module command_parser #(
         grad_dac_value = 12'd0;
         grad_dac_load  = 1'b0;
         pll_busy_seen  = 1'b0;
+        settle_cnt     = 20'd0;
         rng_harvest_en = 1'b0;
         rng_flush      = 1'b0;
         rng_word_buf   = 32'd0;
@@ -1001,6 +1011,7 @@ module command_parser #(
             grad_dac_value <= 12'd0;
             grad_dac_load  <= 1'b0;
             pll_busy_seen  <= 1'b0;
+            settle_cnt     <= 20'd0;
             rng_harvest_en <= 1'b0;
             rng_flush      <= 1'b0;
             rng_word_buf   <= 32'd0;
@@ -1478,6 +1489,7 @@ module command_parser #(
                                 mw_gate_ns   <= arg_vals[3];       // -> gate timer
                                 pll_start    <= 1'b1;
                                 pll_busy_seen <= 1'b0;
+                                settle_cnt   <= 20'd0;
                                 fsm          <= S_PULSE_WAIT;     // wait PLL, then gate
                             end
                         end
@@ -1552,13 +1564,13 @@ module command_parser #(
                         CMD_STATUS : begin
                             // STATUS -> "PLL_LOCKED <0/1> ADC_BUSY <0/1>
                             // VCC3V3_mv 3300 VCC5V_mv 4980 VCC12V_mv 12050
-                            // TEMP_C 25\n". PLL_LOCKED = !pll_busy (idle =>
-                            // settled; the ADF4351 MUXOUT lock-detect is a
-                            // future refinement), ADC_BUSY = det_busy. The rail
-                            // voltages are static nominal mV (no voltage-monitor
-                            // ADC fitted); TEMP_C is a 25 C placeholder (no XADC
-                            // in this build).
-                            status_pll_dig <= pll_busy ? 8'h30 : 8'h31;
+                            // TEMP_C 25\n". PLL_LOCKED is the REAL ADF4351
+                            // lock-detect (pll_locked, synced+deglitched MUXOUT
+                            // from top_level, issue #98), NOT just SPI-idle.
+                            // ADC_BUSY = det_busy. The rail voltages are static
+                            // nominal mV (no voltage-monitor ADC fitted); TEMP_C
+                            // is a 25 C placeholder (no XADC in this build).
+                            status_pll_dig <= pll_locked ? 8'h31 : 8'h30;
                             status_adc_dig <= det_busy  ? 8'h31 : 8'h30;
                             str_idx        <= 7'd0;
                             fsm            <= S_STATUS_SEND;
@@ -1895,7 +1907,14 @@ module command_parser #(
                 // the RF switch does not open onto a still-unlocked carrier.
                 S_PULSE_WAIT : begin
                     if (pll_busy)        pll_busy_seen <= 1'b1;
-                    if (pll_busy_seen && !pll_busy) begin
+                    settle_cnt <= settle_cnt + 20'd1;   // settle budget (from dispatch)
+                    // SPI shifts done (!pll_busy) -- now wait for the REAL PLL
+                    // lock-detect (pll_locked, ADF4351 MUXOUT) OR a 5 ms settle
+                    // timeout before arming the RF gate. Arming on !pll_busy
+                    // alone fires MW while the VCO is still slewing -> wrong-freq
+                    // MW for the first ~ms -> missing ODMR dips (issue #98).
+                    if (pll_busy_seen && !pll_busy &&
+                        (pll_locked || settle_cnt >= SETTLE_TIMEOUT)) begin
                         mw_gate_load <= 1'b1;
                         reply_ok     <= 1'b1;
                         fsm          <= S_REPLY_LOAD;
@@ -2057,16 +2076,21 @@ module command_parser #(
                     pll_rf_pwr     <= 2'd0;
                     pll_start      <= 1'b1;
                     sweep_pll_seen <= 1'b0;
+                    settle_cnt     <= 20'd0;
                     fsm            <= S_SWEEP_PLL;
                 end
 
                 // Wait for PLL busy to assert then deassert (rising then done),
                 // then arm the RF gate ONLY (the read fires on the gate rise so
-                // the fresh sample is taken DURING the 200 us RF pulse).
+                // the fresh sample is taken DURING the 200 us RF pulse). The gate
+                // arms only once the real PLL lock-detect asserts OR the 5 ms
+                // settle timeout expires (issue #98).
                 S_SWEEP_PLL : begin
                     if (pll_busy)
                         sweep_pll_seen <= 1'b1;
-                    if (sweep_pll_seen && !pll_busy) begin
+                    settle_cnt <= settle_cnt + 20'd1;
+                    if (sweep_pll_seen && !pll_busy &&
+                        (pll_locked || settle_cnt >= SETTLE_TIMEOUT)) begin
                         mw_gate_load  <= 1'b1;        // arm the ODMR gate (mw_gate_ns set at dispatch)
                         gate_seen     <= 1'b0;
                         seq_wdog      <= 32'd0;
@@ -2189,14 +2213,18 @@ module command_parser #(
                     pll_rf_pwr     <= 2'd0;
                     pll_start      <= 1'b1;
                     sweep_pll_seen <= 1'b0;
+                    settle_cnt     <= 20'd0;
                     fsm            <= S_ASWEEP_PLL;
                 end
 
-                // Wait for PLL busy to assert then deassert, then arm the RF gate.
+                // Wait for PLL busy to assert then deassert, then arm the RF gate
+                // (on real lock-detect OR the 5 ms settle timeout -- issue #98).
                 S_ASWEEP_PLL : begin
                     if (pll_busy)
                         sweep_pll_seen <= 1'b1;
-                    if (sweep_pll_seen && !pll_busy) begin
+                    settle_cnt <= settle_cnt + 20'd1;
+                    if (sweep_pll_seen && !pll_busy &&
+                        (pll_locked || settle_cnt >= SETTLE_TIMEOUT)) begin
                         mw_gate_load  <= 1'b1;        // arm the ODMR gate
                         gate_seen     <= 1'b0;
                         seq_wdog      <= 32'd0;

@@ -156,7 +156,39 @@ module top_level (
 
     // spi_pins: [0]=LE, [1]=CLK, [2]=DATA (FPGA->PLL), [3]=MUXOUT (PLL->FPGA)
     wire spi_le, spi_sclk, spi_mosi;
-    wire spi_muxout = spi_pins[3];
+
+    // ADF4351 digital lock-detect (R2 MUXOUT=001, HIGH when locked): synchronise
+    // the async pin to sys_clk (2-FF) then deglitch -- require LOCK_DEGLITCH
+    // consecutive high samples before declaring the PLL locked. The pulse/sweep
+    // FSMs in command_parser wait for pll_locked (OR a 5 ms settle timeout)
+    // before arming the RF gate so MW never fires onto a still-slewing VCO
+    // (issue #98: arming on !pll_busy alone fired MW while the VCO was slewing
+    // -> wrong-frequency MW for the first ~ms of every point -> missing ODMR
+    // dips, board looks dead). If MUXOUT is unwired the signal stays low and the
+    // FSM's settle-timeout fallback still lets the design run (at 5 ms/point).
+    wire        pll_lock_pin = spi_pins[3];
+    reg         pll_lock_s1, pll_lock_s2;
+    reg [15:0]  pll_lock_glitch_cnt;
+    reg         pll_locked_r;
+    localparam [15:0] LOCK_DEGLITCH = 16'd256;     // 2.56 us at 100 MHz
+    always @(posedge clk_100mhz) begin
+        if (peri_rst) begin
+            pll_lock_s1         <= 1'b0;
+            pll_lock_s2         <= 1'b0;
+            pll_lock_glitch_cnt <= 16'd0;
+            pll_locked_r        <= 1'b0;
+        end else begin
+            pll_lock_s1 <= pll_lock_pin;
+            pll_lock_s2 <= pll_lock_s1;
+            if (pll_lock_s2)
+                pll_lock_glitch_cnt <= (pll_lock_glitch_cnt == LOCK_DEGLITCH)
+                                       ? LOCK_DEGLITCH : pll_lock_glitch_cnt + 16'd1;
+            else
+                pll_lock_glitch_cnt <= 16'd0;
+            pll_locked_r <= (pll_lock_glitch_cnt == LOCK_DEGLITCH);
+        end
+    end
+    wire pll_locked = pll_locked_r;
 
     spi_master #(.CLK_DIV(4)) spi_inst (
         .clk     (clk_100mhz),
@@ -325,6 +357,7 @@ module top_level (
         .pll_freq_khz     (pll_freq_khz),
         .pll_phase_only   (pll_phase_only),
         .pll_busy         (pll_busy),
+        .pll_locked       (pll_locked),
         .det_read_one     (det_read_one),
         .det_read_all     (det_read_all),
         .det_clear        (det_clear),

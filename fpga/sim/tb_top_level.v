@@ -69,6 +69,13 @@ module tb_top_level;
     wire        mw_gate;
     wire [3:0]  spi_pins;
     wire        refclk_out;
+    // ADF4351 MUXOUT digital lock-detect: the sim models the PLL as locking
+    // immediately (the old RTL armed on !pll_busy alone), so drive spi_pins[3]
+    // HIGH to assert pll_locked via the 2-FF + deglitch path in top_level
+    // (issue #98). Without this the pulse/sweep FSMs fall back to the 5 ms
+    // settle-timeout per point and the sim slows ~500x. The FPGA never drives
+    // spi_pins[3] (it is an input), so this is the sole driver.
+    assign spi_pins[3] = 1'b1;
     // Gradient coil DAC (Invention 5): 3-wire SPI + enable.
     wire        grad_cs;
     wire        grad_sclk;

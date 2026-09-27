@@ -320,7 +320,7 @@ two-board sandwich.
 | 17 | main  | Master clock oscillator          | Y1       | 100 MHz TCXO ±2.5 ppm          | 1   | FPGA master clock; divided to 25 MHz (ADF4351 REF)             | SMD 3225/5032                 | TCXO for stability |
 | 18 | main  | 3.3 V LDO                        | REG1     | AMS1117-3.3                    | 1   | 3.3 V rail: I/O, ADF4351, FT232, head via J12                  | SOT-223                       | ≥1 A |
 | 19 | main  | 1.8 V LDO                        | REG2     | AMS1117-1.8                    | 1   | 1.8 V FPGA aux                                                 | SOT-223                       | ≥1 A |
-| 20 | main  | 1.0 V LDO                        | REG3     | AP2127K-1.0 (Diodes Inc)       | 1   | 1.0 V FPGA core (VCCINT)                                       | SOT-23-5                      | AMS1117 has NO 1.0 V option; AP2127K-1.0 600 mA |
+| 20 | main  | 1.0 V LDO                        | REG3     | AP2127K-1.0 (Diodes Inc)       | 1   | 1.0 V FPGA core (VCCINT)                                       | SOT-23-5                      | AMS1117 has NO 1.0 V option; AP2127K-1.0 600 mA — MARGINAL at 56% LUT / 93% CARRY4 (see §3): upsize to ≥1 A or verify post-P&R power <500 mA; C87 47 µF VCCINT bulk required |
 | 21 | main  | USB-UART bridge                  | J1/J10   | USB-C (GCT USB4105) + FT232RL  | 1   | PC serial link + 5 V VBUS                                       | USB-C 16P / SSOP-28           | FT232RL SSOP-28; USB-C UFP with R71/R72 5.1 k on CC1/CC2 |
 | 22 | main  | Config flash (FPGA boot)        | U8       | W25Q128JVSIQ (Winbond)         | 1   | Artix-7 QSPI x4 config boot (`SPI_BUSWIDTH 4`)                 | SOIC-8 3.9×4.9 mm             | CS/CLK/DIO0-3 → FPGA config balls; HOLD/WP pulled to +3V3 |
 | 23 | main  | Power connector                  | J2       | Barrel 5.5×2.1 mm              | 1   | 5 VDC input (alternative to USB-C VBUS)                         | PJ-102AH (CUI)                | 5 V 3 A source |
@@ -395,7 +395,7 @@ both rails cross J12 from the main board.
 |-------|------|-----------|--------------------------------------|-------|
 | 3.3 V | REG1 | ±3%       | FPGA VCCO, ADF4351, FT232, +3V3 to head via J12 (TIA VDRIVE) | Main I/O rail, ≥1 A; also feeds the head front-end |
 | 1.8 V | REG2 | ±3%       | FPGA VCCAUX / VCCAUX_IO              | ≥1 A |
-| 1.0 V | REG3 | ±3%       | FPGA VCCINT (core)                   | AP2127K-1.0 600 mA; XC7A35T VCCINT peak well under that (synth uses ~10% of LUTs) |
+| 1.0 V | REG3 | ±3%       | FPGA VCCINT (core)                   | AP2127K-1.0 600 mA — MARGINAL: post-P&R synth is 56% LUT / 93% CARRY4 (not the "10% of LUTs" this row once claimed) and the power estimate below is VCCINT ~0.5–0.7 A. Upsize to a ≥1 A 1.0 V LDO (or a tiny buck) OR verify the Vivado post-P&R power report is comfortably <500 mA before commit. The 47 µF VCCINT bulk cap C87 (see Decoupling) is REQUIRED for transient margin. |
 | 5.0 V | (barrel) | ±—    | FB1 input (+5V_RF filter) | ≥1 A; no longer powers the emitter driver (moved to +12V_EMIT) |
 | +5V_RF | FB1 (filter) | — | GVA-84+ RF amplifier | π-filtered from +5V; not a regulator |
 | +12V_EMIT | J4 (barrel) / F2 | ±— | 64 CQD emitter common anode (EM_ANODE) | Separate 12 V LED supply; CQD EL turn-on 4–8 V > 5 V; TLC5947 OUT tolerates 33 V; 64×10 mA full-on ≈ 640 mA, F2 1 A PTC |
@@ -417,7 +417,11 @@ sequence on this board is:
 **Decoupling.** Each VCC/GND pin pair of every IC gets a 100 nF X7R (C1–C20)
 within 3 mm. Bulk 10 µF (C21–C30) sits at each regulator output and at the FPGA
 VCCINT/VCCAUX/VCCO banks. The 1.0 V rail to the FPGA core additionally gets a
-22 µF–47 µF tantalum/ceramic near the BGA for transient supply. Each of the 32
+22 µF–47 µF tantalum/ceramic near the BGA for transient supply — **C87, 47 µF
+X7R 1206, placed under the BGA at the VCCINT balls** (required: the AP2127K-1.0
+600 mA LDO has marginal headroom at the real 56% LUT / 93% CARRY4 utilization;
+the 4.7 µF C54 alone is not enough bulk for core transients during config /
+64-channel switching). Each of the 32
 front-end ICs (16× TLV9004 TIA, 4× AD7616 ADC, on the head board) gets its
 own 100 nF decoupling (`Cut{j}` for the TIAs, `Cua{j}`/`CuaB`/`Cud`/`Cur` for
 the AD7616 analog/digital/ref rails); the 3× TLC5947 each get 100 nF on +3V3
@@ -427,7 +431,11 @@ at the die fanout.
 **Power estimation (rough).** FPGA ~0.75–0.95 W total (VCCINT 1.0 V × ~0.5–0.7 A
 for the active logic + 16 k BRAM + 90 DSP at 100 MHz, + VCCAUX 1.8 V ~30 mA +
 VCCIO 3.3 V ~120 mA — the earlier 0.3–0.5 W figure was VCCINT-only and
-understated the dynamic current; see §15D F12), head front-end via J12 (~80 mA:
+understated the dynamic current; see §15D F12). **LDO margin:** 0.5–0.7 A vs the
+AP2127K-1.0's 600 mA rating leaves little headroom; before first power-up either
+upsize REG3 to a ≥1 A 1.0 V LDO / tiny buck, or confirm the Vivado post-P&R
+power report is comfortably <500 mA, and verify C87 (47 µF VCCINT bulk) is
+fitted. Head front-end via J12 (~80 mA:
 16× TLV9004 + 4× AD7616 ~5 mA each, plus 64 Rf — no pull-ups, no comparators),
 ADF4351 ~30 mA, GVA-84+ ~65 mA at 5 V, emitter driver ~10 mA/emitter at 12 V
 (one/few firing; 64×10 mA full-on ≈ 640 mA on the separate +12V_EMIT rail). The
