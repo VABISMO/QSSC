@@ -291,13 +291,17 @@ def test_lockin_iq_demod_cross_talk_orthogonality():
             ref_mag = float(np.hypot(int(ref_I), int(ref_Q)))
             leak = mag / ref_mag if ref_mag else 0.0
             worst = max(worst, leak)
-            # ROM-rounding orthogonality floor: ~0.02%, NOT the square-wave
-            # +-1/(p*q) floor (which for p=2,q=3 is ~17%).
-            assert leak < 1e-3, \
-                f"cross-talk p={p},q={q}: leak={leak:.4%} > 0.1%"
+            # ROM-rounding orthogonality floor: the documented guarantee is
+            # <0.02% (~330x better than the square-wave +-1/(p*q) floor which
+            # for p=2,q=3 is ~17%). Over a whole LCM the Python mirror is
+            # EXACTLY 0 (Fourier orthogonality holds even with the 12-bit
+            # quantised ROM); pin <2e-4 so a regression toward the old 6.67%
+            # square-wave residual cannot pass silently.
+            assert leak < 2e-4, \
+                f"cross-talk p={p},q={q}: leak={leak:.4%} > 0.02%"
     # the square-wave residual would be ~1/(p*q); for the smallest pair
     # p=2,q=3 that is ~16.7%. The IQ demod beats it by >100x.
-    assert worst < 1e-3
+    assert worst < 2e-4
 
 
 def test_lockin_iq_demod_dc_rejection():

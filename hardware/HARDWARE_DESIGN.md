@@ -9,11 +9,11 @@ graphene/MoS₂ photodetectors** (top face), both read/driven **fully in
 parallel** — no analog multiplexer, no serial sweep. **There are no discrete
 photodiodes;** the detector is the graphene/MoS₂ array. The die has **no
 through-silicon vias (TSVs)**, so each face is contacted by its own PCB:
-  - **Main board** (6-layer HDI 210×140 mm) below the die — FPGA + 3× TLC5947
+  - **Main board** (6-layer HDI 150×118 mm) below the die — FPGA + 3× TLC5947
     emitter driver + RF + USB + power + config flash, contacting the die BOTTOM
     (emitter) face on F.Cu through a soldered **Ironwood SBT spring-pin socket**
     (F.Cu + F.Paste + F.Mask; die removable).
-  - **Detector head** (6-layer 150×140 mm) above the die — 16× TLV9004 TIA +
+  - **Detector head** (6-layer 110×102 mm) above the die — 16× TLV9004 TIA +
     4× AD7616 ADC, contacting the die TOP (detector) face on B.Cu via ACF
     pressure contact (B.Cu + B.Mask, no B.Paste).
   - **J12 board-to-board connector** (2×10, 2.54 mm) joins the two boards and
@@ -81,15 +81,15 @@ Xilinx constraints are [`../fpga/constraints.xdc`](../fpga/constraints.xdc).
 ## 1. System Overview
 
 The design is **two PCBs sandwiching the die**:
-- **Main board** — a **6-layer HDI board** (210 × 140 mm) below the die,
+- **Main board** — a **6-layer HDI board** (150 × 118 mm) below the die,
   carrying the FPGA, the 64-channel emitter driver, the RF chain, power, USB
   and config flash, and contacting the die BOTTOM (emitter) face on F.Cu through
   a soldered **Ironwood SBT spring-pin socket** (F.Cu + F.Paste + F.Mask; die
   removable, emitter-down).
-- **Detector head** — a **6-layer board** (150 × 140 mm) above the die,
+- **Detector head** — a **6-layer board** (110 × 102 mm) above the die,
   carrying the 64-channel TIA front-end + 4× AD7616 ADC, and contacting the die
   TOP (detector) face on B.Cu via ACF pressure contact (no B.Paste). Head
-  origin = main origin + (60, 0) mm.
+  origin = main origin + (37, 12) mm.
 - **J12** — a 2×10 (2.54 mm) board-to-board connector joining the two boards,
   carrying the 9-wire AD7616 SPI (`adc_convst/sclk/miso/busy/resetn/cs0..3`) +
   GND/+3V3/+5V. Every SPI signal is GND-flanked for a clean return path.

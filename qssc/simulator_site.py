@@ -334,7 +334,15 @@ def simulate_odmr(profile: DefectProfile | str = "NV",
         nv_amp = 1.0
 
     contrast = np.ones_like(freqs_ghz)
-    sigma = linewidth_mhz * 1e6
+    # ``linewidth_mhz`` is the ODMR FWHM (callers -- e.g. sensors.compass_measure
+    # -- pass the profile ``odmr_linewidth_hz`` documented as FWHM).  Convert
+    # FWHM -> Gaussian sigma (2*sqrt(2*ln2) ~= 2.355), matching the ODMR line
+    # shape in simulator._odmr_sweep / _run_all_odmr and odmr_decompose (which
+    # all model the ODMR line as a Gaussian with FWHM = linewidth).  Using FWHM
+    # directly as sigma made the rendered compass / CLI ODMR curves 2.355x too
+    # wide (actual FWHM ~= 11.77 MHz instead of 5 MHz); the sensitivity maths
+    # use ``lw`` as FWHM directly and were already correct.
+    sigma = linewidth_mhz * 1e6 / (2.0 * math.sqrt(2.0 * math.log(2.0)))
     f_hz = freqs_ghz * 1e9
     for shift in shifts_hz:
         for ft in transitions:

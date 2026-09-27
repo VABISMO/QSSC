@@ -91,8 +91,9 @@ def modes():
              "hw": True, "badge": "fits current PCB (READ_DETECTORS)",
              "default": True,
              "description": "64-parallel readout via the run-parallel endpoint; "
-                            "independent per-pixel circuits need per-pixel MW "
-                            "(GitHub issue)."},
+                            "per-pixel frequency addressing uses the qssc-grad "
+                            "field gradient (one global MW antenna), not 64 "
+                            "per-pixel antennas (issue #77 closed)."},
         ],
     }
 

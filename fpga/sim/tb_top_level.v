@@ -436,7 +436,7 @@ module tb_top_level;
                      rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
         end
         // The AD7616 keeps sampling live, so the sample is still 1234 after
-        // "clear" -- this proves CLEAR_DETECTORS is an honest no-op on the ADC.
+        // "clear" -- this proves CLEAR_DETECTORS is a no-op on the ADC.
         rx_log_cnt = 0;
         cmd_bytes[0]="R";  cmd_bytes[1]="E";  cmd_bytes[2]="A";  cmd_bytes[3]="D";
         cmd_bytes[4]="_";  cmd_bytes[5]="D";  cmd_bytes[6]="E";  cmd_bytes[7]="T";

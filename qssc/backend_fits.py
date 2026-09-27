@@ -108,13 +108,24 @@ def _fit_gyro_from_codes(codes: np.ndarray, t_step_ns: int,
         rate_noise = math.degrees(float(READOUT_NOISE) / T_s)
         return _gyro_result_dict(0.0, rate_noise, t2_us, T_s * 1e6, n, trace)
     win = np.hanning(n)
+    # NOTE: a single-axis Ramsey fringe 0.5+0.5*cos(omega*t)*exp(-t/T2) is EVEN
+    # in t, so its FFT is real/even and the SIGN of omega is physically
+    # unrecoverable from one trace (rfftfreq returns only non-negative freqs and
+    # np.abs discards the phase, which for a cosine is 0/pi anyway -- it carries
+    # no sign). rate_dps below is therefore |rate|; recovering direction needs a
+    # quadrature / second-axis channel, not a sign extracted from this spectrum.
     Y = np.abs(np.fft.rfft(y * win))
     freqs = np.fft.rfftfreq(n, d=float(t_step_ns) * 1e-9)   # Hz
     peak = 1 + int(np.argmax(Y[1:])) if Y.size > 1 else 0
     f0_hz = float(freqs[peak]) if peak < freqs.size else 0.0
-    omega = 2.0 * math.pi * f0_hz                            # rad/s
-    rate_dps = math.degrees(omega)                           # Sagnac rate
-    fringe_amp = float(Y[peak]) / (n / 2.0) if Y.size > 1 else sigma
+    omega = 2.0 * math.pi * f0_hz                            # rad/s (>= 0)
+    rate_dps = math.degrees(omega)                           # Sagnac |rate|
+    # Hanning coherent gain is 0.5 (sum(window)/n), so the windowed FFT peak is
+    # half the rectangular-window peak -> divide by n/4 (not n/2) to recover the
+    # true fringe amplitude. This only feeds rate_noise (the uncertainty), not
+    # the rate; the old n/2 under-estimated fringe_amp ~2x -> rate_noise ~2x
+    # conservative.
+    fringe_amp = float(Y[peak]) / (n / 4.0) if Y.size > 1 else sigma
     phase_noise = sigma / max(fringe_amp, 1.0) / math.sqrt(n)
     rate_noise = math.degrees(phase_noise / T_s)
     return _gyro_result_dict(rate_dps, rate_noise, t2_us, T_s * 1e6, n, trace)

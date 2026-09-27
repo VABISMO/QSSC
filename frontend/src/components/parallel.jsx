@@ -3,6 +3,7 @@
 
 import React, { useState } from 'react'
 import { PixelGrid, RangeSlider } from './ui.jsx'
+import { NoiseBudget } from './physics.jsx'
 
 
 export function ParallelCalibCard({

@@ -292,6 +292,14 @@ export default function App() {
   const pollRef = useRef(null)
   const parPollRef = useRef(null)
   const arrCalibPollRef = useRef(null)
+  // Run-token guards: each poller captures its token at enqueue time and bails
+  // out of a stale in-flight poll if a newer Run started. Without this, a
+  // double-click on Run starts a new job (clearing the pending setTimeout) but
+  // the PREVIOUS in-flight api.job(OLD) can still resolve and call setJob /
+  // setResult with the OLD job's data, clobbering the NEW run's UI state.
+  const circuitRunToken = useRef(0)
+  const parRunToken = useRef(0)
+  const arrCalibRunToken = useRef(0)
   // clear any pending status-poll timeout on unmount so it can't fire a
   // setState on the unmounted component.
   useEffect(() => () => {
@@ -457,6 +465,7 @@ export default function App() {
 
   const runCircuit = async () => {
     if (pollRef.current) clearTimeout(pollRef.current)
+    const myRun = ++circuitRunToken.current
     setRunErr(null); setResult(null)
     setJob({ status: 'queued' })
     try {
@@ -479,6 +488,7 @@ export default function App() {
       const poll = async (n = 0) => {
         try {
           const rec = await api.job(jobId)
+          if (myRun !== circuitRunToken.current) return  // a newer Run started; drop this stale poll
           setJob({ job_id: jobId, status: rec.status })
           if (rec.status === 'finished') {
             setResult(rec.result || {})
@@ -535,6 +545,7 @@ export default function App() {
   // run inline), so the dashboard polls GET /api/jobs/{id} until finished.
   const calibrateArray = async (body) => {
     if (arrCalibPollRef.current) clearTimeout(arrCalibPollRef.current)
+    const myRun = ++arrCalibRunToken.current
     setArrCalibRunning(true); setArrCalibErr(null); setArrCalib(null)
     try {
       const enq = await api.calibrateArray(body)
@@ -546,6 +557,7 @@ export default function App() {
       const poll = async (n = 0) => {
         try {
           const rec = await api.job(jobId)
+          if (myRun !== arrCalibRunToken.current) return  // a newer calibration started; drop this stale poll
           if (rec.status === 'finished') {
             setArrCalib(rec.result || {})
             setArrCalibRunning(false)
@@ -570,6 +582,7 @@ export default function App() {
 
   const runParallel = async (body) => {
     if (parPollRef.current) clearTimeout(parPollRef.current)
+    const myRun = ++parRunToken.current
     setParRunning(true); setParErr(null); setParRun(null); setParJob({ status: 'queued' })
     try {
       const enq = await api.runParallel(body)
@@ -582,6 +595,7 @@ export default function App() {
       const poll = async (n = 0) => {
         try {
           const rec = await api.job(jobId)
+          if (myRun !== parRunToken.current) return  // a newer parallel run started; drop this stale poll
           setParJob({ job_id: jobId, status: rec.status })
           if (rec.status === 'finished') {
             setParRun(rec.result || {})

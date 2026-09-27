@@ -301,7 +301,7 @@ export default function FpgaTab() {
                 <pre className="mono qrng-hex">{qrng.entropy_hex}</pre>
                 <details style={{ marginTop: 8 }}>
                   <summary className="muted" style={{ cursor: 'pointer', fontSize: 12 }}>Ed25519 public key + X.509 certificate (PEM)</summary>
-                  <pre className="mono qrng-pem">{qrng.public_key_pem}\n{qrng.certificate_pem}</pre>
+                  <pre className="mono qrng-pem">{qrng.public_key_pem + '\n' + qrng.certificate_pem}</pre>
                 </details>
               </div>
             )}

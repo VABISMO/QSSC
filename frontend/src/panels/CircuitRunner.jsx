@@ -381,7 +381,7 @@ export default function CircuitRunner() {
 
               <div className="card">
                 <h2><span className="dot" />Qubit grid (8×8)</h2>
-                <div className="hint">Auto-aligned defect sites; each measured qubit lights up by its measured-|1⟩ probability across all shots.</div>
+                <div className="hint">Auto-aligned defect sites; the top measured bitstring lights up each cell by its bit value (not per-qubit |1⟩ marginals).</div>
                 {cal.data && cal.data.sites && (
                   <QubitGrid
                     sites={cal.data.sites}

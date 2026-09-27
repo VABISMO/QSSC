@@ -111,7 +111,7 @@ module command_parser #(
     // envelope (a real AWG/modulator does that); it sets the ADF4351 carrier
     // phase (R1 PHASE) and output power (R4 RF_PWR, 4 levels), and gates an
     // RF switch for the requested duration (mw_gate_ns -> mw_gate_load). This
-    // is the minimal honest FPGA MW path. Latched on APPLY_PULSE.
+    // is the minimal FPGA MW path. Latched on APPLY_PULSE.
     output reg [11:0] pll_phase,        // -> ADF4351 R1 PHASE
     output reg [1:0]  pll_rf_pwr,       // -> ADF4351 R4 RF_PWR (4 levels)
     output reg [31:0] mw_gate_ns,       // -> RF-switch gate timer (duration, ns)
