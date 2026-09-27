@@ -156,21 +156,47 @@ def _rate_limited(request: Request) -> bool:
     :mod:`api.main` namespace so a test ``monkeypatch.setattr(main_mod,
     "RATE_LIMIT_PER_MIN", ...)`` is honoured.
     """
+    from collections import deque
     from api import main as _m
     now = time.monotonic()
     ip = _client_ip(request)
-    bucket = _m._rate_buckets[ip]
+    # ``.get`` (not ``_rate_buckets[ip]``) so a defaultdict's default_factory
+    # is NOT triggered here -- we want to detect "no bucket yet" ourselves.
+    bucket = _m._rate_buckets.get(ip)
+    if bucket is not None:
+        # Trim expired entries BEFORE appending the current timestamp, so an IP
+        # that went silent for >60s has its bucket emptied and the dict key
+        # evicted (audit #129 -- the prior append-then-trim order left the
+        # just-appended entry in the deque, making `not bucket` always False
+        # and the eviction unreachable dead code).
+        while bucket and now - bucket[0] > 60.0:
+            bucket.popleft()
+        if not bucket:
+            del _m._rate_buckets[ip]
+            bucket = None
+    if bucket is None:
+        bucket = deque()
+        _m._rate_buckets[ip] = bucket
     bucket.append(now)
-    while bucket and now - bucket[0] > 60.0:
-        bucket.popleft()
     over = len(bucket) > _m.RATE_LIMIT_PER_MIN
-    # Evict the per-IP KEY once its deque is empty so a public deploy with
-    # many distinct client IPs does not grow _rate_buckets without bound
-    # (the deques are trimmed above, but the dict keys were never removed,
-    # audit #123). uvicorn is single-threaded so no lock is needed.
-    if not bucket:
-        del _m._rate_buckets[ip]
+    # Bounded periodic sweep: an IP that hits once and never returns still
+    # leaves a dict key (the trim above only runs on that IP's NEXT request,
+    # which never comes). Every _SWEEP_EVERY-th call, drop keys whose newest
+    # entry is older than 60s so a public deploy with many rotating IPs does
+    # not grow _rate_buckets without bound (audit #129). Amortized O(1).
+    _m._rate_calls = getattr(_m, "_rate_calls", 0) + 1
+    if _m._rate_calls & _SWEEP_MASK == 0:
+        stale = [k for k, b in _m._rate_buckets.items()
+                 if not b or now - b[-1] > 60.0]
+        for k in stale:
+            del _m._rate_buckets[k]
     return over
+
+
+# Sweep the per-IP rate-limit dict every 128th call (a power of two so the
+# `& _SWEEP_MASK == 0` test is a cheap bitmask). Bounds the sweep cost while
+# still evicting silent IPs within ~128 requests of any caller.
+_SWEEP_MASK = 0x7F
 
 
 def _check_sync(request: Request, sync: bool) -> None:

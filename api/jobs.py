@@ -155,9 +155,27 @@ def _current_status(job_id: str):
 # --- worker entrypoints (executed by `rq worker`, or in-process fallback) ----
 
 # Secret fields a qrand run produces. These are stripped from the result before
-# it is persisted to MongoDB / the fallback store and held in _secret_store for
-# one-time delivery on the first finished-status poll.
+# it is persisted to MongoDB / the fallback store and held for one-time
+# delivery on the first finished-status poll.
 _SECRET_FIELDS = ("private_key_pem", "symmetric_key_hex")
+
+# When the RQ worker (Redis up) runs the job it is a SEPARATE PROCESS from the
+# API, so a process-local ``_secret_store`` is invisible to the API's
+# ``get_job`` -> the private key is never delivered (audit #128). Store the
+# one-time secret in Redis instead (localhost, TTL=JOB_TIMEOUT_S) so the API
+# process can atomically pop it on the first finished poll. The in-process
+# fallback (Redis down) keeps using ``_secret_store`` (same process). The Mongo
+# record never carries the secret (it is stripped here, before ``_record``).
+_SECRET_REDIS_PREFIX = "qssc:secret:"
+# Atomic one-time pop: GET the value then DEL it in one Redis round-trip so two
+# concurrent finished-polls cannot both receive the secret. Works on any Redis
+# version (no GETDEL requirement).
+_SECRET_POP_LUA = """
+local v = redis.call('GET', KEYS[1])
+if v then redis.call('DEL', KEYS[1]) end
+return v
+"""
+_secret_pop_script = None  # registered lazily on first use (needs a connection)
 
 
 def _stash_secrets(job_id: str, result: dict) -> None:
@@ -165,10 +183,18 @@ def _stash_secrets(job_id: str, result: dict) -> None:
     (in-place on ``result``). Non-qrand results are a no-op.
 
     Undelivered secrets (a qrand job whose result is never polled) are evicted
-    after ``JOB_TIMEOUT_S`` via a one-shot timer so private keys do not live
-    in memory longer than necessary (audit #120)."""
+    after ``JOB_TIMEOUT_S`` -- via Redis TTL (RQ path) or a one-shot timer
+    (in-process fallback) -- so private keys do not live in memory longer than
+    necessary (audit #120, #128)."""
     secrets = {f: result.pop(f) for f in _SECRET_FIELDS if f in result}
-    if secrets:
+    if not secrets:
+        return
+    conn = _get_redis()
+    if conn is not None:
+        import json as _json
+        conn.set(_SECRET_REDIS_PREFIX + job_id, _json.dumps(secrets),
+                 ex=JOB_TIMEOUT_S)
+    else:
         with _secret_lock:
             _secret_store[job_id] = secrets
         # Schedule eviction of the one-time secret if the user never polls it.
@@ -178,6 +204,27 @@ def _stash_secrets(job_id: str, result: dict) -> None:
 
 
 def _pop_secrets(job_id: str) -> dict:
+    """Atomically pop + return the one-time secret for ``job_id`` (or ``{}``).
+
+    Redis path: GET+DEL via a Lua script (atomic, so two concurrent polls
+    cannot both receive the key). In-process fallback: ``_secret_store.pop``."""
+    conn = _get_redis()
+    if conn is not None:
+        global _secret_pop_script
+        if _secret_pop_script is None:
+            _secret_pop_script = conn.register_script(_SECRET_POP_LUA)
+        try:
+            raw = _secret_pop_script(
+                keys=[_SECRET_REDIS_PREFIX + job_id], client=conn)
+        except Exception:  # noqa: BLE001
+            return {}
+        if not raw:
+            return {}
+        try:
+            import json as _json
+            return _json.loads(raw)
+        except Exception:  # noqa: BLE001
+            return {}
     with _secret_lock:
         return _secret_store.pop(job_id, {})
 
