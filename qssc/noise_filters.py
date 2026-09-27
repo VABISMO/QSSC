@@ -191,8 +191,18 @@ def effective_noise_sigma(base_counts: float,
     temp *= keep_ff * cm
     pressure = env.pressure_counts * keep_ff * cm
 
-    # fast, uncorrelated across shots -> also divided by sqrt(N)
-    vib = env.vibration_counts * max(0.0, filters.vibration_iso_residual) * keep_ff / sqrt_n
+    # Vibration (dominant band ``env.vibration_hz``, ~30 Hz -> ~33 ms period)
+    # is correlated over one vibration period. At the lock-in cadence
+    # (``env.emi_hz``, ~1 kHz -> 1 ms/shot) an integration shorter than one
+    # vibration period (~33 shots) sees CORRELATED per-shot vibration, so it
+    # does NOT average down by 1/sqrt(N) -- treat it as correlated (like
+    # temp/pressure) below that cutoff. EMI is at the modulation band itself,
+    # well above the vibration band, so it stays uncorrelated shot-to-shot
+    # (audit #138).
+    vib_raw = env.vibration_counts * max(0.0, filters.vibration_iso_residual) * keep_ff
+    vib_period_s = 1.0 / max(env.vibration_hz, 1e-3)
+    shot_period_s = 1.0 / max(env.emi_hz, 1e-3)
+    vib = vib_raw if n * shot_period_s < vib_period_s else vib_raw / sqrt_n
     emi = env.emi_counts * max(0.0, filters.emi_shield_residual) * keep_ff / sqrt_n
 
     return math.sqrt(floor * floor + temp * temp + pressure * pressure

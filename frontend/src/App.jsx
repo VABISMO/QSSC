@@ -620,6 +620,15 @@ export default function App() {
   }
 
   const loadFromHistory = async (rec) => {
+    // Invalidate any in-flight circuit / parallel / calibration poll BEFORE
+    // loading the history row. Without this, a prior runCircuit poll whose
+    // `myRun === circuitRunToken.current` check still passes would fire its
+    // setResult/setJob AFTER this load and clobber the loaded history result
+    // (audit #132). Bumping the tokens makes those polls see a newer "run"
+    // and drop themselves on the next iteration.
+    circuitRunToken.current++
+    parRunToken.current++
+    arrCalibRunToken.current++
     // Fetch the FULL job record -- list_jobs excludes `result`/`code`, so the
     // list row only carries the summary fields. Without this the loaded
     // result is null and the Hardware tab shows nothing.

@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -176,37 +177,45 @@ def _make_fpga(profile: str, temperature_k: float, seed, hardware: bool):
     # NoFPGADetected propagates up to the API, which returns the
     # no-fpga-detected body for the frontend banner.
     key = (port, profile, float(temperature_k), int(seed))
+    # The cache check + open is guarded by a module lock: when Redis is down
+    # the in-process fallback ThreadPoolExecutor(max_workers=4) can run two
+    # hardware=True jobs concurrently -- without the lock both see _HW_FPGA
+    # is None and double-open /dev/ttyUSB0 (the second open fails or the two
+    # jobs interleave serial I/O on one handle). The RQ path is separate
+    # processes (no shared cache) so the lock is uncontended there (audit #131).
     global _HW_FPGA, _HW_FPGA_KEY
-    if _HW_FPGA is not None and _HW_FPGA_KEY == key:
-        # Liveness probe: a cached handle goes stale if the USB cable was
-        # unplugged and replugged mid-session -- the serial fd is dead but
-        # still cached, so every subsequent hardware run would fail with an
-        # opaque I/O error until the worker is restarted. Probe with ID; on
-        # an I/O exception OR a non-ID reply (a dead link often readline()s
-        # an empty string rather than raising) drop the cache and reopen
-        # once (reconnect-on-failure, audit #106).
-        try:
-            probe = _HW_FPGA.send_command("ID")
-            if not probe.startswith(FPGA_ID_TOKEN):
-                raise IOError(f"stale FPGA handle: ID probe -> {probe!r}")
-        except Exception:
+    with _HW_FPGA_LOCK:
+        if _HW_FPGA is not None and _HW_FPGA_KEY == key:
+            # Liveness probe: a cached handle goes stale if the USB cable was
+            # unplugged and replugged mid-session -- the serial fd is dead but
+            # still cached, so every subsequent hardware run would fail with an
+            # opaque I/O error until the worker is restarted. Probe with ID; on
+            # an I/O exception OR a non-ID reply (a dead link often readline()s
+            # an empty string rather than raising) drop the cache and reopen
+            # once (reconnect-on-failure, audit #106).
             try:
-                _HW_FPGA.close()
-            except Exception:  # noqa: BLE001
-                pass
-            _HW_FPGA = None
-            _HW_FPGA_KEY = None
-    if _HW_FPGA is not None and _HW_FPGA_KEY == key:
+                probe = _HW_FPGA.send_command("ID")
+                if not probe.startswith(FPGA_ID_TOKEN):
+                    raise IOError(f"stale FPGA handle: ID probe -> {probe!r}")
+            except Exception:
+                try:
+                    _HW_FPGA.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                _HW_FPGA = None
+                _HW_FPGA_KEY = None
+        if _HW_FPGA is not None and _HW_FPGA_KEY == key:
+            return _HW_FPGA
+        _HW_FPGA = make_connection(port=port, profile=profile,
+                                   temperature_k=temperature_k, seed=seed)
+        _HW_FPGA_KEY = key
         return _HW_FPGA
-    _HW_FPGA = make_connection(port=port, profile=profile,
-                               temperature_k=temperature_k, seed=seed)
-    _HW_FPGA_KEY = key
-    return _HW_FPGA
 
 
 # Cached real FPGAConnection for the worker process (see _make_fpga).
 _HW_FPGA = None
 _HW_FPGA_KEY = None
+_HW_FPGA_LOCK = threading.Lock()
 
 
 def _source_label(fpga) -> str:

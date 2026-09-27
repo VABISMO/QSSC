@@ -128,6 +128,10 @@ def _record(job_id: str, **fields):
             return
         except Exception as exc:  # noqa: BLE001
             logger.warning("mongo write failed: %s", exc)
+    # Mongo down: mirror into Redis (cross-process) before the in-process store
+    # so the API process can still see the record (audit #130).
+    if _redis_job_store(job_id, rec):
+        return
     with _fallback_lock:
         _fallback_store[job_id] = {**_fallback_store.get(job_id, {}), **rec}
 
@@ -147,6 +151,11 @@ def _current_status(job_id: str):
                 return rec.get("status")
         except Exception:  # noqa: BLE001
             pass
+    # Mongo down (or record written during a Mongo outage): try Redis, then the
+    # in-process store (audit #130).
+    rec = _redis_job_get(job_id)
+    if rec is not None:
+        return rec.get("status")
     with _fallback_lock:
         rec = _fallback_store.get(job_id)
         return rec.get("status") if rec else None
@@ -155,9 +164,126 @@ def _current_status(job_id: str):
 # --- worker entrypoints (executed by `rq worker`, or in-process fallback) ----
 
 # Secret fields a qrand run produces. These are stripped from the result before
-# it is persisted to MongoDB / the fallback store and held in _secret_store for
-# one-time delivery on the first finished-status poll.
+# it is persisted to MongoDB / the fallback store and held for one-time
+# delivery on the first finished-status poll.
 _SECRET_FIELDS = ("private_key_pem", "symmetric_key_hex")
+
+# When the RQ worker (Redis up) runs the job it is a SEPARATE PROCESS from the
+# API, so a process-local ``_secret_store`` is invisible to the API's
+# ``get_job`` -> the private key is never delivered (audit #128). Store the
+# one-time secret in Redis instead (localhost, TTL=JOB_TIMEOUT_S) so the API
+# process can atomically pop it on the first finished poll. The in-process
+# fallback (Redis down) keeps using ``_secret_store`` (same process). The Mongo
+# record never carries the secret (it is stripped here, before ``_record``).
+_SECRET_REDIS_PREFIX = "qssc:secret:"
+# Atomic one-time pop: GET the value then DEL it in one Redis round-trip so two
+# concurrent finished-polls cannot both receive the secret. Works on any Redis
+# version (no GETDEL requirement).
+_SECRET_POP_LUA = """
+local v = redis.call('GET', KEYS[1])
+if v then redis.call('DEL', KEYS[1]) end
+return v
+"""
+_secret_pop_script = None  # registered lazily on first use (needs a connection)
+
+
+# --- Redis job-record fallback (Mongo down + Redis up) -----------------------
+# When the RQ worker (Redis up) runs a job but MongoDB is down, _record used to
+# fall back to its PROCESS-LOCAL _fallback_store -- invisible to the API process
+# -> get_job returned unknown and the frontend polled until MAX_POLLS timeout
+# (silent data loss, audit #130). With Redis up we instead mirror the job
+# record into Redis (qssc:jobrec:{job_id}, TTL 24h) so the API process can read
+# it cross-process. The in-process _fallback_store remains the last resort when
+# BOTH Redis and Mongo are down.
+_REDIS_JOB_PREFIX = "qssc:jobrec:"
+_REDIS_JOB_TTL_S = 86400  # 24h: the history window + the frontend poll window
+
+
+def _json_default(o):
+    """JSON encoder for numpy scalars/arrays + dict subclasses (qiskit Counts)."""
+    import numpy as _np
+    if isinstance(o, _np.integer):
+        return int(o)
+    if isinstance(o, _np.floating):
+        return float(o)
+    if isinstance(o, _np.ndarray):
+        return o.tolist()
+    if isinstance(o, (set, frozenset)):
+        return list(o)
+    if hasattr(o, "items"):  # qiskit Counts (dict subclass) -> plain dict
+        return dict(o)
+    raise TypeError(f"not JSON serializable: {type(o).__name__}")
+
+
+def _redis_job_get(job_id: str) -> dict | None:
+    conn = _get_redis()
+    if conn is None:
+        return None
+    try:
+        import json as _json
+        raw = conn.get(_REDIS_JOB_PREFIX + job_id)
+        if not raw:
+            return None
+        if isinstance(raw, bytes):
+            raw = raw.decode()
+        return _json.loads(raw)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _redis_job_store(job_id: str, rec: dict) -> bool:
+    """Merge ``rec`` into the Redis job record (update_one $set semantics)."""
+    conn = _get_redis()
+    if conn is None:
+        return False
+    try:
+        import json as _json
+        key = _REDIS_JOB_PREFIX + job_id
+        existing = conn.get(key)
+        if isinstance(existing, bytes):
+            existing = existing.decode()
+        data = _json.loads(existing) if existing else {}
+        data.update(rec)
+        conn.set(key, _json.dumps(data, default=_json_default),
+                 ex=_REDIS_JOB_TTL_S)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("redis job-record write failed: %s", exc)
+        return False
+
+
+def _redis_job_list(limit: int) -> list[dict]:
+    conn = _get_redis()
+    if conn is None:
+        return []
+    try:
+        import json as _json
+        out = []
+        for k in conn.scan_iter(match=_REDIS_JOB_PREFIX + "*",
+                                count=max(limit * 2, 100)):
+            raw = conn.get(k)
+            if not raw:
+                continue
+            if isinstance(raw, bytes):
+                raw = raw.decode()
+            try:
+                out.append(_json.loads(raw))
+            except Exception:  # noqa: BLE001
+                pass
+        out.sort(key=lambda r: r.get("created_at", 0), reverse=True)
+        return out[:limit]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _redis_job_delete(job_id: str) -> bool:
+    conn = _get_redis()
+    if conn is None:
+        return False
+    try:
+        return bool(conn.delete(_REDIS_JOB_PREFIX + job_id))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _stash_secrets(job_id: str, result: dict) -> None:
@@ -165,10 +291,18 @@ def _stash_secrets(job_id: str, result: dict) -> None:
     (in-place on ``result``). Non-qrand results are a no-op.
 
     Undelivered secrets (a qrand job whose result is never polled) are evicted
-    after ``JOB_TIMEOUT_S`` via a one-shot timer so private keys do not live
-    in memory longer than necessary (audit #120)."""
+    after ``JOB_TIMEOUT_S`` -- via Redis TTL (RQ path) or a one-shot timer
+    (in-process fallback) -- so private keys do not live in memory longer than
+    necessary (audit #120, #128)."""
     secrets = {f: result.pop(f) for f in _SECRET_FIELDS if f in result}
-    if secrets:
+    if not secrets:
+        return
+    conn = _get_redis()
+    if conn is not None:
+        import json as _json
+        conn.set(_SECRET_REDIS_PREFIX + job_id, _json.dumps(secrets),
+                 ex=JOB_TIMEOUT_S)
+    else:
         with _secret_lock:
             _secret_store[job_id] = secrets
         # Schedule eviction of the one-time secret if the user never polls it.
@@ -178,6 +312,27 @@ def _stash_secrets(job_id: str, result: dict) -> None:
 
 
 def _pop_secrets(job_id: str) -> dict:
+    """Atomically pop + return the one-time secret for ``job_id`` (or ``{}``).
+
+    Redis path: GET+DEL via a Lua script (atomic, so two concurrent polls
+    cannot both receive the key). In-process fallback: ``_secret_store.pop``."""
+    conn = _get_redis()
+    if conn is not None:
+        global _secret_pop_script
+        if _secret_pop_script is None:
+            _secret_pop_script = conn.register_script(_SECRET_POP_LUA)
+        try:
+            raw = _secret_pop_script(
+                keys=[_SECRET_REDIS_PREFIX + job_id], client=conn)
+        except Exception:  # noqa: BLE001
+            return {}
+        if not raw:
+            return {}
+        try:
+            import json as _json
+            return _json.loads(raw)
+        except Exception:  # noqa: BLE001
+            return {}
     with _secret_lock:
         return _secret_store.pop(job_id, {})
 
@@ -318,6 +473,10 @@ def get_job(job_id: str) -> dict | None:
         except Exception as exc:  # noqa: BLE001
             logger.warning("mongo read failed: %s", exc)
     if rec is None:
+        # Mongo down (or the record was written during a Mongo outage): try
+        # the cross-process Redis mirror, then the in-process store (audit #130).
+        rec = _redis_job_get(job_id)
+    if rec is None:
         with _fallback_lock:
             rec = _fallback_store.get(job_id)
     if rec is None:
@@ -340,6 +499,14 @@ def get_job(job_id: str) -> dict | None:
         except Exception:  # noqa: BLE001
             pass
     view = _mongo_to_view(rec)
+    # Drop the custom-circuit code preview from the per-job view. It is stored
+    # at enqueue (160-char slice) and GET /api/jobs/{id} is unauthenticated, so
+    # a leaked job ID would expose the snippet to any caller; list_jobs already
+    # strips it (audit #142). The frontend loads `result` (not `code`) from
+    # history and the Code tab re-saves via POST /api/scripts, so nothing reads
+    # this field back.
+    if "code" in view:
+        del view["code"]
     # One-time secret delivery: on the first finished read, merge the qrand
     # private/symmetric key back into the result view and drop it from memory.
     # Merge into a NEW result dict (not the persisted record's dict, which the
@@ -361,6 +528,14 @@ def list_jobs(limit: int = 50) -> list[dict]:
             return [_mongo_to_view(r) for r in cur]
         except Exception as exc:  # noqa: BLE001
             logger.warning("mongo list failed: %s", exc)
+    # Mongo down: try the cross-process Redis mirror (audit #130).
+    redis_items = _redis_job_list(limit)
+    if redis_items:
+        out = []
+        for r in redis_items:
+            r2 = {k: v for k, v in r.items() if k not in ("result", "code")}
+            out.append(r2)
+        return out
     with _fallback_lock:
         items = sorted(_fallback_store.values(),
                        key=lambda r: r.get("created_at", 0), reverse=True)
@@ -378,9 +553,15 @@ def delete_job(job_id: str) -> bool:
         try:
             res = coll.delete_one({"job_id": job_id})
             if res.deleted_count:
+                _redis_job_delete(job_id)  # clear any stale Redis mirror too
                 return True
         except Exception as exc:  # noqa: BLE001
             logger.warning("mongo delete failed: %s", exc)
+    # Mongo down: try the Redis mirror, then the in-process store (audit #130).
+    if _redis_job_delete(job_id):
+        with _fallback_lock:
+            _fallback_store.pop(job_id, None)
+        return True
     with _fallback_lock:
         return _fallback_store.pop(job_id, None) is not None
 

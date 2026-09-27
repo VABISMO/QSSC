@@ -101,7 +101,12 @@ def b_field_from_odmr(
     splitting_ghz = f_high - f_low
     splitting_mhz = splitting_ghz * 1e3
     b_t = splitting_ghz / (2.0 * gamma_ghz_per_t)
-    mean_lw = sum(c.linewidth_mhz for c in components) / len(components)
+    # Contrast-weighted mean linewidth: a dim noise line carries less weight
+    # than a bright real line, so the resolvable = splitting > mean_lw flag is
+    # not biased by low-contrast noise components (audit #139).
+    w_lw = sum(c.contrast for c in components)
+    mean_lw = (sum(c.linewidth_mhz * c.contrast for c in components) / w_lw
+               if w_lw else sum(c.linewidth_mhz for c in components) / len(components))
     resolvable = splitting_mhz > mean_lw
     return BFieldEstimate(
         b_field_t=float(b_t), splitting_mhz=float(splitting_mhz),

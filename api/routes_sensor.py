@@ -110,6 +110,7 @@ def api_gyro(
     mode: str = "real",
     seed: Optional[int] = None,
     hardware: bool = False,
+    sensor_t2_us: Optional[float] = None,
 ):
     """Ramsey pi/2-T-pi/2 gyroscope: rotation rate -> accumulated phase.
 
@@ -145,7 +146,8 @@ def api_gyro(
         profile, temperature_k=float(temperature_k),
         rotation_rate_dps=float(rate_dps),
         free_precession_us=free_precession_us,
-        n_averages=_sensor_mode_n_avg(n_avg, mode), rng=rng))
+        n_averages=_sensor_mode_n_avg(n_avg, mode), rng=rng,
+        sensor_t2_us=sensor_t2_us))
     out["mode"] = mode
     return out
 
