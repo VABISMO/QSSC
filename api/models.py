@@ -229,4 +229,4 @@ class ScriptRequest(BaseModel):
 
 
 class FpgaCommandRequest(BaseModel):
-    command: str
+    command: str = Field(..., max_length=4096)  # bound the FPGA command blob (audit #141)

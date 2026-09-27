@@ -72,7 +72,7 @@ def resolvable_register_width(gradient_mhz_per_um: float,
 
 
 def auto_align(profile: DefectProfile | str = "NV",
-                grid: int = 8, site_pitch_um: float = 2.5,
+                grid: int = 8, site_pitch_um: float = 2500.0,
                 temperature_k: float = 300.0, max_retries: int = 5,
                 rng: Optional[np.random.Generator] = None,
                 progress=None,
@@ -104,8 +104,10 @@ def auto_align(profile: DefectProfile | str = "NV",
       pixels are independent at 300 K.
 
     ``site_pitch_um`` is the centre-to-centre pitch of one emitter/detector
-    pixel. In the chip view a site is registered as usable when it actually
-    contains defects *and* the fabrication step succeeded: the per-site yield is
+    pixel (2.5 mm die pitch = 2500 um; audit #137 -- the prior 2.5 um default
+    was a 1000x unit error, sub-wavelength and absurd). In the chip view a site
+    is registered as usable when it actually contains defects *and* the
+    fabrication step succeeded: the per-site yield is
     ``SITE_FAB_YIELD * (1 - exp(-density * site_area))`` -- a Poisson "at least
     one defect in the pixel" factor times a fabrication-yield factor. This
     replaces the old ``galvo_area`` camera-era leftover, whose

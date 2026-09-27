@@ -1254,9 +1254,19 @@ class QSSCBackend(BackendV2):
         depth = max(circuit.depth(), 1)
         decomp_depth_floor = (math.sqrt(max(est_2q, 0))
                               if est_2q > 0 else 0.0)
-        crit_path_s = max(depth * self._g1q
-                          + max(n2q, 0) * (self._g2q - self._g1q),
-                          decomp_depth_floor * self._g2q)
+        # Critical-path time: coherence decays over the circuit DEPTH (gates on
+        # disjoint qubits run in parallel on the all-to-all register), so the
+        # wall-clock is ~depth * (per-layer gate time). qiskit's depth already
+        # accounts for parallelism (two 2q gates on disjoint qubits share a
+        # layer). The prior `depth*g1q + n2q*(g2q-g1q)` form added extra time
+        # for EVERY 2q gate as if each sat in its own serial layer, double-
+        # counting 2q time for parallel-2q circuits (audit #135). Use the
+        # pessimistic per-layer bound: every layer is charged at the 2q gate
+        # time (a layer with any 2q gate takes g2q; a 1q-only layer takes g1q,
+        # but g2q > g1q so depth*g2q is a safe upper bound that never double-
+        # counts). decomp_depth_floor keeps compiled blocks (mod-exp / QFT) at
+        # their real ~sqrt(est_2q) decomposed depth.
+        crit_path_s = max(depth, decomp_depth_floor) * self._g2q
         return (n1q, n2q, n_compiled, quantum_time_s,
                 est_2q, est_1q, crit_path_s)
 

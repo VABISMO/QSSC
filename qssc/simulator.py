@@ -189,9 +189,6 @@ class SimulatedFPGA:
         # Ramsey rotation rate (which Hahn refocuses). 20 kHz is a modest
         # spread that produces a visible, fittable fringe over a us-T2 window.
         self.detuning_hz: float = 20e3
-        # per-pixel ODMR resonance detuning (drawn lazily by _run_all_odmr to
-        # model the gradient spreading the 64 pixel resonances).
-        self._pixel_detun_hz: Optional[np.ndarray] = None
         # Few-NV COMPUTE regime (field gradient + the per-pixel register model):
         # each pixel holds one microdiamond of ~100-300 NVs whose resonances the
         # field gradient spreads across the pixel into resolvable, linewidth-
@@ -384,32 +381,45 @@ class SimulatedFPGA:
             return "ERR"
 
     def _site_detun_hz(self, q: int) -> float:
-        """Cross-pixel gradient detuning (Hz) of site ``q``'s resonance from D.
+        """Detuning (Hz) of site ``q``'s resonance from D -- always 0.
 
-        The field gradient shifts each pixel's ODMR centre to a distinct
-        frequency (gradient * column position along the gradient axis,
-        centred on D -- audit #117). Drawn once and held so repeated
-        sweeps / pulses see a consistent per-site resonance.
+        The QSSC field gradient is WITHIN-pixel (``spread_hz = gradient *
+        pixel_size_um`` at simulator.py:563 creates the ~10-NV register per
+        pixel); all 64 pixels share a D-centered register and MW is BROADCAST,
+        so a pulse at freq f flips the NV at f in EVERY pixel. There is NO
+        cross-pixel frequency shift -- per-pixel selectivity is by READOUT (the
+        detector electrode), not MW frequency (audit #133). The prior
+        ``cols % 8`` cross-pixel shift modeled a gradient that does not exist
+        and made on-D pulses reject when the gradient was on (an on-D pulse
+        MUST flip the central NV in every pixel). The within-pixel line offsets
+        (``_pixel_line_freqs``) are handled in :meth:`_apply_pulse`, not here.
         """
-        if self._pixel_detun_hz is None:
-            cols = np.arange(self.N_SITES) % 8
-            self._pixel_detun_hz = (self.gradient_mhz_per_um * 1e6
-                                    * (cols - 3.5) * self.pixel_size_um)
-        return float(self._pixel_detun_hz[q])
+        return 0.0
 
     def _apply_pulse(self, qubit, freq_ghz, amp, dur, phase_rad) -> str:
-        # Reject if the drive is outside the ODMR linewidth of the SITE's
+        # Reject if the drive is outside the ODMR linewidth of the site's
         # resonance (the pulse can only flip the spin within ~one linewidth).
-        # freq_ghz is GHz; self.sim_freq (D) is Hz. The site resonance is
-        # D + the cross-pixel gradient detuning (audit #118): a pulse at D+4 MHz
-        # must flip only the pixel(s) whose gradient-shifted resonance sits
-        # within ~one linewidth of 4 MHz, not every site within 5 MHz of D.
-        # The old bare-ZFS window flipped the whole register for any on-D
-        # pulse. self.noise is reserved for the stochastic RZ/RY gate error
-        # below, not the resonance acceptance.
-        site_reson = self.sim_freq + self._site_detun_hz(qubit)
-        if abs(freq_ghz * 1e9 - site_reson) > self.profile.odmr_linewidth_hz:
-            return "ERR"
+        # freq_ghz is GHz; self.sim_freq (D) is Hz. MW is BROADCAST: a pulse at
+        # freq f flips the NV at f in EVERY pixel (the gradient is within-pixel,
+        # not cross-pixel; all pixels share a D-centered register -- audit
+        # #133). So the site resonance is D plus the within-pixel register line
+        # offsets (_pixel_line_freqs[qubit]) if the per-pixel register is
+        # populated, else bare D. The drive is accepted if it is within one
+        # linewidth of ANY within-pixel line (the register is frequency-
+        # addressed); with the gradient off every line sits at D. self.noise is
+        # reserved for the stochastic RZ/RY gate error below, not the resonance
+        # acceptance.
+        f_hz = freq_ghz * 1e9
+        if self._pixel_line_freqs is None:
+            self._draw_pixel_lines()
+        lines = self._pixel_line_freqs[qubit] if qubit < len(self._pixel_line_freqs) else None
+        if lines is not None and len(lines):
+            lw = self.profile.odmr_linewidth_hz
+            if all(abs(f_hz - (self.sim_freq + float(off))) > lw for off in lines):
+                return "ERR"
+        else:
+            if abs(f_hz - self.sim_freq) > self.profile.odmr_linewidth_hz:
+                return "ERR"
         # amp is the ADF4351 output-power index 0..3 (HARDWARE_DESIGN.md §5).
         # Reject an out-of-range raw-UART value even though backend.apply_pulse
         # already clamps it -- defense in depth for the wire protocol.
@@ -607,15 +617,12 @@ class SimulatedFPGA:
         f0 = self.sim_freq                     # D, Hz
         lw = self.profile.odmr_linewidth_hz    # FWHM, Hz
         fs = np.linspace(f_start_khz * 1e3, f_stop_khz * 1e3, n_points)
-        # per-pixel centre detuning (cross-pixel gradient offset): drawn once,
-        # held so repeated sweeps are consistent. The field gradient shifts
-        # each pixel's resonance to a DISTINCT frequency for per-pixel MW
-        # addressing with one global antenna, so the cross-pixel offset is
-        # GRADIENT-ORDERED across the grid (column / x position along the
-        # gradient axis, centred on D), NOT a random scatter (audit #117).
-        if self._pixel_detun_hz is None:
-            self._site_detun_hz(0)  # lazy-init the array
-        detun = self._pixel_detun_hz
+        # Per-pixel centre detuning: the QSSC gradient is WITHIN-pixel, so all
+        # 64 pixels share a D-centred register (no cross-pixel frequency shift;
+        # per-pixel selectivity is by READOUT, not MW frequency -- audit #133).
+        # The within-pixel line spread is carried by ``line_freqs`` below; the
+        # cross-pixel offset is zero.
+        detun = np.zeros(self.N_SITES)
         # per-pixel few-NV line set (the within-pixel gradient spread -> distinct
         # frequency-addressed NV lines). Drawn once, held across sweeps.
         if self._pixel_line_freqs is None:
@@ -779,8 +786,10 @@ class SimulatedFPGA:
         it matches the host fit's time axis (``backend_fits._fit_t2_from_codes``
         uses the same ``arange(n) * t_step_ns``); otherwise it falls back to a
         fixed ``linspace(0, 2*T2, n)`` grid. The Ramsey fringe carries the
-        ``exp(-t/T2)`` decay envelope (the profile has no separate T2*, so
-        decaying Ramsey at T2 is the conservative choice; real T2* < T2).
+        ``exp(-t/T2)`` decay envelope. Ramsey (un-refocused) decays at the
+        inhomogeneous T2* < T2, but the profile / supplier quotes only T2, so
+        the envelope uses T2 -- this is OPTIMISTIC (slower decay -> more signal
+        retained); real T2* is not quoted by the supplier (audit #136).
 
         The fringe frequency is tied to a PHYSICAL input quantity, not a
         hardcoded rad/us constant: Ramsey precesses at
