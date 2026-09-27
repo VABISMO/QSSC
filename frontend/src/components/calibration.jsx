@@ -3,6 +3,7 @@
 
 import React, { useState } from 'react'
 import { PixelGrid } from './ui.jsx'
+import { QubitFrequencyTable } from './quantum.jsx'
 
 
 export function CalibrationPanel({ run, running }) {

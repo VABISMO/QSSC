@@ -4,6 +4,7 @@
 import React, { useState } from 'react'
 import { PixelGrid, RangeSlider } from './ui.jsx'
 import { NoiseBudget } from './physics.jsx'
+import { ParallelPixelFreqTable } from './quantum.jsx'
 
 
 export function ParallelCalibCard({
