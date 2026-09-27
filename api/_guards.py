@@ -134,11 +134,19 @@ def _rate_limited(request: Request) -> bool:
     """
     from api import main as _m
     now = time.monotonic()
-    bucket = _m._rate_buckets[_client_ip(request)]
+    ip = _client_ip(request)
+    bucket = _m._rate_buckets[ip]
     bucket.append(now)
     while bucket and now - bucket[0] > 60.0:
         bucket.popleft()
-    return len(bucket) > _m.RATE_LIMIT_PER_MIN
+    over = len(bucket) > _m.RATE_LIMIT_PER_MIN
+    # Evict the per-IP KEY once its deque is empty so a public deploy with
+    # many distinct client IPs does not grow _rate_buckets without bound
+    # (the deques are trimmed above, but the dict keys were never removed,
+    # audit #123). uvicorn is single-threaded so no lock is needed.
+    if not bucket:
+        del _m._rate_buckets[ip]
+    return over
 
 
 def _check_sync(request: Request, sync: bool) -> None:

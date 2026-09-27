@@ -74,7 +74,11 @@ def test_odmr_resonance_linewidth():
     # The pulse resonance acceptance is the ~5 MHz ODMR linewidth, not the old
     # 287 MHz noise*D window. On-resonance and just-within-linewidth flip the
     # spin; far off-resonance is rejected. (freq is in kHz: +4 MHz = +4000 kHz.)
-    fpga = SimulatedFPGA("NV", seed=0)
+    # gradient OFF (gradient_mhz_per_um=0.0) so every site resonates at bare D
+    # and this isolates the ~5 MHz linewidth window from the cross-pixel
+    # gradient-addressing shift (audit #118) -- a pulse at D must flip when the
+    # gradient is off, and only the linewidth decides ±4 MHz vs ±10 MHz.
+    fpga = SimulatedFPGA("NV", seed=0, gradient_mhz_per_um=0.0)
     fpga.send_command("DRIVE_EMITTER 0 50")
     # 2.87 GHz exactly (on) and +4 MHz (within the 5 MHz line) -> OK
     assert fpga.send_command("APPLY_PULSE 0 2870000 2 200 0") == "OK"
@@ -216,7 +220,10 @@ def test_readout_odmr_dip():
     # A pumped site with no resonant MW reads bright (ms=0, high code); a
     # resonant X-gate (phase ~= pi) flips the spin to dark (ms=+-1, low code),
     # and an off-resonance drive is rejected by the linewidth check (ERR).
-    fpga = SimulatedFPGA("NV", seed=3)
+    # gradient OFF so site 45 resonates at bare D and the resonant X-gate at
+    # 2.87 GHz flips it (with the gradient on, site 45's resonance is shifted
+    # off D by the cross-pixel detuning, audit #118 -- a separate concern).
+    fpga = SimulatedFPGA("NV", seed=3, gradient_mhz_per_um=0.0)
     assert fpga.send_command("DRIVE_EMITTER 45 50") == "OK"
     # Lock-in averaging: read the electrode several times and take the mean so
     # the small ensemble ODMR dip (~5%, ~2560 16-bit counts) is resolved above
