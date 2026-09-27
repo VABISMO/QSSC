@@ -833,7 +833,7 @@ def run_calibrate_array(req: dict) -> dict:
                            int(prof.odmr_linewidth_hz / 1e3) * 6)
             f_start = d_khz - span_khz
             f_stop = d_khz + span_khz
-            n = int(req.get("n_points", 400))
+            n = min(int(req.get("n_points", 400)), 256)  # RTL CMD_ALL_SWEEP caps n at 256; the tensor path hardcodes 256 too (audit #145)
             # Program the gradient coil BEFORE the sweep so each
             # pixel's ODMR lines spread across the pixel by grad*pixel_size,
             # which is what makes the lines resolvable (-> per-pixel register

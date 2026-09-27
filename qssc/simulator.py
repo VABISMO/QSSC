@@ -532,17 +532,32 @@ class SimulatedFPGA:
         lw = self.profile.odmr_linewidth_hz    # FWHM, Hz
         fs = np.linspace(f_start_khz * 1e3, f_stop_khz * 1e3, n_points)
         # Per-point noise sigma after the anti-noise stack (defaults
-        # -> READOUT_NOISE, bit-identical). Single sweep -> integration_shots=1.
+        # -> READOUT_NOISE, bit-identical). Use self.integration_shots (not a
+        # hardcoded 1) so the single-channel sweep's noise model matches
+        # _run_all_odmr (audit #150).
         nsigma = effective_noise_sigma(READOUT_NOISE, self.noise_env,
-                                       self.anti_noise, 1)
-        # Gaussian dip (FWHM = lw, matching simulate_odmr/odmr_decompose which
-        # model the ODMR line as a Gaussian): PL = bright * (1 - contrast * G(f)).
-        # FWHM-matched to the former Lorentzian so the on-resonance contrast
-        # and the line width are unchanged; the wings now match the resolver
-        # PSF (Lorentzian wings were biasing CLEAN on overlapping Case-D lines).
+                                       self.anti_noise, self.integration_shots)
+        # Within-pixel register lines: with the gradient on, the addressed
+        # pixel's NVs spread into distinct ODMR lines (_pixel_line_freqs[qubit],
+        # drawn lazily by _draw_pixel_lines). The single-channel sweep MUST
+        # mirror _run_all_odmr's _pixel_dip_frac -- a sum of per-line Gaussians
+        # each weighted by its bin contrast -- instead of a single Gaussian at
+        # D, otherwise ODMR_SWEEP <qubit> shows one ~5 MHz dip while
+        # RUN_ALL_ODMR shows the same pixel's full ~10-NV register spectrum
+        # (audit #150). With no gradient _draw_pixel_lines yields one line at
+        # 0 Hz (D) with contrast = contrast_single, so this collapses to the
+        # single-dip shape (now consistent with _run_all_odmr's contrast too).
+        if self._pixel_line_freqs is None:
+            self._draw_pixel_lines()
+        line_freqs = self._pixel_line_freqs[qubit]        # Hz, relative to pixel centre
+        line_contrasts = self._pixel_line_contrasts[qubit]
         sigma = lw / (2.0 * math.sqrt(2.0 * math.log(2.0)))  # FWHM lw -> sigma
-        gauss = np.exp(-((fs - f0) ** 2) / (2.0 * sigma ** 2))
-        codes = BRIGHT_CODE * (1.0 - ODMR_CONTRAST * gauss)
+        s2 = 2.0 * sigma ** 2
+        lf = f0 + line_freqs                              # absolute line freqs, (n_lines,)
+        # (n_points, n_lines) peak-1 Gaussians; total dip fraction = weighted sum, clipped (matches _pixel_dip_frac's min(sum, 1.0))
+        gauss = np.exp(-((fs[:, None] - lf[None, :]) ** 2) / s2)
+        dip_frac = np.clip((line_contrasts[None, :] * gauss).sum(axis=1), 0.0, 1.0)
+        codes = BRIGHT_CODE * (1.0 - dip_frac)
         codes += self.rng.normal(0, nsigma, size=n_points)
         codes = np.clip(codes, 0, ADC_MAX).astype(int)
         # make the addressed channel reflect its pumped/bright state off-resonance

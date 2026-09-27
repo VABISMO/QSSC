@@ -486,9 +486,19 @@ export default function App() {
       // instead of the UI giving up first.
       const MAX_POLLS = 1000
       const poll = async (n = 0) => {
+        // Stale-poll guard BEFORE the fetch: loadFromHistory bumps
+        // circuitRunToken but does NOT clearTimeout(pollRef), so a pending
+        // poll can still fire. api.job() atomically pops the qrand one-time
+        // secret (Redis GET+DEL) on the first finished read -- if we fetched
+        // first and THEN dropped the stale rec, the Ed25519 private key would
+        // be consumed and lost forever. Checking staleness before the await
+        // means a stale poll never fetches, so the secret stays in Redis
+        // (claimed by the live run / expires via TTL) instead of being popped
+        // and discarded (audit #148).
+        if (myRun !== circuitRunToken.current) return
         try {
           const rec = await api.job(jobId)
-          if (myRun !== circuitRunToken.current) return  // a newer Run started; drop this stale poll
+          if (myRun !== circuitRunToken.current) return  // bumped during the fetch -> drop
           setJob({ job_id: jobId, status: rec.status })
           if (rec.status === 'finished') {
             setResult(rec.result || {})

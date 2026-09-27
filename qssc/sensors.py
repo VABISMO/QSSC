@@ -304,7 +304,7 @@ def gyro_measure(
     T_us = float(free_precession_us if free_precession_us is not None
                  else t2_us)
     T_s = T_us * 1e-6
-    omega = math.radians(float(rotation_rate_dps))   # rad/s
+    omega = math.radians(abs(float(rotation_rate_dps)))   # |rate|: a single-axis Ramsey fringe cos(Omega*t) is EVEN in Omega, so the sign of the rotation rate is physically unrecoverable from one trace (audit #149). The companion FFT fit path (backend_fits._fit_gyro_from_codes) also returns |rate|; this keeps the two gyro paths consistent.
     # phase accumulated over the free-precession window
     phase = omega * T_s
     # Ramsey trace: PL vs free-precession time
