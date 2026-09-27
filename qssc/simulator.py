@@ -383,14 +383,32 @@ class SimulatedFPGA:
             logger.error("sim command failed: %s (%s)", command, exc)
             return "ERR"
 
+    def _site_detun_hz(self, q: int) -> float:
+        """Cross-pixel gradient detuning (Hz) of site ``q``'s resonance from D.
+
+        The field gradient shifts each pixel's ODMR centre to a distinct
+        frequency (gradient * column position along the gradient axis,
+        centred on D -- audit #117). Drawn once and held so repeated
+        sweeps / pulses see a consistent per-site resonance.
+        """
+        if self._pixel_detun_hz is None:
+            cols = np.arange(self.N_SITES) % 8
+            self._pixel_detun_hz = (self.gradient_mhz_per_um * 1e6
+                                    * (cols - 3.5) * self.pixel_size_um)
+        return float(self._pixel_detun_hz[q])
+
     def _apply_pulse(self, qubit, freq_ghz, amp, dur, phase_rad) -> str:
-        # Reject if the drive is outside the ODMR linewidth of D (the pulse
-        # can only flip the spin within ~one linewidth). freq_ghz is GHz;
-        # self.sim_freq (D) is Hz. The old window was noise*D = 287 MHz, far
-        # wider than the real ~5 MHz NV ODMR line -- a pulse 200 MHz off would
-        # wrongly have flipped the spin. self.noise is reserved for the
-        # stochastic RZ/RY gate error below, not the resonance acceptance.
-        if abs(freq_ghz * 1e9 - self.sim_freq) > self.profile.odmr_linewidth_hz:
+        # Reject if the drive is outside the ODMR linewidth of the SITE's
+        # resonance (the pulse can only flip the spin within ~one linewidth).
+        # freq_ghz is GHz; self.sim_freq (D) is Hz. The site resonance is
+        # D + the cross-pixel gradient detuning (audit #118): a pulse at D+4 MHz
+        # must flip only the pixel(s) whose gradient-shifted resonance sits
+        # within ~one linewidth of 4 MHz, not every site within 5 MHz of D.
+        # The old bare-ZFS window flipped the whole register for any on-D
+        # pulse. self.noise is reserved for the stochastic RZ/RY gate error
+        # below, not the resonance acceptance.
+        site_reson = self.sim_freq + self._site_detun_hz(qubit)
+        if abs(freq_ghz * 1e9 - site_reson) > self.profile.odmr_linewidth_hz:
             return "ERR"
         # amp is the ADF4351 output-power index 0..3 (HARDWARE_DESIGN.md §5).
         # Reject an out-of-range raw-UART value even though backend.apply_pulse
@@ -590,10 +608,13 @@ class SimulatedFPGA:
         lw = self.profile.odmr_linewidth_hz    # FWHM, Hz
         fs = np.linspace(f_start_khz * 1e3, f_stop_khz * 1e3, n_points)
         # per-pixel centre detuning (cross-pixel gradient offset): drawn once,
-        # held so repeated sweeps are consistent. Spread ~ a few linewidths.
+        # held so repeated sweeps are consistent. The field gradient shifts
+        # each pixel's resonance to a DISTINCT frequency for per-pixel MW
+        # addressing with one global antenna, so the cross-pixel offset is
+        # GRADIENT-ORDERED across the grid (column / x position along the
+        # gradient axis, centred on D), NOT a random scatter (audit #117).
         if self._pixel_detun_hz is None:
-            self._pixel_detun_hz = self.rng.normal(
-                0.0, max(lw * 2.0, 1.0), self.N_SITES)
+            self._site_detun_hz(0)  # lazy-init the array
         detun = self._pixel_detun_hz
         # per-pixel few-NV line set (the within-pixel gradient spread -> distinct
         # frequency-addressed NV lines). Drawn once, held across sweeps.
@@ -784,7 +805,10 @@ class SimulatedFPGA:
             fringe = 0.5 + 0.5 * np.cos(domega * t_s) * np.exp(-ts / t2_us)
         else:  # cpmg
             domega = 2.0 * math.pi * float(self.detuning_hz)
-            fringe = 0.5 + 0.5 * np.cos(domega * t_s) * np.exp(-(ts / t2_us) ** 2)
+            # CPMG refocuses T2* (inhomogeneous) -> the residual decay is
+            # T2-limited EXPONENTIAL (like Hahn), not the Gaussian T2* shape
+            # (which is the un-refocused Ramsey envelope). audit #119.
+            fringe = 0.5 + 0.5 * np.cos(domega * t_s) * np.exp(-ts / t2_us)
         codes = BRIGHT_CODE * fringe + self.rng.normal(0, READOUT_NOISE, size=n_windows)
         codes = np.clip(codes, 0, ADC_MAX).astype(int)
         return " ".join([str(n_windows)] + [str(int(c)) for c in codes])

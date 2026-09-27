@@ -162,11 +162,19 @@ _SECRET_FIELDS = ("private_key_pem", "symmetric_key_hex")
 
 def _stash_secrets(job_id: str, result: dict) -> None:
     """Move qrand secret fields out of ``result`` into the one-time secret store
-    (in-place on ``result``). Non-qrand results are a no-op."""
+    (in-place on ``result``). Non-qrand results are a no-op.
+
+    Undelivered secrets (a qrand job whose result is never polled) are evicted
+    after ``JOB_TIMEOUT_S`` via a one-shot timer so private keys do not live
+    in memory longer than necessary (audit #120)."""
     secrets = {f: result.pop(f) for f in _SECRET_FIELDS if f in result}
     if secrets:
         with _secret_lock:
             _secret_store[job_id] = secrets
+        # Schedule eviction of the one-time secret if the user never polls it.
+        t = threading.Timer(JOB_TIMEOUT_S, _pop_secrets, args=(job_id,))
+        t.daemon = True
+        t.start()
 
 
 def _pop_secrets(job_id: str) -> dict:

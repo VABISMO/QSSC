@@ -25,6 +25,7 @@ import numpy as np
 
 from .defects import DefectProfile, get_profile, coherence_at_temperature
 from .simulator import simulate_odmr
+from .simulator_constants import READOUT_NOISE, BRIGHT_CODE
 
 
 # ---------------------------------------------------------------------------
@@ -302,12 +303,20 @@ def gyro_measure(
     envelope = np.exp(-t_s / max(t2, 1e-9))
     fringe_amp = 0.45
     signal = 0.5 + fringe_amp * np.cos(omega * t_s) * envelope
-    # per-shot noise on the normalised PL readout (~1% of full scale)
-    pl_noise = 0.01 / math.sqrt(max(1, n_averages))
+    # per-shot noise on the normalised PL readout: the datasheet-grounded
+    # ensemble readout noise READOUT_NOISE/BRIGHT_CODE = 640/51200 = 1.25%
+    # (NOT a fabricated 1%), reduced by 1/sqrt(n_averages) for N-shot
+    # lock-in averaging of uncorrelated noise (audit #116).
+    pl_noise = (READOUT_NOISE / BRIGHT_CODE) / math.sqrt(max(1, n_averages))
     noise = rng.normal(0, pl_noise, size=signal.shape)
     signal = np.clip(signal + noise, 0, 1.05)
-    # phase noise from the Ramsey fringe: dphi ~ pl_noise / fringe_amp (rad)
-    phase_noise = pl_noise / fringe_amp
+    # phase noise from the Ramsey fringe: dphi ~ pl_noise / fringe_amp_eff.
+    # Use the EFFECTIVE fringe amplitude at measurement time T (the envelope
+    # exp(-T/T2) has shrunk the fringe from 0.45 to 0.45*exp(-T/T2)); the
+    # prior code used the initial 0.45, making rate_noise ~2.6x optimistic
+    # at T=T2 (audit #116).
+    fringe_amp_eff = max(fringe_amp * math.exp(-T_us / max(t2_us, 1e-9)), 1e-9)
+    phase_noise = pl_noise / fringe_amp_eff
     measured = math.degrees(phase / max(T_s, 1e-9)) if T_s > 0 else 0.0
     # rate noise = phase_noise / T (dividing the tiny accumulated phase by the
     # small free-precession window amplifies noise -- this is the fundamental
