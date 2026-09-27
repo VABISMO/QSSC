@@ -35,6 +35,7 @@ from qssc.array_calibration import (
     gradient_dac_code_from_mhz,
 )
 from qssc.noise_filters import AntiNoiseConfig, noise_environment_preset
+from qssc.backend_fpga import FPGA_ID_TOKEN
 # Re-exported so tests can monkeypatch api.runner.von_neumann_extract (the
 # qrand runner resolves it through this module at call time -- see
 # api.runner_algorithms._run_qrand).
@@ -176,6 +177,25 @@ def _make_fpga(profile: str, temperature_k: float, seed, hardware: bool):
     # no-fpga-detected body for the frontend banner.
     key = (port, profile, float(temperature_k), int(seed))
     global _HW_FPGA, _HW_FPGA_KEY
+    if _HW_FPGA is not None and _HW_FPGA_KEY == key:
+        # Liveness probe: a cached handle goes stale if the USB cable was
+        # unplugged and replugged mid-session -- the serial fd is dead but
+        # still cached, so every subsequent hardware run would fail with an
+        # opaque I/O error until the worker is restarted. Probe with ID; on
+        # an I/O exception OR a non-ID reply (a dead link often readline()s
+        # an empty string rather than raising) drop the cache and reopen
+        # once (reconnect-on-failure, audit #106).
+        try:
+            probe = _HW_FPGA.send_command("ID")
+            if not probe.startswith(FPGA_ID_TOKEN):
+                raise IOError(f"stale FPGA handle: ID probe -> {probe!r}")
+        except Exception:
+            try:
+                _HW_FPGA.close()
+            except Exception:  # noqa: BLE001
+                pass
+            _HW_FPGA = None
+            _HW_FPGA_KEY = None
     if _HW_FPGA is not None and _HW_FPGA_KEY == key:
         return _HW_FPGA
     _HW_FPGA = make_connection(port=port, profile=profile,

@@ -229,6 +229,20 @@ def test_simulated_fpga_sensing_commands():
     assert len(seq) == 9
     assert all(0 <= int(c) <= 65535 for c in seq[1:])
     assert fpga.send_command("RUN_SEQUENCE badseq 8") == "ERR"
+    # RUN_SEQUENCE Ramsey fringe must track rotation_rate_dps (the Sagnac
+    # input quantity), not a hardcoded rad/us constant -- so the host FFT fit
+    # on these codes recovers the set rate. Use a rate that lands exactly on
+    # an FFT bin (bin spacing = 1/(n*t_step) = 3125 Hz; bin 4 = 12.5 kHz =
+    # 4.5e6 dps) so the recovery is exact, not a meaningless hardcoded value
+    # (audit #102).
+    fpga.rotation_rate_dps = 4.5e6
+    n, t_step = 64, 5000                       # 64 windows x 5 us = 320 us window
+    codes = fpga.run_sequence(0, 0, n, t_step)  # kind 0 = Ramsey
+    from qssc.backend_fits import _fit_gyro_from_codes
+    g = _fit_gyro_from_codes(codes, t_step, n * t_step)
+    assert g["measured_rate_dps"] > 1e4        # FFT picked up the fringe
+    assert abs(g["measured_rate_dps"] - 4.5e6) / 4.5e6 < 0.05
+    fpga.rotation_rate_dps = 100.0             # restore default
     # STATUS: keyed self-status report.
     st = fpga.send_command("STATUS")
     assert "PLL_LOCKED" in st and "TEMP_C" in st and "VCC3V3_mv" in st
@@ -619,13 +633,19 @@ def test_room_temp_nv_spin_compute_works():
         assert r["assessment"]["within_coherence"] is True
         assert r["hom_visibility"] < 1e-5  # descriptive photon budget bad @ 300 K
         assert r["assessment"]["within_optical_coherence"] is False
-    # hBN at 300 K: sensor, spin T2 too short for the deep Shor circuit -> None.
+    # hBN at 300 K: sensor, not a compute substrate. The depth-based
+    # coherence window (audit #101) is right at the T2 edge -- the Shor
+    # critical path (~1.9 us) is ~T2 (2.0 us) so within_coherence may be
+    # True -- but the cumulative per-gate DEPOLARIZATION over the ~90
+    # decomposed 2q gates destroys the signal (signal_retention ~3e-3),
+    # so no factors are recovered. The serial depol budget, not the
+    # coherence window, is what rules hBN out for Shor.
     r_hbn = run_circuit({"algorithm": "shor", "profile": "hBN-VB", "n": 15,
                          "shots": 2048, "seed": 7, "noise_mode": "real",
                          "temperature_k": 300.0})
     assert "error" not in r_hbn, r_hbn.get("error")
     assert r_hbn["factors"] is None  # hBN 300 K spin budget too short
-    assert r_hbn["assessment"]["within_coherence"] is False
+    assert r_hbn["assessment"]["signal_retention"] < 0.01
     # Cooled to 1 mK the descriptive optical channel also goes to V->1.
     r_cold = run_circuit({"algorithm": "shor", "profile": "NV", "n": 15,
                           "shots": 2048, "seed": 7, "noise_mode": "real",

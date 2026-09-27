@@ -180,6 +180,15 @@ class SimulatedFPGA:
         # different environment.
         self.b_vector_t: List[float] = [500e-6, 0.0, -200e-6]
         self.rotation_rate_dps: float = 100.0
+        # Residual detuning spread (Hz) driving the Hahn-echo / CPMG fringe.
+        # A static detuning is refocused by a single Hahn pi pulse, but a
+        # detuning SPREAD (inhomogeneous / fluctuating across the ensemble)
+        # leaves a residual oscillation in the echo amplitude; for CPMG the
+        # finite pi-pulse spacing similarly leaves a residual. This is the
+        # physical quantity the Hahn/CPMG trace fringe encodes -- NOT the
+        # Ramsey rotation rate (which Hahn refocuses). 20 kHz is a modest
+        # spread that produces a visible, fittable fringe over a us-T2 window.
+        self.detuning_hz: float = 20e3
         # per-pixel ODMR resonance detuning (drawn lazily by _run_all_odmr to
         # model the gradient spreading the 64 pixel resonances).
         self._pixel_detun_hz: Optional[np.ndarray] = None
@@ -751,6 +760,14 @@ class SimulatedFPGA:
         fixed ``linspace(0, 2*T2, n)`` grid. The Ramsey fringe carries the
         ``exp(-t/T2)`` decay envelope (the profile has no separate T2*, so
         decaying Ramsey at T2 is the conservative choice; real T2* < T2).
+
+        The fringe frequency is tied to a PHYSICAL input quantity, not a
+        hardcoded rad/us constant: Ramsey precesses at
+        ``omega = radians(rotation_rate_dps)`` (the Sagnac relation, exactly as
+        :func:`qssc.sensors.gyro_measure` models it), so the host FFT fit on
+        these codes recovers the set rotation rate. Hahn / CPMG refocus a
+        STATIC detuning, so their fringe is the residual detuning SPREAD
+        (``self.detuning_hz``), not the rotation rate.
         """
         t2_us = self.t2 * 1e6
         if t_step_ns and t_step_ns > 0:
@@ -758,12 +775,16 @@ class SimulatedFPGA:
         else:
             # window times spread over ~2*T2 so the decay is visible
             ts = np.linspace(0, 2 * t2_us, n_windows)
+        t_s = ts * 1e-6                                         # us -> s
         if kind == "ramsey":
-            fringe = 0.5 + 0.5 * np.cos(ts * 0.3) * np.exp(-ts / t2_us)
+            omega = math.radians(float(self.rotation_rate_dps))  # rad/s (Sagnac)
+            fringe = 0.5 + 0.5 * np.cos(omega * t_s) * np.exp(-ts / t2_us)
         elif kind == "hahn":
-            fringe = 0.5 + 0.5 * np.cos(ts * 0.2) * np.exp(-ts / t2_us)
+            domega = 2.0 * math.pi * float(self.detuning_hz)     # rad/s residual spread
+            fringe = 0.5 + 0.5 * np.cos(domega * t_s) * np.exp(-ts / t2_us)
         else:  # cpmg
-            fringe = 0.5 + 0.5 * np.cos(ts * 0.15) * np.exp(-(ts / t2_us) ** 2)
+            domega = 2.0 * math.pi * float(self.detuning_hz)
+            fringe = 0.5 + 0.5 * np.cos(domega * t_s) * np.exp(-(ts / t2_us) ** 2)
         codes = BRIGHT_CODE * fringe + self.rng.normal(0, READOUT_NOISE, size=n_windows)
         codes = np.clip(codes, 0, ADC_MAX).astype(int)
         return " ".join([str(n_windows)] + [str(int(c)) for c in codes])
