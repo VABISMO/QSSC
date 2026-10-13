@@ -61,3 +61,4 @@ grad,Qgrad,1,IRLML2502,Package_TO_SOT_SMD:SOT-23-3,Infineon,IRLML2502TRPBF,https
 grad,Rsense,1,1,Resistor_SMD:R_2512_6332Metric,,,
 grad,"C_grad1, C_grad2",2,100nF,Capacitor_SMD:C_0603_1608Metric,,,
 grad,Lgrad,1,GradCoil,qssc:GradCoil,,,
+grad,Rgrad_feed,1,0R,Resistor_SMD:R_0805_2012Metric,,,
