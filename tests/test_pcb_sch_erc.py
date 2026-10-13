@@ -25,15 +25,23 @@ warnings at gate-creation time):
      with the KiCad install and is deliberately NOT pinned.
    * ``endpoint_off_grid`` -- pin/wire endpoints off the connection grid: the
      locked cosmetic state of the hand-drawn sheets.
-   * ``isolated_pin_label`` / ``pin_not_connected`` / ``pin_to_pin`` -- the
-     pre-existing tolerated wiring warnings on the main and grad sheets
-     (8 unconnected pins, 2 pin-to-pin, 1-2 isolated labels -- the schematics
-     are the source of the fully-routed boards, so these are NC pins without
-     markers and similar; repairing them is eeschema surgery and an upstream
-     decision, not gate scope).
+   * ``isolated_pin_label`` / ``pin_to_pin`` -- the tolerated wiring warnings
+     on the main and grad sheets, each traced to a documented design state:
+     ``isolated_pin_label`` is the ``mod_sync`` label (grad adds ``grad_en``),
+     both documented intentional 1-pin-label nets (see RESERVED_NETS in
+     test_pcb_component_audit); ``pin_to_pin`` is J10's unused USB-C SBU1/SBU2
+     pins, which the schematic ties to GND via labels (the PCB pads sit on the
+     GND net) -- the KiCad matrix dislikes driving that label net's PWR_FLAG
+     (power output) against a bidirectional pin, which is an opinion about
+     connectivity this gate does not second-guess (removing it would mean
+     changing the netlist). The formerly-8-per-sheet ``pin_not_connected``
+     warnings (USB-C SuperSpeed pins with no label/wire and no pads in the
+     generated PCB footprint) were REPAIRED with ``no_connect`` markers, so
+     the class is out of the allowlist: any recurrence now fails as an
+     unknown-class warning.
    A warning from ANY other class fails -- new KiCad check classes or new
    wiring issues must be reviewed consciously, not absorbed silently.
-3. **Exact semantic counts.** For the three semantic classes the per-class
+3. **Exact semantic counts.** For the tolerated semantic classes the per-class
    count is pinned exactly per sheet. This keeps the tolerated classes from
    becoming a growing bin: a newly introduced unconnected pin shifts the
    count and fails the gate.
@@ -60,16 +68,19 @@ SCHEMATICS = {
 
 # Warning classes tolerated per tier-2 -- the two environment/cosmetic classes
 # are NOT count-pinned (their counts depend on the KiCad installation and on
-# the frozen drawing style); the three semantic classes are in
+# the frozen drawing style); the tolerated semantic classes are in
 # SEMANTIC_WARNING_COUNTS and ARE pinned.
 ENV_COSMETIC_CLASSES = {"footprint_link_issues", "endpoint_off_grid"}
-SEMANTIC_CLASSES = {"isolated_pin_label", "pin_not_connected", "pin_to_pin"}
+SEMANTIC_CLASSES = {"isolated_pin_label", "pin_to_pin"}
 
 # Exact per-class warning counts for the semantic classes, measured at
-# gate-creation time (KiCad 10.0.6). head carries none of them.
+# gate-creation time (KiCad 10.0.6) and re-measured after the branch's
+# schematic repair (8 NC markers on J10's unused USB-C SuperSpeed pins moved
+# pin_not_connected to 0; #FLG3 / the GND labels were left untouched). head
+# carries none of the semantic classes.
 SEMANTIC_WARNING_COUNTS = {
-    "main": {"isolated_pin_label": 1, "pin_not_connected": 8, "pin_to_pin": 2},
-    "grad": {"isolated_pin_label": 2, "pin_not_connected": 8, "pin_to_pin": 2},
+    "main": {"isolated_pin_label": 1, "pin_to_pin": 2},
+    "grad": {"isolated_pin_label": 2, "pin_to_pin": 2},
     "head": {},
 }
 
