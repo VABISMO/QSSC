@@ -209,7 +209,11 @@ def prime_decompose(signal: np.ndarray, tau_ns: float,
         usable = n_cycles * period
         t = np.arange(usable)
         ref = np.cos(2.0 * np.pi * t / period)
-        out[p] = 2.0 * float(np.dot(s[:usable], ref) / usable)
+        # p==2: cos(pi*t) = +-1, so sum cos^2 = usable (not usable/2) -> the
+        # uniform 2x normalization over-counts the amplitude by 2. Use factor
+        # 1 for p==2 to match lockin_iq_result's p==2 branch (audit #158).
+        factor = 2.0 if p > 2 else 1.0
+        out[p] = factor * float(np.dot(s[:usable], ref) / usable)
     return out
 
 
@@ -276,3 +280,88 @@ def cross_talk_residual(prime_a: int, prime_b: int, window_ticks: int) -> float:
     ref_a = np.cos(2.0 * np.pi * t / prime_a)
     ref_b = np.cos(2.0 * np.pi * t / prime_b)
     return abs(float(np.dot(ref_a, ref_b) / (n * math.sqrt(0.5))))
+
+
+# ---------------------------------------------------------------------------
+# IQ demodulator (firmware READ_LOCKINP mirror)
+# ---------------------------------------------------------------------------
+# The firmware READ_LOCKINP verb demodulates a detector channel against an
+# EXACTLY-period-p cosine/sine reference (a sample counter wraps at p, indexing
+# a per-prime ROM) and returns the in-phase / quadrature accumulators I, Q plus
+# the sample count n. Exact periodicity (not a free-running NCO) is what makes
+# two distinct-prime references orthogonal over the LCM to the 12-bit ROM
+# rounding (~0.02%), ~75x better than the +-1/(p*q) odd-prime residual of the
+# old 2-sample square-wave boxcar. These tables + lockin_iq_demod are the
+# Python mirror of that RTL; the per-prime values are round(2047*cos/sin(2*pi*i/p))
+# and MUST match the cos_rom/sin_rom blocks in fpga/rtl/command_parser.v
+# (test_prime_readout.test_iq_rom_matches_rtl pins the parity).
+
+_LIQ_SCALE = 2047          # 12-bit signed cos/sin amplitude (+-2047)
+
+
+def _prime_cos_sin_rom(p: int) -> tuple[list[int], list[int]]:
+    """Per-prime cos/sin reference, exactly as the firmware ROM holds it."""
+    c = [int(round(_LIQ_SCALE * math.cos(2.0 * math.pi * i / p))) for i in range(p)]
+    s = [int(round(_LIQ_SCALE * math.sin(2.0 * math.pi * i / p))) for i in range(p)]
+    return c, s
+
+
+# One (cos, sin) block per system prime, indexed by prime_idx 0..15.
+PRIME_IQ_ROM: tuple[tuple[tuple[int, ...], tuple[int, ...]], ...] = tuple(
+    (tuple(_prime_cos_sin_rom(p)[0]), tuple(_prime_cos_sin_rom(p)[1]))
+    for p in PRIME_SYMBOLS
+)
+
+
+def lockin_iq_demod(codes, prime_idx: int) -> tuple[int, int, int]:
+    """In-phase / quadrature MAC against the per-prime reference ROM.
+
+    Mirrors the firmware ``READ_LOCKINP`` multiply-accumulate exactly: for each
+    of the ``len(codes)`` samples, ``I += code[k] * cos_rom[k % p]`` and
+    ``Q += code[k] * sin_rom[k % p]``, where ``p = PRIME_SYMBOLS[prime_idx]``
+    and the cos/sin tables are the per-prime ROM. The wrapping ``k % p`` index
+    makes the reference EXACTLY periodic with period p, so over a whole-LCM
+    window two distinct-prime references are orthogonal to 12-bit rounding.
+    Returns ``(I, Q, n)`` as signed Python ints (I/Q are 48-bit in the RTL).
+    """
+    if not (0 <= int(prime_idx) < len(PRIME_SYMBOLS)):
+        raise ValueError(f"prime_idx {prime_idx} out of range 0..{len(PRIME_SYMBOLS) - 1}")
+    p = PRIME_SYMBOLS[int(prime_idx)]
+    cos_rom, sin_rom = PRIME_IQ_ROM[int(prime_idx)]
+    arr = np.asarray(codes, dtype=np.int64).ravel()
+    n = int(arr.size)
+    if n == 0:
+        return 0, 0, 0
+    idx = np.arange(n) % p
+    I = int(np.dot(arr, np.asarray(cos_rom, dtype=np.int64)[idx]))
+    Q = int(np.dot(arr, np.asarray(sin_rom, dtype=np.int64)[idx]))
+    return I, Q, n
+
+
+def lockin_iq_result(I: int, Q: int, n: int, prime_idx: int,
+                      readout_noise: float) -> dict:
+    """Build the IQ-demod result dict from raw accumulators + sample count.
+
+    ``amplitude_code`` is the recovered modulation amplitude in ADC-code units:
+    for p > 2, ``A = 2*|R|/(n*S)`` (since ``sum cos^2 = n/2`` over whole
+    periods); for p == 2 the cos reference is a +-1 square wave
+    (``sum cos^2 = n``) so the factor is 1. ``phase_rad`` is ``atan2(Q, I)``.
+    ``sigma_code`` is the integrated noise floor (single-frame noise / sqrt(n)),
+    and ``snr`` is ``amplitude_code / sigma_code`` -- the lock-in SNR gain.
+    """
+    p = PRIME_SYMBOLS[int(prime_idx)]
+    n = max(1, int(n))
+    mag = math.hypot(int(I), int(Q))
+    amp = (2.0 * mag / (n * _LIQ_SCALE)) if p > 2 else (mag / (n * _LIQ_SCALE))
+    sigma = float(readout_noise) / math.sqrt(n)
+    return {
+        "prime_idx": int(prime_idx),
+        "prime": p,
+        "n_samples": n,
+        "I": int(I),
+        "Q": int(Q),
+        "amplitude_code": round(amp, 3),
+        "phase_rad": round(math.atan2(int(Q), int(I)), 4),
+        "sigma_code": round(sigma, 3),
+        "snr": round(amp / sigma, 3) if sigma else 0.0,
+    }

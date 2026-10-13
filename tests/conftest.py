@@ -14,6 +14,32 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 # Set before any test runs (and before the app/client fixtures import the
 # guards). ``setdefault`` leaves an explicit outer value untouched.
 os.environ.setdefault("QSSC_TESTING", "1")
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limit_buckets():
+    """Clear the per-IP rate-limit buckets before each test.
+
+    ``RATE_LIMIT_PER_MIN`` defaults to 20 and the rate-limit bucket for the
+    ``testclient`` peer accumulates across the whole session (a sliding 60s
+    window). Without a per-test reset, suites that fire many rate-limited
+    requests (POST /api/circuit/run, /api/circuit/custom, ...) trip 429 for
+    later tests -- e.g. ``test_mongo_persistence`` after the combined suite
+    (audit #143). This isolates each test's rate-limit state. Production never
+    imports this file, so the reset does not leak into a real deploy."""
+    try:
+        from api import main as _m
+        _m._rate_buckets.clear()
+    except Exception:  # noqa: BLE001
+        pass
+    yield
+    try:
+        from api import main as _m
+        _m._rate_buckets.clear()
+    except Exception:  # noqa: BLE001
+        pass

@@ -40,7 +40,7 @@ def dipole_coupling_hz(r_nm: float) -> float:
     gate-time estimate below uses this, conservative up to a 2x geometry
     factor).  Returns the coupling in Hz.
 
-    Examples (rounded): r=2 nm -> ~16 MHz, r=3 nm -> ~1.9 MHz,
+    Examples (rounded): r=2 nm -> ~6.5 MHz, r=3 nm -> ~1.9 MHz,
     r=5 nm -> ~415 kHz, r=10 nm -> ~52 kHz.
     """
     r = r_nm * 1e-9

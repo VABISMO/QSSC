@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Request
 from api import jobs
 
 from ._guards import (
-    _rate_limited, _check_sync, _check_custom_circuit, _req_dict,
+    _rate_limited, _check_sync, _check_custom_circuit, _check_write, _req_dict,
 )
 from .models import (
     RunRequest, CustomCircuitRequest, ParallelRunRequest, CalibrateArrayRequest,
@@ -66,7 +66,11 @@ def run_custom_circuit(req: CustomCircuitRequest, sync: bool = False,
     payload["algorithm"] = "custom"
     if sync:
         from api.runner import run_custom as _run
-        return {"job_id": None, "status": "finished", "result": _run(payload)}
+        try:
+            return {"job_id": None, "status": "finished", "result": _run(payload)}
+        except Exception as exc:  # noqa: BLE001 - surface sim errors, not a 500
+            return {"job_id": None, "status": "failed",
+                    "result": {"error": str(exc)}}
     job_id = jobs.enqueue("custom", payload)
     return {"job_id": job_id, "status": "queued"}
 
@@ -160,7 +164,9 @@ def list_jobs(limit: int = 50):
 
 
 @router.delete("/api/jobs/{job_id}")
-def delete_job(job_id: str):
+def delete_job(job_id: str, request: Request = None):
+    if request is not None:
+        _check_write(request)
     return {"deleted": jobs.delete_job(job_id)}
 
 
@@ -172,11 +178,15 @@ def list_scripts():
 
 
 @router.post("/api/scripts")
-def save_script(req: ScriptRequest):
+def save_script(req: ScriptRequest, request: Request = None):
+    if request is not None:
+        _check_write(request)
     rec = jobs.save_script(req.name, req.code, req.id)
     return rec
 
 
 @router.delete("/api/scripts/{sid}")
-def delete_script(sid: str):
+def delete_script(sid: str, request: Request = None):
+    if request is not None:
+        _check_write(request)
     return {"deleted": jobs.delete_script(sid)}

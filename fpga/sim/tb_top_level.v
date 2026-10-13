@@ -69,6 +69,13 @@ module tb_top_level;
     wire        mw_gate;
     wire [3:0]  spi_pins;
     wire        refclk_out;
+    // ADF4351 MUXOUT digital lock-detect: the sim models the PLL as locking
+    // immediately (the old RTL armed on !pll_busy alone), so drive spi_pins[3]
+    // HIGH to assert pll_locked via the 2-FF + deglitch path in top_level
+    // (issue #98). Without this the pulse/sweep FSMs fall back to the 5 ms
+    // settle-timeout per point and the sim slows ~500x. The FPGA never drives
+    // spi_pins[3] (it is an input), so this is the sole driver.
+    assign spi_pins[3] = 1'b1;
     // Gradient coil DAC (Invention 5): 3-wire SPI + enable.
     wire        grad_cs;
     wire        grad_sclk;
@@ -299,6 +306,8 @@ module tb_top_level;
     integer li_k, li_ok;     // READ_LOCKIN verify loop
     integer k18, ok18;       // Ramsey RUN_SEQUENCE verify loop
     integer r19, k19, base19, ok19;  // RUN_ALL_ODMR + SET_GRADIENT verify loop
+    integer li_j;                    // READ_LOCKINP IQ reply compare loop
+    reg [7:0] iq_exp [0:44];         // expected 45-byte IQ reply "<I 16> <Q 16> <n 10>\n"
     reg [7:0] cmd_bytes [0:39];
     initial begin
         // Reset
@@ -434,7 +443,7 @@ module tb_top_level;
                      rx_log_cnt, (rx_log_cnt>0 ? rx_log[0] : 8'h00));
         end
         // The AD7616 keeps sampling live, so the sample is still 1234 after
-        // "clear" -- this proves CLEAR_DETECTORS is an honest no-op on the ADC.
+        // "clear" -- this proves CLEAR_DETECTORS is a no-op on the ADC.
         rx_log_cnt = 0;
         cmd_bytes[0]="R";  cmd_bytes[1]="E";  cmd_bytes[2]="A";  cmd_bytes[3]="D";
         cmd_bytes[4]="_";  cmd_bytes[5]="D";  cmd_bytes[6]="E";  cmd_bytes[7]="T";
@@ -943,67 +952,103 @@ module tb_top_level;
             $display("TB: FAIL READ_LOCKIN (got %0d bytes)", rx_log_cnt);
         end
 
-        // ---- 17b) READ_LOCKINP 0 4 10000 -> same 4936 4936 4 4 (prime-period
-        // lock-in with a non-default half_ns; constant ADC 1234 -> sums 4*1234).
-        // Proves the host-supplied half-period drives the on/off timing.
+        // ---- 17b) READ_LOCKINP 0 7 3 -> IQ reply "-000000000001234
+        // 000000000000000 0000000007\n" (45 bytes). prime_idx=3 -> p=7; one full
+        // period (n=7) of the constant ADC code 1234. I = 1234 * sum(cos_rom[7])
+        // = 1234 * (-1) = -1234 (the per-period cos-LUT rounding residual); Q =
+        // 1234 * sum(sin_rom[7]) = 0 (sin is antisymmetric -> exact cancellation).
+        // Proves arg parse (site/n_samples/prime_idx), p=7 ROM-block selection,
+        // the wrapping sample counter (7 samples = one 0..6 wrap), the MAC, and
+        // the 45-byte "<I 16> <Q 16> <n 10>\n" encoding.
         entropy_mode = 1'b0;
         rx_log_cnt = 0;
         cmd_bytes[0]="R";  cmd_bytes[1]="E";  cmd_bytes[2]="A";  cmd_bytes[3]="D";
         cmd_bytes[4]="_";  cmd_bytes[5]="L";  cmd_bytes[6]="O";  cmd_bytes[7]="C";
         cmd_bytes[8]="K";  cmd_bytes[9]="I";  cmd_bytes[10]="N"; cmd_bytes[11]="P";
-        cmd_bytes[12]=" "; cmd_bytes[13]="0"; cmd_bytes[14]=" "; cmd_bytes[15]="4";
-        cmd_bytes[16]=" "; cmd_bytes[17]="1"; cmd_bytes[18]="0"; cmd_bytes[19]="0";
-        cmd_bytes[20]="0"; cmd_bytes[21]="0"; cmd_bytes[22]=8'h0A;
-        $display("TB: sending READ_LOCKINP 0 4 10000 (expect 4936 4936 4 4 + LF)");
-        for (c=0;c<23;c=c+1) uart_send_byte(cmd_bytes[c]);
-        wait_for_bytes(44, W_SAFE);
-        li_ok = 1;
-        if (rx_log_cnt != 44) li_ok = 0;
-        for (li_k=0;li_k<4;li_k=li_k+1) begin
-            if (li_k < 2) begin
-                if (!(rx_log[li_k*11+0]==="0" && rx_log[li_k*11+1]==="0" &&
-                      rx_log[li_k*11+2]==="0" && rx_log[li_k*11+3]==="0" &&
-                      rx_log[li_k*11+4]==="0" && rx_log[li_k*11+5]==="0" &&
-                      rx_log[li_k*11+6]==="4" && rx_log[li_k*11+7]==="9" &&
-                      rx_log[li_k*11+8]==="3" && rx_log[li_k*11+9]==="6")) li_ok = 0;
-            end else begin
-                if (!(rx_log[li_k*11+0]==="0" && rx_log[li_k*11+1]==="0" &&
-                      rx_log[li_k*11+2]==="0" && rx_log[li_k*11+3]==="0" &&
-                      rx_log[li_k*11+4]==="0" && rx_log[li_k*11+5]==="0" &&
-                      rx_log[li_k*11+6]==="0" && rx_log[li_k*11+7]==="0" &&
-                      rx_log[li_k*11+8]==="0" && rx_log[li_k*11+9]==="4")) li_ok = 0;
-            end
-            if (li_k<3 && rx_log[li_k*11+10] !== " ") li_ok = 0;
-            if (li_k==3 && rx_log[li_k*11+10] !== 8'h0A) li_ok = 0;
-        end
+        cmd_bytes[12]=" "; cmd_bytes[13]="0"; cmd_bytes[14]=" "; cmd_bytes[15]="7";
+        cmd_bytes[16]=" "; cmd_bytes[17]="3"; cmd_bytes[18]=8'h0A;
+        $display("TB: sending READ_LOCKINP 0 7 3 (expect -000000000001234 000000000000000 0000000007 + LF)");
+        for (c=0;c<19;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(45, W_SAFE);
+        li_ok = (rx_log_cnt == 45);
+        // I field [0..15] = "-000000000001234"
+        if (rx_log[0] !== "-") li_ok = 0;
+        for (li_j=1; li_j<=11; li_j=li_j+1) if (rx_log[li_j] !== "0") li_ok = 0;
+        if (!(rx_log[12]==="1" && rx_log[13]==="2" &&
+              rx_log[14]==="3" && rx_log[15]==="4")) li_ok = 0;
+        if (rx_log[16] !== " ") li_ok = 0;             // sep
+        // Q field [17..32] = " 000000000000000" (Q=0 -> sign ' ', 15 zeros)
+        if (rx_log[17] !== " ") li_ok = 0;
+        for (li_j=18; li_j<=32; li_j=li_j+1) if (rx_log[li_j] !== "0") li_ok = 0;
+        if (rx_log[33] !== " ") li_ok = 0;             // sep
+        // n field [34..43] = "0000000007"
+        for (li_j=34; li_j<=42; li_j=li_j+1) if (rx_log[li_j] !== "0") li_ok = 0;
+        if (rx_log[43] !== "7") li_ok = 0;
+        if (rx_log[44] !== 8'h0A) li_ok = 0;           // LF
         if (li_ok) begin
             ok_count = ok_count + 1;
-            $display("TB: READ_LOCKINP = 4936 4936 4 4 + LF  (PASS)");
+            $display("TB: READ_LOCKINP 0 7 3 = -1234 0 7 (IQ)  (PASS)");
         end else begin
             err_count = err_count + 1;
-            $display("TB: FAIL READ_LOCKINP (got %0d bytes)", rx_log_cnt);
+            $display("TB: FAIL READ_LOCKINP 17b (got %0d bytes)", rx_log_cnt);
         end
 
-        // ---- 17c) READ_LOCKINP 0 4 1000 -> ERR (half_ns below the 2000 min)
+        // ---- 17c) READ_LOCKINP 0 4 16 -> ERR (prime_idx=16 > 15, out of range)
         entropy_mode = 1'b0;
         rx_log_cnt = 0;
         cmd_bytes[0]="R";  cmd_bytes[1]="E";  cmd_bytes[2]="A";  cmd_bytes[3]="D";
         cmd_bytes[4]="_";  cmd_bytes[5]="L";  cmd_bytes[6]="O";  cmd_bytes[7]="C";
         cmd_bytes[8]="K";  cmd_bytes[9]="I";  cmd_bytes[10]="N"; cmd_bytes[11]="P";
         cmd_bytes[12]=" "; cmd_bytes[13]="0"; cmd_bytes[14]=" "; cmd_bytes[15]="4";
-        cmd_bytes[16]=" "; cmd_bytes[17]="1"; cmd_bytes[18]="0"; cmd_bytes[19]="0";
-        cmd_bytes[20]="0"; cmd_bytes[21]=8'h0A;
-        $display("TB: sending READ_LOCKINP 0 4 1000 (expect ERR, half_ns < 2000)");
-        for (c=0;c<22;c=c+1) uart_send_byte(cmd_bytes[c]);
+        cmd_bytes[16]=" "; cmd_bytes[17]="1"; cmd_bytes[18]="6"; cmd_bytes[19]=8'h0A;
+        $display("TB: sending READ_LOCKINP 0 4 16 (expect ERR, prime_idx > 15)");
+        for (c=0;c<20;c=c+1) uart_send_byte(cmd_bytes[c]);
         wait_for_bytes(4, W_SAFE);
         li_ok = (rx_log_cnt==4 && rx_log[0]==="E" && rx_log[1]==="R" &&
                  rx_log[2]==="R" && rx_log[3]===8'h0A);
         if (li_ok) begin
             ok_count = ok_count + 1;
-            $display("TB: READ_LOCKINP 1000 -> ERR (bounds)  (PASS)");
+            $display("TB: READ_LOCKINP 0 4 16 -> ERR (prime_idx bounds)  (PASS)");
         end else begin
             err_count = err_count + 1;
             $display("TB: FAIL READ_LOCKINP bounds (got %0d bytes)", rx_log_cnt);
+        end
+
+        // ---- 17d) READ_LOCKINP 0 14 3 -> "-000000000002468 000000000000000
+        // 0000000014\n". Same prime_idx=3 (p=7) but n=14 = TWO full periods of
+        // constant 1234. I = 2 * (-1234) = -2468 (residual scales linearly with
+        // the number of periods); Q stays exactly 0. Proves multi-period
+        // accumulation + the wrapping counter resets at p across period boundaries.
+        entropy_mode = 1'b0;
+        rx_log_cnt = 0;
+        cmd_bytes[0]="R";  cmd_bytes[1]="E";  cmd_bytes[2]="A";  cmd_bytes[3]="D";
+        cmd_bytes[4]="_";  cmd_bytes[5]="L";  cmd_bytes[6]="O";  cmd_bytes[7]="C";
+        cmd_bytes[8]="K";  cmd_bytes[9]="I";  cmd_bytes[10]="N"; cmd_bytes[11]="P";
+        cmd_bytes[12]=" "; cmd_bytes[13]="0"; cmd_bytes[14]=" "; cmd_bytes[15]="1";
+        cmd_bytes[16]="4"; cmd_bytes[17]=" "; cmd_bytes[18]="3"; cmd_bytes[19]=8'h0A;
+        $display("TB: sending READ_LOCKINP 0 14 3 (expect -000000000002468 000000000000000 0000000014 + LF)");
+        for (c=0;c<20;c=c+1) uart_send_byte(cmd_bytes[c]);
+        wait_for_bytes(45, W_SAFE);
+        li_ok = (rx_log_cnt == 45);
+        // I field [0..15] = "-000000000002468"
+        if (rx_log[0] !== "-") li_ok = 0;
+        for (li_j=1; li_j<=11; li_j=li_j+1) if (rx_log[li_j] !== "0") li_ok = 0;
+        if (!(rx_log[12]==="2" && rx_log[13]==="4" &&
+              rx_log[14]==="6" && rx_log[15]==="8")) li_ok = 0;
+        if (rx_log[16] !== " ") li_ok = 0;
+        if (rx_log[17] !== " ") li_ok = 0;
+        for (li_j=18; li_j<=32; li_j=li_j+1) if (rx_log[li_j] !== "0") li_ok = 0;
+        if (rx_log[33] !== " ") li_ok = 0;
+        // n field [34..43] = "0000000014"
+        for (li_j=34; li_j<=41; li_j=li_j+1) if (rx_log[li_j] !== "0") li_ok = 0;
+        if (!(rx_log[42]==="1" && rx_log[43]==="4")) li_ok = 0;
+        if (rx_log[44] !== 8'h0A) li_ok = 0;
+        if (li_ok) begin
+            ok_count = ok_count + 1;
+            $display("TB: READ_LOCKINP 0 14 3 = -2468 0 14 (2 periods)  (PASS)");
+        end else begin
+            err_count = err_count + 1;
+            $display("TB: FAIL READ_LOCKINP 17d (got %0d bytes)", rx_log_cnt);
         end
 
         // ---- 18) RUN_SEQUENCE 0 0 4 500 -> "00004 01234 01234 01234 01234\n"

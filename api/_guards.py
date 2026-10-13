@@ -103,11 +103,35 @@ def _req_dict(model) -> dict:
 # ---------------------------------------------------------------------------
 
 def _client_ip(request: Request) -> str:
-    # trust the first hop only when a proxy (Render) sets the header
+    # The RIGHTMOST X-Forwarded-For entry is the one the immediate trusted
+    # proxy appended (the real client IP); the LEFTMOST is client-controlled
+    # and spoofable -- a public attacker rotating the leftmost value used to
+    # get a fresh _rate_buckets entry per request and never trip the 20/min
+    # limit. Honour XFF only when the immediate peer is a trusted proxy
+    # (loopback, or a CIDR the operator set in QSSC_TRUSTED_PROXY_CIDR); a
+    # DIRECT public client's XFF is fully forged, so fall back to the
+    # connection peer (audit #105). For a localhost lab tool the rate limit
+    # is best-effort regardless -- this just stops trivial XFF spoofing on a
+    # public deploy.
+    peer = request.client.host if request.client else ""
     fwd = request.headers.get("x-forwarded-for", "")
-    if fwd:
-        return fwd.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    if fwd and (_is_local(request) or _is_trusted_proxy(peer)):
+        rightmost = fwd.split(",")[-1].strip()
+        if rightmost:
+            return rightmost
+    return peer or "unknown"
+
+
+def _is_trusted_proxy(peer: str) -> bool:
+    """True if the immediate peer is in the operator-configured proxy CIDR."""
+    cidr = os.environ.get("QSSC_TRUSTED_PROXY_CIDR", "").strip()
+    if not peer or not cidr:
+        return False
+    import ipaddress
+    try:
+        return ipaddress.ip_address(peer) in ipaddress.ip_network(cidr, strict=False)
+    except ValueError:
+        return False
 
 
 def _is_local(request: Request) -> bool:
@@ -132,13 +156,47 @@ def _rate_limited(request: Request) -> bool:
     :mod:`api.main` namespace so a test ``monkeypatch.setattr(main_mod,
     "RATE_LIMIT_PER_MIN", ...)`` is honoured.
     """
+    from collections import deque
     from api import main as _m
     now = time.monotonic()
-    bucket = _m._rate_buckets[_client_ip(request)]
+    ip = _client_ip(request)
+    # ``.get`` (not ``_rate_buckets[ip]``) so a defaultdict's default_factory
+    # is NOT triggered here -- we want to detect "no bucket yet" ourselves.
+    bucket = _m._rate_buckets.get(ip)
+    if bucket is not None:
+        # Trim expired entries BEFORE appending the current timestamp, so an IP
+        # that went silent for >60s has its bucket emptied and the dict key
+        # evicted (audit #129 -- the prior append-then-trim order left the
+        # just-appended entry in the deque, making `not bucket` always False
+        # and the eviction unreachable dead code).
+        while bucket and now - bucket[0] > 60.0:
+            bucket.popleft()
+        if not bucket:
+            del _m._rate_buckets[ip]
+            bucket = None
+    if bucket is None:
+        bucket = deque()
+        _m._rate_buckets[ip] = bucket
     bucket.append(now)
-    while bucket and now - bucket[0] > 60.0:
-        bucket.popleft()
-    return len(bucket) > _m.RATE_LIMIT_PER_MIN
+    over = len(bucket) > _m.RATE_LIMIT_PER_MIN
+    # Bounded periodic sweep: an IP that hits once and never returns still
+    # leaves a dict key (the trim above only runs on that IP's NEXT request,
+    # which never comes). Every _SWEEP_EVERY-th call, drop keys whose newest
+    # entry is older than 60s so a public deploy with many rotating IPs does
+    # not grow _rate_buckets without bound (audit #129). Amortized O(1).
+    _m._rate_calls = getattr(_m, "_rate_calls", 0) + 1
+    if _m._rate_calls & _SWEEP_MASK == 0:
+        stale = [k for k, b in _m._rate_buckets.items()
+                 if not b or now - b[-1] > 60.0]
+        for k in stale:
+            del _m._rate_buckets[k]
+    return over
+
+
+# Sweep the per-IP rate-limit dict every 128th call (a power of two so the
+# `& _SWEEP_MASK == 0` test is a cheap bitmask). Bounds the sweep cost while
+# still evicting silent IPs within ~128 requests of any caller.
+_SWEEP_MASK = 0x7F
 
 
 def _check_sync(request: Request, sync: bool) -> None:
@@ -166,6 +224,31 @@ def _check_custom_circuit(request: Request) -> None:
         raise HTTPException(
             401, "A valid X-API-Key header is required for the custom-circuit endpoint.",
         )
+
+
+def _check_write(request: Request) -> None:
+    """Gate destructive / persistence endpoints (delete_job, save_script,
+    delete_script) so a public deploy can't be griefed (history wiped or
+    Mongo filled with unbounded scripts). Allowed from localhost (the lab
+    tool's normal use) OR with the custom-circuit ``X-API-Key`` (audit #107).
+    Read endpoints (list_scripts, get_job) stay open."""
+    from api import main as _m
+    if _is_local(request):
+        return
+    key = _m.CUSTOM_CIRCUIT_API_KEY
+    if key and request.headers.get("x-api-key", "") == key:
+        return
+    if key:
+        raise HTTPException(
+            401, "A valid X-API-Key header is required for this write endpoint "
+                 "from a non-localhost peer.",
+        )
+    # No key configured: block the write from a non-localhost peer rather
+    # than leave it open on a public deploy.
+    raise HTTPException(
+        403, "This write endpoint is localhost-only on this deployment "
+             "(set CUSTOM_CIRCUIT_API_KEY to enable X-API-Key access).",
+    )
 
 
 def _clamp_points(points: int, lo: int = 1, hi: int = 2000) -> int:

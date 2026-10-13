@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -35,6 +36,7 @@ from qssc.array_calibration import (
     gradient_dac_code_from_mhz,
 )
 from qssc.noise_filters import AntiNoiseConfig, noise_environment_preset
+from qssc.backend_fpga import FPGA_ID_TOKEN
 # Re-exported so tests can monkeypatch api.runner.von_neumann_extract (the
 # qrand runner resolves it through this module at call time -- see
 # api.runner_algorithms._run_qrand).
@@ -175,18 +177,45 @@ def _make_fpga(profile: str, temperature_k: float, seed, hardware: bool):
     # NoFPGADetected propagates up to the API, which returns the
     # no-fpga-detected body for the frontend banner.
     key = (port, profile, float(temperature_k), int(seed))
+    # The cache check + open is guarded by a module lock: when Redis is down
+    # the in-process fallback ThreadPoolExecutor(max_workers=4) can run two
+    # hardware=True jobs concurrently -- without the lock both see _HW_FPGA
+    # is None and double-open /dev/ttyUSB0 (the second open fails or the two
+    # jobs interleave serial I/O on one handle). The RQ path is separate
+    # processes (no shared cache) so the lock is uncontended there (audit #131).
     global _HW_FPGA, _HW_FPGA_KEY
-    if _HW_FPGA is not None and _HW_FPGA_KEY == key:
+    with _HW_FPGA_LOCK:
+        if _HW_FPGA is not None and _HW_FPGA_KEY == key:
+            # Liveness probe: a cached handle goes stale if the USB cable was
+            # unplugged and replugged mid-session -- the serial fd is dead but
+            # still cached, so every subsequent hardware run would fail with an
+            # opaque I/O error until the worker is restarted. Probe with ID; on
+            # an I/O exception OR a non-ID reply (a dead link often readline()s
+            # an empty string rather than raising) drop the cache and reopen
+            # once (reconnect-on-failure, audit #106).
+            try:
+                probe = _HW_FPGA.send_command("ID")
+                if not probe.startswith(FPGA_ID_TOKEN):
+                    raise IOError(f"stale FPGA handle: ID probe -> {probe!r}")
+            except Exception:
+                try:
+                    _HW_FPGA.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                _HW_FPGA = None
+                _HW_FPGA_KEY = None
+        if _HW_FPGA is not None and _HW_FPGA_KEY == key:
+            return _HW_FPGA
+        _HW_FPGA = make_connection(port=port, profile=profile,
+                                   temperature_k=temperature_k, seed=seed)
+        _HW_FPGA_KEY = key
         return _HW_FPGA
-    _HW_FPGA = make_connection(port=port, profile=profile,
-                               temperature_k=temperature_k, seed=seed)
-    _HW_FPGA_KEY = key
-    return _HW_FPGA
 
 
 # Cached real FPGAConnection for the worker process (see _make_fpga).
 _HW_FPGA = None
 _HW_FPGA_KEY = None
+_HW_FPGA_LOCK = threading.Lock()
 
 
 def _source_label(fpga) -> str:
@@ -568,13 +597,22 @@ def run_parallel(req: dict) -> dict:
         if nq > 19:
             return {"error": f"N={n} -> {nq} qubits too large (>19). Use N <= 63."}
         # Scale the race width down for larger N: each pixel runs a full
-        # 3*bitlen(N)+1-qubit Shor statevector, so 64 pixels @ 16q cannot
+        # 3*bitlen(N)+1-qubit Shor statevector SEQUENTIALLY (run_array has no
+        # short-circuit -- it builds+runs every base then post-processes), so
+        # wall-clock ~= race_pixels * per-pixel cost. 64 pixels @ 16q cannot
         # finish inside the job timeout (and 64 @ 19q is hopeless). Shor only
         # needs a few coprime bases to find a factor (P(success) > 1/2 per
-        # non-trivial base), so 16 bases @ 16q and 4 @ 19q are plenty and keep
-        # the wall-clock inside the 600 s cap. The full 64-pixel race stays
-        # available for the fast 13q band (N <= 15).
-        race_pixels = min(n_pixels, 64 if nq <= 13 else 16 if nq <= 16 else 4)
+        # non-trivial base -> 4 bases give ~94%, 8 give ~99.6%). Measured
+        # 2026-09-26 on the real run_array path via a SINGLE clean rq worker:
+        # ~20 s/pixel at nq=16 (RGQFTMultiplier build + per-pixel register/
+        # readout/noise), so 4 px @ 16q finished N=21 -> [7,3] in 81 s wall-
+        # clock (base 2 wins) -- well under the 600 s frontend watchdog AND the
+        # 900 s rq job_timeout. CAUTION: stale rq workers from other trees
+        # (e.g. /tmp checkouts) stealing the queue run OLD race_pixels and
+        # balloon this to 500-900 s; keep exactly one worker on the live tree.
+        # The full 64-pixel race stays available for the fast 13q band (N<=15);
+        # 19q keeps 4 bases.
+        race_pixels = min(n_pixels, 64 if nq <= 13 else 4 if nq <= 16 else 4)
         out["race_pixels"] = race_pixels
         rng = np.random.default_rng(seed)
         circuits = []
@@ -795,7 +833,7 @@ def run_calibrate_array(req: dict) -> dict:
                            int(prof.odmr_linewidth_hz / 1e3) * 6)
             f_start = d_khz - span_khz
             f_stop = d_khz + span_khz
-            n = int(req.get("n_points", 400))
+            n = min(int(req.get("n_points", 400)), 256)  # RTL CMD_ALL_SWEEP caps n at 256; the tensor path hardcodes 256 too (audit #145)
             # Program the gradient coil BEFORE the sweep so each
             # pixel's ODMR lines spread across the pixel by grad*pixel_size,
             # which is what makes the lines resolvable (-> per-pixel register

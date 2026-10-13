@@ -8,7 +8,6 @@ model, and the XY8 decoupling toolbox. The shared readout constants live in
 """
 from __future__ import annotations
 
-import math
 from typing import List, Optional
 
 import numpy as np
@@ -75,5 +74,16 @@ def xy8_decoupling(n_blocks: int = 1) -> List[str]:
 
 
 def estimate_coherence_xy8(t2: float, n_blocks: int = 1, tau_s: float = 1e-6) -> float:
-    """Toy estimator of the extended coherence under XY8 (exponential gain)."""
-    return t2 * (2 ** n_blocks) * (1 - math.exp(-tau_s / max(t2, 1e-12)))
+    """Estimate the extended coherence under XY8 decoupling.
+
+    Standard XY8 refocuses low-frequency dephasing noise, extending the
+    coherence by ~``T2 * 2**n_blocks`` (the exponential gain per XY8 block).
+    The prior ``* (1 - exp(-tau/t2))`` factor modelled the AC-sensing SIGNAL
+    AMPLITUDE (which vanishes as tau -> 0), not the T2 extension -- it
+    conflated sensitivity with coherence (audit #119). The active noise path
+    (``noise_filters.effective_t2``) already uses the correct ``2**n`` gain;
+    this standalone estimator now matches it. ``tau_s`` is retained in the
+    signature for API compatibility but no longer scales the result.
+    """
+    _ = tau_s  # retained for API compatibility; AC-sensing tau factor dropped
+    return t2 * (2 ** n_blocks)

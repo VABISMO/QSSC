@@ -4,7 +4,7 @@
 Exposes the simulator, the Qiskit backend, the ODMR model and the fabrication
 protocol as a small REST API consumed by the React frontend.  Run with:
 
-    uvicorn api.main:app --reload --port 8000
+    uvicorn api.main:app --port 8011
 
 This module is the application factory: it owns the deploy configuration (env-
 driven), builds the ``FastAPI`` app + CORS middleware, and includes the

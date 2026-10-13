@@ -103,19 +103,22 @@ def test_common_mode_reject_lowers_noise():
 # --- slow vs fast channels: 1/sqrt(N) behaviour -----------------------------
 
 def test_fast_channels_average_down_with_n():
-    """Vibration + EMI are uncorrelated shot-to-shot -> they average down by
-    1/sqrt(N). With only fast channels present (zero the slow ones), doubling N
-    must reduce the fast contribution."""
+    """Vibration + EMI are uncorrelated shot-to-shot PAST one vibration period
+    -> they average down by 1/sqrt(N). With only fast channels present (zero the
+    slow ones), a 4x longer integration -- both well past the ~33-shot vibration
+    period at the 1 kHz cadence (audit #138) -- must halve the fast contribution.
+    Below one vibration period vibration is correlated and does NOT average down
+    (see test_vibration_correlated_for_short_integration in test_reaudit_fixes)."""
     env = NoiseEnvironment(temp_drift_counts=0.0, pressure_counts=0.0,
                            vibration_counts=120.0, emi_counts=80.0)
     f = AntiNoiseConfig()  # pass-through
-    n1 = effective_noise_sigma(READOUT_NOISE, env, f, 1)
-    n4 = effective_noise_sigma(READOUT_NOISE, env, f, 4)
-    # the fast-channel residual at N=4 is half the N=1 residual (in quadrature)
-    fast1_sq = (120.0 ** 2 + 80.0 ** 2)
-    fast4_sq = fast1_sq / 4  # /sqrt(4)=2 -> squared /4
-    floor1 = READOUT_NOISE
-    floor4 = READOUT_NOISE / 2
+    n1 = effective_noise_sigma(READOUT_NOISE, env, f, 64)
+    n4 = effective_noise_sigma(READOUT_NOISE, env, f, 256)
+    # the fast-channel residual at N=256 is half the N=64 residual (in quadrature)
+    fast1_sq = (120.0 ** 2 + 80.0 ** 2) / 64
+    fast4_sq = (120.0 ** 2 + 80.0 ** 2) / 256  # 4x N -> /2 in quadrature
+    floor1 = READOUT_NOISE / math.sqrt(64)
+    floor4 = READOUT_NOISE / math.sqrt(256)
     assert n1 == pytest.approx(math.sqrt(floor1 ** 2 + fast1_sq))
     assert n4 == pytest.approx(math.sqrt(floor4 ** 2 + fast4_sq))
     assert n4 < n1

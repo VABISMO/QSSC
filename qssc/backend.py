@@ -444,6 +444,21 @@ class QSSCBackend(BackendV2):
             self.n_nv_per_pixel = len(sites)
         self.sites = list(sites)
         self._n_qubits = len(self.sites)
+        # auto_align / explicit sites may have set a register width different
+        # from the constructor-arg n_nv_per_pixel (the gradient caps the
+        # register to the resolvable count); re-derive the prime-symbol count
+        # + SNR from the ACTUAL width so the noise model and noise_summary
+        # report the real prime-denoiser improvement (audit #156). The original
+        # derivation above ran before sites was determined, so it used the
+        # requested width, not the capped one.
+        if self._register_line_freqs_hz is not None:
+            self._n_prime_symbols = max(1, len(self._register_line_freqs_hz))
+        else:
+            self._n_prime_symbols = max(1, min(self.n_nv_per_pixel,
+                                               len(PRIME_SYMBOLS)))
+        self._prime_snr = (
+            prime_noise_rejection(self._n_prime_symbols, self._n_noise_bins)
+            if self._prime_readout else 1.0)
         # Nuclear-spin memory: when enabled, append one 13C memory
         # qubit per electron NV (paired by index). The 13C carries nuclear_t2
         # (seconds, vs the electron's ~1.8 ms) so a circuit can STORE a state on
@@ -809,11 +824,15 @@ class QSSCBackend(BackendV2):
         ros = [float(s.readout_err) for s in self.sites]
         base_ro = (float(np.mean(ros)) if ros
                    else float(self.profile.readout_error))
-        env_ro = float(np.clip(base_ro * self._readout_noise_factor, 0.0,
-                               base_ro * 4.0))
-        eff_ro = (float(np.clip(env_ro / self._prime_snr, 0.0, env_ro))
-                  if self._prime_readout and self._prime_snr > 1.0
-                  else env_ro)
+        # Match _effective_readout_err exactly: base * env_factor, then / prime
+        # SNR, then clip the FINAL result to [0, base*4]. The prior code clipped
+        # env_ro to base*4 first and then divided by prime_snr, which disagrees
+        # with the noise model when env_factor > 4 and prime_snr > 1 (the panel
+        # reported base*4/prime_snr while the model used base*4) -- audit #157.
+        raw_err = base_ro * self._readout_noise_factor
+        if self._prime_readout and self._prime_snr > 1.0:
+            raw_err = raw_err / self._prime_snr
+        eff_ro = float(np.clip(raw_err, 0.0, base_ro * 4.0))
         return {
             "readout_error": round(base_ro, 6),
             "effective_readout_error": round(eff_ro, 6),
@@ -1073,7 +1092,7 @@ class QSSCBackend(BackendV2):
         # it with a clear message instead. 1q-only circuits run fine (64 chip
         # pixels). Register mode (the default) keeps the all-to-all dipole 2q.
         if self._ensemble_mode:
-            _, n_2q, n_compiled, _, _, _ = self._decomposed_cost(circuit)
+            _, n_2q, n_compiled, _, _, _, _ = self._decomposed_cost(circuit)
             if n_2q > 0 or n_compiled > 0:
                 raise ValueError(
                     "ensemble mode has no within-pixel 2q gate at 300 K (the 64 "
@@ -1162,7 +1181,7 @@ class QSSCBackend(BackendV2):
         distribution.
         """
         n_active = len(self._active_qubits(circuit))
-        _, _, n_compiled, _, _, _ = self._decomposed_cost(circuit)
+        _, _, n_compiled, _, _, _, _ = self._decomposed_cost(circuit)
         use_dm = (n_active <= self._dm_qubit_limit) and (n_compiled == 0)
         if use_dm:
             try:
@@ -1183,9 +1202,14 @@ class QSSCBackend(BackendV2):
     def _decomposed_cost(self, circuit: QuantumCircuit) -> tuple:
         """Estimate the *decomposed* (basis-gate) cost of a circuit.
 
-        Returns ``(n_1q, n_2q, n_compiled_blocks, quantum_time_s)`` where
-        ``quantum_time_s`` is the estimated duration of the quantum evolution
-        (1q + 2q gate times, no readout). Compiled high-level blocks (Shor's
+        Returns ``(n_1q, n_2q, n_compiled_blocks, quantum_time_s, est_2q,
+        est_1q, crit_path_s)`` where ``quantum_time_s`` is the estimated
+        SERIAL duration of the quantum evolution (every decomposed gate
+        summed, 1q + 2q gate times, no readout) and ``crit_path_s`` is the
+        CRITICAL-PATH (wall-clock) duration -- coherence decays over the
+        circuit DEPTH, not the serial gate sum, because gates on disjoint
+        qubit pairs run in parallel on the all-to-all register. Compiled
+        high-level blocks (Shor's
         controlled modular exponentiation, QFT, multipliers) have a tiny logical
         depth but decompose to many 2-qubit gates; we estimate that cost so the
         coherence physics is faithful.
@@ -1234,17 +1258,49 @@ class QSSCBackend(BackendV2):
         est_2q = n2q + decomp_2q
         est_1q = n1q + est_2q * 2
         quantum_time_s = est_1q * self._g1q + est_2q * self._g2q
-        return n1q, n2q, n_compiled, quantum_time_s, est_2q, est_1q
+        # Critical-path (wall-clock) time: coherence decays over the circuit
+        # DEPTH, not the serial gate sum -- gates on disjoint qubits run in
+        # parallel on the all-to-all register, so a QFT (log-depth, n(n-1)/2
+        # gates) or parallel arithmetic decoheres by ~depth, not ~n^2. For
+        # explicit 1q/2q gates the depth is qiskit's circuit.depth(); for
+        # compiled blocks (mod-exp / QFT / multipliers) the logical depth is
+        # tiny but the DECOMPOSED depth is O(n) for O(n^2) gates, i.e.
+        # ~sqrt(decomp_2q) layers -- use that as a floor so a Shor mod-exp
+        # block (~10^3 2q gates, ~sqrt ~30 layers) is timed at its real
+        # depth, not as a single layer. The serial quantum_time_s is kept
+        # for the depolarization product (cumulative per-gate depol IS
+        # serial-correct).
+        depth = max(circuit.depth(), 1)
+        decomp_depth_floor = (math.sqrt(max(est_2q, 0))
+                              if est_2q > 0 else 0.0)
+        # Critical-path time: coherence decays over the circuit DEPTH (gates on
+        # disjoint qubits run in parallel on the all-to-all register), so the
+        # wall-clock is ~depth * (per-layer gate time). qiskit's depth already
+        # accounts for parallelism (two 2q gates on disjoint qubits share a
+        # layer). The prior `depth*g1q + n2q*(g2q-g1q)` form added extra time
+        # for EVERY 2q gate as if each sat in its own serial layer, double-
+        # counting 2q time for parallel-2q circuits (audit #135). Use the
+        # pessimistic per-layer bound: every layer is charged at the 2q gate
+        # time (a layer with any 2q gate takes g2q; a 1q-only layer takes g1q,
+        # but g2q > g1q so depth*g2q is a safe upper bound that never double-
+        # counts). decomp_depth_floor keeps compiled blocks (mod-exp / QFT) at
+        # their real ~sqrt(est_2q) decomposed depth.
+        crit_path_s = max(depth, decomp_depth_floor) * self._g2q
+        return (n1q, n2q, n_compiled, quantum_time_s,
+                est_2q, est_1q, crit_path_s)
 
     def _signal_survival(self, circuit: QuantumCircuit) -> tuple:
         """Shared signal-retention estimate used by :meth:`assess_circuit` and
         the phenomenological blend so the two paths cannot disagree.
 
         ``signal_retention = coherence_survival * depolarization_survival``
-        where ``coherence_survival = exp(-t_circuit/T2)`` (spin T2 dephasing
-        over the decomposed quantum-evolution time) and
+        where ``coherence_survival = exp(-t_crit/T2)`` (spin T2 dephasing over
+        the circuit's CRITICAL-PATH / wall-clock time, not the serial gate
+        sum -- gates on disjoint qubits run in parallel on the all-to-all
+        register, so coherence decays over the depth) and
         ``depolarization_survival = (1-depol_1q)**est_1q * (1-depol_2q)**est_2q``
-        (cumulative per-gate drive depolarization, temperature-independent).
+        (cumulative per-gate drive depolarization, temperature-independent,
+        and SERIAL-correct -- depolarization accumulates per gate applied).
         This is the on-chip *spin*-gate budget: the QSSC 2-qubit gate is a
         ~200 ns microwave / magnetic-dipole spin gate, so its fidelity is set
         by the spin T2 + depolarization, NOT by optical photon
@@ -1262,11 +1318,11 @@ class QSSCBackend(BackendV2):
         on-chip spin gate.
 
         Returns ``(coherence_survival, depolarization_survival, optical_survival,
-        hom_visibility, signal_retention, t_circuit_s, est_1q, est_2q)``.
+        hom_visibility, signal_retention, crit_path_s, est_1q, est_2q)``.
         """
-        _, _, _, t_circuit, est_2q, est_1q = self._decomposed_cost(circuit)
+        _, _, _, _, est_2q, est_1q, crit_path_s = self._decomposed_cost(circuit)
         t2 = max(self._t2, 1e-15)
-        coherence_survival = math.exp(-t_circuit / t2)
+        coherence_survival = math.exp(-crit_path_s / t2)
         d1 = self._depol_1q
         d2 = self._depol_2q
         depol_survival = ((1.0 - d1) ** max(est_1q, 0)
@@ -1278,7 +1334,7 @@ class QSSCBackend(BackendV2):
         # optical model or at cryo (transform-limited ideal); V~2e-7 at 300 K NV.
         optical_survival = self._hom_v ** max(est_2q, 0)
         return (coherence_survival, depol_survival, optical_survival,
-                self._hom_v, signal_retention, t_circuit, est_1q, est_2q)
+                self._hom_v, signal_retention, crit_path_s, est_1q, est_2q)
 
     def assess_circuit(self, circuit: QuantumCircuit) -> dict:
         """Physical-feasibility assessment of a circuit on this chip.
@@ -1288,14 +1344,19 @@ class QSSCBackend(BackendV2):
         coherence window — the key limitation of a 300 K spin-defect chip.
         """
         depth = max(circuit.depth(), 1)
-        n1q, n2q, n_compiled, quantum_time_s, est_2q, est_1q = self._decomposed_cost(
-            circuit)
+        n1q, n2q, n_compiled, quantum_time_s, est_2q, est_1q, crit_path_s = (
+            self._decomposed_cost(circuit))
         duration_s = quantum_time_s + self._readout_t
-        crit_path_s = depth * self._g1q + max(n2q, 0) * (self._g2q - self._g1q)
         t2 = self._t2
         budget_gates = int(t2 / self._g1q) if self._g1q > 0 else 0
-        damping = 1.0 - math.exp(-duration_s / max(t2, 1e-15))
-        within = duration_s <= t2
+        # Coherence decays over the circuit DEPTH (critical-path / wall-clock
+        # time), not the serial gate sum -- gates on disjoint qubits run in
+        # parallel on the all-to-all register. within_coherence and the
+        # decoherence fraction are depth-based; the serial quantum_time_s is
+        # retained for the depolarization product (cumulative per-gate depol
+        # IS serial-correct) and for the duration_ns/duration_us report.
+        damping = 1.0 - math.exp(-crit_path_s / max(t2, 1e-15))
+        within = crit_path_s <= t2
         # Shared retention estimate (spin coherence + cumulative per-gate
         # depolarization) -- the phenomenological blend uses the same helper,
         # so assessment and run cannot disagree by construction. The on-chip

@@ -72,7 +72,7 @@ def resolvable_register_width(gradient_mhz_per_um: float,
 
 
 def auto_align(profile: DefectProfile | str = "NV",
-                grid: int = 8, site_pitch_um: float = 2.5,
+                grid: int = 8, site_pitch_um: float = 2500.0,
                 temperature_k: float = 300.0, max_retries: int = 5,
                 rng: Optional[np.random.Generator] = None,
                 progress=None,
@@ -104,8 +104,10 @@ def auto_align(profile: DefectProfile | str = "NV",
       pixels are independent at 300 K.
 
     ``site_pitch_um`` is the centre-to-centre pitch of one emitter/detector
-    pixel. In the chip view a site is registered as usable when it actually
-    contains defects *and* the fabrication step succeeded: the per-site yield is
+    pixel (2.5 mm die pitch = 2500 um; audit #137 -- the prior 2.5 um default
+    was a 1000x unit error, sub-wavelength and absurd). In the chip view a site
+    is registered as usable when it actually contains defects *and* the
+    fabrication step succeeded: the per-site yield is
     ``SITE_FAB_YIELD * (1 - exp(-density * site_area))`` -- a Poisson "at least
     one defect in the pixel" factor times a fabrication-yield factor. This
     replaces the old ``galvo_area`` camera-era leftover, whose
@@ -334,7 +336,15 @@ def simulate_odmr(profile: DefectProfile | str = "NV",
         nv_amp = 1.0
 
     contrast = np.ones_like(freqs_ghz)
-    sigma = linewidth_mhz * 1e6
+    # ``linewidth_mhz`` is the ODMR FWHM (callers -- e.g. sensors.compass_measure
+    # -- pass the profile ``odmr_linewidth_hz`` documented as FWHM).  Convert
+    # FWHM -> Gaussian sigma (2*sqrt(2*ln2) ~= 2.355), matching the ODMR line
+    # shape in simulator._odmr_sweep / _run_all_odmr and odmr_decompose (which
+    # all model the ODMR line as a Gaussian with FWHM = linewidth).  Using FWHM
+    # directly as sigma made the rendered compass / CLI ODMR curves 2.355x too
+    # wide (actual FWHM ~= 11.77 MHz instead of 5 MHz); the sensitivity maths
+    # use ``lw`` as FWHM directly and were already correct.
+    sigma = linewidth_mhz * 1e6 / (2.0 * math.sqrt(2.0 * math.log(2.0)))
     f_hz = freqs_ghz * 1e9
     for shift in shifts_hz:
         for ft in transitions:

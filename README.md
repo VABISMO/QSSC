@@ -52,8 +52,9 @@ qssc info                              # backend / defect summary (defaults to N
 qssc shor 15                           # → factors 3 × 5
 qssc odmr                              # ODMR spectrum (NV default, dip at 2.87 GHz)
 
-# start the REST backend
-uvicorn api.main:app --port 8000
+# start the REST backend (port 8011 matches the Vite dev proxy + api/main.py
+# default; the Dockerfile uses PORT env, default 8000, for deploy)
+uvicorn api.main:app --port 8011
 
 # in another shell, the dashboard
 cd frontend
@@ -227,7 +228,7 @@ circuit at 64 qubits.
 
 ```bash
 # API
-curl -X POST localhost:8000/api/circuit/custom \
+curl -X POST localhost:8011/api/circuit/custom \
   -H 'Content-Type: application/json' \
   -d '{"code":"from qiskit import QuantumCircuit\nqc=QuantumCircuit(3,3)\nqc.h(0);qc.cx(0,1);qc.cx(1,2);qc.measure(range(3),range(3))","shots":512}'
 ```

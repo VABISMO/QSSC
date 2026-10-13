@@ -92,6 +92,7 @@ module command_parser #(
     output reg [31:0] pll_freq_khz,
     output reg        pll_phase_only,   // 1 = R1-only phase step (no re-lock)
     input             pll_busy,
+    input             pll_locked,   // ADF4351 MUXOUT digital lock-detect (synced+deglitched in top_level)
     // ADC reader (64-ch parallel readout via 4x AD7616; same handshake the
     // photon_counter_array used, but `det_code` is a 16-bit intensity sample)
     output reg        det_read_one,
@@ -111,7 +112,7 @@ module command_parser #(
     // envelope (a real AWG/modulator does that); it sets the ADF4351 carrier
     // phase (R1 PHASE) and output power (R4 RF_PWR, 4 levels), and gates an
     // RF switch for the requested duration (mw_gate_ns -> mw_gate_load). This
-    // is the minimal honest FPGA MW path. Latched on APPLY_PULSE.
+    // is the minimal FPGA MW path. Latched on APPLY_PULSE.
     output reg [11:0] pll_phase,        // -> ADF4351 R1 PHASE
     output reg [1:0]  pll_rf_pwr,       // -> ADF4351 R4 RF_PWR (4 levels)
     output reg [31:0] mw_gate_ns,       // -> RF-switch gate timer (duration, ns)
@@ -168,7 +169,7 @@ module command_parser #(
     // the host runs RUN_SEQUENCE (Ramsey) and fits the rate, so no CMD_GYRO.
     localparam [4:0] CMD_SEQ       = 5'd16;  // RUN_SEQUENCE site kind n t_step (4 args)
     localparam [4:0] CMD_LOCKIN    = 5'd17;  // READ_LOCKIN site n_cycles (2 args)
-    localparam [4:0] CMD_LOCKINP   = 5'd18;  // READ_LOCKINP site n_cycles half_ns (3 args, prime-period lock-in)
+    localparam [4:0] CMD_LOCKINP   = 5'd18;  // READ_LOCKINP site n_samples prime_idx (3 args, prime-period IQ lock-in)
     // Invention 5 field-gradient verb. SET_GRADIENT <code 0..4095> programs the
     // MCP4921 DAC that sets the gradient-coil current; ODMR_SWEEP then counts the
     // resolved NV lines = the per-pixel register width at that gradient.
@@ -268,6 +269,19 @@ module command_parser #(
     localparam [6:0] S_ASWEEP_GATE_WAIT= 7'd62;  // wait gate rise, then read_all
     localparam [6:0] S_ASWEEP_GATE_FALL= 7'd63;  // wait gate fall, then next
     localparam [6:0] S_ASWEEP_NEXT     = 7'd64;  // f += step; loop or finish OK
+    // READ_LOCKINP cosine/sine IQ demodulator (prime-period lock-in). Replaces
+    // the old on/off square-wave boxcar with a true NCO-cosine reference so the
+    // odd-prime +-1/(p*q) cross-talk residual of a 2-sample square wave is gone
+    // (residual now bounded by the 64-entry LUT quantization, ~1/64^2). The FSM
+    // reads the ADC once per loop tick, multiplies by cos/sin of the NCO phase,
+    // and accumulates signed I/Q. No MW gate -- this is a pure detector demod;
+    // the host drives any modulation (APPLY_PULSE/DRIVE_PATTERN) separately.
+    localparam [6:0] S_LIP_INIT       = 7'd65;  // zero I/Q/n/phase, latch args
+    localparam [6:0] S_LIP_READ       = 7'd66;  // trigger read_one(site)
+    localparam [6:0] S_LIP_WAIT       = 7'd67;  // wait det_code_valid (or wdog)
+    localparam [6:0] S_LIP_MAC        = 7'd68;  // I+=code*cos, Q+=code*sin, phase+=inc
+    localparam [6:0] S_LIP_ENC        = 7'd69;  // build the 45-byte "<I> <Q> <n>\n" line
+    localparam [6:0] S_LIP_SEND       = 7'd70;  // stream the IQ line
 
     // ---- Line buffer ------------------------------------------------------
     reg [7:0] cmd_buffer [0:63];
@@ -309,6 +323,14 @@ module command_parser #(
     reg        pll_busy_seen;
     reg        em_busy_seen;
     reg        grad_busy_seen;
+
+    // Settle budget for the PLL lock wait (issue #98): after the SPI sequencer
+    // finishes (!pll_busy), count up to SETTLE_TIMEOUT (5 ms @ 100 MHz) waiting
+    // for the real ADF4351 lock-detect (pll_locked). Arm the RF gate on lock OR
+    // timeout -- the timeout is the fallback if MUXOUT is unwired, so the design
+    // still runs (at a 5 ms/point cost) without the lock signal.
+    localparam [19:0] SETTLE_TIMEOUT = 20'd500_000;   // 5 ms at 100 MHz
+    reg [19:0] settle_cnt;
 
     // ---- Calibration helpers ----------------------------------------------
     reg [15:0] cal_max_code;
@@ -424,6 +446,32 @@ module command_parser #(
     reg [31:0] li_half_cyc;     // li_half_ns / 10 (100 MHz clk cycles)
     reg [7:0]  li_line [0:43];  // 44-byte line: 4x dec32_pad + 3 ' ' + '\n'
 
+    // ---- READ_LOCKINP cosine/sine IQ demodulator state --------------------
+    // I/Q are 48-bit signed MAC accumulators: each ADC sample (16-bit unsigned,
+    // 0..65535) is multiplied by the 12-bit signed cos/sin (+-2047), giving a
+    // 30-bit signed product; summed over up to 100000 samples -> < 2^44, so 48
+    // bits is safe. The reference is EXACTLY periodic with period p (one of the
+    // 16 system primes): a sample counter lip_cnt wraps at p (lip_p) and indexes
+    // a per-prime cos/sin ROM. Exact periodicity is what makes two distinct-prime
+    // references orthogonal over the LCM (to 12-bit rounding, ~0.02%), NOT the
+    // +-1/(p*q) of the old 2-sample square-wave boxcar. The host supplies a 4-bit
+    // prime_idx (0..15) selecting PRIME_SYMBOLS[prime_idx]; no RTL divide. n
+    // counts samples taken.
+    reg [5:0]          lip_site;        // detector channel 0..63
+    reg [31:0]         lip_n_samples;   // total samples 1..100000
+    reg [3:0]          lip_prime_idx;   // prime channel index 0..15
+    reg [5:0]          lip_p;           // prime period (samples) = prime_tab[idx]
+    reg [5:0]          lip_cnt;         // sample-in-period counter 0..p-1 (wraps)
+    reg signed [47:0]  lip_I;           // in-phase  accumulator (Σ code·cos)
+    reg signed [47:0]  lip_Q;           // quadrature accumulator (Σ code·sin)
+    reg [31:0]         lip_n;           // samples taken
+    reg [15:0]         lip_code;        // latched ADC code for the MAC
+    reg [7:0]          lip_line [0:44]; // 45-byte IQ reply: <I 16> <Q 16> <n 10>
+
+    wire [127:0] lip_I_dec = signed_dec48(lip_I);
+    wire [127:0] lip_Q_dec = signed_dec48(lip_Q);
+    wire [79:0]  lip_n_dec = dec32_pad(lip_n);
+
     // ---- Calibration LUT (emitter pixel -> detector electrode) ------------
     reg [5:0] cal_lut [0:63];
     assign lut_rd_data = cal_lut[lut_rd_addr];
@@ -522,6 +570,175 @@ module command_parser #(
             dec5_pad[39:32]  = 8'h30 + (t % 16'd10);
         end
     endfunction
+
+    // 48-bit SIGNED value -> 16 ASCII chars: sign ('-' or ' ') + 15 zero-padded
+    // decimal digits (ones at the right). Used for the READ_LOCKINP I/Q
+    // accumulators (signed MAC sums). Range +-2^47 ~ +-1.4e14 -> 15 digits.
+    function [127:0] signed_dec48;
+        input signed [47:0] v;
+        integer i;
+        reg [47:0] mag;
+        reg [7:0]  sign_c;
+        reg [7:0]  d [0:14];
+        begin
+            if (v < 48'sd0) begin sign_c = 8'h2D; mag = -v; end  // '-'
+            else            begin sign_c = 8'h20; mag =  v; end  // ' ' pad
+            for (i = 0; i < 15; i = i + 1) begin
+                d[14 - i] = 8'h30 + (mag % 48'sd10);
+                mag       = mag / 48'sd10;
+            end
+            signed_dec48 = {sign_c,
+                            d[0], d[1], d[2], d[3], d[4], d[5], d[6],
+                            d[7], d[8], d[9], d[10], d[11], d[12], d[13], d[14]};
+        end
+    endfunction
+
+    // Per-prime cos/sin ROM for the READ_LOCKINP IQ demodulator. 12-bit signed
+    // (range +-2047, ~1.0). For each of the 16 system primes p, a contiguous
+    // block of p entries holds round(2047*cos(2*pi*i/p)) (cos_rom) and
+    // round(2047*sin(2*pi*i/p)) (sin_rom), i=0..p-1. The demod indexes the block
+    // for the selected prime at base prime_base[lip_prime_idx] + lip_cnt, where
+    // lip_cnt wraps 0..p-1 -> the reference is EXACTLY periodic with period p.
+    // Exact periodicity gives LCM orthogonality to 12-bit rounding (~0.02%),
+    // ~75x better than the +-1/(p*q) odd-prime square-wave residual. prime_tab
+    // maps idx->p (the wrap value); prime_base maps idx->ROM offset. Inlined
+    // (no external .hex) so iverilog and Vivado ROM inference are self-contained.
+    reg [5:0]          prime_tab  [0:15];   // PRIME_SYMBOLS[idx] = period p
+    reg [8:0]          prime_base [0:15];   // cumulative ROM offset per prime
+    reg signed [11:0]  cos_rom    [0:380];  // per-prime cos blocks
+    reg signed [11:0]  sin_rom    [0:380];  // per-prime sin blocks
+    initial begin
+    // prime period (samples) for channel index 0..15 = PRIME_SYMBOLS
+    prime_tab[ 0]=6'd2;    prime_tab[ 1]=6'd3;    prime_tab[ 2]=6'd5;    prime_tab[ 3]=6'd7;    prime_tab[ 4]=6'd11;    prime_tab[ 5]=6'd13;    prime_tab[ 6]=6'd17;    prime_tab[ 7]=6'd19;    prime_tab[ 8]=6'd23;    prime_tab[ 9]=6'd29;    prime_tab[10]=6'd31;    prime_tab[11]=6'd37;    prime_tab[12]=6'd41;    prime_tab[13]=6'd43;    prime_tab[14]=6'd47;    prime_tab[15]=6'd53;
+    // cumulative base offset of each prime's cos/sin block in the ROM
+    prime_base[ 0]=9'd0;    prime_base[ 1]=9'd2;    prime_base[ 2]=9'd5;    prime_base[ 3]=9'd10;    prime_base[ 4]=9'd17;    prime_base[ 5]=9'd28;    prime_base[ 6]=9'd41;    prime_base[ 7]=9'd58;    prime_base[ 8]=9'd77;    prime_base[ 9]=9'd100;    prime_base[10]=9'd129;    prime_base[11]=9'd160;    prime_base[12]=9'd197;    prime_base[13]=9'd238;    prime_base[14]=9'd281;    prime_base[15]=9'd328;
+    // p=2 (entries 0..1)
+    cos_rom[  0]=12'sd2047;  cos_rom[  1]=-12'sd2047;
+    sin_rom[  0]=12'sd0;  sin_rom[  1]=12'sd0;
+    // p=3 (entries 2..4)
+    cos_rom[  2]=12'sd2047;  cos_rom[  3]=-12'sd1023;  cos_rom[  4]=-12'sd1024;
+    sin_rom[  2]=12'sd0;  sin_rom[  3]=12'sd1773;  sin_rom[  4]=-12'sd1773;
+    // p=5 (entries 5..9)
+    cos_rom[  5]=12'sd2047;  cos_rom[  6]=12'sd633;  cos_rom[  7]=-12'sd1656;  cos_rom[  8]=-12'sd1656;  cos_rom[  9]=12'sd633;
+    sin_rom[  5]=12'sd0;  sin_rom[  6]=12'sd1947;  sin_rom[  7]=12'sd1203;  sin_rom[  8]=-12'sd1203;  sin_rom[  9]=-12'sd1947;
+    // p=7 (entries 10..16)
+    cos_rom[ 10]=12'sd2047;  cos_rom[ 11]=12'sd1276;  cos_rom[ 12]=-12'sd456;  cos_rom[ 13]=-12'sd1844;  cos_rom[ 14]=-12'sd1844;  cos_rom[ 15]=-12'sd456;  cos_rom[ 16]=12'sd1276;
+    sin_rom[ 10]=12'sd0;  sin_rom[ 11]=12'sd1600;  sin_rom[ 12]=12'sd1996;  sin_rom[ 13]=12'sd888;  sin_rom[ 14]=-12'sd888;  sin_rom[ 15]=-12'sd1996;  sin_rom[ 16]=-12'sd1600;
+    // p=11 (entries 17..27)
+    cos_rom[ 17]=12'sd2047;  cos_rom[ 18]=12'sd1722;  cos_rom[ 19]=12'sd850;  cos_rom[ 20]=-12'sd291;  cos_rom[ 21]=-12'sd1340;  cos_rom[ 22]=-12'sd1964;  cos_rom[ 23]=-12'sd1964;  cos_rom[ 24]=-12'sd1340;
+    cos_rom[ 25]=-12'sd291;  cos_rom[ 26]=12'sd850;  cos_rom[ 27]=12'sd1722;
+    sin_rom[ 17]=12'sd0;  sin_rom[ 18]=12'sd1107;  sin_rom[ 19]=12'sd1862;  sin_rom[ 20]=12'sd2026;  sin_rom[ 21]=12'sd1547;  sin_rom[ 22]=12'sd577;  sin_rom[ 23]=-12'sd577;  sin_rom[ 24]=-12'sd1547;
+    sin_rom[ 25]=-12'sd2026;  sin_rom[ 26]=-12'sd1862;  sin_rom[ 27]=-12'sd1107;
+    // p=13 (entries 28..40)
+    cos_rom[ 28]=12'sd2047;  cos_rom[ 29]=12'sd1813;  cos_rom[ 30]=12'sd1163;  cos_rom[ 31]=12'sd247;  cos_rom[ 32]=-12'sd726;  cos_rom[ 33]=-12'sd1532;  cos_rom[ 34]=-12'sd1988;  cos_rom[ 35]=-12'sd1988;
+    cos_rom[ 36]=-12'sd1532;  cos_rom[ 37]=-12'sd726;  cos_rom[ 38]=12'sd247;  cos_rom[ 39]=12'sd1163;  cos_rom[ 40]=12'sd1813;
+    sin_rom[ 28]=12'sd0;  sin_rom[ 29]=12'sd951;  sin_rom[ 30]=12'sd1685;  sin_rom[ 31]=12'sd2032;  sin_rom[ 32]=12'sd1914;  sin_rom[ 33]=12'sd1357;  sin_rom[ 34]=12'sd490;  sin_rom[ 35]=-12'sd490;
+    sin_rom[ 36]=-12'sd1357;  sin_rom[ 37]=-12'sd1914;  sin_rom[ 38]=-12'sd2032;  sin_rom[ 39]=-12'sd1685;  sin_rom[ 40]=-12'sd951;
+    // p=17 (entries 41..57)
+    cos_rom[ 41]=12'sd2047;  cos_rom[ 42]=12'sd1909;  cos_rom[ 43]=12'sd1513;  cos_rom[ 44]=12'sd912;  cos_rom[ 45]=12'sd189;  cos_rom[ 46]=-12'sd560;  cos_rom[ 47]=-12'sd1234;  cos_rom[ 48]=-12'sd1740;
+    cos_rom[ 49]=-12'sd2012;  cos_rom[ 50]=-12'sd2012;  cos_rom[ 51]=-12'sd1740;  cos_rom[ 52]=-12'sd1234;  cos_rom[ 53]=-12'sd560;  cos_rom[ 54]=12'sd189;  cos_rom[ 55]=12'sd912;  cos_rom[ 56]=12'sd1513;
+    cos_rom[ 57]=12'sd1909;
+    sin_rom[ 41]=12'sd0;  sin_rom[ 42]=12'sd739;  sin_rom[ 43]=12'sd1379;  sin_rom[ 44]=12'sd1832;  sin_rom[ 45]=12'sd2038;  sin_rom[ 46]=12'sd1969;  sin_rom[ 47]=12'sd1634;  sin_rom[ 48]=12'sd1078;
+    sin_rom[ 49]=12'sd376;  sin_rom[ 50]=-12'sd376;  sin_rom[ 51]=-12'sd1078;  sin_rom[ 52]=-12'sd1634;  sin_rom[ 53]=-12'sd1969;  sin_rom[ 54]=-12'sd2038;  sin_rom[ 55]=-12'sd1832;  sin_rom[ 56]=-12'sd1379;
+    sin_rom[ 57]=-12'sd739;
+    // p=19 (entries 58..76)
+    cos_rom[ 58]=12'sd2047;  cos_rom[ 59]=12'sd1936;  cos_rom[ 60]=12'sd1615;  cos_rom[ 61]=12'sd1120;  cos_rom[ 62]=12'sd503;  cos_rom[ 63]=-12'sd169;  cos_rom[ 64]=-12'sd822;  cos_rom[ 65]=-12'sd1386;
+    cos_rom[ 66]=-12'sd1800;  cos_rom[ 67]=-12'sd2019;  cos_rom[ 68]=-12'sd2019;  cos_rom[ 69]=-12'sd1800;  cos_rom[ 70]=-12'sd1386;  cos_rom[ 71]=-12'sd822;  cos_rom[ 72]=-12'sd169;  cos_rom[ 73]=12'sd503;
+    cos_rom[ 74]=12'sd1120;  cos_rom[ 75]=12'sd1615;  cos_rom[ 76]=12'sd1936;
+    sin_rom[ 58]=12'sd0;  sin_rom[ 59]=12'sd665;  sin_rom[ 60]=12'sd1257;  sin_rom[ 61]=12'sd1714;  sin_rom[ 62]=12'sd1984;  sin_rom[ 63]=12'sd2040;  sin_rom[ 64]=12'sd1875;  sin_rom[ 65]=12'sd1506;
+    sin_rom[ 66]=12'sd974;  sin_rom[ 67]=12'sd337;  sin_rom[ 68]=-12'sd337;  sin_rom[ 69]=-12'sd974;  sin_rom[ 70]=-12'sd1506;  sin_rom[ 71]=-12'sd1875;  sin_rom[ 72]=-12'sd2040;  sin_rom[ 73]=-12'sd1984;
+    sin_rom[ 74]=-12'sd1714;  sin_rom[ 75]=-12'sd1257;  sin_rom[ 76]=-12'sd665;
+    // p=23 (entries 77..99)
+    cos_rom[ 77]=12'sd2047;  cos_rom[ 78]=12'sd1971;  cos_rom[ 79]=12'sd1749;  cos_rom[ 80]=12'sd1397;  cos_rom[ 81]=12'sd942;  cos_rom[ 82]=12'sd416;  cos_rom[ 83]=-12'sd140;  cos_rom[ 84]=-12'sd685;
+    cos_rom[ 85]=-12'sd1180;  cos_rom[ 86]=-12'sd1588;  cos_rom[ 87]=-12'sd1878;  cos_rom[ 88]=-12'sd2028;  cos_rom[ 89]=-12'sd2028;  cos_rom[ 90]=-12'sd1878;  cos_rom[ 91]=-12'sd1588;  cos_rom[ 92]=-12'sd1180;
+    cos_rom[ 93]=-12'sd685;  cos_rom[ 94]=-12'sd140;  cos_rom[ 95]=12'sd416;  cos_rom[ 96]=12'sd942;  cos_rom[ 97]=12'sd1397;  cos_rom[ 98]=12'sd1749;  cos_rom[ 99]=12'sd1971;
+    sin_rom[ 77]=12'sd0;  sin_rom[ 78]=12'sd552;  sin_rom[ 79]=12'sd1064;  sin_rom[ 80]=12'sd1496;  sin_rom[ 81]=12'sd1818;  sin_rom[ 82]=12'sd2004;  sin_rom[ 83]=12'sd2042;  sin_rom[ 84]=12'sd1929;
+    sin_rom[ 85]=12'sd1672;  sin_rom[ 86]=12'sd1292;  sin_rom[ 87]=12'sd816;  sin_rom[ 88]=12'sd279;  sin_rom[ 89]=-12'sd279;  sin_rom[ 90]=-12'sd816;  sin_rom[ 91]=-12'sd1292;  sin_rom[ 92]=-12'sd1672;
+    sin_rom[ 93]=-12'sd1929;  sin_rom[ 94]=-12'sd2042;  sin_rom[ 95]=-12'sd2004;  sin_rom[ 96]=-12'sd1818;  sin_rom[ 97]=-12'sd1496;  sin_rom[ 98]=-12'sd1064;  sin_rom[ 99]=-12'sd552;
+    // p=29 (entries 100..128)
+    cos_rom[100]=12'sd2047;  cos_rom[101]=12'sd1999;  cos_rom[102]=12'sd1858;  cos_rom[103]=12'sd1630;  cos_rom[104]=12'sd1325;  cos_rom[105]=12'sd959;  cos_rom[106]=12'sd548;  cos_rom[107]=12'sd111;
+    cos_rom[108]=-12'sd331;  cos_rom[109]=-12'sd758;  cos_rom[110]=-12'sd1149;  cos_rom[111]=-12'sd1486;  cos_rom[112]=-12'sd1754;  cos_rom[113]=-12'sd1940;  cos_rom[114]=-12'sd2035;  cos_rom[115]=-12'sd2035;
+    cos_rom[116]=-12'sd1940;  cos_rom[117]=-12'sd1754;  cos_rom[118]=-12'sd1486;  cos_rom[119]=-12'sd1149;  cos_rom[120]=-12'sd758;  cos_rom[121]=-12'sd331;  cos_rom[122]=12'sd111;  cos_rom[123]=12'sd548;
+    cos_rom[124]=12'sd959;  cos_rom[125]=12'sd1325;  cos_rom[126]=12'sd1630;  cos_rom[127]=12'sd1858;  cos_rom[128]=12'sd1999;
+    sin_rom[100]=12'sd0;  sin_rom[101]=12'sd440;  sin_rom[102]=12'sd860;  sin_rom[103]=12'sd1239;  sin_rom[104]=12'sd1560;  sin_rom[105]=12'sd1809;  sin_rom[106]=12'sd1972;  sin_rom[107]=12'sd2044;
+    sin_rom[108]=12'sd2020;  sin_rom[109]=12'sd1902;  sin_rom[110]=12'sd1694;  sin_rom[111]=12'sd1408;  sin_rom[112]=12'sd1055;  sin_rom[113]=12'sd654;  sin_rom[114]=12'sd221;  sin_rom[115]=-12'sd221;
+    sin_rom[116]=-12'sd654;  sin_rom[117]=-12'sd1055;  sin_rom[118]=-12'sd1408;  sin_rom[119]=-12'sd1694;  sin_rom[120]=-12'sd1902;  sin_rom[121]=-12'sd2020;  sin_rom[122]=-12'sd2044;  sin_rom[123]=-12'sd1972;
+    sin_rom[124]=-12'sd1809;  sin_rom[125]=-12'sd1560;  sin_rom[126]=-12'sd1239;  sin_rom[127]=-12'sd860;  sin_rom[128]=-12'sd440;
+    // p=31 (entries 129..159)
+    cos_rom[129]=12'sd2047;  cos_rom[130]=12'sd2005;  cos_rom[131]=12'sd1881;  cos_rom[132]=12'sd1680;  cos_rom[133]=12'sd1410;  cos_rom[134]=12'sd1083;  cos_rom[135]=12'sd711;  cos_rom[136]=12'sd310;
+    cos_rom[137]=-12'sd104;  cos_rom[138]=-12'sd513;  cos_rom[139]=-12'sd901;  cos_rom[140]=-12'sd1253;  cos_rom[141]=-12'sd1553;  cos_rom[142]=-12'sd1790;  cos_rom[143]=-12'sd1953;  cos_rom[144]=-12'sd2036;
+    cos_rom[145]=-12'sd2036;  cos_rom[146]=-12'sd1953;  cos_rom[147]=-12'sd1790;  cos_rom[148]=-12'sd1553;  cos_rom[149]=-12'sd1253;  cos_rom[150]=-12'sd901;  cos_rom[151]=-12'sd513;  cos_rom[152]=-12'sd104;
+    cos_rom[153]=12'sd310;  cos_rom[154]=12'sd711;  cos_rom[155]=12'sd1083;  cos_rom[156]=12'sd1410;  cos_rom[157]=12'sd1680;  cos_rom[158]=12'sd1881;  cos_rom[159]=12'sd2005;
+    sin_rom[129]=12'sd0;  sin_rom[130]=12'sd412;  sin_rom[131]=12'sd807;  sin_rom[132]=12'sd1169;  sin_rom[133]=12'sd1484;  sin_rom[134]=12'sd1737;  sin_rom[135]=12'sd1920;  sin_rom[136]=12'sd2023;
+    sin_rom[137]=12'sd2044;  sin_rom[138]=12'sd1982;  sin_rom[139]=12'sd1838;  sin_rom[140]=12'sd1619;  sin_rom[141]=12'sd1333;  sin_rom[142]=12'sd993;  sin_rom[143]=12'sd613;  sin_rom[144]=12'sd207;
+    sin_rom[145]=-12'sd207;  sin_rom[146]=-12'sd613;  sin_rom[147]=-12'sd993;  sin_rom[148]=-12'sd1333;  sin_rom[149]=-12'sd1619;  sin_rom[150]=-12'sd1838;  sin_rom[151]=-12'sd1982;  sin_rom[152]=-12'sd2044;
+    sin_rom[153]=-12'sd2023;  sin_rom[154]=-12'sd1920;  sin_rom[155]=-12'sd1737;  sin_rom[156]=-12'sd1484;  sin_rom[157]=-12'sd1169;  sin_rom[158]=-12'sd807;  sin_rom[159]=-12'sd412;
+    // p=37 (entries 160..196)
+    cos_rom[160]=12'sd2047;  cos_rom[161]=12'sd2018;  cos_rom[162]=12'sd1930;  cos_rom[163]=12'sd1787;  cos_rom[164]=12'sd1593;  cos_rom[165]=12'sd1352;  cos_rom[166]=12'sd1073;  cos_rom[167]=12'sd763;
+    cos_rom[168]=12'sd431;  cos_rom[169]=12'sd87;  cos_rom[170]=-12'sd260;  cos_rom[171]=-12'sd599;  cos_rom[172]=-12'sd922;  cos_rom[173]=-12'sd1217;  cos_rom[174]=-12'sd1478;  cos_rom[175]=-12'sd1696;
+    cos_rom[176]=-12'sd1865;  cos_rom[177]=-12'sd1981;  cos_rom[178]=-12'sd2040;  cos_rom[179]=-12'sd2040;  cos_rom[180]=-12'sd1981;  cos_rom[181]=-12'sd1865;  cos_rom[182]=-12'sd1696;  cos_rom[183]=-12'sd1478;
+    cos_rom[184]=-12'sd1217;  cos_rom[185]=-12'sd922;  cos_rom[186]=-12'sd599;  cos_rom[187]=-12'sd260;  cos_rom[188]=12'sd87;  cos_rom[189]=12'sd431;  cos_rom[190]=12'sd763;  cos_rom[191]=12'sd1073;
+    cos_rom[192]=12'sd1352;  cos_rom[193]=12'sd1593;  cos_rom[194]=12'sd1787;  cos_rom[195]=12'sd1930;  cos_rom[196]=12'sd2018;
+    sin_rom[160]=12'sd0;  sin_rom[161]=12'sd346;  sin_rom[162]=12'sd682;  sin_rom[163]=12'sd998;  sin_rom[164]=12'sd1286;  sin_rom[165]=12'sd1537;  sin_rom[166]=12'sd1743;  sin_rom[167]=12'sd1899;
+    sin_rom[168]=12'sd2001;  sin_rom[169]=12'sd2045;  sin_rom[170]=12'sd2030;  sin_rom[171]=12'sd1957;  sin_rom[172]=12'sd1828;  sin_rom[173]=12'sd1646;  sin_rom[174]=12'sd1416;  sin_rom[175]=12'sd1146;
+    sin_rom[176]=12'sd843;  sin_rom[177]=12'sd516;  sin_rom[178]=12'sd174;  sin_rom[179]=-12'sd174;  sin_rom[180]=-12'sd516;  sin_rom[181]=-12'sd843;  sin_rom[182]=-12'sd1146;  sin_rom[183]=-12'sd1416;
+    sin_rom[184]=-12'sd1646;  sin_rom[185]=-12'sd1828;  sin_rom[186]=-12'sd1957;  sin_rom[187]=-12'sd2030;  sin_rom[188]=-12'sd2045;  sin_rom[189]=-12'sd2001;  sin_rom[190]=-12'sd1899;  sin_rom[191]=-12'sd1743;
+    sin_rom[192]=-12'sd1537;  sin_rom[193]=-12'sd1286;  sin_rom[194]=-12'sd998;  sin_rom[195]=-12'sd682;  sin_rom[196]=-12'sd346;
+    // p=41 (entries 197..237)
+    cos_rom[197]=12'sd2047;  cos_rom[198]=12'sd2023;  cos_rom[199]=12'sd1952;  cos_rom[200]=12'sd1834;  cos_rom[201]=12'sd1674;  cos_rom[202]=12'sd1475;  cos_rom[203]=12'sd1241;  cos_rom[204]=12'sd978;
+    cos_rom[205]=12'sd692;  cos_rom[206]=12'sd390;  cos_rom[207]=12'sd78;  cos_rom[208]=-12'sd235;  cos_rom[209]=-12'sd542;  cos_rom[210]=-12'sd837;  cos_rom[211]=-12'sd1113;  cos_rom[212]=-12'sd1362;
+    cos_rom[213]=-12'sd1579;  cos_rom[214]=-12'sd1760;  cos_rom[215]=-12'sd1899;  cos_rom[216]=-12'sd1993;  cos_rom[217]=-12'sd2041;  cos_rom[218]=-12'sd2041;  cos_rom[219]=-12'sd1993;  cos_rom[220]=-12'sd1899;
+    cos_rom[221]=-12'sd1760;  cos_rom[222]=-12'sd1579;  cos_rom[223]=-12'sd1362;  cos_rom[224]=-12'sd1113;  cos_rom[225]=-12'sd837;  cos_rom[226]=-12'sd542;  cos_rom[227]=-12'sd235;  cos_rom[228]=12'sd78;
+    cos_rom[229]=12'sd390;  cos_rom[230]=12'sd692;  cos_rom[231]=12'sd978;  cos_rom[232]=12'sd1241;  cos_rom[233]=12'sd1475;  cos_rom[234]=12'sd1674;  cos_rom[235]=12'sd1834;  cos_rom[236]=12'sd1952;
+    cos_rom[237]=12'sd2023;
+    sin_rom[197]=12'sd0;  sin_rom[198]=12'sd312;  sin_rom[199]=12'sd618;  sin_rom[200]=12'sd908;  sin_rom[201]=12'sd1178;  sin_rom[202]=12'sd1419;  sin_rom[203]=12'sd1628;  sin_rom[204]=12'sd1798;
+    sin_rom[205]=12'sd1927;  sin_rom[206]=12'sd2010;  sin_rom[207]=12'sd2045;  sin_rom[208]=12'sd2033;  sin_rom[209]=12'sd1974;  sin_rom[210]=12'sd1868;  sin_rom[211]=12'sd1718;  sin_rom[212]=12'sd1528;
+    sin_rom[213]=12'sd1302;  sin_rom[214]=12'sd1046;  sin_rom[215]=12'sd765;  sin_rom[216]=12'sd466;  sin_rom[217]=12'sd157;  sin_rom[218]=-12'sd157;  sin_rom[219]=-12'sd466;  sin_rom[220]=-12'sd765;
+    sin_rom[221]=-12'sd1046;  sin_rom[222]=-12'sd1302;  sin_rom[223]=-12'sd1528;  sin_rom[224]=-12'sd1718;  sin_rom[225]=-12'sd1868;  sin_rom[226]=-12'sd1974;  sin_rom[227]=-12'sd2033;  sin_rom[228]=-12'sd2045;
+    sin_rom[229]=-12'sd2010;  sin_rom[230]=-12'sd1927;  sin_rom[231]=-12'sd1798;  sin_rom[232]=-12'sd1628;  sin_rom[233]=-12'sd1419;  sin_rom[234]=-12'sd1178;  sin_rom[235]=-12'sd908;  sin_rom[236]=-12'sd618;
+    sin_rom[237]=-12'sd312;
+    // p=43 (entries 238..280)
+    cos_rom[238]=12'sd2047;  cos_rom[239]=12'sd2025;  cos_rom[240]=12'sd1960;  cos_rom[241]=12'sd1853;  cos_rom[242]=12'sd1707;  cos_rom[243]=12'sd1525;  cos_rom[244]=12'sd1309;  cos_rom[245]=12'sd1066;
+    cos_rom[246]=12'sd801;  cos_rom[247]=12'sd518;  cos_rom[248]=12'sd224;  cos_rom[249]=-12'sd75;  cos_rom[250]=-12'sd372;  cos_rom[251]=-12'sd661;  cos_rom[252]=-12'sd936;  cos_rom[253]=-12'sd1191;
+    cos_rom[254]=-12'sd1421;  cos_rom[255]=-12'sd1620;  cos_rom[256]=-12'sd1785;  cos_rom[257]=-12'sd1912;  cos_rom[258]=-12'sd1998;  cos_rom[259]=-12'sd2042;  cos_rom[260]=-12'sd2042;  cos_rom[261]=-12'sd1998;
+    cos_rom[262]=-12'sd1912;  cos_rom[263]=-12'sd1785;  cos_rom[264]=-12'sd1620;  cos_rom[265]=-12'sd1421;  cos_rom[266]=-12'sd1191;  cos_rom[267]=-12'sd936;  cos_rom[268]=-12'sd661;  cos_rom[269]=-12'sd372;
+    cos_rom[270]=-12'sd75;  cos_rom[271]=12'sd224;  cos_rom[272]=12'sd518;  cos_rom[273]=12'sd801;  cos_rom[274]=12'sd1066;  cos_rom[275]=12'sd1309;  cos_rom[276]=12'sd1525;  cos_rom[277]=12'sd1707;
+    cos_rom[278]=12'sd1853;  cos_rom[279]=12'sd1960;  cos_rom[280]=12'sd2025;
+    sin_rom[238]=12'sd0;  sin_rom[239]=12'sd298;  sin_rom[240]=12'sd590;  sin_rom[241]=12'sd869;  sin_rom[242]=12'sd1129;  sin_rom[243]=12'sd1366;  sin_rom[244]=12'sd1573;  sin_rom[245]=12'sd1747;
+    sin_rom[246]=12'sd1884;  sin_rom[247]=12'sd1980;  sin_rom[248]=12'sd2035;  sin_rom[249]=12'sd2046;  sin_rom[250]=12'sd2013;  sin_rom[251]=12'sd1937;  sin_rom[252]=12'sd1820;  sin_rom[253]=12'sd1665;
+    sin_rom[254]=12'sd1474;  sin_rom[255]=12'sd1251;  sin_rom[256]=12'sd1002;  sin_rom[257]=12'sd731;  sin_rom[258]=12'sd445;  sin_rom[259]=12'sd149;  sin_rom[260]=-12'sd149;  sin_rom[261]=-12'sd445;
+    sin_rom[262]=-12'sd731;  sin_rom[263]=-12'sd1002;  sin_rom[264]=-12'sd1251;  sin_rom[265]=-12'sd1474;  sin_rom[266]=-12'sd1665;  sin_rom[267]=-12'sd1820;  sin_rom[268]=-12'sd1937;  sin_rom[269]=-12'sd2013;
+    sin_rom[270]=-12'sd2046;  sin_rom[271]=-12'sd2035;  sin_rom[272]=-12'sd1980;  sin_rom[273]=-12'sd1884;  sin_rom[274]=-12'sd1747;  sin_rom[275]=-12'sd1573;  sin_rom[276]=-12'sd1366;  sin_rom[277]=-12'sd1129;
+    sin_rom[278]=-12'sd869;  sin_rom[279]=-12'sd590;  sin_rom[280]=-12'sd298;
+    // p=47 (entries 281..327)
+    cos_rom[281]=12'sd2047;  cos_rom[282]=12'sd2029;  cos_rom[283]=12'sd1974;  cos_rom[284]=12'sd1885;  cos_rom[285]=12'sd1761;  cos_rom[286]=12'sd1606;  cos_rom[287]=12'sd1423;  cos_rom[288]=12'sd1214;
+    cos_rom[289]=12'sd984;  cos_rom[290]=12'sd736;  cos_rom[291]=12'sd475;  cos_rom[292]=12'sd205;  cos_rom[293]=-12'sd68;  cos_rom[294]=-12'sd340;  cos_rom[295]=-12'sd606;  cos_rom[296]=-12'sd862;
+    cos_rom[297]=-12'sd1101;  cos_rom[298]=-12'sd1322;  cos_rom[299]=-12'sd1518;  cos_rom[300]=-12'sd1688;  cos_rom[301]=-12'sd1827;  cos_rom[302]=-12'sd1934;  cos_rom[303]=-12'sd2006;  cos_rom[304]=-12'sd2042;
+    cos_rom[305]=-12'sd2042;  cos_rom[306]=-12'sd2006;  cos_rom[307]=-12'sd1934;  cos_rom[308]=-12'sd1827;  cos_rom[309]=-12'sd1688;  cos_rom[310]=-12'sd1518;  cos_rom[311]=-12'sd1322;  cos_rom[312]=-12'sd1101;
+    cos_rom[313]=-12'sd862;  cos_rom[314]=-12'sd606;  cos_rom[315]=-12'sd340;  cos_rom[316]=-12'sd68;  cos_rom[317]=12'sd205;  cos_rom[318]=12'sd475;  cos_rom[319]=12'sd736;  cos_rom[320]=12'sd984;
+    cos_rom[321]=12'sd1214;  cos_rom[322]=12'sd1423;  cos_rom[323]=12'sd1606;  cos_rom[324]=12'sd1761;  cos_rom[325]=12'sd1885;  cos_rom[326]=12'sd1974;  cos_rom[327]=12'sd2029;
+    sin_rom[281]=12'sd0;  sin_rom[282]=12'sd273;  sin_rom[283]=12'sd541;  sin_rom[284]=12'sd799;  sin_rom[285]=12'sd1043;  sin_rom[286]=12'sd1269;  sin_rom[287]=12'sd1471;  sin_rom[288]=12'sd1648;
+    sin_rom[289]=12'sd1795;  sin_rom[290]=12'sd1910;  sin_rom[291]=12'sd1991;  sin_rom[292]=12'sd2037;  sin_rom[293]=12'sd2046;  sin_rom[294]=12'sd2018;  sin_rom[295]=12'sd1955;  sin_rom[296]=12'sd1857;
+    sin_rom[297]=12'sd1725;  sin_rom[298]=12'sd1563;  sin_rom[299]=12'sd1373;  sin_rom[300]=12'sd1158;  sin_rom[301]=12'sd923;  sin_rom[302]=12'sd671;  sin_rom[303]=12'sd408;  sin_rom[304]=12'sd137;
+    sin_rom[305]=-12'sd137;  sin_rom[306]=-12'sd408;  sin_rom[307]=-12'sd671;  sin_rom[308]=-12'sd923;  sin_rom[309]=-12'sd1158;  sin_rom[310]=-12'sd1373;  sin_rom[311]=-12'sd1563;  sin_rom[312]=-12'sd1725;
+    sin_rom[313]=-12'sd1857;  sin_rom[314]=-12'sd1955;  sin_rom[315]=-12'sd2018;  sin_rom[316]=-12'sd2046;  sin_rom[317]=-12'sd2037;  sin_rom[318]=-12'sd1991;  sin_rom[319]=-12'sd1910;  sin_rom[320]=-12'sd1795;
+    sin_rom[321]=-12'sd1648;  sin_rom[322]=-12'sd1471;  sin_rom[323]=-12'sd1269;  sin_rom[324]=-12'sd1043;  sin_rom[325]=-12'sd799;  sin_rom[326]=-12'sd541;  sin_rom[327]=-12'sd273;
+    // p=53 (entries 328..380)
+    cos_rom[328]=12'sd2047;  cos_rom[329]=12'sd2033;  cos_rom[330]=12'sd1990;  cos_rom[331]=12'sd1919;  cos_rom[332]=12'sd1821;  cos_rom[333]=12'sd1698;  cos_rom[334]=12'sd1551;  cos_rom[335]=12'sd1382;
+    cos_rom[336]=12'sd1193;  cos_rom[337]=12'sd988;  cos_rom[338]=12'sd769;  cos_rom[339]=12'sd540;  cos_rom[340]=12'sd302;  cos_rom[341]=12'sd61;  cos_rom[342]=-12'sd182;  cos_rom[343]=-12'sd422;
+    cos_rom[344]=-12'sd656;  cos_rom[345]=-12'sd880;  cos_rom[346]=-12'sd1093;  cos_rom[347]=-12'sd1290;  cos_rom[348]=-12'sd1469;  cos_rom[349]=-12'sd1627;  cos_rom[350]=-12'sd1763;  cos_rom[351]=-12'sd1873;
+    cos_rom[352]=-12'sd1958;  cos_rom[353]=-12'sd2015;  cos_rom[354]=-12'sd2043;  cos_rom[355]=-12'sd2043;  cos_rom[356]=-12'sd2015;  cos_rom[357]=-12'sd1958;  cos_rom[358]=-12'sd1873;  cos_rom[359]=-12'sd1763;
+    cos_rom[360]=-12'sd1627;  cos_rom[361]=-12'sd1469;  cos_rom[362]=-12'sd1290;  cos_rom[363]=-12'sd1093;  cos_rom[364]=-12'sd880;  cos_rom[365]=-12'sd656;  cos_rom[366]=-12'sd422;  cos_rom[367]=-12'sd182;
+    cos_rom[368]=12'sd61;  cos_rom[369]=12'sd302;  cos_rom[370]=12'sd540;  cos_rom[371]=12'sd769;  cos_rom[372]=12'sd988;  cos_rom[373]=12'sd1193;  cos_rom[374]=12'sd1382;  cos_rom[375]=12'sd1551;
+    cos_rom[376]=12'sd1698;  cos_rom[377]=12'sd1821;  cos_rom[378]=12'sd1919;  cos_rom[379]=12'sd1990;  cos_rom[380]=12'sd2033;
+    sin_rom[328]=12'sd0;  sin_rom[329]=12'sd242;  sin_rom[330]=12'sd481;  sin_rom[331]=12'sd713;  sin_rom[332]=12'sd935;  sin_rom[333]=12'sd1144;  sin_rom[334]=12'sd1336;  sin_rom[335]=12'sd1510;
+    sin_rom[336]=12'sd1663;  sin_rom[337]=12'sd1793;  sin_rom[338]=12'sd1897;  sin_rom[339]=12'sd1975;  sin_rom[340]=12'sd2025;  sin_rom[341]=12'sd2046;  sin_rom[342]=12'sd2039;  sin_rom[343]=12'sd2003;
+    sin_rom[344]=12'sd1939;  sin_rom[345]=12'sd1848;  sin_rom[346]=12'sd1731;  sin_rom[347]=12'sd1590;  sin_rom[348]=12'sd1426;  sin_rom[349]=12'sd1242;  sin_rom[350]=12'sd1041;  sin_rom[351]=12'sd825;
+    sin_rom[352]=12'sd598;  sin_rom[353]=12'sd362;  sin_rom[354]=12'sd121;  sin_rom[355]=-12'sd121;  sin_rom[356]=-12'sd362;  sin_rom[357]=-12'sd598;  sin_rom[358]=-12'sd825;  sin_rom[359]=-12'sd1041;
+    sin_rom[360]=-12'sd1242;  sin_rom[361]=-12'sd1426;  sin_rom[362]=-12'sd1590;  sin_rom[363]=-12'sd1731;  sin_rom[364]=-12'sd1848;  sin_rom[365]=-12'sd1939;  sin_rom[366]=-12'sd2003;  sin_rom[367]=-12'sd2039;
+    sin_rom[368]=-12'sd2046;  sin_rom[369]=-12'sd2025;  sin_rom[370]=-12'sd1975;  sin_rom[371]=-12'sd1897;  sin_rom[372]=-12'sd1793;  sin_rom[373]=-12'sd1663;  sin_rom[374]=-12'sd1510;  sin_rom[375]=-12'sd1336;
+    sin_rom[376]=-12'sd1144;  sin_rom[377]=-12'sd935;  sin_rom[378]=-12'sd713;  sin_rom[379]=-12'sd481;  sin_rom[380]=-12'sd242;
+    end
 
     // combinational decimal encoding of the latched detector sample (the live
     // det_code may change once we ack the ADC reader, so S_ENC must use
@@ -630,6 +847,7 @@ module command_parser #(
         grad_dac_value = 12'd0;
         grad_dac_load  = 1'b0;
         pll_busy_seen  = 1'b0;
+        settle_cnt     = 20'd0;
         rng_harvest_en = 1'b0;
         rng_flush      = 1'b0;
         rng_word_buf   = 32'd0;
@@ -676,6 +894,16 @@ module command_parser #(
         li_dcnt       = 32'd0;
         li_half_ns    = LI_HALF_NS;
         li_half_cyc   = LI_HALF_CYC;
+        // READ_LOCKINP IQ demodulator defaults
+        lip_site      = 6'd0;
+        lip_n_samples = 32'd0;
+        lip_prime_idx = 4'd0;
+        lip_p         = 6'd0;
+        lip_cnt       = 6'd0;
+        lip_I         = 48'sd0;
+        lip_Q         = 48'sd0;
+        lip_n         = 32'd0;
+        lip_code      = 16'd0;
         // ID reply string "QSSC v1\n"
         id_str[0]="Q"; id_str[1]="S"; id_str[2]="S"; id_str[3]="C"; id_str[4]=" "; id_str[5]="v"; id_str[6]="1"; id_str[7]=8'h0A;
         // STATUS template (79 bytes; digits at idx 11/22 patched at send time)
@@ -783,6 +1011,7 @@ module command_parser #(
             grad_dac_value <= 12'd0;
             grad_dac_load  <= 1'b0;
             pll_busy_seen  <= 1'b0;
+            settle_cnt     <= 20'd0;
             rng_harvest_en <= 1'b0;
             rng_flush      <= 1'b0;
             rng_word_buf   <= 32'd0;
@@ -826,6 +1055,14 @@ module command_parser #(
             li_n_on        <= 32'd0;
             li_n_off       <= 32'd0;
             li_dcnt        <= 32'd0;
+            lip_site       <= 6'd0;
+            lip_n_samples  <= 32'd0;
+            lip_prime_idx  <= 4'd0;
+            lip_p          <= 6'd0;
+            lip_cnt        <= 6'd0;
+            lip_I          <= 48'sd0;
+            lip_Q          <= 48'sd0;
+            lip_n          <= 32'd0;
         end else begin
             // Default one-cycle pulses
             tx_load        <= 1'b0;
@@ -971,12 +1208,13 @@ module command_parser #(
                                          cmd_str[6]=="O" && cmd_str[7]=="C" &&
                                          cmd_str[8]=="K" && cmd_str[9]=="I" &&
                                          cmd_str[10]=="N" && cmd_str[11]=="P") begin
-                                // READ_LOCKINP (12 chars): site n_cycles half_ns
-                                // -- prime-period lock-in. The host passes the
-                                // modulation half-period half_ns = p*tau/2 for a
-                                // prime p (qssc.prime_readout picks the prime); the
-                                // RTL just demodulates at that half-period. Same
-                                // FSM as READ_LOCKIN with a configurable half.
+                                // READ_LOCKINP (12 chars): site n_samples prime_idx
+                                // -- prime-period cosine/sine IQ lock-in. The host
+                                // passes prime_idx (0..15) selecting a system prime
+                                // p = PRIME_SYMBOLS[prime_idx] (qssc.prime_readout
+                                // assigns the prime); the RTL demodulates against an
+                                // EXACTLY period-p cos/sin reference (per-prime ROM +
+                                // wrapping sample counter), returning I Q n.
                                 cmd_id <= CMD_LOCKINP; arg_count <= 3'd3;
                                 if (!is_eol && ch == 8'h20) begin
                                     parse_idx <= parse_idx + 7'd1;
@@ -1251,6 +1489,7 @@ module command_parser #(
                                 mw_gate_ns   <= arg_vals[3];       // -> gate timer
                                 pll_start    <= 1'b1;
                                 pll_busy_seen <= 1'b0;
+                                settle_cnt   <= 20'd0;
                                 fsm          <= S_PULSE_WAIT;     // wait PLL, then gate
                             end
                         end
@@ -1325,13 +1564,13 @@ module command_parser #(
                         CMD_STATUS : begin
                             // STATUS -> "PLL_LOCKED <0/1> ADC_BUSY <0/1>
                             // VCC3V3_mv 3300 VCC5V_mv 4980 VCC12V_mv 12050
-                            // TEMP_C 25\n". PLL_LOCKED = !pll_busy (idle =>
-                            // settled; the ADF4351 MUXOUT lock-detect is a
-                            // future refinement), ADC_BUSY = det_busy. The rail
-                            // voltages are static nominal mV (no voltage-monitor
-                            // ADC fitted); TEMP_C is a 25 C placeholder (no XADC
-                            // in this build).
-                            status_pll_dig <= pll_busy ? 8'h30 : 8'h31;
+                            // TEMP_C 25\n". PLL_LOCKED is the REAL ADF4351
+                            // lock-detect (pll_locked, synced+deglitched MUXOUT
+                            // from top_level, issue #98), NOT just SPI-idle.
+                            // ADC_BUSY = det_busy. The rail voltages are static
+                            // nominal mV (no voltage-monitor ADC fitted); TEMP_C
+                            // is a 25 C placeholder (no XADC in this build).
+                            status_pll_dig <= pll_locked ? 8'h31 : 8'h30;
                             status_adc_dig <= det_busy  ? 8'h31 : 8'h30;
                             str_idx        <= 7'd0;
                             fsm            <= S_STATUS_SEND;
@@ -1465,37 +1704,38 @@ module command_parser #(
                             end
                         end
                         CMD_LOCKINP : begin
-                            // READ_LOCKINP <site> <n_cycles> <half_ns>: prime-
-                            // period lock-in. Same accumulator as READ_LOCKIN
-                            // but the on/off half-period is the host-supplied
-                            // half_ns (= p*tau/2 for the prime p the Python
-                            // qssc.prime_readout assigned to this NV channel).
-                            // Bounds: site 0..63, n 1..10000, half_ns >= 2000
-                            // (>= 20 clk cycles so the off-wait countdown and
-                            // the gate timer resolve; 2000 ns >> the ~86 us ADC
-                            // scan is NOT required -- the read happens after the
-                            // half, not during it).
+                            // READ_LOCKINP <site> <n_samples> <prime_idx>:
+                            // prime-period cosine/sine IQ lock-in. prime_idx
+                            // (0..15) selects one of the 16 system primes p =
+                            // PRIME_SYMBOLS[prime_idx] (2,3,5,...,53); the demod
+                            // reference is a cosine/sine at EXACTLY period p
+                            // (a sample counter wraps at p, indexing the per-prime
+                            // ROM), so over the LCM two distinct-prime references
+                            // are orthogonal to 12-bit rounding (~0.02%) -- NOT
+                            // the +-1/(p*q) odd-prime residual of the old 2-sample
+                            // square-wave boxcar. The host sends prime_idx (not a
+                            // phase_inc) so no RTL divide and no NCO frequency
+                            // detuning. Bounds: site 0..63, n_samples 1..100000,
+                            // prime_idx 0..15. No MW gate -- pure detector demod.
                             if ($signed(arg_vals[0]) < 0 || $signed(arg_vals[0]) >= N_DET ||
                                 $signed(arg_vals[1]) < 32'd1 ||
-                                $signed(arg_vals[1]) > 32'd10000 ||
-                                $signed(arg_vals[2]) < 32'd2000) begin
+                                $signed(arg_vals[1]) > 32'd100000 ||
+                                $signed(arg_vals[2]) < 32'd0 ||
+                                $signed(arg_vals[2]) > 32'd15) begin
                                 reply_ok <= 1'b0;            // ERR
                                 fsm      <= S_REPLY_LOAD;
                             end else begin
-                                li_site   <= arg_vals[0][5:0];
-                                li_n      <= arg_vals[1];
-                                li_i      <= 32'd0;
-                                li_sum_on <= 32'd0;
-                                li_sum_off<= 32'd0;
-                                li_n_on   <= 32'd0;
-                                li_n_off  <= 32'd0;
-                                li_dcnt   <= 32'd0;
-                                li_half_ns <= arg_vals[2];
-                                li_half_cyc<= arg_vals[2] / 32'd10;
-                                pll_phase <= 12'd0;
+                                lip_site      <= arg_vals[0][5:0];
+                                lip_n_samples <= arg_vals[1];
+                                lip_prime_idx <= arg_vals[2][3:0];
+                                lip_p         <= prime_tab[arg_vals[2][3:0]];
+                                lip_cnt       <= 6'd0;
+                                lip_I         <= 48'sd0;
+                                lip_Q         <= 48'sd0;
+                                lip_n         <= 32'd0;
                                 read_all_mode <= 1'b0;
-                                str_idx   <= 7'd0;
-                                fsm       <= S_LI_INIT;
+                                str_idx       <= 7'd0;
+                                fsm           <= S_LIP_INIT;
                             end
                         end
                         CMD_GRADIENT : begin
@@ -1667,7 +1907,20 @@ module command_parser #(
                 // the RF switch does not open onto a still-unlocked carrier.
                 S_PULSE_WAIT : begin
                     if (pll_busy)        pll_busy_seen <= 1'b1;
-                    if (pll_busy_seen && !pll_busy) begin
+                    settle_cnt <= settle_cnt + 20'd1;   // settle budget (from dispatch)
+                    // SPI shifts done (!pll_busy) -- now wait for the REAL PLL
+                    // lock-detect (pll_locked, ADF4351 MUXOUT) OR a 5 ms settle
+                    // timeout before arming the RF gate. Arming on !pll_busy
+                    // alone fires MW while the VCO is still slewing -> wrong-freq
+                    // MW for the first ~ms -> missing ODMR dips (issue #98).
+                    // The second clause is a watchdog: if pll_busy NEVER asserts
+                    // (adf4351_ctrl stuck in reset / pll_start glitched) the
+                    // original `pll_busy_seen && ...` condition hung forever;
+                    // arm once SPI is idle and the settle budget has elapsed
+                    // (audit #154).
+                    if ((pll_busy_seen && !pll_busy &&
+                         (pll_locked || settle_cnt >= SETTLE_TIMEOUT)) ||
+                        (!pll_busy_seen && !pll_busy && settle_cnt >= SETTLE_TIMEOUT)) begin
                         mw_gate_load <= 1'b1;
                         reply_ok     <= 1'b1;
                         fsm          <= S_REPLY_LOAD;
@@ -1829,16 +2082,26 @@ module command_parser #(
                     pll_rf_pwr     <= 2'd0;
                     pll_start      <= 1'b1;
                     sweep_pll_seen <= 1'b0;
+                    settle_cnt     <= 20'd0;
                     fsm            <= S_SWEEP_PLL;
                 end
 
                 // Wait for PLL busy to assert then deassert (rising then done),
                 // then arm the RF gate ONLY (the read fires on the gate rise so
-                // the fresh sample is taken DURING the 200 us RF pulse).
+                // the fresh sample is taken DURING the 200 us RF pulse). The gate
+                // arms only once the real PLL lock-detect asserts OR the 5 ms
+                // settle timeout expires (issue #98).
                 S_SWEEP_PLL : begin
                     if (pll_busy)
                         sweep_pll_seen <= 1'b1;
-                    if (sweep_pll_seen && !pll_busy) begin
+                    settle_cnt <= settle_cnt + 20'd1;
+                    // Arm on (busy-seen + SPI-done + lock-or-settle) OR (busy
+                    // never asserted + SPI idle + settle elapsed) -- the second
+                    // clause is a watchdog for a PLL sub-block that never flags
+                    // busy, so the FSM cannot hang forever (audit #154).
+                    if ((sweep_pll_seen && !pll_busy &&
+                         (pll_locked || settle_cnt >= SETTLE_TIMEOUT)) ||
+                        (!sweep_pll_seen && !pll_busy && settle_cnt >= SETTLE_TIMEOUT)) begin
                         mw_gate_load  <= 1'b1;        // arm the ODMR gate (mw_gate_ns set at dispatch)
                         gate_seen     <= 1'b0;
                         seq_wdog      <= 32'd0;
@@ -1961,14 +2224,22 @@ module command_parser #(
                     pll_rf_pwr     <= 2'd0;
                     pll_start      <= 1'b1;
                     sweep_pll_seen <= 1'b0;
+                    settle_cnt     <= 20'd0;
                     fsm            <= S_ASWEEP_PLL;
                 end
 
-                // Wait for PLL busy to assert then deassert, then arm the RF gate.
+                // Wait for PLL busy to assert then deassert, then arm the RF gate
+                // (on real lock-detect OR the 5 ms settle timeout -- issue #98).
                 S_ASWEEP_PLL : begin
                     if (pll_busy)
                         sweep_pll_seen <= 1'b1;
-                    if (sweep_pll_seen && !pll_busy) begin
+                    settle_cnt <= settle_cnt + 20'd1;
+                    // Arm on (busy-seen + SPI-done + lock-or-settle) OR (busy
+                    // never asserted + SPI idle + settle elapsed) -- watchdog
+                    // so the FSM cannot hang if pll_busy never rises (audit #154).
+                    if ((sweep_pll_seen && !pll_busy &&
+                         (pll_locked || settle_cnt >= SETTLE_TIMEOUT)) ||
+                        (!sweep_pll_seen && !pll_busy && settle_cnt >= SETTLE_TIMEOUT)) begin
                         mw_gate_load  <= 1'b1;        // arm the ODMR gate
                         gate_seen     <= 1'b0;
                         seq_wdog      <= 32'd0;
@@ -2084,7 +2355,12 @@ module command_parser #(
                     end else if (!gate_seen) begin
                         if (mw_gate) gate_seen <= 1'b1;
                         seq_wdog <= seq_wdog + 32'd1;
-                    end else if (!mw_gate) begin
+                    end else if (!mw_gate || seq_wdog >= GATE_WDOG_CYC) begin
+                        // gate fell, OR the gate-fall watchdog expired (mw_gate
+                        // stuck high after gate_seen) -> count down T. Same
+                        // pattern as S_SWEEP_GATE_FALL (audit #153); without
+                        // the `|| seq_wdog >= GATE_WDOG_CYC` term a stuck-high
+                        // mw_gate hung the pulse engine forever.
                         if (seq_dcnt == 32'd0) begin
                             fsm <= (seq_kind == 2'd0) ? S_SEQ_PI2B : S_SEQ_PI;
                         end else begin
@@ -2113,7 +2389,10 @@ module command_parser #(
                     end else if (!gate_seen) begin
                         if (mw_gate) gate_seen <= 1'b1;
                         seq_wdog <= seq_wdog + 32'd1;
-                    end else if (!mw_gate) begin
+                    end else if (!mw_gate || seq_wdog >= GATE_WDOG_CYC) begin
+                        // gate fell, OR gate-fall watchdog expired (mw_gate
+                        // stuck high) -> count down T. Mirrors S_SWEEP_GATE_FALL
+                        // (audit #153).
                         if (seq_dcnt == 32'd0)
                             fsm <= S_SEQ_PI2B;
                         else
@@ -2381,6 +2660,106 @@ module command_parser #(
                         tx_load <= 1'b1;
                         tx_din  <= li_line[str_idx[5:0]];
                         if (str_idx == 7'd43)
+                            fsm <= S_IDLE;
+                        else
+                            str_idx <= str_idx + 7'd1;
+                    end
+                end
+
+                // ---- READ_LOCKINP cosine/sine IQ demodulator ---------------
+                // Zero the accumulators + reset the period counter (prime_idx and
+                // lip_p already latched in the dispatch).
+                S_LIP_INIT : begin
+                    lip_cnt       <= 6'd0;
+                    lip_I         <= 48'sd0;
+                    lip_Q         <= 48'sd0;
+                    lip_n         <= 32'd0;
+                    seq_wdog      <= 32'd0;
+                    fsm           <= S_LIP_READ;
+                end
+
+                // Trigger a fresh read_one of the demod channel.
+                S_LIP_READ : begin
+                    det_read_one <= 1'b1;
+                    det_site     <= lip_site;
+                    seq_wdog     <= 32'd0;
+                    fsm          <= S_LIP_WAIT;
+                end
+
+                // Wait for the fresh sample (or the read watchdog -> sentinel 0).
+                S_LIP_WAIT : begin
+                    if (det_code_valid) begin
+                        lip_code     <= det_code;
+                        det_code_ack <= 1'b1;
+                        fsm          <= S_LIP_MAC;
+                    end else if (seq_wdog >= READ_WDOG_CYC) begin
+                        lip_code     <= 16'd0;     // dead-ADC sentinel -> MACs as 0
+                        det_code_ack <= 1'b1;
+                        fsm          <= S_LIP_MAC;
+                    end else begin
+                        seq_wdog <= seq_wdog + 32'd1;
+                    end
+                end
+
+                // Multiply-accumulate against the per-prime cos/sin ROM. The ROM
+                // index for the current sample is prime_base[lip_prime_idx] +
+                // lip_cnt; lip_cnt wraps at lip_p so the reference is EXACTLY
+                // periodic with period p. cos/sin and the code are read
+                // combinationally from the CURRENT lip_code (latched in
+                // S_LIP_WAIT, held stable here) and the CURRENT lip_cnt (advanced
+                // at end of cycle via <=), so every one of the n_samples samples
+                // contributes exactly once.
+                S_LIP_MAC : begin
+                    lip_I  <= lip_I + ($signed({1'b0, lip_code})
+                                       * $signed(cos_rom[prime_base[lip_prime_idx] + lip_cnt]));
+                    lip_Q  <= lip_Q + ($signed({1'b0, lip_code})
+                                       * $signed(sin_rom[prime_base[lip_prime_idx] + lip_cnt]));
+                    lip_cnt <= (lip_cnt == lip_p - 6'd1) ? 6'd0 : (lip_cnt + 6'd1);
+                    lip_n   <= lip_n + 32'd1;
+                    if (lip_n + 32'd1 >= lip_n_samples)
+                        fsm <= S_LIP_ENC;
+                    else
+                        fsm <= S_LIP_READ;
+                end
+
+                // Build the 45-byte line: "<I 16-char signed> <Q 16-char signed>
+                // <n 10-digit>\n". signed_dec48 lays out sign at [127:120], most-
+                // significant digit at [119:112], ones at [7:0]; dec32_pad lays
+                // out billions at [79:72], ones at [7:0]. We emit MSB-first.
+                S_LIP_ENC : begin
+                    lip_line[ 0] <= lip_I_dec[127:120]; lip_line[ 1] <= lip_I_dec[119:112];
+                    lip_line[ 2] <= lip_I_dec[111:104]; lip_line[ 3] <= lip_I_dec[103:96];
+                    lip_line[ 4] <= lip_I_dec[95:88];   lip_line[ 5] <= lip_I_dec[87:80];
+                    lip_line[ 6] <= lip_I_dec[79:72];   lip_line[ 7] <= lip_I_dec[71:64];
+                    lip_line[ 8] <= lip_I_dec[63:56];   lip_line[ 9] <= lip_I_dec[55:48];
+                    lip_line[10] <= lip_I_dec[47:40];   lip_line[11] <= lip_I_dec[39:32];
+                    lip_line[12] <= lip_I_dec[31:24];   lip_line[13] <= lip_I_dec[23:16];
+                    lip_line[14] <= lip_I_dec[15:8];    lip_line[15] <= lip_I_dec[7:0];
+                    lip_line[16] <= 8'h20;              // ' '
+                    lip_line[17] <= lip_Q_dec[127:120]; lip_line[18] <= lip_Q_dec[119:112];
+                    lip_line[19] <= lip_Q_dec[111:104]; lip_line[20] <= lip_Q_dec[103:96];
+                    lip_line[21] <= lip_Q_dec[95:88];   lip_line[22] <= lip_Q_dec[87:80];
+                    lip_line[23] <= lip_Q_dec[79:72];   lip_line[24] <= lip_Q_dec[71:64];
+                    lip_line[25] <= lip_Q_dec[63:56];   lip_line[26] <= lip_Q_dec[55:48];
+                    lip_line[27] <= lip_Q_dec[47:40];   lip_line[28] <= lip_Q_dec[39:32];
+                    lip_line[29] <= lip_Q_dec[31:24];   lip_line[30] <= lip_Q_dec[23:16];
+                    lip_line[31] <= lip_Q_dec[15:8];    lip_line[32] <= lip_Q_dec[7:0];
+                    lip_line[33] <= 8'h20;              // ' '
+                    lip_line[34] <= lip_n_dec[79:72];   lip_line[35] <= lip_n_dec[71:64];
+                    lip_line[36] <= lip_n_dec[63:56];   lip_line[37] <= lip_n_dec[55:48];
+                    lip_line[38] <= lip_n_dec[47:40];   lip_line[39] <= lip_n_dec[39:32];
+                    lip_line[40] <= lip_n_dec[31:24];   lip_line[41] <= lip_n_dec[23:16];
+                    lip_line[42] <= lip_n_dec[15:8];    lip_line[43] <= lip_n_dec[7:0];
+                    lip_line[44] <= 8'h0A;              // '\n'
+                    str_idx      <= 7'd0;
+                    fsm          <= S_LIP_SEND;
+                end
+
+                S_LIP_SEND : begin
+                    if (tx_ready) begin
+                        tx_load <= 1'b1;
+                        tx_din  <= lip_line[str_idx[6:0]];
+                        if (str_idx == 7'd44)
                             fsm <= S_IDLE;
                         else
                             str_idx <= str_idx + 7'd1;

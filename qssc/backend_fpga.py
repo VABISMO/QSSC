@@ -18,6 +18,7 @@ QSSC board answers the ``ID`` handshake — so the runner/API surfaces a clear
 from __future__ import annotations
 
 import math
+import threading
 import time
 from typing import Optional
 
@@ -59,6 +60,14 @@ class FPGAConnection:
 
     def __init__(self, port: str = "/dev/ttyUSB0", baudrate: int = 115200):
         import serial  # local import
+        # Per-instance I/O lock: the runner caches ONE FPGAConnection per
+        # (port,profile,T,seed) and reuses it across runs. When the in-process
+        # fallback pool runs two hardware jobs concurrently they share this
+        # handle -- without a lock their send_command calls interleave on the
+        # serial port (job B's write between job A's write+readline corrupts
+        # both replies). The lock makes each write+readline atomic, fully
+        # serializing I/O on the shared port (audit #131).
+        self._io_lock = threading.Lock()
         try:
             self.ser = serial.Serial(port, baudrate, timeout=5)
         except Exception as exc:  # port absent / permission denied / busy
@@ -79,8 +88,13 @@ class FPGAConnection:
                 port, f"ID reply {reply!r} did not start with {FPGA_ID_TOKEN!r}")
 
     def send_command(self, command: str) -> str:
-        self.ser.write((command + "\n").encode())
-        return self.ser.readline().decode().strip()
+        # Hold the I/O lock across the write+readline pair so concurrent jobs
+        # sharing this cached handle cannot interleave on the serial port
+        # (audit #131). Each command is atomic; the next caller's command only
+        # starts after this reply is fully read.
+        with self._io_lock:
+            self.ser.write((command + "\n").encode())
+            return self.ser.readline().decode().strip()
 
     def close(self):
         self.ser.close()
@@ -123,32 +137,50 @@ class FPGAConnection:
         SNR. Returns the same dict shape as
         :func:`qssc.sensors.lockin_integrated_readout`.
         """
-        if not (0 <= int(site) < N_SITES) or not (1 <= int(n_cycles) <= 100000):
+        if not (0 <= int(site) < N_SITES) or not (1 <= int(n_cycles) <= 10000):
             raise ValueError("site/n_cycles out of range")
         reply = self.send_command(f"READ_LOCKIN {int(site)} {int(n_cycles)}")
         return self._parse_lockin_reply(reply)
 
-    def read_lockinp(self, site: int, n_cycles: int, half_ns: int) -> dict:
-        """``READ_LOCKINP <site> <n> <half_ns>`` -> prime-period lock-in result.
+    def read_lockinp(self, site: int, n_samples: int, prime_idx: int) -> dict:
+        """``READ_LOCKINP <site> <n_samples> <prime_idx>`` -> IQ demod result.
 
-        Same accumulator + reply shape as :meth:`read_lockin`, but the on/off
-        half-period is the host-supplied ``half_ns`` (= ``p * tau / 2`` for the
-        prime ``p`` that :mod:`qssc.prime_readout` assigned to this NV channel),
-        instead of the fixed 200 us default. The prime-coprime orthogonality
-        (zero cross-talk over the LCM) lives in the Python readout model; the
-        RTL just demodulates at the requested half-period. Returns the same
-        dict shape as :meth:`read_lockin`.
+        Prime-period cosine/sine IQ lock-in. ``prime_idx`` (0..15) selects one
+        of the 16 system primes ``p = PRIME_SYMBOLS[prime_idx]`` the Python
+        :mod:`qssc.prime_readout` assigned to this NV channel. The firmware
+        demodulates against an EXACTLY-period-p cos/sin reference (per-prime ROM
+        + wrapping sample counter) and replies ``"<I> <Q> <n>"`` (three signed
+        ints, NO ``OK``): ``I`` = sum(code*cos), ``Q`` = sum(code*sin), ``n`` =
+        samples taken. The prime-coprime orthogonality (zero cross-talk over
+        the LCM to 12-bit rounding, ~75x better than the +-1/(p*q) odd-prime
+        square-wave residual) lives in the exactly-period-p reference. Returns
+        the IQ result dict (see :func:`qssc.prime_readout.lockin_iq_result`).
         """
-        if not (0 <= int(site) < N_SITES) or not (1 <= int(n_cycles) <= 100000):
-            raise ValueError("site/n_cycles out of range")
-        if int(half_ns) < 2000:
-            raise ValueError("half_ns must be >= 2000 (>= 20 clk cycles)")
+        from .prime_readout import lockin_iq_result
+        if not (0 <= int(site) < N_SITES) or not (1 <= int(n_samples) <= 100000):
+            raise ValueError("site/n_samples out of range")
+        if not (0 <= int(prime_idx) < 16):
+            raise ValueError("prime_idx must be 0..15")
         reply = self.send_command(
-            f"READ_LOCKINP {int(site)} {int(n_cycles)} {int(half_ns)}")
-        return self._parse_lockin_reply(reply)
+            f"READ_LOCKINP {int(site)} {int(n_samples)} {int(prime_idx)}")
+        I, Q, n = self._parse_lockin_iq_reply(reply)
+        return lockin_iq_result(I, Q, n, int(prime_idx), float(READOUT_NOISE))
+
+    def _parse_lockin_iq_reply(self, reply: str) -> tuple[int, int, int]:
+        """Parse the three-int IQ reply ``"<I> <Q> <n>"`` from READ_LOCKINP.
+
+        The firmware emits each of I/Q as a 16-char signed decimal (sign + 15
+        digits) and n as a 10-digit unsigned decimal, whitespace-separated and
+        ``\\n``-terminated (45 bytes). ``str.split`` + ``int`` handle the sign
+        and the leading-space (non-negative) padding directly.
+        """
+        toks = reply.split()
+        if len(toks) != 3:
+            raise IOError(f"READ_LOCKINP reply mismatch: {reply!r}")
+        return int(toks[0]), int(toks[1]), int(toks[2])
 
     def _parse_lockin_reply(self, reply: str) -> dict:
-        """Parse the four-int lock-in reply (shared by READ_LOCKIN/READ_LOCKINP)."""
+        """Parse the four-int lock-in reply from READ_LOCKIN."""
         toks = reply.split()
         if len(toks) != 4:
             raise IOError(f"READ_LOCKIN(P) reply mismatch: {reply!r}")
@@ -190,20 +222,26 @@ class FPGAConnection:
         each pixel's resolved ODMR lines = its calibrated register width.
         Returns an ``int32`` array of shape ``(n_points, 64)``.
         """
-        if n_points <= 0 or n_points > 4096:
-            raise ValueError("n_points out of range 1..4096")
+        if n_points <= 0 or n_points > 256:
+            raise ValueError("n_points out of range 1..256 (RTL CMD_ALL_SWEEP cap)")
         cmd = f"RUN_ALL_ODMR {int(f_start_khz)} {int(f_stop_khz)} {int(n_points)}\n"
-        self.ser.write(cmd.encode())
-        rows = []
-        for _ in range(n_points):
-            line = self.ser.readline().decode().strip()
-            toks = line.split()
-            if len(toks) != N_SITES:
-                raise IOError(f"RUN_ALL_ODMR row mismatch: {line!r}")
-            rows.append([int(t) for t in toks])
-        ok = self.ser.readline().decode().strip()
-        if ok != "OK":
-            raise IOError(f"RUN_ALL_ODMR missing OK: {ok!r}")
+        # Hold the I/O lock across the whole write + n_points readlines + OK
+        # readline so a concurrent send_command (e.g. SET_GRADIENT) on the same
+        # cached handle cannot interleave between this write and the streaming
+        # rows (audit #147 -- same #131 class; run_all_odmr is the longest
+        # serial exchange so it is the most exposed to interleaving).
+        with self._io_lock:
+            self.ser.write(cmd.encode())
+            rows = []
+            for _ in range(n_points):
+                line = self.ser.readline().decode().strip()
+                toks = line.split()
+                if len(toks) != N_SITES:
+                    raise IOError(f"RUN_ALL_ODMR row mismatch: {line!r}")
+                rows.append([int(t) for t in toks])
+            ok = self.ser.readline().decode().strip()
+            if ok != "OK":
+                raise IOError(f"RUN_ALL_ODMR missing OK: {ok!r}")
         return np.array(rows, dtype=np.int32)
 
     def read_gyro(self, site: int, t_ns: int, n_windows: int = 64) -> dict:

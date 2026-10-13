@@ -74,7 +74,11 @@ def test_odmr_resonance_linewidth():
     # The pulse resonance acceptance is the ~5 MHz ODMR linewidth, not the old
     # 287 MHz noise*D window. On-resonance and just-within-linewidth flip the
     # spin; far off-resonance is rejected. (freq is in kHz: +4 MHz = +4000 kHz.)
-    fpga = SimulatedFPGA("NV", seed=0)
+    # gradient OFF (gradient_mhz_per_um=0.0) so every site resonates at bare D
+    # and this isolates the ~5 MHz linewidth window from the cross-pixel
+    # gradient-addressing shift (audit #118) -- a pulse at D must flip when the
+    # gradient is off, and only the linewidth decides ±4 MHz vs ±10 MHz.
+    fpga = SimulatedFPGA("NV", seed=0, gradient_mhz_per_um=0.0)
     fpga.send_command("DRIVE_EMITTER 0 50")
     # 2.87 GHz exactly (on) and +4 MHz (within the 5 MHz line) -> OK
     assert fpga.send_command("APPLY_PULSE 0 2870000 2 200 0") == "OK"
@@ -118,6 +122,51 @@ def test_odmr_field_splitting():
     # zero field: dips collapse towards D (single pair at +/-A)
     dip0 = f0[np.argmin(c0)]
     assert abs(dip0 - HBN_VB.d_ghz) < 0.06
+
+
+def test_simulate_odmr_fwhm_matches_linewidth():
+    # Regression: simulate_odmr must treat ``linewidth_mhz`` as the Gaussian
+    # FWHM (sigma = FWHM / 2.355), NOT as sigma directly.  The old code used
+    # sigma = linewidth, which rendered the ODMR curves 2.355x too wide (actual
+    # FWHM ~= 11.77 MHz instead of the 5 MHz profile linewidth).  Use a
+    # linewidth large enough that the NV 14N hyperfine triplet (+/-2.18 MHz)
+    # blends into one Gaussian dip, b_field=0 (no Zeeman doublet), so the
+    # measured FWHM of the blended envelope ~= linewidth_mhz and NOT ~=
+    # 2.355 * linewidth_mhz.
+    lw = 20.0
+    f, c = simulate_odmr("NV", b_field_t=0.0, linewidth_mhz=lw,
+                         contrast_depth=0.1, gradient_mhz_per_um=0.0,
+                         n_nv_per_pixel=1)
+    idx = int(np.argmin(c))
+    depth = 1.0 - float(c[idx])          # dip below the bright baseline (1.0)
+    half = float(c[idx]) + depth / 2.0   # half-dip threshold
+    lo = idx
+    while lo > 0 and c[lo] < half:
+        lo -= 1
+    hi = idx
+    while hi < len(c) - 1 and c[hi] < half:
+        hi += 1
+    fwhm_mhz = (float(f[hi]) - float(f[lo])) * 1e3   # GHz -> MHz
+    # correct: FWHM ~= lw (~=20).  The 2.355x bug would give ~=47.
+    assert 14.0 < fwhm_mhz < 28.0, f"FWHM {fwhm_mhz:.1f} MHz != linewidth {lw} MHz"
+
+
+def test_perfect_power_classical_factoring():
+    # Shor classical preprocessing step 1: N = p**k (a prime power) is factored
+    # classically (the quantum gcd step is trivial for every coprime base).
+    # Pins the prime-power path for 9/25/27/49 and the non-prime-power composites
+    # that MUST fall through to the quantum circuit.
+    from qssc import perfect_power
+    assert perfect_power(9) == (3, 2)
+    assert perfect_power(25) == (5, 2)
+    assert perfect_power(27) == (3, 3)
+    assert perfect_power(49) == (7, 2)
+    # composites that are NOT prime powers -> None (quantum path handles them)
+    for n in (15, 21, 35, 77):
+        assert perfect_power(n) is None
+    # primes and small N -> None
+    for n in (2, 3, 5, 7, 11):
+        assert perfect_power(n) is None
 
 
 def test_xy8():
@@ -184,6 +233,20 @@ def test_simulated_fpga_sensing_commands():
     assert len(seq) == 9
     assert all(0 <= int(c) <= 65535 for c in seq[1:])
     assert fpga.send_command("RUN_SEQUENCE badseq 8") == "ERR"
+    # RUN_SEQUENCE Ramsey fringe must track rotation_rate_dps (the Sagnac
+    # input quantity), not a hardcoded rad/us constant -- so the host FFT fit
+    # on these codes recovers the set rate. Use a rate that lands exactly on
+    # an FFT bin (bin spacing = 1/(n*t_step) = 3125 Hz; bin 4 = 12.5 kHz =
+    # 4.5e6 dps) so the recovery is exact, not a meaningless hardcoded value
+    # (audit #102).
+    fpga.rotation_rate_dps = 4.5e6
+    n, t_step = 64, 5000                       # 64 windows x 5 us = 320 us window
+    codes = fpga.run_sequence(0, 0, n, t_step)  # kind 0 = Ramsey
+    from qssc.backend_fits import _fit_gyro_from_codes
+    g = _fit_gyro_from_codes(codes, t_step, n * t_step)
+    assert g["measured_rate_dps"] > 1e4        # FFT picked up the fringe
+    assert abs(g["measured_rate_dps"] - 4.5e6) / 4.5e6 < 0.05
+    fpga.rotation_rate_dps = 100.0             # restore default
     # STATUS: keyed self-status report.
     st = fpga.send_command("STATUS")
     assert "PLL_LOCKED" in st and "TEMP_C" in st and "VCC3V3_mv" in st
@@ -202,7 +265,10 @@ def test_readout_odmr_dip():
     # A pumped site with no resonant MW reads bright (ms=0, high code); a
     # resonant X-gate (phase ~= pi) flips the spin to dark (ms=+-1, low code),
     # and an off-resonance drive is rejected by the linewidth check (ERR).
-    fpga = SimulatedFPGA("NV", seed=3)
+    # gradient OFF so site 45 resonates at bare D and the resonant X-gate at
+    # 2.87 GHz flips it (with the gradient on, site 45's resonance is shifted
+    # off D by the cross-pixel detuning, audit #118 -- a separate concern).
+    fpga = SimulatedFPGA("NV", seed=3, gradient_mhz_per_um=0.0)
     assert fpga.send_command("DRIVE_EMITTER 45 50") == "OK"
     # Lock-in averaging: read the electrode several times and take the mean so
     # the small ensemble ODMR dip (~5%, ~2560 16-bit counts) is resolved above
@@ -574,13 +640,19 @@ def test_room_temp_nv_spin_compute_works():
         assert r["assessment"]["within_coherence"] is True
         assert r["hom_visibility"] < 1e-5  # descriptive photon budget bad @ 300 K
         assert r["assessment"]["within_optical_coherence"] is False
-    # hBN at 300 K: sensor, spin T2 too short for the deep Shor circuit -> None.
+    # hBN at 300 K: sensor, not a compute substrate. The depth-based
+    # coherence window (audit #101) is right at the T2 edge -- the Shor
+    # critical path (~1.9 us) is ~T2 (2.0 us) so within_coherence may be
+    # True -- but the cumulative per-gate DEPOLARIZATION over the ~90
+    # decomposed 2q gates destroys the signal (signal_retention ~3e-3),
+    # so no factors are recovered. The serial depol budget, not the
+    # coherence window, is what rules hBN out for Shor.
     r_hbn = run_circuit({"algorithm": "shor", "profile": "hBN-VB", "n": 15,
                          "shots": 2048, "seed": 7, "noise_mode": "real",
                          "temperature_k": 300.0})
     assert "error" not in r_hbn, r_hbn.get("error")
     assert r_hbn["factors"] is None  # hBN 300 K spin budget too short
-    assert r_hbn["assessment"]["within_coherence"] is False
+    assert r_hbn["assessment"]["signal_retention"] < 0.01
     # Cooled to 1 mK the descriptive optical channel also goes to V->1.
     r_cold = run_circuit({"algorithm": "shor", "profile": "NV", "n": 15,
                           "shots": 2048, "seed": 7, "noise_mode": "real",

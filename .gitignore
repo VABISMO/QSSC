@@ -156,3 +156,7 @@ hardware/pcb/qssc-grad.maze3d.kicad_prl
 # Parameter-sweep benchmark outputs (tools/run_benchmark.py -- regenerable)
 benchmark_circuits.json
 benchmark_report.html
+
+# Local array-calibration cache (api/runner.py _CALIB_FILE writes this
+# machine-specific 72 KB+ JSON; never commit it -- audit #121)
+hardware/calibration/array_calibration.json

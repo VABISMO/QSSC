@@ -180,9 +180,15 @@ class SimulatedFPGA:
         # different environment.
         self.b_vector_t: List[float] = [500e-6, 0.0, -200e-6]
         self.rotation_rate_dps: float = 100.0
-        # per-pixel ODMR resonance detuning (drawn lazily by _run_all_odmr to
-        # model the gradient spreading the 64 pixel resonances).
-        self._pixel_detun_hz: Optional[np.ndarray] = None
+        # Residual detuning spread (Hz) driving the Hahn-echo / CPMG fringe.
+        # A static detuning is refocused by a single Hahn pi pulse, but a
+        # detuning SPREAD (inhomogeneous / fluctuating across the ensemble)
+        # leaves a residual oscillation in the echo amplitude; for CPMG the
+        # finite pi-pulse spacing similarly leaves a residual. This is the
+        # physical quantity the Hahn/CPMG trace fringe encodes -- NOT the
+        # Ramsey rotation rate (which Hahn refocuses). 20 kHz is a modest
+        # spread that produces a visible, fittable fringe over a us-T2 window.
+        self.detuning_hz: float = 20e3
         # Few-NV COMPUTE regime (field gradient + the per-pixel register model):
         # each pixel holds one microdiamond of ~100-300 NVs whose resonances the
         # field gradient spreads across the pixel into resolvable, linewidth-
@@ -335,19 +341,21 @@ class SimulatedFPGA:
                     return "ERR"
                 return self._read_lockin(ref_khz, n_cycles)
             if head == "READ_LOCKINP":
-                # READ_LOCKINP <site> <n_cycles> <half_ns>: prime-period lock-in.
-                # Same accumulator as READ_LOCKIN with a host-supplied on/off
-                # half-period (half_ns = p*tau/2 for the prime p the Python
-                # qssc.prime_readout assigned to this NV channel). The simulator
-                # stub reuses the lock-in model (the half-period does not change
-                # the sim physics); the real RTL demodulates at half_ns.
+                # READ_LOCKINP <site> <n_samples> <prime_idx>: prime-period
+                # cosine/sine IQ lock-in. prime_idx (0..15) selects a system
+                # prime p; the sim generates n_samples modulated detector codes
+                # and MACs them against the EXACTLY-period-p per-prime cos/sin
+                # ROM (the same ROM the RTL holds), replying "<I> <Q> <n>".
                 if len(parts) < 4:
                     return "ERR"
-                n_cycles = int(parts[2])
-                half_ns = int(parts[3])
-                if n_cycles <= 0 or n_cycles > 10000 or half_ns < 2000:
+                try:
+                    site = int(parts[1]); n_samples = int(parts[2]); pidx = int(parts[3])
+                except ValueError:
                     return "ERR"
-                return self._read_lockin(int(parts[1]) or 1000, n_cycles)
+                if not (0 <= site < N_SITES) or not (1 <= n_samples <= 100000) \
+                        or not (0 <= pidx < 16):
+                    return "ERR"
+                return self._read_lockinp_iq(site, n_samples, pidx)
             if head == "RUN_SEQUENCE":
                 # RUN_SEQUENCE <kind> <n_windows>: sim-side model of the RTL
                 # pulse-sequence engine (RUN_SEQUENCE verb, PR3a). kind in
@@ -372,15 +380,46 @@ class SimulatedFPGA:
             logger.error("sim command failed: %s (%s)", command, exc)
             return "ERR"
 
+    def _site_detun_hz(self, q: int) -> float:
+        """Detuning (Hz) of site ``q``'s resonance from D -- always 0.
+
+        The QSSC field gradient is WITHIN-pixel (``spread_hz = gradient *
+        pixel_size_um`` at simulator.py:563 creates the ~10-NV register per
+        pixel); all 64 pixels share a D-centered register and MW is BROADCAST,
+        so a pulse at freq f flips the NV at f in EVERY pixel. There is NO
+        cross-pixel frequency shift -- per-pixel selectivity is by READOUT (the
+        detector electrode), not MW frequency (audit #133). The prior
+        ``cols % 8`` cross-pixel shift modeled a gradient that does not exist
+        and made on-D pulses reject when the gradient was on (an on-D pulse
+        MUST flip the central NV in every pixel). The within-pixel line offsets
+        (``_pixel_line_freqs``) are handled in :meth:`_apply_pulse`, not here.
+        """
+        return 0.0
+
     def _apply_pulse(self, qubit, freq_ghz, amp, dur, phase_rad) -> str:
-        # Reject if the drive is outside the ODMR linewidth of D (the pulse
-        # can only flip the spin within ~one linewidth). freq_ghz is GHz;
-        # self.sim_freq (D) is Hz. The old window was noise*D = 287 MHz, far
-        # wider than the real ~5 MHz NV ODMR line -- a pulse 200 MHz off would
-        # wrongly have flipped the spin. self.noise is reserved for the
-        # stochastic RZ/RY gate error below, not the resonance acceptance.
-        if abs(freq_ghz * 1e9 - self.sim_freq) > self.profile.odmr_linewidth_hz:
-            return "ERR"
+        # Reject if the drive is outside the ODMR linewidth of the site's
+        # resonance (the pulse can only flip the spin within ~one linewidth).
+        # freq_ghz is GHz; self.sim_freq (D) is Hz. MW is BROADCAST: a pulse at
+        # freq f flips the NV at f in EVERY pixel (the gradient is within-pixel,
+        # not cross-pixel; all pixels share a D-centered register -- audit
+        # #133). So the site resonance is D plus the within-pixel register line
+        # offsets (_pixel_line_freqs[qubit]) if the per-pixel register is
+        # populated, else bare D. The drive is accepted if it is within one
+        # linewidth of ANY within-pixel line (the register is frequency-
+        # addressed); with the gradient off every line sits at D. self.noise is
+        # reserved for the stochastic RZ/RY gate error below, not the resonance
+        # acceptance.
+        f_hz = freq_ghz * 1e9
+        if self._pixel_line_freqs is None:
+            self._draw_pixel_lines()
+        lines = self._pixel_line_freqs[qubit] if qubit < len(self._pixel_line_freqs) else None
+        if lines is not None and len(lines):
+            lw = self.profile.odmr_linewidth_hz
+            if all(abs(f_hz - (self.sim_freq + float(off))) > lw for off in lines):
+                return "ERR"
+        else:
+            if abs(f_hz - self.sim_freq) > self.profile.odmr_linewidth_hz:
+                return "ERR"
         # amp is the ADF4351 output-power index 0..3 (HARDWARE_DESIGN.md §5).
         # Reject an out-of-range raw-UART value even though backend.apply_pulse
         # already clamps it -- defense in depth for the wire protocol.
@@ -390,9 +429,14 @@ class SimulatedFPGA:
         self.sim_states.setdefault(q, 0)
         # phase arrives in radians (converted from integer milliradians on the
         # wire). Tolerance ~1 mrad matches the integer-mrad quantisation.
-        if abs(phase_rad - math.pi) < 1e-3:          # X gate (phase ~= pi) flips the spin
+        # A resonant π pulse flips the spin population for +X (phase 0) and -X
+        # (phase π) alike -- a 2-level readout is insensitive to the XY axis of a
+        # π rotation, so both must flip. (apply_pulse defaults phase=0.0 and the
+        # real-ODMR sweep calls it with no phase, so phase==0 is the common +X
+        # case and MUST flip, not no-op.)
+        if abs(abs(phase_rad) - math.pi) < 1e-3 or abs(phase_rad) < 1e-3:
             self.sim_states[q] = 1 - self.sim_states[q]
-        elif abs(phase_rad) > 1e-3:                  # RZ/RY: stochastic error
+        elif abs(phase_rad) > 1e-3:                  # off-axis RZ/RY: stochastic error
             if self.rng.random() < self.noise:
                 self.sim_states[q] = 1 - self.sim_states[q]
         return "OK"
@@ -479,7 +523,7 @@ class SimulatedFPGA:
         """Sweep the ADF4351 across the NV resonance, one AD7616 sample per point.
 
         Models the ODMR lineshape the compass/thermometry fit on top of: a
-        Lorentzian PL dip at D (``self.sim_freq``) with the profile linewidth,
+        Gaussian PL dip at D (``self.sim_freq``) with the profile linewidth,
         plus photocurrent noise. Returns ``"<n> f0 c0 f1 c1 ..."``
         (freq_khz, 16-bit code) -- the same flat space-separated form as
         READ_DETECTORS, count-prefixed so the host parser knows the arity.
@@ -488,17 +532,32 @@ class SimulatedFPGA:
         lw = self.profile.odmr_linewidth_hz    # FWHM, Hz
         fs = np.linspace(f_start_khz * 1e3, f_stop_khz * 1e3, n_points)
         # Per-point noise sigma after the anti-noise stack (defaults
-        # -> READOUT_NOISE, bit-identical). Single sweep -> integration_shots=1.
+        # -> READOUT_NOISE, bit-identical). Use self.integration_shots (not a
+        # hardcoded 1) so the single-channel sweep's noise model matches
+        # _run_all_odmr (audit #150).
         nsigma = effective_noise_sigma(READOUT_NOISE, self.noise_env,
-                                       self.anti_noise, 1)
-        # Gaussian dip (FWHM = lw, matching simulate_odmr/odmr_decompose which
-        # model the ODMR line as a Gaussian): PL = bright * (1 - contrast * G(f)).
-        # FWHM-matched to the former Lorentzian so the on-resonance contrast
-        # and the line width are unchanged; the wings now match the resolver
-        # PSF (Lorentzian wings were biasing CLEAN on overlapping Case-D lines).
+                                       self.anti_noise, self.integration_shots)
+        # Within-pixel register lines: with the gradient on, the addressed
+        # pixel's NVs spread into distinct ODMR lines (_pixel_line_freqs[qubit],
+        # drawn lazily by _draw_pixel_lines). The single-channel sweep MUST
+        # mirror _run_all_odmr's _pixel_dip_frac -- a sum of per-line Gaussians
+        # each weighted by its bin contrast -- instead of a single Gaussian at
+        # D, otherwise ODMR_SWEEP <qubit> shows one ~5 MHz dip while
+        # RUN_ALL_ODMR shows the same pixel's full ~10-NV register spectrum
+        # (audit #150). With no gradient _draw_pixel_lines yields one line at
+        # 0 Hz (D) with contrast = contrast_single, so this collapses to the
+        # single-dip shape (now consistent with _run_all_odmr's contrast too).
+        if self._pixel_line_freqs is None:
+            self._draw_pixel_lines()
+        line_freqs = self._pixel_line_freqs[qubit]        # Hz, relative to pixel centre
+        line_contrasts = self._pixel_line_contrasts[qubit]
         sigma = lw / (2.0 * math.sqrt(2.0 * math.log(2.0)))  # FWHM lw -> sigma
-        gauss = np.exp(-((fs - f0) ** 2) / (2.0 * sigma ** 2))
-        codes = BRIGHT_CODE * (1.0 - ODMR_CONTRAST * gauss)
+        s2 = 2.0 * sigma ** 2
+        lf = f0 + line_freqs                              # absolute line freqs, (n_lines,)
+        # (n_points, n_lines) peak-1 Gaussians; total dip fraction = weighted sum, clipped (matches _pixel_dip_frac's min(sum, 1.0))
+        gauss = np.exp(-((fs[:, None] - lf[None, :]) ** 2) / s2)
+        dip_frac = np.clip((line_contrasts[None, :] * gauss).sum(axis=1), 0.0, 1.0)
+        codes = BRIGHT_CODE * (1.0 - dip_frac)
         codes += self.rng.normal(0, nsigma, size=n_points)
         codes = np.clip(codes, 0, ADC_MAX).astype(int)
         # make the addressed channel reflect its pumped/bright state off-resonance
@@ -552,7 +611,7 @@ class SimulatedFPGA:
                       n_points: int) -> str:
         """Sweep the ADF4351 and sample all 64 detectors per point.
 
-        Each pixel's ODMR response is a Lorentzian PL dip at D + a per-pixel
+        Each pixel's ODMR response is a Gaussian PL dip at D + a per-pixel
         detuning (the field gradient spreads the 64 pixel resonances, so the 64
         columns dip at slightly different frequencies -- the raw form
         :func:`qssc.odmr_decompose.decompose_odmr` fits per pixel to count its
@@ -573,12 +632,12 @@ class SimulatedFPGA:
         f0 = self.sim_freq                     # D, Hz
         lw = self.profile.odmr_linewidth_hz    # FWHM, Hz
         fs = np.linspace(f_start_khz * 1e3, f_stop_khz * 1e3, n_points)
-        # per-pixel centre detuning (cross-pixel gradient offset): drawn once,
-        # held so repeated sweeps are consistent. Spread ~ a few linewidths.
-        if self._pixel_detun_hz is None:
-            self._pixel_detun_hz = self.rng.normal(
-                0.0, max(lw * 2.0, 1.0), self.N_SITES)
-        detun = self._pixel_detun_hz
+        # Per-pixel centre detuning: the QSSC gradient is WITHIN-pixel, so all
+        # 64 pixels share a D-centred register (no cross-pixel frequency shift;
+        # per-pixel selectivity is by READOUT, not MW frequency -- audit #133).
+        # The within-pixel line spread is carried by ``line_freqs`` below; the
+        # cross-pixel offset is zero.
+        detun = np.zeros(self.N_SITES)
         # per-pixel few-NV line set (the within-pixel gradient spread -> distinct
         # frequency-addressed NV lines). Drawn once, held across sweeps.
         if self._pixel_line_freqs is None:
@@ -704,6 +763,31 @@ class SimulatedFPGA:
         return (f"{res['differential_code']:.1f} {res['sigma_code']:.1f} "
                 f"{res['single_frame_snr']:.2f} {res['integrated_snr']:.2f}")
 
+    def _read_lockinp_iq(self, site: int, n_samples: int, prime_idx: int) -> str:
+        """Sim-side model of the RTL ``READ_LOCKINP`` IQ demodulator.
+
+        Generates ``n_samples`` detector codes whose PL is sinusoidally
+        modulated at the prime period ``p = PRIME_SYMBOLS[prime_idx]`` (the
+        prime channel this NV is driven on), then MACs them against the per-
+        prime cos/sin ROM -- the SAME ROM the RTL holds -- and replies
+        ``"<I> <Q> <n>"``. The modulation amplitude is the ODMR contrast depth
+        (``0.5 * ODMR_CONTRAST * BRIGHT_CODE``); the demod recovers it as
+        ``amplitude_code`` in the host result. Per-sample noise at
+        ``READOUT_NOISE``; ``site`` selects the channel (the sim modulation
+        depth is site-independent, matching the constant-ADC testbench model).
+        """
+        from .prime_readout import lockin_iq_demod
+        from .prime_readout import PRIME_SYMBOLS
+        p = PRIME_SYMBOLS[int(prime_idx)]
+        baseline = 0.5 * (BRIGHT_CODE + DARK_CODE)
+        amp = 0.5 * ODMR_CONTRAST * BRIGHT_CODE           # modulation depth (codes)
+        k = np.arange(int(n_samples))
+        codes = baseline + amp * np.cos(2.0 * np.pi * k / p)
+        codes += self.rng.normal(0, READOUT_NOISE, size=int(n_samples))
+        codes = np.clip(codes, 0, ADC_MAX).astype(np.int64)
+        I, Q, n = lockin_iq_demod(codes, int(prime_idx))
+        return f"{I} {Q} {n}"
+
     def _run_sequence(self, kind: str, n_windows: int,
                       t_step_ns: int = 0) -> str:
         """Sim-side model of the RTL pulse-sequence engine (RUN_SEQUENCE, PR3a).
@@ -717,8 +801,18 @@ class SimulatedFPGA:
         it matches the host fit's time axis (``backend_fits._fit_t2_from_codes``
         uses the same ``arange(n) * t_step_ns``); otherwise it falls back to a
         fixed ``linspace(0, 2*T2, n)`` grid. The Ramsey fringe carries the
-        ``exp(-t/T2)`` decay envelope (the profile has no separate T2*, so
-        decaying Ramsey at T2 is the conservative choice; real T2* < T2).
+        ``exp(-t/T2)`` decay envelope. Ramsey (un-refocused) decays at the
+        inhomogeneous T2* < T2, but the profile / supplier quotes only T2, so
+        the envelope uses T2 -- this is OPTIMISTIC (slower decay -> more signal
+        retained); real T2* is not quoted by the supplier (audit #136).
+
+        The fringe frequency is tied to a PHYSICAL input quantity, not a
+        hardcoded rad/us constant: Ramsey precesses at
+        ``omega = radians(rotation_rate_dps)`` (the Sagnac relation, exactly as
+        :func:`qssc.sensors.gyro_measure` models it), so the host FFT fit on
+        these codes recovers the set rotation rate. Hahn / CPMG refocus a
+        STATIC detuning, so their fringe is the residual detuning SPREAD
+        (``self.detuning_hz``), not the rotation rate.
         """
         t2_us = self.t2 * 1e6
         if t_step_ns and t_step_ns > 0:
@@ -726,12 +820,19 @@ class SimulatedFPGA:
         else:
             # window times spread over ~2*T2 so the decay is visible
             ts = np.linspace(0, 2 * t2_us, n_windows)
+        t_s = ts * 1e-6                                         # us -> s
         if kind == "ramsey":
-            fringe = 0.5 + 0.5 * np.cos(ts * 0.3) * np.exp(-ts / t2_us)
+            omega = math.radians(float(self.rotation_rate_dps))  # rad/s (Sagnac)
+            fringe = 0.5 + 0.5 * np.cos(omega * t_s) * np.exp(-ts / t2_us)
         elif kind == "hahn":
-            fringe = 0.5 + 0.5 * np.cos(ts * 0.2) * np.exp(-ts / t2_us)
+            domega = 2.0 * math.pi * float(self.detuning_hz)     # rad/s residual spread
+            fringe = 0.5 + 0.5 * np.cos(domega * t_s) * np.exp(-ts / t2_us)
         else:  # cpmg
-            fringe = 0.5 + 0.5 * np.cos(ts * 0.15) * np.exp(-(ts / t2_us) ** 2)
+            domega = 2.0 * math.pi * float(self.detuning_hz)
+            # CPMG refocuses T2* (inhomogeneous) -> the residual decay is
+            # T2-limited EXPONENTIAL (like Hahn), not the Gaussian T2* shape
+            # (which is the un-refocused Ramsey envelope). audit #119.
+            fringe = 0.5 + 0.5 * np.cos(domega * t_s) * np.exp(-ts / t2_us)
         codes = BRIGHT_CODE * fringe + self.rng.normal(0, READOUT_NOISE, size=n_windows)
         codes = np.clip(codes, 0, ADC_MAX).astype(int)
         return " ".join([str(n_windows)] + [str(int(c)) for c in codes])
@@ -766,18 +867,25 @@ class SimulatedFPGA:
         return lockin_integrated_readout(BRIGHT_CODE, ODMR_CONTRAST,
                                          int(n_cycles), READOUT_NOISE, rng=self.rng)
 
-    def read_lockinp(self, site: int, n_cycles: int, half_ns: int) -> dict:
-        """Prime-period lock-in -> differential + SNR (mirrors FPGAConnection).
+    def read_lockinp(self, site: int, n_samples: int, prime_idx: int) -> dict:
+        """Prime-period IQ lock-in -> amplitude + SNR (mirrors FPGAConnection).
 
-        The half-period ``half_ns`` (= p*tau/2 for the prime p the Python
-        :mod:`qssc.prime_readout` assigned to this NV channel) selects the
-        orthogonal modulation channel. The simulator stub reuses the lock-in
-        model (the half-period does not change the sim physics); the real RTL
-        demodulates at ``half_ns``. Same dict shape as :meth:`read_lockin`.
+        ``prime_idx`` (0..15) selects the prime channel ``p =
+        PRIME_SYMBOLS[prime_idx]``. The sim generates ``n_samples`` codes whose
+        PL is modulated at period ``p`` and MACs them against the per-prime
+        cos/sin ROM (the SAME ROM the RTL holds), then returns the IQ result
+        dict (see :func:`qssc.prime_readout.lockin_iq_result`): recovered
+        ``amplitude_code``, ``phase_rad``, integrated ``sigma_code`` and
+        ``snr``. Same dict shape as :meth:`FPGAConnection.read_lockinp`.
         """
-        if int(half_ns) < 2000:
-            raise ValueError("half_ns must be >= 2000")
-        return self.read_lockin(site, n_cycles)
+        from .prime_readout import lockin_iq_result
+        if not (0 <= int(site) < self.N_SITES) or not (1 <= int(n_samples) <= 100000):
+            raise ValueError("site/n_samples out of range")
+        if not (0 <= int(prime_idx) < 16):
+            raise ValueError("prime_idx must be 0..15")
+        reply = self._read_lockinp_iq(int(site), int(n_samples), int(prime_idx))
+        I, Q, n = (int(t) for t in reply.split())
+        return lockin_iq_result(I, Q, n, int(prime_idx), float(READOUT_NOISE))
 
     def read_gyro(self, site: int, t_ns: int, n_windows: int = 64) -> dict:
         """Ramsey pi/2-T-pi/2 -> rotation rate (gyro_measure dict shape)."""

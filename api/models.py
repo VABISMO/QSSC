@@ -224,9 +224,9 @@ class CalibrateArrayRequest(BaseModel):
 
 class ScriptRequest(BaseModel):
     name: str
-    code: str
+    code: str = Field(..., max_length=100_000)  # bound the stored blob (audit #107)
     id: Optional[str] = None
 
 
 class FpgaCommandRequest(BaseModel):
-    command: str
+    command: str = Field(..., max_length=4096)  # bound the FPGA command blob (audit #141)

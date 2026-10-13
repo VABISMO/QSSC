@@ -338,6 +338,11 @@ def test_api_sensor_tensor_real_path_with_mock_fpga():
             pass
         def send_command(self, cmd):
             return "OK"
+        def close(self):
+            # mirror the real FPGAConnection.close() the production try/finally
+            # in routes_sensor.api_tensor calls on every request (handle-leak
+            # fix); the mock owns no UART so this is a no-op.
+            pass
         def run_all_odmr(self, f_start_khz, f_stop_khz, n):
             # (n, 64) AD7616 code matrix: a dip at each of the 8 line centres
             # for every pixel (BRIGHT_CODE baseline, dips on resonance) + real

@@ -110,6 +110,7 @@ def api_gyro(
     mode: str = "real",
     seed: Optional[int] = None,
     hardware: bool = False,
+    sensor_t2_us: Optional[float] = None,
 ):
     """Ramsey pi/2-T-pi/2 gyroscope: rotation rate -> accumulated phase.
 
@@ -145,7 +146,8 @@ def api_gyro(
         profile, temperature_k=float(temperature_k),
         rotation_rate_dps=float(rate_dps),
         free_precession_us=free_precession_us,
-        n_averages=_sensor_mode_n_avg(n_avg, mode), rng=rng))
+        n_averages=_sensor_mode_n_avg(n_avg, mode), rng=rng,
+        sensor_t2_us=sensor_t2_us))
     out["mode"] = mode
     return out
 
@@ -322,6 +324,11 @@ def api_sensor_tensor(
     grid = 8
     prof = get_profile(profile)
     lw = prof.odmr_linewidth_hz / 1e6
+    # Bound n_avg: the source=real path loops n_shots = n_avg serial
+    # RUN_ALL_ODMR round-trips (each a 256-point sweep), so an unbounded value
+    # holds the single uvicorn worker + the board for minutes. Mirrors the
+    # api_gyro / api_signal `min(..., 1024)` clamp (audit #151).
+    n_avg = max(1, min(int(n_avg), 1024))
     # sim mode averages freely (n_avg x8); real is shot-noise-limited (n_avg).
     n_eff = int(n_avg) * (8 if source == "sim" else 1)
     sens_ut = (lw * 1e6) / (2.0 * prof.gyromagnetic_ratio) * 1e6 / math.sqrt(
@@ -352,47 +359,56 @@ def api_sensor_tensor(
                                 seed=int(seed if seed is not None else 42))
         except NoFPGADetected as exc:
             return {"error": "no-fpga-detected", "message": str(exc)}
-        if not hasattr(fpga, "run_all_odmr"):
-            return {"error": "real tensor needs a board with run_all_odmr "
-                             "(set QSSC_FPGA_PORT or use source=sim)"}
-        # Sweep span: cover the Zeeman doublet of the ambient + bias field. A
-        # split > linewidth (5 MHz) needs |B.n_i| > ~90 µT; to resolve the 4 NV
-        # <111> axes as DISTINCT doublets (the vector reconstruction needs >= 3
-        # separated splits) a ~1 mT bias is typical, so ±50 MHz around D covers
-        # |B.n_i| up to ~1.8 mT (gamma=28 GHz/T) and keeps the lines clear of the
-        # sweep edges (the bright-baseline estimator samples the outer 10%).
-        d_khz = int(prof.zero_field_splitting / 1e3)
-        span_khz = max(int(prof.odmr_linewidth_hz / 1e3) * 6, 50000)
-        f_start = d_khz - span_khz
-        f_stop = d_khz + span_khz
-        n = 256  # sweep points (one serial RUN_ALL_ODMR round-trip per point)
-        # N-shot lock-in integration: average n_eff independent sweeps so the
-        # per-point readout noise drops by sqrt(n_eff) (dimmer doublets clear
-        # the linewidth floor and more pixels reconstruct a B-vector).
-        n_shots = max(1, int(n_avg))
-        acc = None
-        for _ in range(n_shots):
-            m = np.asarray(fpga.run_all_odmr(f_start, f_stop, n), dtype=float)
-            acc = m if acc is None else acc + m
-        matrix = (acc / n_shots).astype(np.int32)
-        freqs_ghz = np.linspace(f_start * 1e3, f_stop * 1e3, n) / 1e9
-        calib = calibrate_array_from_codes(
-            matrix, freqs_ghz, prof, gradient_mhz_per_um=0.0,
-            pixel_size_um=200.0, seed=int(seed if seed is not None else 42),
-            temperature_k=300.0, integration_shots=n_shots,
-            cap_to_resolvable=False)
-        # (8,8,3) B-vector map in Tesla -> µT (the tensor gradiometer input).
-        fmap_ut = b_vector_map_from_array_calibration(calib, prof) * 1e6
-        pixels = tensor_gradient_map(fmap_ut, pitch_mm)
-        fit = localize_dipole(fmap_ut, pitch_mm=pitch_mm,
-                              z_guess_mm=z_guess_mm, background_ut=None)
-        res_profile = prof.name
-        res_grid = grid
-        res_n_pixels = grid * grid
-        res_pitch_mm = pitch_mm
-        io_note = ("Real: RUN_ALL_ODMR -> decompose per pixel -> 4-axis "
-                   "B-vector -> tensor gradient + dipole fit on the measured "
-                   "map (no synthetic field). Differential via background fit.")
+        try:
+            if not hasattr(fpga, "run_all_odmr"):
+                return {"error": "real tensor needs a board with run_all_odmr "
+                                 "(set QSSC_FPGA_PORT or use source=sim)"}
+            # Sweep span: cover the Zeeman doublet of the ambient + bias field. A
+            # split > linewidth (5 MHz) needs |B.n_i| > ~90 µT; to resolve the 4 NV
+            # <111> axes as DISTINCT doublets (the vector reconstruction needs >= 3
+            # separated splits) a ~1 mT bias is typical, so ±50 MHz around D covers
+            # |B.n_i| up to ~1.8 mT (gamma=28 GHz/T) and keeps the lines clear of the
+            # sweep edges (the bright-baseline estimator samples the outer 10%).
+            d_khz = int(prof.zero_field_splitting / 1e3)
+            span_khz = max(int(prof.odmr_linewidth_hz / 1e3) * 6, 50000)
+            f_start = d_khz - span_khz
+            f_stop = d_khz + span_khz
+            n = 256  # sweep points (one serial RUN_ALL_ODMR round-trip per point)
+            # N-shot lock-in integration: average n_eff independent sweeps so the
+            # per-point readout noise drops by sqrt(n_eff) (dimmer doublets clear
+            # the linewidth floor and more pixels reconstruct a B-vector).
+            n_shots = max(1, int(n_avg))
+            acc = None
+            for _ in range(n_shots):
+                m = np.asarray(fpga.run_all_odmr(f_start, f_stop, n), dtype=float)
+                acc = m if acc is None else acc + m
+            matrix = (acc / n_shots).astype(np.int32)
+            freqs_ghz = np.linspace(f_start * 1e3, f_stop * 1e3, n) / 1e9
+            calib = calibrate_array_from_codes(
+                matrix, freqs_ghz, prof, gradient_mhz_per_um=0.0,
+                pixel_size_um=200.0, seed=int(seed if seed is not None else 42),
+                temperature_k=300.0, integration_shots=n_shots,
+                cap_to_resolvable=False)
+            # (8,8,3) B-vector map in Tesla -> µT (the tensor gradiometer input).
+            fmap_ut = b_vector_map_from_array_calibration(calib, prof) * 1e6
+            pixels = tensor_gradient_map(fmap_ut, pitch_mm)
+            fit = localize_dipole(fmap_ut, pitch_mm=pitch_mm,
+                                  z_guess_mm=z_guess_mm, background_ut=None)
+            res_profile = prof.name
+            res_grid = grid
+            res_n_pixels = grid * grid
+            res_pitch_mm = pitch_mm
+            io_note = ("Real: RUN_ALL_ODMR -> decompose per pixel -> 4-axis "
+                       "B-vector -> tensor gradient + dipole fit on the measured "
+                       "map (no synthetic field). Differential via background fit.")
+        finally:
+            # Every other hardware route closes its FPGA handle in a finally
+            # (api_gyro / api_signal / fpga command). connect_fpga returns a NEW
+            # FPGAConnection per call (not the runner cache), so without this the
+            # /dev/ttyUSB0 handle leaks on every request AND on any mid-sweep
+            # exception -- the OS then refuses a second open of the same UART and
+            # the next hardware call fails with a spurious NoFPGADetected.
+            fpga.close()
     else:
         fmap = synthetic_field_map(
             gradient_ut_mm=gradient_ut_mm, base_bx_ut=base_bx_ut,
