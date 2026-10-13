@@ -1,6 +1,7 @@
 # tests/test_pcb_board_integrity.py
-"""Board-file integrity gates for both PCBs (``qssc.kicad_pcb``,
-``chip_module.kicad_pcb``) -- pure sexp/JSON parsing, no pcbnew, fast in CI.
+"""Board-file integrity gates for all three routed PCBs
+(``qssc.kicad_pcb``, ``chip_module.kicad_pcb``, ``qssc-grad.kicad_pcb``) --
+pure sexp/JSON parsing, no pcbnew, fast in CI.
 
 These gates exist because the boards are GENERATED artifacts
 (``tools/gen_qssc_kicad.py`` + the headless routing pipeline) and several
@@ -29,7 +30,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 PCB_DIR = REPO / "hardware" / "pcb"
-BOARDS = [PCB_DIR / "qssc.kicad_pcb", PCB_DIR / "chip_module.kicad_pcb"]
+BOARDS = [PCB_DIR / "qssc.kicad_pcb", PCB_DIR / "chip_module.kicad_pcb",
+          PCB_DIR / "qssc-grad.kicad_pcb"]
 
 
 def _text(board: Path) -> str:
@@ -61,6 +63,10 @@ def test_head_uuids_unique():
     _assert_uuids_unique(PCB_DIR / "chip_module.kicad_pcb")
 
 
+def test_grad_uuids_unique():
+    _assert_uuids_unique(PCB_DIR / "qssc-grad.kicad_pcb")
+
+
 def _assert_uuids_unique(board: Path):
     uuids = re.findall(r'\(uuid "([0-9a-f-]{36})"\)', _text(board))
     dupes = {u: n for u, n in Counter(uuids).items() if n > 1}
@@ -82,6 +88,10 @@ def test_main_min_track_width():
 
 def test_head_min_track_width():
     _assert_min_track_width(PCB_DIR / "chip_module.kicad_pcb")
+
+
+def test_grad_min_track_width():
+    _assert_min_track_width(PCB_DIR / "qssc-grad.kicad_pcb")
 
 
 def _assert_min_track_width(board: Path):
@@ -141,6 +151,10 @@ def test_plane_zone_assignment_main():
 
 def test_plane_zone_assignment_head():
     _assert_plane_zones(PCB_DIR / "chip_module.kicad_pcb")
+
+
+def test_plane_zone_assignment_grad():
+    _assert_plane_zones(PCB_DIR / "qssc-grad.kicad_pcb")
 
 
 def _assert_plane_zones(board: Path):

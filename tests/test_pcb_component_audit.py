@@ -1,5 +1,6 @@
 # tests/test_pcb_component_audit.py
-"""Pure-Python PCB component-usage + BOM + netlist audit for both QSSC boards.
+"""Pure-Python PCB component-usage + BOM + netlist audit for all three QSSC
+boards (main, head, gradient variant).
 
 This is the **CI-runnable** audit (no ``pcbnew``, no ``kicad-cli``): it parses
 the committed ``.kicad_pcb`` files as S-expressions and answers: *"all
@@ -23,6 +24,15 @@ components present"*:
      on its board, every placed part is in the BOM (with a justified allowlist
      for mechanical / mounting / no-BOM parts).
 
+The BOM gate uses two directions with different row scopes. *Row validity* is
+strict per board: a row labeled ``main`` must be placed on the main board (and
+likewise for ``head``/``grad``). *Coverage* is a union check: the grad section
+is a hand-maintained DELTA over the main rows (``tools/gen_bom.py`` generates
+only main+head), so a placed part counts as covered when it appears in ANY
+board's rows -- that is the shape that catches an added part with no BOM row
+at all (as Rgrad_feed once was) without flagging the whole main-derived clone
+on the gradient board.
+
 Pure-Python so it runs in the existing ``pytest`` CI job (CI has no KiCad).
 The geometry-level connectivity gate (copper graph, split nets) is
 ``test_pcb_connectivity.py``; the ``kicad-cli`` DRC gate is
@@ -42,6 +52,7 @@ PCB_DIR = REPO / "hardware" / "pcb"
 BOARDS = {
     "main": PCB_DIR / "qssc.kicad_pcb",
     "head": PCB_DIR / "chip_module.kicad_pcb",
+    "grad": PCB_DIR / "qssc-grad.kicad_pcb",
 }
 BOM_CSV = REPO / "hardware" / "datasheets" / "BOM.csv"
 
@@ -80,7 +91,11 @@ NO_POWER_CHECK_FP = ("SOT-89",)
 # memory/netlist-verified-per-datasheet). ``mod_sync`` is the FPGA's emitter/
 # detector sync output, held as a single pad on the main board pending a
 # future board-to-board route; not a dangling mistake.
-RESERVED_NETS = {"mod_sync"}
+# ``grad_en`` exists only on the gradient board: the FPGA ball is pinned
+# (gen_fpga_ballmap_csg324: ball V7) as a spare STATUS output, documented NC on
+# the PCB -- tools/route_grad_nets.py: "grad_en is a 1-pad FPGA STATUS output,
+# NC on the PCB -- left unrouted."
+RESERVED_NETS = {"mod_sync", "grad_en"}
 
 # Parts on the board but intentionally NOT in the BOM: mechanical mounting
 # holes, board fiducials, logos, and any "*FID*" / "*LOGO*" / "MH*" references.
@@ -263,15 +278,20 @@ def test_every_ic_has_power_and_ground(name: str, path: Path):
 # 4. BOM <-> board consistency
 # --------------------------------------------------------------------------
 def _bom_refs_by_board():
-    """{board: set(refs)} from BOM.csv (Designators is a comma-separated list)."""
-    by_board: dict[str, set[str]] = {"main": set(), "head": set()}
+    """{board: set(refs)} from BOM.csv (Designators is a comma-separated list).
+
+    Dynamically keyed on the Board column so a section added to the CSV (the
+    grad rows arrived after the test was written) is audited automatically --
+    a hardcoded {main, head} silently dropped every other section."""
+    by_board: dict[str, set[str]] = {}
     if not BOM_CSV.exists():
         return by_board
     with BOM_CSV.open(newline="") as f:
         for row in csv.DictReader(f):
             board = (row.get("Board") or "").strip()
-            if board not in by_board:
+            if not board:
                 continue
+            by_board.setdefault(board, set())
             for d in (row.get("Designators") or "").split(","):
                 d = d.strip()
                 if d:
@@ -283,23 +303,31 @@ def _bom_refs_by_board():
 def test_bom_matches_board(name: str, path: Path):
     """Every BOM designator is placed on its board, and every placed part is in
     the BOM (except mechanical / mounting / logo / Uchip, which are allowlisted
-    as intentionally no-BOM)."""
+    as intentionally no-BOM).
+
+    Row scope differs by direction: rows labeled for THIS board must be placed
+    on it (strict, per-board); placed parts must appear in the BOM under any
+    board (union -- the grad rows are a hand-maintained delta over main, see
+    the module docstring)."""
     if not path.exists() or not BOM_CSV.exists():
         pytest.skip("board or BOM not present")
     fps, _ = _extract(path)
     placed = {fp["ref"] for fp in fps if fp["ref"]}
-    bom_all = _bom_refs_by_board().get(name, set())
-    # drop KiCad schematic-only "#FLG"/PWR_FLAG markers -- they are in the BOM
-    # but never become a placed footprint, so they are not a "missing part".
-    bom = {r for r in bom_all if not SCHEMATIC_ONLY_RE.match(r)}
+    by_board = _bom_refs_by_board()
+    bom_own = {r for r in by_board.get(name, set())
+               if not SCHEMATIC_ONLY_RE.match(r)}
+    bom_union = {r for refs in by_board.values() for r in refs
+                 if not SCHEMATIC_ONLY_RE.match(r)}
 
-    in_bom_not_placed = sorted(bom - placed)
+    in_bom_not_placed = sorted(bom_own - placed)
     placed_not_in_bom = sorted(
-        r for r in (placed - bom) if not NO_BOM_RE.match(r) and not SCHEMATIC_ONLY_RE.match(r)
+        r for r in (placed - bom_union)
+        if not NO_BOM_RE.match(r) and not SCHEMATIC_ONLY_RE.match(r)
     )
     assert not in_bom_not_placed, (
         f"{name}: {len(in_bom_not_placed)} BOM designator(s) NOT placed on the "
         f"board: {in_bom_not_placed[:25]}")
     assert not placed_not_in_bom, (
-        f"{name}: {len(placed_not_in_bom)} placed part(s) NOT in the BOM "
-        f"(and not in the mechanical allowlist): {placed_not_in_bom[:25]}")
+        f"{name}: {len(placed_not_in_bom)} placed part(s) with NO BOM row under "
+        f"any board section (and not in the mechanical allowlist): "
+        f"{placed_not_in_bom[:25]}")
