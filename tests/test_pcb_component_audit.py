@@ -286,7 +286,7 @@ def _bom_refs_by_board():
     by_board: dict[str, set[str]] = {}
     if not BOM_CSV.exists():
         return by_board
-    with BOM_CSV.open(newline="") as f:
+    with BOM_CSV.open(newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
             board = (row.get("Board") or "").strip()
             if not board:

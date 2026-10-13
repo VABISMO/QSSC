@@ -58,7 +58,7 @@ pcbnew.SaveBoard({pcb!r}, b)
 # "swig/python detected a memory leak ..." warnings to stdout as the proxy
 # objects are destroyed at interpreter shutdown, which interleave with and
 # corrupt a printed JSON line. A file write is atomic and clean.
-with open({out!r}, "w") as fh:
+with open({out!r}, "w", encoding="utf-8") as fh:
     json.dump({{
         "hdi_via": br.m_ViasMinSize,
         "hdi_drill": br.m_MinThroughDrill,
