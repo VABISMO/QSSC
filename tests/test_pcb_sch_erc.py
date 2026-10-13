@@ -103,7 +103,7 @@ def test_sch_erc_gate(name: str, path: Path, tmp_path):
     res = subprocess.run(
         ["kicad-cli", "sch", "erc", "--severity-all", "--format", "json",
          "--output", str(out), str(path)],
-        capture_output=True, text=True,
+        capture_output=True, text=True, check=False,
     )
     assert res.returncode == 0, f"kicad-cli sch erc failed:\n{res.stderr}"
 
