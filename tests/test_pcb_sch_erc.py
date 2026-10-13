@@ -46,7 +46,9 @@ warnings at gate-creation time):
    becoming a growing bin: a newly introduced unconnected pin shifts the
    count and fails the gate.
 
-Skips automatically where ``kicad-cli`` is not on PATH (CI has no KiCad).
+Skips automatically where ``kicad-cli`` is not on PATH. Upstream's
+``pcb.yml`` workflow installs KiCad and would run this gate; upstream
+Actions are currently disabled (billing), so pins are enforced locally.
 """
 from __future__ import annotations
 
