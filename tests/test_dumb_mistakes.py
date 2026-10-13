@@ -63,7 +63,11 @@ BIN_SUFFIX = {".pdf", ".png", ".jpg", ".jpeg", ".zip", ".wav", ".gz", ".7z"}
 
 SECRET_PATTERNS = [
     re.compile(rb"ghp_[0-9A-Za-z]{36}"),
-    re.compile(rb"github_pat_"),
+    # literal split: the committed sweep file must not self-match its own
+    # credential scanners (the pattern below would otherwise match the
+    # source text of this very file, since the file is a tracked scan
+    # target itself)
+    re.compile(rb"github_" + b"pat_"),
     re.compile(rb"AKIA[0-9A-Z]{16}"),
     re.compile(rb"xox[bp]-"),
     re.compile(rb"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
