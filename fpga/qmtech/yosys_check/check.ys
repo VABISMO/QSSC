@@ -1,0 +1,46 @@
+# check.ys -- structural + resource check of the QMTECH port, using yosys only.
+#
+# What this validates (and what it does not):
+#   YES: the RTL parses, hierarchy resolves, no inferred latches, no
+#        unmapped/blackbox cells beyond the declared primitive stubs, and a
+#        realistic fabric-usage figure for the XC7A15T.
+#   NO : place-and-route, timing closure, MMCM behaviour, or a bitstream.
+#        Those need Vivado -> build_bitstream_qmtech.tcl.
+#
+# Run from the repo root:
+#   yosys -l /tmp/qmtech_check.log -s fpga/qmtech/yosys_check/check.ys
+#
+# Does NOT write anything back into the repository (no -edif, no write_json).
+
+read_verilog fpga/qmtech/yosys_check/stubs.v
+read_verilog fpga/rtl/uart_rx.v
+read_verilog fpga/rtl/uart_tx.v
+read_verilog fpga/rtl/spi_master.v
+read_verilog fpga/rtl/tlc5947_ctrl.v
+read_verilog fpga/rtl/emitter_array.v
+read_verilog fpga/rtl/adc_reader.v
+read_verilog fpga/rtl/adf4351_ctrl.v
+read_verilog fpga/rtl/qrng_entropy.v
+read_verilog fpga/rtl/dac_ctrl.v
+read_verilog fpga/rtl/command_parser.v
+read_verilog fpga/rtl/top_level.v
+read_verilog fpga/qmtech/top_qmtech.v
+
+hierarchy -check -top top_qmtech
+
+# No latch may survive the front end: assert so the run FAILS instead of
+# hiding the problem in a long log.
+proc
+select -assert-none t:$_DLATCH_*
+select -clear
+
+synth_xilinx -top top_qmtech -family xc7 -abc9
+
+# Every remaining cell must be a known Xilinx cell (or a declared stub).
+select -assert-none t:$_NOT_ t:$_AND_ t:$_OR_ t:$_XOR_ t:$_MUX_
+select -assert-none t:$abc t:$_DLATCH_* t:$dlatch
+select -clear
+
+stat
+
+log "=== QMTECH yosys check COMPLETE (top_qmtech, family xc7) ==="

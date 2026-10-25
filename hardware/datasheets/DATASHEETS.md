@@ -529,6 +529,45 @@ schematic + netlist + placement are DRC 0/0/0.
 
 ---
 
+## QMTECH XC7A15T bring-up board (firmware test target)
+
+A **stock QMTECH XC7A15T core board** (bought, not designed here) is used to
+bring up and exercise the QSSC firmware before the custom control board comes
+back from fabrication.  Nothing external is cabled to it yet — it is a bare
+board, so only its own oscillator, LEDs, buttons, SPI flash and JTAG are
+live.
+
+**Local PDFs (pin schematic + manual):**
+
+| file | content |
+|---|---|
+| [`pdfs/QMTECH_XC7A15T_schematic.pdf`](pdfs/QMTECH_XC7A15T_schematic.pdf) | full 4-sheet schematic — **the authoritative ball/pin map**: FPGA banks, JP2/JP3 headers, JTAG J1, SPI flash, LEDs, keys |
+| [`pdfs/QMTECH_XC7A15T_user_manual.pdf`](pdfs/QMTECH_XC7A15T_user_manual.pdf) | user manual — JP2/JP3 pin tables, power, Vivado/JTAG flow, boot mode |
+
+Source: `https://github.com/ChinaQMTECH/QMTECH_XC7A15T_35T_CSG325_CORE_BOARD`
+(`Hardware/QMTECH_XC7A15T_35T_50T_CSG325_SDRAM_V1.pdf` and
+`QMTECH_XC7A15T_SDRAM-User_Manual_V01.pdf`), md5-verified against upstream.
+
+**Board facts:**
+
+- FPGA **XC7A15T-1CSG325C** — 16 640 logic cells, 10 400 LUTs, 20 800 FF,
+  2 600 CARRY4, 50 BRAM, 40 DSP.  **Not** the XC7A35T-1CSG324C of the custom
+  board: different die *and* different package, so the ball map differs.
+- 50 MHz oscillator on **R2** (`IO_L12N_T1_MRCC_34`), not 100 MHz.
+- Two 50-pin headers: **JP2 = bank 34**, **JP3 = bank 15**, 87 usable IOs,
+  all banks at 3.3 V by default.
+- On-board: 2 user LEDs (D1/D4, active-**low**), 2 user keys (SW1/SW2,
+  active-**low**, 4.7 k pull-ups), PROG_B (SW3), DONE LED (D3), power LED (D2),
+  64 Mbit SPI flash **N25Q64A** (quad-wired), JTAG J1.
+- Boots Master SPI (`M[2:0] = 1:0:0`).
+
+**Gotchas when porting from the custom board** — several balls used in
+`../constraints.xdc` are ground or absent on CSG325 (e.g. B8, A18, B18, G1,
+A8, A1, B1, C1), so they must be re-assigned.  The QMTECH port lives in
+[`fpga/qmtech/`](../../fpga/qmtech/) with its own `constraints_qmtech.xdc`.
+
+---
+
 ## KiCad footprints & 3D models
 
 All 2D footprints used by both sandwich boards are present in the installed

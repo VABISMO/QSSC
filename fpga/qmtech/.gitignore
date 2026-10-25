@@ -1,0 +1,13 @@
+# Build outputs and tool noise -- everything here is regenerable by
+# build.sh / build_bitstream_qmtech.tcl, so it is never committed.
+build/
+.Xil/
+__pycache__/
+*.pyc
+
+# Vivado writes these into the current working directory on every run.
+clockInfo.txt
+tight_setup_hold_pins.txt
+vivado*.backup.log
+*.jou
+*.str
