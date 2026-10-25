@@ -142,11 +142,17 @@ def build_main_board(grad=False):
     # into the USB host.  Barrel stays direct so the +5V rail keeps the full 5.0 V
     # the GVA-84+ RF amp needs (4.8-5.2 V abs max); only USB-only power (config,
     # no RF) takes the Schottky drop.
+    # The USB-2.0-only design leaves the SuperSpeed TX/RX quad pairs open:
+    # mark them no_connect so the generated sheet declares them deliberately
+    # open instead of reporting 8 pin_not_connected ERC warnings per board.
+    # Without this the generator silently regenerates the defect that was
+    # hand-patched into the committed sheets (issue #164).
     add("J10", "qssc:USB_C_Receptacle", "USB-C", "Connector_USB:USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal",
         360, 70, pins={"A4": "VBUS_USB", "A9": "VBUS_USB", "B4": "VBUS_USB", "B9": "VBUS_USB",
                        "A1": "GND", "A12": "GND", "B1": "GND", "B12": "GND",
                        "A6": "USB_DP", "B6": "USB_DP", "A7": "USB_DM", "B7": "USB_DM",
-                       "A5": "CC1", "B5": "CC2", "A8": "GND", "B8": "GND", "S1": "GND"})
+                       "A5": "CC1", "B5": "CC2", "A8": "GND", "B8": "GND", "S1": "GND"},
+        nc_pins=["A2", "A3", "A10", "A11", "B2", "B3", "B10", "B11"])
     add("R71", "qssc:R", "5.1k", "Resistor_SMD:R_0603_1608Metric", 360, 100, pins={"1": "CC1", "2": "GND"})
     add("R72", "qssc:R", "5.1k", "Resistor_SMD:R_0603_1608Metric", 360, 110, pins={"1": "CC2", "2": "GND"})
 
