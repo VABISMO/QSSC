@@ -123,7 +123,11 @@ def auto_align(profile: DefectProfile | str = "NV",
     complete. Register-view NVs are usable by construction (engineered NVs).
     """
     prof = get_profile(profile) if isinstance(profile, str) else profile
-    rng = rng or np.random.default_rng()
+    if rng is None:
+        # issue #170 option 1: the generator parameter is required -- no
+        # silent OS-entropy fallback anywhere in the engine
+        raise ValueError("auto_align needs a seeded rng -- thread "
+                         "np.random.default_rng(seed) from the entry point")
     t1, t2 = coherence_at_temperature(prof, temperature_k)
     # ---- per-pixel NV register view (the circuit backend's qubits) ----------
     # ONE microdiamond's n NVs: all pixel_id=0, distinct nv_index, on a

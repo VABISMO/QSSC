@@ -282,7 +282,7 @@ def magnetometer_sweep(
     mode: str = "real",
     differential: bool = False,
     average: bool = False,
-    rng: Optional[np.random.Generator] = None,
+    *, rng: np.random.Generator,
 ) -> MagnetometerResult:
     """Run a 64-pixel vector magnetometer sweep.
 
@@ -298,7 +298,6 @@ def magnetometer_sweep(
     mean +/- std (single-number readout) in addition to the per-pixel image.
     """
     prof = get_profile(profile) if isinstance(profile, str) else profile
-    rng = rng or np.random.default_rng()
     lw = prof.odmr_linewidth_hz / 1e6
     n_eff = n_avg * 8 if mode == "sim" else int(n_avg)
     sens_ut = (lw * 1e6) / (2.0 * prof.gyromagnetic_ratio) * 1e6 / math.sqrt(max(1, n_eff))
