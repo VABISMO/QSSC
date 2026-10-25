@@ -115,6 +115,11 @@ parser.out
 # the file -- a trailing-slash directory exclude blocks all re-includes.
 .tmpwork/*
 !.tmpwork/pins.json
+# ...and the pinned FPGA ballmap, for the same reason: tools/kicad/symbols.py
+# reads it at import (json.loads at module level), so without it a fresh clone
+# dies with FileNotFoundError before gen_qssc_kicad.py / gen_bom.py can run
+# (issue #166). Rebuild with `python3 tools/gen_fpga_ballmap_csg324.py`.
+!.tmpwork/fpga_csg324_map.json
 hardware/pcb/*erc*.txt
 hardware/pcb/*drc*.txt
 hardware/pcb/*erc*.json
