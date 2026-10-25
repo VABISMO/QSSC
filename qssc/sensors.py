@@ -37,7 +37,7 @@ def lockin_integrated_readout(
     contrast: float,
     n_frames: int,
     noise_counts: float,
-    rng: np.random.Generator | None = None,
+    rng: np.random.Generator,
 ) -> dict:
     """Model the lock-in-integrated readout that replaces 'keep last frame'.
 
@@ -53,7 +53,6 @@ def lockin_integrated_readout(
     Returns the integrated differential code, its sigma, the single-frame SNR
     and the integrated SNR so the caller can show the improvement.
     """
-    rng = rng or np.random.default_rng()
     n_frames = max(1, int(n_frames))
     bright = float(bright_code)
     dark = bright * (1.0 - float(contrast))
@@ -113,7 +112,7 @@ def compass_measure(
     n_avg: int = 1000,
     linewidth_mhz: float | None = None,
     points: int = 300,
-    rng: np.random.Generator | None = None,
+    *, rng: np.random.Generator,
 ) -> CompassResult:
     """ODMR compass: sweep the MW (ADF4351 via J3 -> A1 antenna) across the
     NV resonance for each of the 4 <111> orientations, fit the Zeeman doublet
@@ -130,7 +129,6 @@ def compass_measure(
     linewidth limit set by the sensor's own FWHM, not a fabricated sensitivity.
     """
     prof = get_profile(profile) if isinstance(profile, str) else profile
-    rng = rng or np.random.default_rng()
     B = np.asarray(b_vector_t, dtype=float)
     b_mag = float(np.linalg.norm(B))
     gamma = prof.gyromagnetic_ratio            # Hz/T (NV 28 GHz/T)
@@ -261,7 +259,7 @@ def gyro_measure(
     n_averages: int = 100,
     points: int = 200,
     sensor_t2_us: float | None = None,
-    rng: np.random.Generator | None = None,
+    *, rng: np.random.Generator,
 ) -> GyroResult:
     """Ramsey-precession gyroscope model.
 
@@ -280,7 +278,6 @@ def gyro_measure(
     and the caller can see the phase-per-T2 directly.
     """
     prof = get_profile(profile) if isinstance(profile, str) else profile
-    rng = rng or np.random.default_rng()
     _t1, t2 = coherence_at_temperature(prof, temperature_k)
     # The profile T2 is the BULK compute-grade coherence (NV 12C-CVD ~1.8 ms).
     # The as-built spin-coated microdiamond SENSOR array is sensor-grade

@@ -57,7 +57,8 @@ def test_gradient_caps_register_width():
 def test_no_gradient_keeps_nominal_width():
     """With no gradient the register keeps its nominal n_nv_per_pixel (10)."""
     sites = auto_align(get_profile("NV"), register=True, n_nv_per_pixel=10,
-                       gradient_mhz_per_um=0.0)
+                       gradient_mhz_per_um=0.0,
+                       rng=__import__("numpy").random.default_rng(0))
     assert len(sites) == 10
 
 

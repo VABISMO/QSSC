@@ -410,20 +410,16 @@ def test_engine_no_wallclock():
 # 9. engine RNG calls must be seeded (or allowlisted as verified fallbacks)
 # --------------------------------------------------------------------------
 # np.random.<fn>() with NO arguments silently falls back to OS entropy: two
-# "identical" engine runs then disagree. The intentional unseeded
-# ``rng = rng or np.random.default_rng()`` convenience defaults (whose
-# callers thread an rng through today) plus the Miller-Rabin witness draw
-# are the frozen allowlist.
+# "identical" engine runs then disagree. Issue #170 option 1 removed the
+# ``rng = rng or np.random.default_rng()`` convenience defaults -- the
+# generator parameter is REQUIRED at every engine entry point (or guarded
+# with an explicit ValueError), so every call site threads a seeded rng
+# from --seed / the API ctx. The allowlist shrank 9 -> 1: the deliberate
+# Miller-Rabin fresh-entropy witness draw (a witness that is predictable
+# from a seed weakens the primality proof) is the only remaining zero-arg
+# np.random site in the engine.
 _RNG_UNSEEDED_ALLOW = {
-    ("qssc/circuits.py", 53),       # Miller-Rabin witness (by design)
-    ("qssc/circuits.py", 91),       # select_coprime rng-default
-    ("qssc/magnetometry.py", 301),   # magnetometry rng-default
-    ("qssc/sensors.py", 56),
-    ("qssc/sensors.py", 133),
-    ("qssc/sensors.py", 283),
-    ("qssc/simulator_response.py", 31),
-    ("qssc/simulator_response.py", 52),
-    ("qssc/simulator_site.py", 126),
+    ("qssc/circuits.py", 53),       # Miller-Rabin witness (deliberate)
 }
 
 

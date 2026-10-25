@@ -50,7 +50,8 @@ def is_prime(n: int, k: int = 8) -> bool:
         r += 1
         d //= 2
     for _ in range(k):
-        a = np.random.randint(2, n - 1)
+        rng = np.random.default_rng(np.random.SeedSequence().entropy)  # deliberate fresh-entropy witness (issue #170 option 1) -- the one allowlisted OS-entropy site; Miller-Rabin witnesses must stay unpredictable
+        a = int(rng.integers(2, n - 1))
         x = pow(int(a), d, n)
         if x in (1, n - 1):
             continue
@@ -86,9 +87,16 @@ def perfect_power(n: int) -> Optional[tuple[int, int]]:
     return None
 
 
-def select_coprime(n: int, rng=None) -> int:
-    """Pick a random ``a`` with 1 < a < n and gcd(a, n) == 1."""
-    rng = rng or np.random.default_rng()
+def select_coprime(n: int, rng: np.random.Generator) -> int:
+    """Pick a random ``a`` with 1 < a < n and gcd(a, n) == 1.
+
+    The generator parameter is required (issue #170, option 1): no
+    fallback -- a missing generator is a caller bug, never a convenience.
+    Pass the seeded generator threaded from the CLI ``--seed`` / API ctx.
+    """
+    if rng is None:
+        raise ValueError("select_coprime needs a seeded rng -- thread "
+                         "np.random.default_rng(seed) from the entry point")
     candidates = [a for a in range(2, n) if gcd(a, n) == 1]
     if not candidates:
         raise ValueError(f"no coprime base for n={n}")
