@@ -227,8 +227,9 @@ def _compute_fpga_info() -> dict:
                     latches = latches if latches else []
                     blackboxes = blackboxes if blackboxes else []
                     width = width if width else []
-            except Exception:
-                pass
+            except (AttributeError, IndexError, KeyError, TypeError,
+                    ValueError):
+                pass   # malformed committed report -> keep log-based fallback
     if b is not None and mr is not None:
         info["resources"] = [
             {"name": k, "label": lab, "used": b.get(k, 0),

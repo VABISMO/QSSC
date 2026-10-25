@@ -111,7 +111,11 @@ MPN_MAP: dict[tuple[str, str], tuple[str, str, str]] = {
     ("MW_GATE", "PinHeader"):
         ("Würth", "61300211121", ""),
     ("JTAG", "PinHeader"):
-        ("Würth", "61300411121", ""),
+        # 2x05 = 10 contacts: digits 5-6 of the WR-PHD series are the contact
+        # count, so a 4-contact MPN on a 10-pad footprint was wrong (issue #169
+        # item 1, repaired in BOM.csv by PR #171 -- kept in sync here or a
+        # regeneration reverts it).
+        ("Würth", "61301011121", ""),
     ("2A PTC", "Fuse_1206"):
         ("Littelfuse", "nanoSMDC020F",
          "https://www.littelfuse.com/media?resourcetype=datasheets&value=0810070"),
@@ -140,7 +144,10 @@ MPN_MAP: dict[tuple[str, str], tuple[str, str, str]] = {
         ("Infineon", "IRLML2502TRPBF",
          "https://www.infineon.com/dgdl/irlml2502.pdf"),
     ("LM358", "SOIC-8"):
-        ("Texas Instruments", "LM358P",
+        # -P is a PDIP-8 suffix on a SOIC-8 footprint; an SOIC build orders
+        # -DR (issue #169 item 2, repaired in BOM.csv by PR #171 -- kept in
+        # sync here or a regeneration reverts it).
+        ("Texas Instruments", "LM358DR",
          "https://www.ti.com/lit/ds/symlink/lm358.pdf"),
     ("MCP4921", "SOIC-8"):
         ("Microchip", "MCP4921-I/SN",
@@ -218,7 +225,7 @@ def main() -> None:
     fieldnames = ["Board", "Designators", "Qty", "Value", "Footprint",
                   "Manufacturer", "MPN", "DatasheetURL"]
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    with OUT.open("w", newline="") as f:
+    with OUT.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
         w.writerows(rows)

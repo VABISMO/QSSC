@@ -49,7 +49,8 @@ def test_sweep_returns_64_pixels_and_image():
     res = magnetometer_sweep("NV", n_avg=2000, mode="sim",
                              b_field_map_ut=synthetic_field_map(
                                  base_bx_ut=2000.0, base_bz_ut=-1000.0,
-                                 gradient_ut_mm=50.0))
+                                 gradient_ut_mm=50.0),
+                             rng=np.random.default_rng(0))
     assert res.n_pixels == 64
     assert len(res.pixels) == 64
     assert len(res.image) == 64
@@ -67,9 +68,11 @@ def test_differential_mode_suppresses_baseline():
                                    gradient_ut_mm=50.0, dipole_moment_am2=0.0)
     diff = magnetometer_sweep("NV", b_field_map_ut=fmap,
                               baseline_map_ut=baseline, n_avg=8000,
-                              mode="sim", differential=True)
+                              mode="sim", differential=True,
+                              rng=np.random.default_rng(0))
     plain = magnetometer_sweep("NV", b_field_map_ut=fmap, n_avg=8000,
-                               mode="sim", differential=False)
+                               mode="sim", differential=False,
+                               rng=np.random.default_rng(0))
     assert diff.differential is True
     # the perturbation image is far smaller than the baseline-dominated one
     assert diff.image_max_ut < plain.image_max_ut * 0.1, (
@@ -80,7 +83,8 @@ def test_differential_mode_suppresses_baseline():
 def test_average_mode_reports_mean_std():
     res = magnetometer_sweep("NV", b_field_map_ut=synthetic_field_map(
         base_bx_ut=2000.0, base_bz_ut=-1000.0, gradient_ut_mm=50.0),
-        n_avg=1000, mode="sim", average=True)
+        n_avg=1000, mode="sim", average=True,
+        rng=np.random.default_rng(0))
     assert res.average is True
     assert res.mean_b_mag_ut > 0
     assert res.std_b_mag_ut >= 0
@@ -90,5 +94,6 @@ def test_average_mode_reports_mean_std():
 def test_zero_field_image_near_floor():
     """A zero field with heavy averaging gives an image at the noise floor."""
     res = magnetometer_sweep("NV", b_field_map_ut=np.zeros((8, 8, 3)),
-                             n_avg=10000, mode="sim")
+                             n_avg=10000, mode="sim",
+                             rng=np.random.default_rng(0))
     assert res.image_max_ut < 100.0

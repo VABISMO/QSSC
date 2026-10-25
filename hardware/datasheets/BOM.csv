@@ -80,9 +80,9 @@ grad,Lgrad,1,GradCoil,qssc:GradCoil,,,
 main,LED1,1,Green,LED_SMD:LED_0603_1608Metric,,,
 grad,LED1,1,Green,LED_SMD:LED_0603_1608Metric,,,
 grad,Qgrad,1,IRLML2502,Package_TO_SOT_SMD:SOT-23-3,Infineon,IRLML2502TRPBF,https://www.infineon.com/dgdl/irlml2502.pdf
-main,J9,1,JTAG,Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical,Würth,61300411121,
-grad,J9,1,JTAG,Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical,Würth,61300411121,
-grad,Udrv,1,LM358,Package_SO:SOIC-8_3.9x4.9mm_P1.27mm,Texas Instruments,LM358P,https://www.ti.com/lit/ds/symlink/lm358.pdf
+main,J9,1,JTAG,Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical,Würth,61301011121,
+grad,J9,1,JTAG,Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical,Würth,61301011121,
+grad,Udrv,1,LM358,Package_SO:SOIC-8_3.9x4.9mm_P1.27mm,Texas Instruments,LM358DR,https://www.ti.com/lit/ds/symlink/lm358.pdf
 grad,Ugrad,1,MCP4921,Package_SO:SOIC-8_3.9x4.9mm_P1.27mm,Microchip,MCP4921-I/SN,https://ww1.microchip.com/downloads/en/DeviceDoc/22248A.pdf
 main,J8,1,MW_GATE,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,Würth,61300211121,
 grad,J8,1,MW_GATE,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,Würth,61300211121,

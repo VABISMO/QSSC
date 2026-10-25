@@ -498,7 +498,7 @@ def _run_qftnos(ctx, req, result):
         result["prime_power"] = {"base": pbase, "exp": pexp}
     comparison = None
     try:
-        full_qc, _ = create_shor_circuit(n, a=a)
+        full_qc, _ = create_shor_circuit(n, a=a, rng=rng)
         comparison = {
             "num_qubits": full_qc.num_qubits, "depth": full_qc.depth(),
             "size": full_qc.size(), "ops": dict(full_qc.count_ops()),
