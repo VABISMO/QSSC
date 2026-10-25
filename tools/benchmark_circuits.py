@@ -442,7 +442,7 @@ def main():
                        "ideal_correct": sum(1 for r in all_rows if r["mode"] == "ideal" and r["correct"]),
                        "real_correct": sum(1 for r in all_rows if r["mode"] == "real" and r["correct"])}}
     path = os.path.join(os.path.dirname(__file__), "..", "benchmark_circuits.json")
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(out, f, indent=2, default=str)
     print(f"\nwrote {len(all_rows)} rows + audit -> {path}")
     return out

@@ -2,9 +2,9 @@
 """Structural checks for the headless signal router + FPGA BGA fanout
 (``tools/route_signals.py``).
 
-Skips automatically where ``pcbnew`` (KiCad) is not installed -- CI has no
-KiCad, so this only runs locally (like ``test_pcb_route.py``). The check runs a
-SUBPROCESS that loads a TEMPORARY copy of the board, applies the HDI-lite design
+CI installs KiCad and runs this unconditionally -- no skips
+(``tests/_pcb_env`` resolves the binding and fails loudly when absent). The
+check runs a SUBPROCESS that loads a TEMPORARY copy of the board, applies the HDI-lite design
 rules and the BGA via-in-pad fanout (``_apply_hdi_rules`` + ``_bga_fanout``), and
 saves -- then the test parses the saved ``.kicad_pcb`` sexp (no pcbnew) for the
 0.20/0.10 mm via-in-pad vias.
@@ -23,9 +23,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 
-pytest.importorskip("pcbnew")
+from _pcb_env import child_env, ensure_pcbnew
+
+ensure_pcbnew()
 
 REPO = Path(__file__).resolve().parent.parent
 SRC_PCB = REPO / "hardware" / "pcb" / "qssc.kicad_pcb"
@@ -57,7 +58,7 @@ pcbnew.SaveBoard({pcb!r}, b)
 # "swig/python detected a memory leak ..." warnings to stdout as the proxy
 # objects are destroyed at interpreter shutdown, which interleave with and
 # corrupt a printed JSON line. A file write is atomic and clean.
-with open({out!r}, "w") as fh:
+with open({out!r}, "w", encoding="utf-8") as fh:
     json.dump({{
         "hdi_via": br.m_ViasMinSize,
         "hdi_drill": br.m_MinThroughDrill,
@@ -77,7 +78,7 @@ os._exit(0)
 
 def _run_probe(target: Path, out_path: Path) -> dict:
     script = _PROBE.format(tools=str(TOOLS), pcb=str(target), out=str(out_path))
-    subprocess.run([sys.executable, "-c", script],
+    subprocess.run([sys.executable, "-c", script], env=child_env(),
                    check=True, capture_output=True, text=True)
     return json.loads(out_path.read_text())
 

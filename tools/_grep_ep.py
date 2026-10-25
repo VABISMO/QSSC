@@ -1,5 +1,5 @@
 import re
-txt = open("hardware/pcb/qssc.kicad_pcb").read()
+txt = open("hardware/pcb/qssc.kicad_pcb", encoding="utf-8").read()
 i = txt.find('reference "UE0"')
 j = txt.find('(footprint ', i + 1)
 blk = txt[i:j]

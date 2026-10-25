@@ -347,13 +347,13 @@ if ses.exists():
     ses.unlink()
     print(f"  removed stale {ses.name} (will abort if FreeRouting produces none)")
 
-with open(log, "w") as lf:
+with open(log, "w", encoding="utf-8") as lf:
     p = subprocess.run(cmd, stdout=lf, stderr=subprocess.STDOUT)
 print(f"  freerouting exit: {p.returncode}  ses exists: {ses.exists()}  size:",
       ses.stat().st_size if ses.exists() else 0)
 if not ses.exists():
     print("  --- log tail ---")
-    print(open(log).read()[-2000:])
+    print(open(log, encoding="utf-8").read()[-2000:])
     sys.exit("FreeRouting produced no SES")
 
 print(f"== importing SES -> {board_path.name} ==")

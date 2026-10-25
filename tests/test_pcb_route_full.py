@@ -17,7 +17,8 @@ board) and is gated behind ``QSSC_SLOW=1`` so it does not run in the normal
 local/CI suite. The committed board (already routed + DRC-clean, verified by
 ``test_pcb_drc.py``) is the fast-path source of truth.
 
-Skips automatically where ``pcbnew`` is not installed (no KiCad -> no routing).
+No skips: CI sets ``QSSC_SLOW=1`` and installs KiCad, so the full pipeline
+smoke runs there too (``tests/_pcb_env`` fails loudly when pcbnew is absent).
 """
 from __future__ import annotations
 
@@ -28,7 +29,9 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("pcbnew")
+from _pcb_env import child_env, ensure_pcbnew
+
+ensure_pcbnew()
 
 REPO = Path(__file__).resolve().parent.parent
 TOOLS = REPO / "tools"
@@ -87,8 +90,8 @@ def _routed_count(stdout: str) -> int:
 
 
 def test_full_pipeline_idempotent(tmp_path):
-    env = {**os.environ, "PYTHONPATH": str(TOOLS),
-           "QSSC_PCB_PATH": str(tmp_path / "qssc.kicad_pcb")}
+    env = child_env(PYTHONPATH=str(TOOLS),
+                    QSSC_PCB_PATH=str(tmp_path / "qssc.kicad_pcb"))
     # gen writes qssc.kicad_pcb to its own CWD (hardware/pcb); copy the project
     # bundle into tmp so the pipeline runs off a writable tree, then point
     # QSSC_PCB_PATH at the temp board.

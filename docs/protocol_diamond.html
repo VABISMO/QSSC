@@ -102,6 +102,7 @@ td code{font-size:12px}
 <h2 id="section-5-characterization-testing">Section 5 — Characterization &amp; Testing</h2>
 <h3 id="51-electroluminescence-cqd-array-unchanged">5.1 Electroluminescence (CQD array) — unchanged</h3>
 <h3 id="52-odmr-of-nv-in-diamond">5.2 ODMR of NV⁻ in diamond</h3>
+<h3 id="521-optical-link-budget-explicit">5.2.1 Optical link budget (explicit)</h3>
 <h3 id="53-spin-coherence-t2">5.3 Spin coherence (T₂)</h3>
 <h3 id="54-coupling-efficiency-waveguide-detector-unchanged">5.4 Coupling efficiency (waveguide → detector) — unchanged</h3>
 <h3 id="55-end-to-end-functional-test">5.5 End-to-end functional test</h3>
@@ -123,24 +124,6 @@ td code{font-size:12px}
 <p><strong>Microdiamond-layer option (home-lab / budget).</strong> Instead of a bulk CVD plate, the spin host can be a <strong>layer of commercial NV⁻ microdiamonds (~100 nm, pre-activated, $30–60/100 mg) dispersed in a TEOS sol-gel SiO₂ matrix</strong> and spin-coated on a 10×10 mm glass carrier. This trades the bulk plate's ~ms T₂ for µs-scale ensemble T₂ (surface-proximity-limited) but <strong>removes the tube-furnace and the $50–250 plate</strong>, making it the route used by the home-lab prototype <code>FABRICATION_PROTOCOL_P0.md</code>.</p>
 <p><strong>Note.</strong> The NV⁻ variant is the <strong>easiest platform swap</strong> in the QSSC family because the NV⁻ is pumped at <strong>532 nm green</strong> — exactly the colour the on-chip CQD emitter already makes — and its red/NIR PL (637–800 nm) passes the <strong>same 650 nm long-pass filter</strong> and is read by the <strong>same graphene/MoS₂ array</strong> as the hBN chip. The emitter, filter, detector and FPGA are reused verbatim. What you give up relative to hBN is the 2D / van-der-Waals integrability and the atomically-flat surface proximity: diamond is a <strong>bulk 3D plate</strong>, so the emitter and detector sit <em>on top</em> of the diamond rather than in a stacked 2D heterostructure. What you gain is <strong>~900× better room-temperature coherence</strong> (T₂ 1.8 ms vs 2 µs), enough to run small quantum algorithms at 300 K with dynamical decoupling.</p>
 <p><strong>On-chip emitter (no big diodes).</strong> This variant keeps the <strong>on-chip CQD emitter</strong> as the pump — no external laser diode is required. (The SiC variant is the one that needs a different on-chip emitter; diamond reuses the green CQD unchanged.)</p>
-<p><strong>Two diamond routes, one canonical die (audit issue #15).</strong> The QSSC chip is
-built around a single canonical <strong>20 × 20 mm two-faced die</strong> (130 pads, 2.5 mm
-pitch, 64 electrodes + 1 common per face — see
-<code>hardware/HARDWARE_DESIGN.md</code>). The diamond host can be realized two ways,
-both centred on that die:
-1. <strong>Bulk ¹²C-enriched CVD diamond</strong> — the <strong>compute</strong> route described in this
-   protocol (T₂ ≈ 1.8 ms at 300 K, enough to run small Shor-15). This is the
-   route the <code>NV</code> simulator profile's 300 K compute claim is scoped to.
-2. <strong>Spin-coated NV⁻ microdiamond in TEOS sol-gel</strong> — the <strong>sensor-array</strong>
-   route (the microdiamond-layer option above / <code>FABRICATION_PROTOCOL_P0.md</code>):
-   ~100 nm pre-activated microdiamonds give µs–tens-of-µs ensemble T₂
-   (surface-proximity-limited), suitable for sensing, <strong>not</strong> for running
-   quantum algorithms. Do <strong>not</strong> read the 1.8 ms / 300 K-compute figure as
-   applying to the as-built microdiamond sensor array — it is a bulk-CVD
-   compute-material figure.</p>
-<p>This protocol documents the bulk-CVD compute route; a full microdiamond
-sensor-array protocol rewrite is flagged as a follow-up (the P0 prototype
-covers the home-lab version today).</p>
 </blockquote>
 <hr />
 <h2 id="1-abstract">1. Abstract</h2>
@@ -312,66 +295,69 @@ covers the home-lab version today).</p>
 <h2 id="section-5-characterization-testing">Section 5 — Characterization &amp; Testing</h2>
 <h3 id="51-electroluminescence-cqd-array-unchanged">5.1 Electroluminescence (CQD array) — unchanged</h3>
 <p>Drive each pixel 0–15 V, confirm turn-on 4–8 V and broadband green EL; ASE check (FWHM narrowing &lt; 25 nm). As in the hBN protocol.</p>
-<blockquote>
-<p><strong>At-the-sample optical power (mandatory, audit issue #14).</strong> The CQD
-radiance target (≥ 10 cd/m², Sec. 1) and the ODMR pump budget (~1 mW at the
-sample, Sec. 5.2) sit ~4 decades apart (see the §5.2 link budget). Before any
-ODMR run, place a <strong>calibrated lab optical power meter</strong> (µW-class thermal /
-Si photodiode sensor head + meter, e.g. a Thorlabs PM100 series power sensor)
-at the sample plane — <strong>directly where the diamond will sit</strong> — and record the
-green pump power with the driven pixel on. This is a <strong>characterization
-instrument</strong>, not a design part of the chip (it lives on the bench, never on
-the PCB): it reconciles the radiance spec with the watt-level pump budget and
-tells you whether the on-chip CQD emitter actually delivers the ~1 mW the
-ODMR step assumes, or whether an external 532 nm assist is needed for the
-first measurement. Record the reading in the run log. No discrete photodiode
-is added to the chip itself.</p>
-</blockquote>
+<p><strong>One addition over the hBN base:</strong> the hBN §5.1 at-the-sample optical-power measurement (calibrated µW-class photodiode, step 4 there) is <strong>mandatory here too</strong> — its reading is the pump-power input of the §5.2.1 link budget and the gate for any ODMR attempt.</p>
 <h3 id="52-odmr-of-nv-in-diamond">5.2 ODMR of NV⁻ in diamond</h3>
-<ol start="4">
-<li><strong>Optical:</strong> on-chip green CQD emitter (~532 nm, ~1 mW at the sample) — no external laser. Collect NV⁻ PL at <strong>637–800 nm</strong> through the <strong>650 nm red photographic long-pass filter</strong> (passes the red/NIR NV PL, blocks the 532 nm green pump) into the <strong>on-chip graphene/MoS₂ detector array</strong>. No Si APD / discrete photodiode.</li>
+<ol start="5">
+<li><strong>Optical:</strong> on-chip green CQD emitter (~532 nm) at the pump power measured in §5.1 — at the §1 radiance target (≥ 10 cd/m²) that is <strong>≈ 45–50 nW per 1 mm² pixel</strong> (≈ 3 µW array-wide), <em>not</em> the ~1 mW quoted in earlier revisions: that figure contradicted the §1 radiance target by ~4 orders of magnitude, and the §5.2.1 budget below supersedes it — no external laser. Collect NV⁻ PL at <strong>637–800 nm</strong> through the <strong>650 nm red photographic long-pass filter</strong> (passes the red/NIR NV PL, blocks the 532 nm green pump) into the <strong>on-chip graphene/MoS₂ detector array</strong>. No Si APD / discrete photodiode.</li>
+<li><strong>Microwave:</strong> sweep <strong>2.80–2.94 GHz</strong> from the function generator / ADF4351 through the CPW. Modulate MW at 1 kHz for lock-in detection of the ODMR dip.</li>
+<li><strong>Expected resonance:</strong> a single dip at <strong>D ≈ 2.87 GHz</strong> (the ¹⁴N 3-line hyperfine, A ≈ 2.16 MHz, is sub-linewidth and usually merges into one dip at B=0; it splits into a doublet under a static B₀). ODMR contrast <strong>2–30 %</strong> (ensemble/single), linewidth <strong>1–10 MHz</strong>. NV⁻ ODMR contrast is <strong>higher</strong> than V_B⁻ (0.5–3 %), so readout is easier.</li>
+<li><strong>Magnetic field sweep:</strong> apply B₀ along the NV axis; observe D shift D(B) = D₀ ± γ_e·B₀, γ_e/2π ≈ 28 GHz/T; the resonance splits into a doublet — confirms the S=1 triplet.</li>
 </ol>
-<blockquote>
-<p><strong>Radiance → watt link budget (audit issue #14).</strong> The two headline optical
-numbers are measured at different points in the chain and are <strong>not
-contradictory</strong>:</p>
-<ul>
-<li><strong>Radiance ≥ 10 cd/m²</strong> (Sec. 1) is the CQD emitter's <em>surface brightness</em>
-  into 2π — the spec the EL/ASE check verifies. Converting: 10 cd/m² ≈
-  14.6 mW·sr⁻¹·m⁻² for a Lambertian green source (1 cd ≈ 1.46 mW·sr⁻¹ at
-  532 nm via the photopic-luminous-efficiency peak). A single 1 mm² pixel
-  radiating into 2π sr therefore emits ~14.6 mW·sr⁻¹·m⁻² × 1 mm² × … ≈
-  <strong>45–50 nW</strong> isotropic-equivalent at the source surface.</li>
-<li><strong>~1 mW at the sample</strong> (above) is the <em>pump irradiance</em> the NV⁻ ensemble
-  needs for measurable ODMR — the on-chip CQD emitter is driven harder
-  (overdrive into the ASE regime, Sec. 1.7) and the diamond is held within
-  ~tens of µm of the emitter, so the collected solid angle is large and the
-  drive is concentrated onto the ~3×3 mm plate, not spread over 2π.</li>
-</ul>
-<p>The ~4-decade gap is therefore the <strong>collection geometry + overdrive</strong> factor
-(Lambertian-spread → near-field concentration), not a missing watt. The build
-drives the <strong>on-chip CQD emitter</strong> to ~1 mW at the sample; verify it with the
-§5.1 power meter before relying on it for ODMR. If the on-chip emitter falls
-short, an external 532 nm laser diode through the same optical path is the
-fallback for the first characterization only — the chip's defining demo is
-the on-chip-pumped ODMR.
-5. <strong>Microwave:</strong> sweep <strong>2.80–2.94 GHz</strong> from the function generator / ADF4351 through the CPW. Modulate MW at 1 kHz for lock-in detection of the ODMR dip.
-6. <strong>Expected resonance:</strong> a single dip at <strong>D ≈ 2.87 GHz</strong> (the ¹⁴N 3-line hyperfine, A ≈ 2.16 MHz, is sub-linewidth and usually merges into one dip at B=0; it splits into a doublet under a static B₀). ODMR contrast <strong>2–30 %</strong> (ensemble/single), linewidth <strong>1–10 MHz</strong>. NV⁻ ODMR contrast is <strong>higher</strong> than V_B⁻ (0.5–3 %), so readout is easier.
-7. <strong>Magnetic field sweep:</strong> apply B₀ along the NV axis; observe D shift D(B) = D₀ ± γ_e·B₀, γ_e/2π ≈ 28 GHz/T; the resonance splits into a doublet — confirms the S=1 triplet.</p>
-</blockquote>
+<h3 id="521-optical-link-budget-explicit">5.2.1 Optical link budget (explicit)</h3>
+<p>At the §1 target (radiance ≥ 10 cd/m², 532 nm, 1 mm² Lambertian pixel):</p>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Radiance → radiant exitance</td>
+<td>10 cd/m² ≈ <strong>15 mW·sr⁻¹·m⁻²</strong> at 532 nm</td>
+</tr>
+<tr>
+<td>EL per pixel (π·L·A)</td>
+<td>≈ <strong>45–50 nW</strong></td>
+</tr>
+<tr>
+<td>NV⁻ absorption over the 0.5 mm plate (10¹⁰–10¹² cm⁻³)</td>
+<td>1.5–78 % → <strong>0.8–39 nW</strong> absorbed</td>
+</tr>
+<tr>
+<td>PL quantum yield</td>
+<td>~10 % → <strong>80 pW–4 nW</strong> NV⁻ PL emitted</td>
+</tr>
+<tr>
+<td>Escape cone ~1/(4n²), n_diamond ≈ 2.4</td>
+<td>≈ 4.3 % → <strong>≈ 3–160 pW at the detector</strong></td>
+</tr>
+<tr>
+<td>Graphene responsivity 0.01–0.1 A/W</td>
+<td>0.03–16 pA — <strong>below the 51 pA RMS TIA floor</strong> (HARDWARE_DESIGN.md §C1)</td>
+</tr>
+<tr>
+<td>MoS₂ photogating 10–10² A/W</td>
+<td><strong>30 pA–16 nA</strong> — marginal; the only channel that can close</td>
+</tr>
+</tbody>
+</table>
+<p>At the radiance target the graphene-only readout sits below the TIA noise floor and the MoS₂ channel is marginal — the chain closes only if the emitters deliver near the other figure of this pair. Deciding that is exactly what the §5.1 photodiode measurement is for: "~1 mW at the sample" would require ≈ 2×10⁵ cd/m² (~4 orders above the §1 target), so the measured value — not either prose figure — is the planning basis for the §5.5 end-to-end ODMR claim. If the measured P_EL lands at the radiance target, re-derive §5.5 expectations against this table (MoS₂ photogating, longer integration, 1 kHz lock-in) before declaring the readout failed.</p>
+<hr />
 <h3 id="53-spin-coherence-t2">5.3 Spin coherence (T₂)</h3>
-<ol start="8">
+<ol start="9">
 <li><strong>Pulsed ODMR</strong> (Hahn echo, π/2–τ–π–τ–echo). Vary τ from 1 µs to <strong>2 ms</strong>. Fit echo vs τ to exp[−(2τ/T₂)^n].</li>
 <li><strong>Expected T₂:</strong> <strong>0.5–1.8 ms at room temperature</strong> (≈0.5–0.7 ms natural-abundance, ≈1.8 ms in ¹²C-enriched CVD). T₁ typically <strong>3–7 ms</strong>. This is <strong>~900× longer than V_B⁻</strong> and is why this variant can run small quantum algorithms at 300 K. With dynamical decoupling (XY8/CPMG) T₂ extends further.</li>
 </ol>
 <h3 id="54-coupling-efficiency-waveguide-detector-unchanged">5.4 Coupling efficiency (waveguide → detector) — unchanged</h3>
 <p>Inject calibrated 532 nm light into the sol-gel SiO₂ facet; measure output + on-chip detector photocurrent. Target 20–60 % coupling, &lt; 0.5 dB/cm loss.</p>
 <h3 id="55-end-to-end-functional-test">5.5 End-to-end functional test</h3>
-<ol start="12">
+<ol start="13">
 <li>Drive the CQD pixel electrically → green EL pumps the NV⁻ ensemble → collect 637–800 nm NV PL (through the 650 nm long-pass filter) at the on-chip graphene/MoS₂ detector → photocurrent modulated by MW at <strong>2.87 GHz</strong> → FPGA/lock-in reads the ODMR dip. Successful end-to-end ODMR with the <strong>on-chip CQD pump</strong> (no external laser) is the chip's defining demonstration — identical concept to the hBN chip, at a different MW frequency and with ~900× more coherence headroom.</li>
 </ol>
 <h3 id="56-emitterqubitdetector-calibration-software-pulse-capture-unchanged">5.6 Emitter↔qubit↔detector calibration (software pulse-capture) — unchanged</h3>
-<ol start="13">
+<ol start="14">
 <li>Same automated FPGA sweep as the hBN chip: for each emitter pixel fire a green pump pulse, sample every detector electrode, record which sees a modulated NV-PL response under MW at <strong>2.87 GHz</strong> → build the emitter-pixel→qubit-site→detector-electrode lookup table. No camera, no alignment jig. (The only change is the MW frequency in the sweep.)</li>
 </ol>
 <hr />
@@ -554,7 +540,7 @@ the on-chip-pumped ODMR.
 <li>G. Balasubramanian et al., "Ultralong spin coherence time in isotopically engineered diamond," Nature Materials 8, 383–387 (2009). doi:10.1038/nmat2420</li>
 <li>K. Jarmola et al., "Temperature- and magnetic-field-dependent luminescence of NV⁻ in diamond," PRL 108, 197601 (2012). doi:10.1103/PhysRevLett.108.197601</li>
 </ul>
-  <div class="foot">QSSC — Quantum Solid State Chip (room temperature) · fabrication protocol · branded document · 29127 source bytes</div>
+  <div class="foot">QSSC — Quantum Solid State Chip (room temperature) · fabrication protocol · branded document · 27347 source bytes</div>
 </div>
 </body>
 </html>
