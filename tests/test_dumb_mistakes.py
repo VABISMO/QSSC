@@ -720,6 +720,9 @@ def test_bom_delta_is_exactly_rgrad_feed():
     Reviewed deltas (issues #162/#166/#167/#168/#169):
       ~ Udrv MPN LM358P -> LM358DR (SOIC-8 ordering needs the D/DR suffix)
       ~ J9 MPN 61300411121 -> 61301011121 (2x05 needs 10 contacts)
+      ~ U3/Y1/J4 gain the MPN their own footprint/value already identified
+        (ADF4351BCPZ, Abracon ASE-100MHz, CUI PJ-102AH) -- their MPN_MAP keys
+        matched no row, so main and grad both shipped blank (issue #169)
       + Rgrad_feed (grad coil 0R feed)
       - the two #FLG*/PWR_FLAG phantom rows (issue #167: not purchasable
         parts, never become a footprint)
@@ -741,7 +744,10 @@ def test_bom_delta_is_exactly_rgrad_feed():
             'grad,Udrv,1,LM358,Package_SO:SOIC-8_3.9x4.9mm_P1.27mm,Texas Instruments,LM358P,https://www.ti.com/lit/ds/symlink/lm358.pdf',
             'head,"#FLG10, #FLG11, #FLG12, #FLG9",4,PWR_FLAG,,,,',
             'main,"#FLG1, #FLG2, #FLG3, #FLG4, #FLG5, #FLG6, #FLG7, #FLG8",8,PWR_FLAG,,,,',
+            'main,J4,1,12V LED,Connector_BarrelJack:BarrelJack_CUI_PJ-102AH_Horizontal,,,',
             'main,J9,1,JTAG,Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical,Würth,61300411121,',
+            'main,U3,1,ADF4351BCPZ,Package_DFN_QFN:QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm,,,',
+            'main,Y1,1,100MHz XO,Oscillator:Oscillator_SMD_Abracon_ASE-4Pin_3.2x2.5mm,,,',
         ], f"BOM rows removed vs baseline: {removed}"
     assert added == [
             'grad,"C31, C33",2,220p,Capacitor_SMD:C_0603_1608Metric,,,',
@@ -767,7 +773,7 @@ def test_bom_delta_is_exactly_rgrad_feed():
             'grad,J12,1,BTB_HOST,qssc:Conn_02x10_BTB,Würth Elektronik,61302011121,https://www.we-online.com/en/components/products/WR-PHD_2_54_MM_SMT_PIN_HEADER_61302011121',
             'grad,J2,1,5V Barrel,Connector_BarrelJack:BarrelJack_CUI_PJ-102AH_Horizontal,CUI,PJ-102AH,https://www.cui.com/product/resource/pj-102a.pdf',
             'grad,J3,1,SMA,Connector_Coaxial:SMA_Amphenol_132289_EdgeMount,Amphenol,132289,https://www.amphenolrf.com/132289.html',
-            'grad,J4,1,12V LED,Connector_BarrelJack:BarrelJack_CUI_PJ-102AH_Horizontal,,,',
+            'grad,J4,1,12V LED,Connector_BarrelJack:BarrelJack_CUI_PJ-102AH_Horizontal,CUI,PJ-102AH,https://www.cui.com/product/resource/pj-102a.pdf',
             'grad,J7,1,RESET,Button_Switch_THT:SW_PUSH_6mm_H5mm,Würth,430182050816,',
             'grad,J8,1,MW_GATE,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,Würth,61300211121,',
             'grad,J9,1,JTAG,Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical,Würth,61301011121,',
@@ -782,13 +788,16 @@ def test_bom_delta_is_exactly_rgrad_feed():
             'grad,REG3,1,AP2127K-1.0,Package_TO_SOT_SMD:SOT-23-5,Diodes Inc,AP2127K-1.0,https://www.diodes.com/assets/Datasheets/AP2127K.pdf',
             'grad,Rgrad_feed,1,0R,Resistor_SMD:R_0805_2012Metric,,,',
             'grad,U1,1,XC7A35T-1CSG324C,Package_BGA:Xilinx_CSG324,AMD/Xilinx,XC7A35T-1CSG324C,https://docs.amd.com/r/en-US/ds181-Artix-7-Data-Sheet',
-            'grad,U3,1,ADF4351BCPZ,Package_DFN_QFN:QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm,,,',
+            'grad,U3,1,ADF4351BCPZ,Package_DFN_QFN:QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm,Analog Devices,ADF4351BCPZ,https://www.analog.com/media/en/technical-documentation/data-sheets/ADF4351.pdf',
             'grad,U5,1,GVA-84+,Package_TO_SOT_SMD:SOT-89-3,Mini-Circuits,GVA-84+,https://www.minicircuits.com/WebStore/dashboard.html?model=GVA-84%2B',
             'grad,U8,1,W25Q128JVSIQ,Package_SO:SOIC-8_3.9x4.9mm_P1.27mm,Winbond,W25Q128JVSIQ,https://www.winbond.com/resource-files/w25q128jv%20revh%2004082019%20plus.pdf',
             'grad,Uchip,1,ChipSocket_2.54_EM,qssc:ChipSocket_2.54_EM,,,',
             'grad,Udrv,1,LM358,Package_SO:SOIC-8_3.9x4.9mm_P1.27mm,Texas Instruments,LM358DR,https://www.ti.com/lit/ds/symlink/lm358.pdf',
-            'grad,Y1,1,100MHz XO,Oscillator:Oscillator_SMD_Abracon_ASE-4Pin_3.2x2.5mm,,,',
+            'grad,Y1,1,100MHz XO,Oscillator:Oscillator_SMD_Abracon_ASE-4Pin_3.2x2.5mm,Abracon,ASE-100.000MHZ-LR,https://abracon.com/Oscillators/ASE.pdf',
+            'main,J4,1,12V LED,Connector_BarrelJack:BarrelJack_CUI_PJ-102AH_Horizontal,CUI,PJ-102AH,https://www.cui.com/product/resource/pj-102a.pdf',
             'main,J9,1,JTAG,Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical,Würth,61301011121,',
+            'main,U3,1,ADF4351BCPZ,Package_DFN_QFN:QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm,Analog Devices,ADF4351BCPZ,https://www.analog.com/media/en/technical-documentation/data-sheets/ADF4351.pdf',
+            'main,Y1,1,100MHz XO,Oscillator:Oscillator_SMD_Abracon_ASE-4Pin_3.2x2.5mm,Abracon,ASE-100.000MHZ-LR,https://abracon.com/Oscillators/ASE.pdf',
         ], f"BOM rows added vs baseline: {added}"
 
 # ------------------------------------------------- simulator constants

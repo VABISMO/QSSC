@@ -586,32 +586,40 @@ def test_head_det_ref_network():
 # BOM: MPN uniqueness + the frozen no-MPN blanket
 # --------------------------------------------------------------------------
 KNOWN_NO_MPN = {
-    ("main", "Y1"), ("main", "J4"), ("main", "F2"), ("main", "U3"),
-    ("main", "LED1"), ("main", "D_USB"), ("main", "Uchip"),
+    # Repaired on this branch (issue #169): U3, Y1 and J4 now carry an MPN --
+    # their rows were blank because MPN_MAP keyed them on values/footprints no
+    # row ever used, not because the parts are unknown. What is left is
+    # genuinely generic or project-specific.
+    ("main", "F2"), ("main", "LED1"), ("main", "D_USB"), ("main", "Uchip"),
     ("head", "Uchip"),
     # The gradient board carries the same power/RF/connector parts as the main
     # board (build_gradient_board reuses build_main_board(grad=True)), so each
-    # of them has a grad twin with the same blank MPN -- gen_bom emits the full
-    # grad section now (issue #162) instead of six hand-typed rows.
-    ("grad", "Y1"), ("grad", "J4"), ("grad", "F2"), ("grad", "U3"),
-    ("grad", "LED1"), ("grad", "D_USB"), ("grad", "Uchip"),
+    # of them has a grad twin -- gen_bom emits the full grad section now
+    # (issue #162) instead of six hand-typed rows.
+    ("grad", "F2"), ("grad", "LED1"), ("grad", "D_USB"), ("grad", "Uchip"),
 }
 # rows whose designator MUST carry an MPN (active parts, connectors, fuses)
 _NEEDS_MPN = re.compile(r"^(U|Y|J|D|R?EG\d|F|Q|LED)")
 
 
 def test_bom_mpn_conflict_free():
-    """The same MPN may appear on only one (Value, Footprint) combination --
-    two rows ordering the identical part with different footprints is a
-    paste/sourcing split waiting to happen."""
+    """One MPN must always mean one footprint.
+
+    A part number appearing against two *footprints* is a paste/sourcing
+    split waiting to happen -- one order, two land patterns. Two rows may
+    legitimately share an MPN under different labels: J2's 5 V barrel and
+    J4's 12 V barrel are the same CUI PJ-102AH, and every board twin repeats
+    its part across main/grad, so the label is not the constraint. The
+    footprint is (issue #169).
+    """
     by_mpn: dict = {}
     for row in _bom():
         mpn = row["MPN"].strip()
         if not mpn:
             continue
-        by_mpn.setdefault(mpn, set()).add((row["Value"], row["Footprint"]))
+        by_mpn.setdefault(mpn, set()).add(row["Footprint"])
     conflicts = {m: v for m, v in by_mpn.items() if len(v) > 1}
-    assert not conflicts, f"MPN reuse across footprints/values: {conflicts}"
+    assert not conflicts, f"MPN reuse across footprints: {conflicts}"
 
 
 def test_bom_mpn_known_empty_set():

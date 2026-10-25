@@ -58,7 +58,11 @@ MPN_MAP: dict[tuple[str, str], tuple[str, str, str]] = {
     ("XC7A35T-1CSG324C", "Xilinx_CSG324"):
         ("AMD/Xilinx", "XC7A35T-1CSG324C",
          "https://docs.amd.com/r/en-US/ds181-Artix-7-Data-Sheet"),
-    ("ADF4351BCPZ", "LFCSP"):
+    ("ADF4351BCPZ", "QFN-32"):
+        # Keyed on the footprint's real name: KiCad calls this land pattern
+        # QFN-32-1EP, ADI calls the same package LFCSP -- matching on "LFCSP"
+        # matched nothing, so the ADF4351 rows shipped without an MPN even
+        # though the part number sits in their own Value column (issue #169).
         ("Analog Devices", "ADF4351BCPZ",
          "https://www.analog.com/media/en/technical-documentation/data-sheets/ADF4351.pdf"),
     ("GVA-84+", "SOT-89"):
@@ -94,13 +98,24 @@ MPN_MAP: dict[tuple[str, str], tuple[str, str, str]] = {
     ("AP2127K-1.0", "SOT-23-5"):
         ("Diodes Inc", "AP2127K-1.0",
          "https://www.diodes.com/assets/Datasheets/AP2127K.pdf"),
-    ("ASE-100MHz", "Oscillator"):
+    ("100MHz XO", "ASE-4Pin"):
+        # Was keyed on the value "ASE-100MHz", which no row ever used -- the
+        # rows say "100MHz XO" and carry the Abracon ASE land pattern in the
+        # footprint, so the oscillator rows stayed MPN-less (issue #169).
         ("Abracon", "ASE-100.000MHZ-LR",
          "https://abracon.com/Oscillators/ASE.pdf"),
     ("USB-C", "USB_C"):
         ("GCT", "USB4105-GF-610-50-B",
          "https://www.gct.cc/connector/usb4105/"),
     ("5V Barrel", "BarrelJack"):
+        ("CUI", "PJ-102AH",
+         "https://www.cui.com/product/resource/pj-102a.pdf"),
+    ("12V LED", "BarrelJack"):
+        # J4 carries the identical CUI PJ-102AH land pattern as J2's 5 V
+        # barrel: one connector part feeding two rails, so the row must not
+        # stay MPN-less (issue #169). Same MPN across two *labels* is fine;
+        # the gate that guards this only cares that one MPN never spans two
+        # different footprints.
         ("CUI", "PJ-102AH",
          "https://www.cui.com/product/resource/pj-102a.pdf"),
     ("SMA", "SMA_Amphenol"):
