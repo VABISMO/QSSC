@@ -35,6 +35,21 @@ import gen_qssc_kicad as g  # noqa: E402
 
 OUT = ROOT / "hardware" / "datasheets" / "BOM.csv"
 
+# Components that belong in the BOM but are deliberately NOT yet placed on
+# their board.  They must be emitted here, otherwise regenerating BOM.csv
+# silently drops a real hardware requirement and the file stops being
+# reproducible from its generator.
+#
+#   C87 -- 47 uF VCCINT bulk near the BGA.  audit #99 / commit 06add88 added
+#          the row to satisfy the 22-47 uF the design doc calls for (only
+#          4.7 uF was present); PCB placement near the VCCINT balls was
+#          explicitly deferred "to avoid re-running the router over committed
+#          boards".  Still a real TODO (issue #169 item 3).
+BOM_ONLY: dict[str, list[dict]] = {
+    "main": [{"ref": "C87", "value": "47uF",
+              "fp": "Capacitor_SMD:C_1206_3216Metric"}],
+}
+
 # Curated manufacturer/MPN/URL for the ICs + connectors (verified pinouts in
 # DATASHEETS.md). Keyed by (value, footprint-basename) so it is robust to the
 # exact KiCad footprint-library path prefix.
@@ -113,6 +128,23 @@ MPN_MAP: dict[tuple[str, str], tuple[str, str, str]] = {
         # Digi-Key line item -- tracked here so the mechanical/sourcing is visible.
         ("Ironwood Electronics", "SBT custom (quote against die drawing)",
          "https://www.ironwood.com/pqfp-spring-pin-test-sockets/"),
+    # Gradient-board parts.  These rows used to exist only as hand-typed lines
+    # in BOM.csv, which is why regenerating used to drop their manufacturer /
+    # MPN / datasheet URL (issue #162).
+    #
+    # NOTE: repairing an MPN in BOM.csv alone is not enough -- a regeneration
+    # re-derives the value from this map, so the fix must land HERE too
+    # (issue #169: J9 and Udrv are repaired in BOM.csv but still carry their
+    # pre-repair values in MPN_MAP).
+    ("IRLML2502", "SOT-23-3"):
+        ("Infineon", "IRLML2502TRPBF",
+         "https://www.infineon.com/dgdl/irlml2502.pdf"),
+    ("LM358", "SOIC-8"):
+        ("Texas Instruments", "LM358P",
+         "https://www.ti.com/lit/ds/symlink/lm358.pdf"),
+    ("MCP4921", "SOIC-8"):
+        ("Microchip", "MCP4921-I/SN",
+         "https://ww1.microchip.com/downloads/en/DeviceDoc/22248A.pdf"),
 }
 
 
@@ -136,8 +168,13 @@ def main() -> None:
     g.build_pincoords()
 
     board_comps: list[tuple[str, list[dict]]] = []
+    # Three boards: the two sandwich boards plus the gradient variant.  The
+    # grad section used to be hand-maintained in BOM.csv because this loop
+    # never asked the generator for it, so `gen_bom` could not reproduce the
+    # committed file (issue #162).
     for label, build_fn in (("main", g.build_main_board),
-                            ("head", g.build_detector_head)):
+                            ("head", g.build_detector_head),
+                            ("grad", g.build_gradient_board)):
         g.COMPONENTS.clear()
         build_fn()
         board_comps.append((label, list(g.COMPONENTS)))
@@ -146,7 +183,12 @@ def main() -> None:
     # Group by (Board, value, footprint) -> list of refs.
     groups: dict[tuple[str, str, str], list[str]] = {}
     for label, comps in board_comps:
-        for c in comps:
+        for c in list(comps) + BOM_ONLY.get(label, []):
+            # Skip KiCad schematic-only markers (#FLG*/PWR_FLAG): they are
+            # power flags, not purchasable parts, and never become a footprint
+            # (issue #167).
+            if c["ref"].startswith("#"):
+                continue
             key = (label, c["value"], c["fp"])
             groups.setdefault(key, []).append(c["ref"])
 
@@ -185,7 +227,8 @@ def main() -> None:
     n_comp = sum(len(c) for _, c in board_comps)
     n_rows = len(rows)
     print(f"wrote {OUT}")
-    print(f"  main: {len(board_comps[0][1])} comps | head: {len(board_comps[1][1])} comps")
+    print("  " + " | ".join(f"{label}: {len(comps)} comps"
+                            for label, comps in board_comps))
     print(f"  {n_comp} components -> {n_rows} distinct BOM line items")
     # sanity: list any leftover two-board parts that must NOT appear.
     forbidden = {"ADG732BCPZ", "ADA4530-1", "74LVC1G04", "74HCT240",
