@@ -10,6 +10,19 @@
 #   bash fpga/synth/run_synth.sh        # locates yosys, runs, builds the report
 #   yosys -s fpga/synth/synth_yosys.ys  # raw yosys script mode (native commands)
 
+# --- Xilinx primitive used by top_level.v -----------------------------------
+# top_level.v instantiates ODDR2 (audit #110 -- a Spartan-6/Virtex-6
+# primitive).  Without a declaration `hierarchy -check` aborts the whole job
+# with "Module ODDR2 ... is not part of the design".
+#
+# Declare ONLY ODDR2: adding the whole of +/xilinx/cells_xtra.v instead
+# injects hundreds of extra modules into the hierarchy listing, which pushes
+# "Count including submodules" outside make_report.py's 40-line search window
+# and silently makes every resource count in SYNTH_REPORT.md come out 0.
+# ODDR2 here matches yosys's own definition (synth_xilinx replaces this stub
+# with cells_xtra.v's), so the netlist is unchanged.
+read_verilog -lib fpga/synth/oddr2_stub.v
+
 # --- read all behavioural RTL (top + every submodule) -----------------------
 read_verilog fpga/rtl/uart_rx.v
 read_verilog fpga/rtl/uart_tx.v
