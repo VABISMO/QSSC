@@ -43,7 +43,7 @@ main,Uchip,1,ChipSocket_2.54_EM,qssc:ChipSocket_2.54_EM,,,
 main,J1,1,FT232RL,Package_SO:SSOP-28_5.3x10.2mm_P0.65mm,FTDI,FT232RL,https://www.ftdichip.com/Support/Documents/DataSheets/ICs/DS_FT232R.pdf
 main,U5,1,GVA-84+,Package_TO_SOT_SMD:SOT-89-3,Mini-Circuits,GVA-84+,https://www.minicircuits.com/WebStore/dashboard.html?model=GVA-84%2B
 main,LED1,1,Green,LED_SMD:LED_0603_1608Metric,,,
-main,J9,1,JTAG,Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical,Würth,61300411121,
+main,J9,1,JTAG,Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical,Würth,61301011121,
 main,J8,1,MW_GATE,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,Würth,61300211121,
 main,"#FLG1, #FLG2, #FLG3, #FLG4, #FLG5, #FLG6, #FLG7, #FLG8",8,PWR_FLAG,,,,
 head,"#FLG10, #FLG11, #FLG12, #FLG9",4,PWR_FLAG,,,,
@@ -56,7 +56,7 @@ main,J10,1,USB-C,Connector_USB:USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Hori
 main,U8,1,W25Q128JVSIQ,Package_SO:SOIC-8_3.9x4.9mm_P1.27mm,Winbond,W25Q128JVSIQ,https://www.winbond.com/resource-files/w25q128jv%20revh%2004082019%20plus.pdf
 main,U1,1,XC7A35T-1CSG324C,Package_BGA:Xilinx_CSG324,AMD/Xilinx,XC7A35T-1CSG324C,https://docs.amd.com/r/en-US/ds181-Artix-7-Data-Sheet
 grad,Ugrad,1,MCP4921,Package_SO:SOIC-8_3.9x4.9mm_P1.27mm,Microchip,MCP4921-I/SN,https://ww1.microchip.com/downloads/en/DeviceDoc/22248A.pdf
-grad,Udrv,1,LM358,Package_SO:SOIC-8_3.9x4.9mm_P1.27mm,Texas Instruments,LM358P,https://www.ti.com/lit/ds/symlink/lm358.pdf
+grad,Udrv,1,LM358,Package_SO:SOIC-8_3.9x4.9mm_P1.27mm,Texas Instruments,LM358DR,https://www.ti.com/lit/ds/symlink/lm358.pdf
 grad,Qgrad,1,IRLML2502,Package_TO_SOT_SMD:SOT-23-3,Infineon,IRLML2502TRPBF,https://www.infineon.com/dgdl/irlml2502.pdf
 grad,Rsense,1,1,Resistor_SMD:R_2512_6332Metric,,,
 grad,"C_grad1, C_grad2",2,100nF,Capacitor_SMD:C_0603_1608Metric,,,

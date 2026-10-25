@@ -13648,7 +13648,7 @@
 				(pin power_in line
 					(at 0 -7.62 90)
 					(length 2.54)
-					(name "VCC"
+					(name "V-"
 						(effects
 							(font
 								(size 1.27 1.27)
@@ -13720,7 +13720,7 @@
 				(pin power_in line
 					(at 0 7.62 270)
 					(length 2.54)
-					(name "GND"
+					(name "V+"
 						(effects
 							(font
 								(size 1.27 1.27)
@@ -33270,7 +33270,7 @@
 		)
 		(uuid "8fd0958c-7386-4bf6-9644-f7d0853fbf31")
 	)
-	(label "+5V"
+	(label "GND"
 		(at 640.0 27.62 0)
 		(fields_autoplaced yes)
 		(effects
@@ -33314,7 +33314,7 @@
 		)
 		(uuid "9054fa4c-802c-4946-bcb0-b76d5eb4cc9a")
 	)
-	(label "GND"
+	(label "+5V"
 		(at 640.0 12.38 0)
 		(fields_autoplaced yes)
 		(effects

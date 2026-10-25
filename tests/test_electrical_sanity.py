@@ -10,10 +10,12 @@ knows nothing about a 3.3 V SPI master driving a 5 V-coded VIH input, and a
 BOM review knows nothing about digits 5-6 of a Würth WR-PHD part number
 encoding the contact count.
 
-Known defects are frozen as ``xfail(strict=True)`` -- each FAILS today, and
-when one is repaired the suite goes red with an XPASS until the mark is
-removed and the green state re-pinned (that is the re-classification
-alarm). The five at gate-creation time:
+At gate creation the five defects below were frozen as
+``xfail(strict=True)`` -- each failing test goes red with an XPASS once
+repaired, until the mark is removed and the green state re-pinned (that is
+the re-classification alarm). Defects 1, 2, 4 and 5 are repaired on
+``fix/electrical-repairs``: markers dropped, gates re-pinned green.
+Defect 3 is still open:
 
   1. LM358 power pads swapped, netlist (grad/Udrv): pad 4 sits on +5V and
      pad 8 on GND. The true LM358 dual opamp is 4 = V-, 8 = V+; the
@@ -170,18 +172,14 @@ def test_board_parse_inventory(board: str):
 # --------------------------------------------------------------------------
 # known defect 1+2: LM358 dual-opamp power pins (grad board + lib symbol)
 # --------------------------------------------------------------------------
-@pytest.mark.xfail(strict=True, reason="Udrv (LM358, grad): pad 4 sits on "
-                    "+5V and pad 8 on GND -- quad convention on a dual "
-                    "part; true LM358 is 4=V-, 8=V+ (issue #168)")
+# Repaired on fix/electrical-repairs: pad 4 = GND, pad 8 = +5V, symbol
+# renamed (issue #168). Gate stays as a regression pin, no xfail.
 def test_lm358_dual_opamp_power_pads():
     pads = _board("grad")["fps"]["Udrv"]["pads"]
     assert pads["4"] == "GND", f"pad 4 (must be V-): {pads.get('4')}"
     assert pads["8"] == "+5V", f"pad 8 (must be V+): {pads.get('8')}"
 
 
-@pytest.mark.xfail(strict=True, reason="qssc:LM358 lib-symbol names pin 4 "
-                    "'VCC' (power_in) and pin 8 'GND' (power_in) -- defect 1's "
-                    "source; a dual LM358 is 4=V-, 8=V+ (issue #168)")
 def test_lm358_symbol_pin_numbering():
     pins = _sch_pins("qssc:LM358")
     assert len(pins) == 8, f"LM358 symbol pins parsed: {sorted(pins)}"
@@ -342,11 +340,7 @@ def test_ic_reference_inventory():
     ("main", "J8"),
     ("main", "J12"),
     ("head", "J12"),
-    pytest.param("main", "J9",
-                 marks=pytest.mark.xfail(strict=True,
-                                         reason="J9: Würth 61300411121 has 4 "
-                                         "contacts but the 2x05 JTAG "
-                                         "footprint has 10 pads (issue #169)")),
+    ("main", "J9"),  # repaired: 61301011121 (10 contacts) matches the 2x05 PADS
 ])
 def test_wuerth_mpn_matches_pad_count(board: str, ref: str):
     row = _bom_row(board, ref)
@@ -361,12 +355,8 @@ def test_wuerth_mpn_matches_pad_count(board: str, ref: str):
         f"({row['Value']}) has {n_pads} signal pads")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Udrv BOM: TI 'LM358P' -P suffix is a PDIP-8 order for the SOIC-8 "
-           "footprint; an SOIC build needs LM358D/DR (issue #169)")
 def test_lm358p_package_matches_footprint():
-    """TI's "-P" suffix is PDIP-8; an SOIC-8 order needs LM358D/DR (issue #169)."""
+    """Udrv BOM repaired to LM358DR (SOIC-8, issue #169); gate stays as a pin."""
     row = _bom_row("grad", "Udrv")
     mpn, fp = row["MPN"].strip().upper(), row["Footprint"]
     assert not (re.search(r"\bSOIC\b", fp) and mpn.endswith("P")), (

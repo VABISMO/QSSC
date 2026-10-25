@@ -711,14 +711,41 @@ def test_head_sheet_byte_identical():
     reason=f"baseline {BASELINE} not present in this clone",
 )
 def test_bom_delta_is_exactly_rgrad_feed():
+    """Pin the reviewed BOM delta against the baseline.
+
+    Reviewed deltas (issues #168/#169 + the Rgrad_feed addition):
+      + Rgrad_feed (grad coil 0R feed)
+      ~ Udrv MPN LM358P -> LM358DR (SOIC-8 ordering needs the D/DR suffix)
+      ~ J9 MPN 61300411121 -> 61301011121 (2x05 needs 10 contacts)
+    """
     before = _baseline_blob("hardware/datasheets/BOM.csv").decode("utf-8")
     after = _text("hardware/datasheets/BOM.csv")
     b_lines, a_lines = before.splitlines(), after.splitlines()
     removed = sorted(set(b_lines) - set(a_lines))
     added = sorted(set(a_lines) - set(b_lines))
-    assert not removed, f"BOM rows removed vs baseline: {removed}"
-    assert len(added) == 1 and "Rgrad_feed" in added[0] and "grad," in added[0], (
-        f"BOM delta must be exactly the Rgrad_feed row: {added}"
+    assert removed == sorted([
+        (
+            "grad,Udrv,1,LM358,Package_SO:SOIC-8_3.9x4.9mm_P1.27mm,Texas "
+            "Instruments,LM358P,https://www.ti.com/lit/ds/symlink/lm358.pdf"
+        ),
+        (
+            "main,J9,1,JTAG,Connector_PinHeader_2.54mm:"
+            "PinHeader_2x05_P2.54mm_Vertical,Würth,61300411121,"
+        ),
+    ]), f"BOM rows removed vs baseline: {removed}"
+    assert added == sorted([
+        (
+            "grad,Udrv,1,LM358,Package_SO:SOIC-8_3.9x4.9mm_P1.27mm,Texas "
+            "Instruments,LM358DR,https://www.ti.com/lit/ds/symlink/lm358.pdf"
+        ),
+        "grad,Rgrad_feed,1,0R,Resistor_SMD:R_0805_2012Metric,,,",
+        (
+            "main,J9,1,JTAG,Connector_PinHeader_2.54mm:"
+            "PinHeader_2x05_P2.54mm_Vertical,Würth,61301011121,"
+        ),
+    ]), (
+        "BOM delta must be exactly the reviewed rows "
+        "(Rgrad_feed + the #169 MPN repairs): " + f"{added}"
     )
 
 
