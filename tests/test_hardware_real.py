@@ -394,8 +394,10 @@ def test_api_gyro_hardware_with_board(monkeypatch):
 
 
 @requires_serial
-def test_calibration_hardware_stage4_measured(monkeypatch):
-    """Hardware calibration: stage-4 T2/T2* are measured via RUN_SEQUENCE."""
+def test_calibration_hardware_stage4_says_model_when_the_fit_fails(monkeypatch):
+    """Constant stub codes: every T2 fit falls back to the model, so the
+    stage-4 label must say model -- not "measured" (audit #7b used to pin the
+    lying label here)."""
     monkeypatch.setenv("QSSC_FPGA_PORT", "/dev/ttyFAKE0")
     _patch_cmd_serial(monkeypatch)          # constant codes -> fit falls back to model
     import api.main as main
@@ -407,10 +409,33 @@ def test_calibration_hardware_stage4_measured(monkeypatch):
     assert "error" not in body
     assert body["source"] == "hardware"
     assert body["io"] == "real"
-    assert body["stage4_source"] == "measured (Ramsey/Hahn via RUN_SEQUENCE)"
-    assert body["stages"][3]["source"] == "measured (Ramsey/Hahn via RUN_SEQUENCE)"
+    assert body["stage4_source"] == "model (RUN_SEQUENCE fit unavailable)"
+    assert body["stages"][3]["source"] == "model (RUN_SEQUENCE fit unavailable)"
     assert len(body["per_pin"]) == 4                   # grid=2 -> 4 pins
     assert all("t2_us" in p and "t2_star_us" in p for p in body["per_pin"])
+    assert all(p["t2_source"] == "model (fit fallback)" for p in body["per_pin"])
+
+
+@requires_serial
+def test_calibration_hardware_stage4_measured_when_the_fit_works(monkeypatch):
+    """Decaying Ramsey/Hahn codes fit per pin -> the label is measured."""
+    import math
+    monkeypatch.setenv("QSSC_FPGA_PORT", "/dev/ttyFAKE0")
+    n, t_step = 16, 6250
+    tt = np.arange(n) * t_step * 1e-9
+    omega = 2 * math.pi * 120e3
+    codes = (30000 + 8000 * np.cos(omega * tt) * np.exp(-tt / 40e-6)).round().astype(int)
+    _patch_cmd_serial(monkeypatch, seq_codes=list(codes))
+    import api.main as main
+    from fastapi.testclient import TestClient
+    client = TestClient(main.app)
+    r = client.post("/api/calibration/run?profile=NV&hardware=true&grid=2&points=4")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "error" not in body
+    assert body["stage4_source"] == "measured (Ramsey/Hahn via RUN_SEQUENCE)"
+    assert body["stages"][3]["source"] == "measured (Ramsey/Hahn via RUN_SEQUENCE)"
+    assert all(p["t2_source"] == "measured" for p in body["per_pin"]), body["per_pin"]
 
 
 @requires_serial
