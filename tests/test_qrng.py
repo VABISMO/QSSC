@@ -218,3 +218,39 @@ def test_qrng_endpoint_gates_degenerate_entropy(monkeypatch):
     assert detail["health"]["passed"] is False
     assert "private_key_pem" not in r.json()
     assert "entropy_hex" not in r.json()
+
+
+# -- the no-board FPGA-tab backend is seeded (audit #7b) --------------------
+def test_tab_sim_backend_is_seeded(monkeypatch):
+    """The FPGA tab's SimulatedFPGA is created with QSSC_SEED (default 42).
+
+    The unseeded instance used here put every tab readout (QRNG included)
+    outside the reproducibility gate: with the seed fixed, two fresh
+    connections draw the same entropy; change the seed and it differs.
+    """
+    monkeypatch.delenv("QSSC_FPGA_PORT", raising=False)
+    from api import routes_fpga
+    from api.main import app
+    from fastapi.testclient import TestClient
+
+    def draw(seed):
+        if seed is None:
+            monkeypatch.delenv("QSSC_SEED", raising=False)
+        else:
+            monkeypatch.setenv("QSSC_SEED", seed)
+        routes_fpga._FPGA = None
+        r = TestClient(app).get("/api/fpga/qrng?num_bytes=16&common_name=t")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert "entropy_hex" in body, body
+        return body["entropy_hex"]
+
+    try:
+        default_a = draw(None)
+        default_b = draw(None)
+        assert default_a == default_b, "default seed (42) must reproduce"
+        assert draw("1234") == draw("1234"), "QSSC_SEED must reproduce"
+        assert draw("1234") != default_a, "a different seed must differ"
+    finally:
+        routes_fpga._FPGA = None
+        monkeypatch.delenv("QSSC_SEED", raising=False)

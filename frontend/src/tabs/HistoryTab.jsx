@@ -16,7 +16,7 @@ export default function HistoryTab() {
             </button>
           </div>
           <div className="hint" style={{ marginBottom: 12 }}>
-            Every run is persisted in MongoDB. Click a row to load its result back into the Hardware tab.
+            Every run lands in the job history — MongoDB when it is configured, the in-memory store otherwise (this deploy keeps history in memory). Click a row to load its result back into the Hardware tab.
           </div>
           {history.length === 0 && !historyLoading && <div className="muted">No executions yet — run a circuit in the Hardware tab.</div>}
           <div className="histlist">

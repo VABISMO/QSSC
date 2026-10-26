@@ -34,7 +34,11 @@ async function del(path) {
   return handle(await fetch(`${BASE}${path}`, { method: 'DELETE' }))
 }
 
-const q = (o) => new URLSearchParams(o).toString()
+// Drop null/undefined: a literal "null" in a query string is not a value --
+// gradient_code=null used to become an unhelpful 422 from the int parser.
+const q = (o) => new URLSearchParams(
+  Object.fromEntries(Object.entries(o).filter(([, v]) => v != null)),
+).toString()
 
 export const api = {
   health: () => get('/api/health'),
