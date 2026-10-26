@@ -36,8 +36,7 @@ refrigerator, no optical bench — no waveguides, no active cooling, no camera.
 | **Frontend** | `frontend/` | React 18 + Vite dashboard (ODMR chart, qubit grid, circuit runner, protocol viewer) |
 | **FPGA RTL** | `fpga/rtl` | 11 Verilog modules (Artix-7) — UART, SPI/ADF4351 PLL, 64-ch CQD emitter drive (3× TLC5947 + `dac_ctrl` gradient DAC), detector readout (TLV9004 TIA → 4× AD7616 parallel 16-bit ADC, 1 kHz lock-in host-side), hardware QRNG (`qrng_entropy` von-Neumann extractor), command parser, top-level |
 | **Hardware** | `hardware/` | KiCad boards (main control, detector head, gradient), XDC constraints, CNC G-code, datasheets, `HARDWARE_DESIGN.md` |
-| **Protocol** | `docs/FABRICATION_PROTOCOL.md` | lab fabrication protocol, validated against published studies (canonical source: `qssc/protocol.py`) |
-| **Protocol (HTML)** | `docs/protocol.html` | print-ready HTML render of the protocol (regenerate with `python3 tools/build_protocol_html.py`) |
+| **Protocol** | `docs/FABRICATION_PROTOCOL_Diamond.md` | NV-diamond fabrication protocol: CQD emitter array, CVD diamond + NV⁻ defect engineering, on-chip photodetectors, assembly, safety |
 | **Tests** | `tests/` | software/physics tests (defects, simulator, circuits, backend, API, crypto, cross-platform) — **1174 collected**, of which 1135 run in CI — plus a PCB gate track (DRC, connectivity, pin audit, routing, board integrity) that runs locally against an installed KiCad |
 
 ## Quick start
@@ -397,19 +396,17 @@ under an explicit *simulated* label — the switch never falls back silently.
 
 ## Fabrication protocol
 
-`docs/FABRICATION_PROTOCOL.md` is a parameterised lab build — CQD emitter
-array, diamond + NV⁻ defect engineering, on-chip 2D photodetectors, device
-assembly and safety — each step with target parameters and expected outcomes.
-It is grounded in landmark publications (Gottscholl *Nature Physics* 2020;
-Hernandez *Nature Nanotechnol.* 2008; Coleman *Science* 2011; Kianinia
-*ACS Photonics* 2020) and is explicit about what is established versus
-aspirational (the CQD source is amplified spontaneous emission, **not** a laser).
+[`docs/FABRICATION_PROTOCOL_Diamond.md`](docs/FABRICATION_PROTOCOL_Diamond.md)
+is the **NV-diamond** build: CQD emitter array, CVD diamond + NV⁻ defect
+engineering, on-chip graphene/MoS₂ photodetectors, device assembly and safety —
+each step with target parameters and expected outcomes. It is grounded in
+landmark publications (Gottscholl *Nature Physics* 2020; Hernandez *Nature
+Nanotechnol.* 2008; Coleman *Science* 2011; Kianinia *ACS Photonics* 2020) and is
+explicit about what is established versus aspirational (the CQD source is
+amplified spontaneous emission, **not** a laser).
 
-The API and dashboard read the protocol from structured Python data in
-[`qssc/protocol.py`](qssc/protocol.py) (`/api/protocol`). The lab-facing
-document is [`docs/FABRICATION_PROTOCOL.md`](docs/FABRICATION_PROTOCOL.md);
-its HTML renders (`docs/protocol*.html`) are rebuilt with
-`python3 tools/build_protocol_html.py`.
+The API and dashboard serve the same protocol from structured Python data in
+[`qssc/protocol.py`](qssc/protocol.py) (`/api/protocol`).
 
 ## Features & inventions
 
@@ -596,13 +593,10 @@ failed test/parse/sim run blocks both deploys). It then:
 
 ### Fabrication protocol
 
-- [`qssc/protocol.py`](qssc/protocol.py) — the protocol as structured Python
-  data, served by `/api/protocol` and rendered by the dashboard; the
-  `.md`/`.html` in `docs/` are the lab-facing document and its renders
+- [`docs/FABRICATION_PROTOCOL_Diamond.md`](docs/FABRICATION_PROTOCOL_Diamond.md)
+  — the NV-diamond lab protocol. The API serves the same content from
+  [`qssc/protocol.py`](qssc/protocol.py)
   (decision: [ADR-0007](docs/adr/0007-fabrication-protocol-as-python-data.md)).
-- [`docs/fabrication/QSSC_fabrication_protocol_diamond.pdf`](docs/fabrication/QSSC_fabrication_protocol_diamond.pdf)
-  — PDF export of the NV-diamond protocol (CQD emitter array, CVD diamond +
-  NV⁻ engineering, on-chip graphene/MoS₂ photodetectors, safety).
 
 ### Architecture & decision records
 
