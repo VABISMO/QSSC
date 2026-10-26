@@ -34,6 +34,11 @@ fi
 
 echo "=== Running $YOSYS $(yosys --version 2>&1 | head -1) ==="
 cd "$ROOT"
+
+# Stage the shipped RTL (patched copies under fpga/qmtech/build/) so the gate
+# synthesises what actually gets flashed -- see fpga/synth/stage_rtl.py.
+python3 "$HERE/stage_rtl.py"
+
 # -l tees the log; -q keeps stdout quiet; the script echoes its own banner.
 "$YOSYS" -l "$LOG" -q -s "$HERE/synth_yosys.ys" 2>&1 | tail -20 || {
     echo "ERROR: yosys synthesis failed — see $LOG" >&2

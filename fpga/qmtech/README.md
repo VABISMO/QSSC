@@ -104,8 +104,10 @@ Both user LEDs are **active-low**: `3V3 -> 1k -> LED -> pin`, so `0` = on.
    number-to-decimal formatters (`dec32_pad` x6 call sites, each 10 chained
    32-bit `/10`; `signed_dec48` x2, each 15 chained 48-bit `/10`).
 
-   Note `fpga/synth/SYNTH_REPORT.md` is **stale** (26 Sep: CARRY4 = 4 856);
-   `command_parser.v` and `adf4351_ctrl.v` were modified on 27 Sep.
+   `fpga/synth/synth_yosys.ys` stages this same patched tree
+   (`fpga/synth/stage_rtl.py`) before synthesising, so
+   `fpga/synth/SYNTH_REPORT.md` now measures the shipped configuration:
+   CARRY4 = 1 313, LUT = 8 377.
 
 ## Current status
 
