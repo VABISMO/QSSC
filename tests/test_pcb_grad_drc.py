@@ -25,6 +25,9 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 PCB = REPO / "hardware" / "pcb" / "qssc-grad.kicad_pcb"
+if not PCB.exists():
+    pytest.skip("qssc-grad board is local-only (not published here)",
+                allow_module_level=True)
 
 
 def _have_kicad_cli() -> bool:

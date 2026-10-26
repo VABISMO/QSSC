@@ -27,6 +27,7 @@ import json
 import re
 from collections import Counter
 from pathlib import Path
+import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 PCB_DIR = REPO / "hardware" / "pcb"
@@ -64,6 +65,8 @@ def test_head_uuids_unique():
 
 
 def test_grad_uuids_unique():
+    if not (PCB_DIR / "qssc-grad.kicad_pcb").exists():
+        pytest.skip("qssc-grad board is local-only (not published here)")
     _assert_uuids_unique(PCB_DIR / "qssc-grad.kicad_pcb")
 
 
@@ -91,6 +94,8 @@ def test_head_min_track_width():
 
 
 def test_grad_min_track_width():
+    if not (PCB_DIR / "qssc-grad.kicad_pcb").exists():
+        pytest.skip("qssc-grad board is local-only (not published here)")
     _assert_min_track_width(PCB_DIR / "qssc-grad.kicad_pcb")
 
 
@@ -154,6 +159,8 @@ def test_plane_zone_assignment_head():
 
 
 def test_plane_zone_assignment_grad():
+    if not (PCB_DIR / "qssc-grad.kicad_pcb").exists():
+        pytest.skip("qssc-grad board is local-only (not published here)")
     _assert_plane_zones(PCB_DIR / "qssc-grad.kicad_pcb")
 
 

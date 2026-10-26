@@ -171,3 +171,8 @@ hardware/calibration/array_calibration.json
 # public project -- keep them on disk, keep them out of git.
 presentation/
 docs/propiedad-intelectual/
+# The gradient variant is local work in progress: its board/schematic are
+# NOT part of this repository (only qssc + chip_module are published).
+hardware/pcb/qssc-grad.kicad_pcb
+hardware/pcb/qssc-grad.kicad_pro
+hardware/pcb/qssc-grad.kicad_sch
