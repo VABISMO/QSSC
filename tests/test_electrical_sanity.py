@@ -338,6 +338,8 @@ def test_ic_reference_inventory():
 
     # the documented railless exceptions really are railless
     for board, refs in RAILESS_IC.items():
+        if board == "grad" and not BOARDS["grad"].exists():
+            continue          # local-only gradient board, unpublished
         for ref in refs:
             rails = [n for n in _board(board)["fps"][ref]["pads"].values()
                      if n.startswith("+")]
