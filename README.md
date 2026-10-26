@@ -3,7 +3,7 @@
 [![CI](https://github.com/VABISMO/QSSC/actions/workflows/ci.yml/badge.svg)](https://github.com/VABISMO/QSSC/actions/workflows/ci.yml)
 [![License: Apache-2.0 (non-commercial)](https://img.shields.io/badge/license-Apache--2.0%20NC-lightgrey.svg)](LICENSE)
 [![Python 3.10–3.12](https://img.shields.io/badge/python-3.10–3.12-blue.svg)](https://www.python.org)
-[![Tests](https://img.shields.io/badge/tests-1108%20passed-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-1103%20passed-brightgreen.svg)](#testing)
 
 A room-temperature **solid-state spin-defect** quantum platform: a Qiskit
 backend, an FPGA control stack with PCB design, a validated chip-fabrication
@@ -33,9 +33,9 @@ benchtop electronics: zero-field splitting D ≈ 2.87 GHz, ODMR readout,
 | **REST backend** | `api/` | FastAPI app exposing the simulator, ODMR model, protocol and a circuit runner |
 | **Frontend** | `frontend/` | React 18 + Vite dashboard (ODMR chart, qubit grid, circuit runner, protocol viewer) |
 | **FPGA RTL** | `fpga/rtl` | 11 Verilog modules (Artix-7) — UART, SPI/ADF4351 PLL, 64-ch CQD emitter drive (3× TLC5947 + `dac_ctrl` gradient DAC), detector readout (TLV9004 TIA → 4× AD7616 parallel 16-bit ADC, 1 kHz lock-in host-side), hardware QRNG (`qrng_entropy` von-Neumann extractor), command parser, top-level |
-| **Hardware** | `hardware/` | KiCad boards (main control, detector head, gradient), XDC constraints, CNC G-code, datasheets, `HARDWARE_DESIGN.md` |
+| **Hardware** | `hardware/` | KiCad boards (main control + detector head — the two sandwich boards), XDC constraints, CNC G-code, datasheets, `HARDWARE_DESIGN.md` |
 | **Protocol** | `docs/FABRICATION_PROTOCOL_Diamond.md` | NV-diamond fabrication protocol: CQD emitter array, CVD diamond + NV⁻ defect engineering, on-chip photodetectors, assembly, safety |
-| **Tests** | `tests/` | software/physics tests (defects, simulator, circuits, backend, API, crypto, cross-platform) — **1153 collected**, of which 1114 run in CI — plus a PCB gate track (DRC, connectivity, pin audit, routing, board integrity) that runs locally against an installed KiCad |
+| **Tests** | `tests/` | software/physics tests (defects, simulator, circuits, backend, API, crypto, cross-platform) — **1148 collected**, of which 1109 run in CI — plus a PCB gate track (DRC, connectivity, pin audit, routing, board integrity) that runs locally against an installed KiCad |
 
 ## Quick start
 
@@ -47,7 +47,7 @@ pip install -e ".[api,dev,hw]"
 
 # run the test suite
 python -m pytest --ignore-glob='tests/test_pcb_*'
-#   1108 passed, 5 skipped, 1 xfailed  (see ## Testing)
+#   1103 passed, 5 skipped, 1 xfailed  (see ## Testing)
 
 # try the CLI
 qssc info                              # backend / defect summary (defaults to NV)
@@ -88,10 +88,11 @@ The **canonical chip is a 20×20 mm two-faced die** — 130 bond pads on a 2.5 m
 pitch (65 pads per face: 64 electrodes in an 8×8 grid + 1 common), with **no
 through-silicon vias**: the emitter face and the detector face are independent
 surfaces on opposite sides of the bare die. The two-board PCB sandwich (a
-210×140 mm main board + a 150×140 mm head board, 6 layers each) is built
-around that die — the head board holds an Ironwood SBT socket on the emitter
-face and an ACF bond on the detector face; the main board carries the FPGA,
-the AD7616 readout and the TLC5947 emitter drivers. Everything below is
+150×118 mm main board + a 110×102 mm head board, 6 layers each) is built
+around that die — the emitter face sits in a plain through-hole 2.54 mm socket
+on the main board (die removable) and the detector face plugs into the head
+board's matching through-hole socket; the main board carries the FPGA, the
+AD7616 readout and the TLC5947 emitter drivers. Everything below is
 specified relative to that canonical die.
 
 The chip integrates its own emitter and detector arrays and is read
@@ -451,13 +452,13 @@ support.
 ## Testing
 
 ```bash
-# what CI runs on every push/PR — 1114 tests, no KiCad required
+# what CI runs on every push/PR — 1109 tests, no KiCad required
 python -m pytest --ignore-glob='tests/test_pcb_*'
-#   1108 passed, 5 skipped, 1 xfailed     ← the "Tests" badge above
+#   1103 passed, 5 skipped, 1 xfailed     ← the "Tests" badge above
 
 # everything, including the PCB gate track — needs a system KiCad
 # (kicad-cli + the pcbnew python binding)
-python -m pytest                          # 1153 collected
+python -m pytest                          # 1148 collected
 
 # the two things that are *not* pytest, run separately
 bash fpga/synth/run_synth.sh              # yosys synthesis gate (~45 min)
@@ -467,7 +468,7 @@ cd fpga && iverilog -g2012 -DFAST_SIM -o /tmp/tb.vvp -s tb_top_level \
 
 | Track | Where it runs | Needs |
 |---|---|---|
-| Python suite — 1114 collected | CI, every push and PR | nothing beyond `pip install -e ".[api,dev,hw]"` |
+| Python suite — 1109 collected | CI, every push and PR | nothing beyond `pip install -e ".[api,dev,hw]"` |
 | FPGA parse (pyverilog) + simulate (iverilog) + synthesise (yosys) | CI, **only when `fpga/**` changes** (path-filtered — one run costs ~45 min) | iverilog, pyverilog, oss-cad-suite (CI installs all three) |
 | PCB DRC / connectivity / pin audit / routing — 39 tests in 13 files | **local only** | system KiCad with `kicad-cli pcb drc` |
 | Analog loop-filter bandwidth | CI, every push | ngspice |
@@ -606,7 +607,7 @@ failed test/parse/sim run blocks both deploys). It then:
 2. Code, comments and commit messages in English; commit style is
    `<area>(<scope>)?: <imperative summary>`.
 3. CI green before review. Locally: `pip install -e ".[api,dev,hw]"`, then
-   `pytest --ignore-glob='tests/test_pcb_*'` (**1108 passed, 5 skipped, 1 xfailed**)
+   `pytest --ignore-glob='tests/test_pcb_*'` (**1103 passed, 5 skipped, 1 xfailed**)
    and `ruff check --select=E9,F63,F7,F82,F401,F841 .`
 4. Hardware/PCB changes additionally run `pytest tests/test_pcb_*.py` with KiCad
    installed, and `python3 tools/gen_bom.py` when the BOM changes.
