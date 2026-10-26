@@ -136,10 +136,16 @@ jobs:
       - id: deploy
         uses: actions/deploy-pages@v5
 
+  # Manual only. This job used to run after every green CI on main, and with
+  # RENDER_DEPLOY_HOOK_URL unset each of those runs came back red for a deploy
+  # nobody asked for -- pushes never ship anyway (render.yaml sets
+  # autoDeploy: false), so the hook is fired on demand instead:
+  # Actions -> Deploy -> Run workflow. The dashboard keeps publishing itself
+  # through deploy-frontend above.
   deploy-api:
     name: API → Render (deploy hook)
     needs: require-green-ci
-    if: ${{ needs.require-green-ci.outputs.ok == 'true' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && needs.require-green-ci.outputs.ok == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Render deploy hook (test-gated)
