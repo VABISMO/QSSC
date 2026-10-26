@@ -214,7 +214,8 @@ die EM face, and the BTB HOST connector J12.
 - **Function:** +5V -> +5V_RF isolation (replaces the old REG4 AMS1117-5.0
   LDO which sat in dropout; the +5V rail is already regulated, so +5V_RF only
   needs a bead + pi filter, not another regulator).
-- **Package:** 0603.  C45/C46 buffer +5V side, C47/C48 buffer +5V_RF side.
+- **Package:** FB1 0603.  Pi-filter caps are mixed on the board: C45/C47 =
+  0805, C46/C48 = 0603 (verified against the committed footprints).
 
 ### UE0 / UE1 / UE2 — TLC5947  (Texas Instruments 24-ch 12-bit PWM constant-current LED driver) x3
 - **Function:** 64-channel parallel CQD emitter driver.  Each CQD emitter
