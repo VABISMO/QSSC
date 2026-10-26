@@ -164,8 +164,7 @@ def test_through_cut_has_bridges(name):
 # position, and emits the SAME 4 carrier-corner fiducials -> the files overlay.
 
 P0_LAYERS = ["p0_cathode_stencil.gcode",
-             "p0_waveguide_channel.gcode", "p0_detector_stencil.gcode",
-             "p0_carrier_pcb.gcode"]
+             "p0_detector_stencil.gcode", "p0_carrier_pcb.gcode"]
 P0_SHARED_FIDUCIALS = ["X1.000 Y1.000", "X134.000 Y1.000",
                        "X134.000 Y89.000", "X1.000 Y89.000"]
 
@@ -182,18 +181,17 @@ def test_p0_layers_share_carrier_fiducials():
 
 
 def test_p0_layers_align_to_carrier_pockets():
-    """VERTICAL STACK: the three layer gcodes (cathode, waveguide, detector)
+    """VERTICAL STACK: the three layer gcodes (cathode, detector, carrier)
     are drawn at the SAME single die-pocket carrier coord (57.5,35), and the
     carrier mills that same pocket -- so every layer overlays on one 20x20
     footprint (the three layers stack vertically, they do not sit side-by-side).
     The L1 ITO is a CONTINUOUS common anode now (no isolation gcode -- the
     p0_ito_isolate job was removed)."""
     cath = _text("p0_cathode_stencil.gcode")
-    wg = _text("p0_waveguide_channel.gcode")
     det = _text("p0_detector_stencil.gcode")
     carr = _text("p0_carrier_pcb.gcode")
     # every layer + the carrier die pocket start a rapid at the centred die (57.5,35)
-    for txt in (cath, wg, det, carr):
+    for txt in (cath, det, carr):
         assert "X57.500 Y35.000" in txt, "layer not at the centred die pocket (57.5,35)"
     # the OLD side-by-side pockets must be gone
     assert "X10.000 Y35.000" not in carr   # old emitter pocket
@@ -278,42 +276,6 @@ def test_p0_carrier_vertical_stack_breakout():
     assert "[BOND]" not in txt
 
 
-def test_p0_waveguide_channel():
-    """P0 L2 MIDDLE layer (carrier coords): a SERPENTINE ENTANGLEMENT BUS
-    threading all 64 NV microdiamond sites (8x8, 2.5 mm pitch) as ONE continuous
-    core (8 horizontal runs + 7 vertical connectors), + 64 NV-site markers + a
-    perimeter MW-loop groove. 532 nm pump in at the LEFT facet (bus start). Foot-
-    print at the centred die pocket (57.5,35)->(77.5,55). No outline, no arcs."""
-    txt = _text("p0_waveguide_channel.gcode")
-    # serpentine bus: two z-passes (-0.25 then -0.5), one continuous plunge each
-    assert txt.count("Z-0.250") == 1
-    assert txt.count("Z-0.500") == 1
-    # bus spans the full die width: left facet X58.0, right facet X77.0
-    assert "X58.000" in txt and "X77.000" in txt
-    # all 8 pixel-row Y centres (carrier 36.25 .. 53.75)
-    for yv in ["36.250", "38.750", "41.250", "43.750",
-               "46.250", "48.750", "51.250", "53.750"]:
-        assert f"Y{yv}" in txt, f"missing serpentine row at Y={yv}"
-    # 64 NV site markers (one per pixel) named by carrier coord
-    centres = [58.75, 61.25, 63.75, 66.25, 68.75, 71.25, 73.75, 76.25]
-    rows = [36.25, 38.75, 41.25, 43.75, 46.25, 48.75, 51.25, 53.75]
-    for cx in centres:
-        for cy in rows:
-            assert f"NV site carrier ({cx:.2f},{cy:.2f})" in txt, \
-                f"missing NV site at ({cx},{cy})"
-    # 64 NV-site markers + 2 facet markers peck at Z-0.20 -> 66 total
-    assert txt.count("Z-0.200") == 66
-    # 532 pump in at the bus start (top-left facet)
-    assert "X58.000 Y36.250" in txt
-    # MW loop perimeter groove (rect_groove at -0.30 -> 4 segment plunges)
-    assert txt.count("Z-0.300") == 4
-    # wafer footprint at the centred die pocket
-    assert "X57.500 Y35.000" in txt
-    # no through-cut (glass wafer is snapped/clamped, not milled), no arcs
-    assert "Z-3.000" not in txt
-    assert "G02" not in txt and "G03" not in txt
-
-
 def test_p0_detector_stencil():
     """P0 L3 detector TOP face (carrier coords): 64 Au/Cr detector contact-pad
     openings (8x8) in Kapton at Z-0.06, over the centred die pocket (same
@@ -395,9 +357,6 @@ def test_p1_holes_and_mold_two_pieces():
     2.0 mm, ONLY holes ("sin rebordes"), flush at the copy origin. Row 2
     (Y 20.78..38.56): 4 MOLD pieces -- 17.78 x 17.78, 1.0 mm-deep pocket
     (perimeter "cuadrado de fuera" + interior zigzag "vaciado de por dentro").
-    Row 3 (Y 41.56..59.34): 4 WAVEGUIDE templates -- 17.78 x 17.78, 1.0 mm-deep
-    SERPENTINE channel connecting all 64 grid points in boustrophedon order (the
-    L2 entanglement-bus layer, later filled with TEOS + microdiamonds; 532 nm
     pump in at the bottom-left facet). 4 of each type (12 pieces), 3 mm gap,
     ~80 x 59 mm (fits a 3018). No through-cut on any piece. The original
     p1_pin_array_support (through-holes + outline) is a SEPARATE file, unchanged.
@@ -408,7 +367,6 @@ def test_p1_holes_and_mold_two_pieces():
     # 4 of each type -- the per-copy origin markers
     assert txt.count("holes piece (") == 4
     assert txt.count("mold piece (") == 4
-    assert txt.count("waveguide piece (") == 4
     assert "2.54 mm pitch" in txt
     # holes BLIND 2.0 mm deep (NOT through): Z-2.000 present, Z-3.000 absent
     assert "Z-2.000" in txt
@@ -440,35 +398,10 @@ def test_p1_holes_and_mold_two_pieces():
     assert "X79.620 Y38.060" in txt
     for ox in [0.00, 20.78, 41.56, 62.34]:
         assert f"at origin ({ox:.2f},20.78)" in txt, f"missing mold origin x={ox}"
-    # --- Row 3 (waveguides): 1 mm-deep SERPENTINE through all 64 points ---
-    assert "WAVEGUIDE" in txt or "waveguide" in txt
-    assert "SERPENTINE" in txt
-    # copy 0 waveguide at origin (0,41.56): bus start at the bottom-left facet
-    # (pump in), first feed to the next grid point (2.54, 41.56)
-    assert "X0.000 Y41.560" in txt
-    assert "X2.540 Y41.560" in txt
-    # the serpentine reaches every row Y of the 8x8 grid (relative to origin 41.56):
-    #   Y = 41.56 + j*2.54 for j=0..7  -> 41.56, 44.10, 46.64, 49.18, 51.72, 54.26, 56.80, 59.34
-    for j in range(8):
-        yv = 41.56 + j * 2.54
-        assert f"Y{yv:.3f}" in txt, f"waveguide copy 0 missing row Y={yv}"
-    # serpentine ends at the bottom-left of the last row: (0, 41.56+17.78) = (0, 59.34)
-    assert "X0.000 Y59.340" in txt
-    # copy 3 waveguide at origin (62.34,41.56): last row ends at (62.34, 59.34)
-    assert "X62.340 Y59.340" in txt
-    for ox in [0.00, 20.78, 41.56, 62.34]:
-        assert f"at origin ({ox:.2f},41.56)" in txt, f"missing waveguide origin x={ox}"
-    # the serpentine passes through all 64 grid points of copy 0 (on the 2.54 grid)
-    for j in range(8):
-        for i in range(8):
-            xv = i * 2.54
-            yv = 41.56 + j * 2.54
-            assert f"X{xv:.3f} Y{yv:.3f}" in txt, \
-                f"waveguide copy 0 missing grid point ({xv},{yv})"
     # 3 mm gap between copies: pitch = array span (17.78) + gap (3) = 20.78
     assert "20.78" in txt
     # the three rows are documented
-    assert "Row 1" in txt and "Row 2" in txt and "Row 3" in txt
+    assert "Row 1" in txt and "Row 2" in txt
     assert "no through-cut" in txt.lower() or "NO through-cut" in txt
 
 
@@ -510,32 +443,6 @@ def test_p1_vaciado_single():
     # no outline through-cut corners
     for corner in ["X-0.500 Y-0.500", "X20.500 Y-0.500"]:
         assert corner not in txt
-
-
-def test_p1_waveguide_single():
-    """Standalone single-piece: ONE 17.78x17.78 serpentine waveguide channel,
-    1.0 mm deep, connecting all 64 grid points in boustrophedon order (the L2
-    entanglement-bus template, TEOS + microdiamond fill). Same geometry as one
-    grid copy. Pump in at the bottom-left facet (0,0)."""
-    txt = _text("p1_waveguide.gcode")
-    assert "WAVEGUIDE" in txt or "waveguide" in txt
-    assert "SERPENTINE" in txt
-    assert "Z-1.000" in txt               # 1 mm blind channel
-    assert "Z-3.000" not in txt           # no through-cut
-    assert not re.search(r"(?m)^G02\b", txt)
-    assert not re.search(r"(?m)^G03\b", txt)
-    # bus start at the bottom-left facet (0,0)
-    assert "X0.000 Y0.000" in txt
-    # the serpentine reaches every row Y of the 8x8 grid (j*2.54, j=0..7)
-    for j in range(8):
-        assert f"Y{j * 2.54:.3f}" in txt, f"missing row Y={j * 2.54}"
-    # ends at the bottom-left of the last row: (0, 17.78)
-    assert "X0.000 Y17.780" in txt
-    # passes through ALL 64 grid points (on the 2.54 grid, flush at origin)
-    for j in range(8):
-        for i in range(8):
-            assert f"X{i * 2.54:.3f} Y{j * 2.54:.3f}" in txt, \
-                f"waveguide single missing grid point ({i},{j})"
 
 
 # --- determinism -------------------------------------------------------------

@@ -139,27 +139,6 @@ PANEL_TEXT = {
                 "50 um Kapton foil (stencil) . Ag paste . silver epoxy (EM_ANODE)",
                 "1.0 mm flat end-mill . backing board . bond BEFORE seating"],
     },
-    "B": {
-        "ttl": "Job B - L2 TOP face: SERPENTINE ENTANGLEMENT BUS (64 NV sites in series)",
-        "sub": "the face that points UP to L3 . 20x20x1 glass wafer . drawn from p0_waveguide_channel.gcode",
-        "purpose": "PURPOSE: mill ONE continuous serpentine channel threading all 64 NV sites in series on one shared optical core = the on-chip entanglement bus.",
-        "cnc": ["- mill ONE continuous serpentine channel, 1 mm wide, two Z passes (-0.25, -0.5)",
-                "- 8 horizontal runs (one per pixel row Y=36.25..53.75) + 7 vertical",
-                "  connectors at alternating ends = a single boustrophedon core",
-                "- 64 NV-site peck markers (Z-0.20) along the bus",
-                "- perimeter MW-loop seating groove (Z-0.30) around the whole die",
-                "- 532 pump-in + bus-out facet markers"],
-        "then": ["- place one 150-200 um Adamas FMDNVLN microdiamond at each of the 64 NV sites",
-                 "- fill the bus with Ti-doped TEOS sol-gel (no diamonds in the sol)",
-                 "- soft-bake 80 C, densify 300 C hotplate -> SiO2 core n~1.55 > glass 1.52 (TIR)",
-                 "- seat Cu wire in the perimeter groove"],
-        "mat": ["20x20x1 mm borosilicate glass wafer", "Ti-doped TEOS sol (n~1.55) . NV- microdiamonds 150-200 um (Adamas FMDNVLN)",
-                "T2~1.8 ms long coherence (simulator, 12C bulk) . T1~5.9-10.2 ms, ODMR 4.4-4.9% (Adamas datasheet) . Cu wire . 1.0 mm bit"],
-        "why": ["All 64 NV sites share the ONE serial bus, so a photon from any site",
-                "propagates along the same core to any other. Two indistinguishable",
-                "photons interfere at the bus output -> spin-spin entanglement heralded.",
-                "MW 2.87 GHz ODMR; lock-in reads the L3 detector photocurrent."],
-    },
     "C": {
         "ttl": "Job C - L3 TOP face: detector stencil (64 Au/Cr pads) on ITO glass",
         "sub": "top of the stack . ITO glass + MoS2/graphene + Au/Cr pads . drawn from p0_detector_stencil.gcode",
@@ -198,7 +177,6 @@ PANEL_TEXT = {
 # cut colour per job + whether it is a die-crop (True) or full-carrier (False)
 JOB_CFG = {
     "A": ("p0_cathode_stencil.gcode", "#5a5d65", True),
-    "B": ("p0_waveguide_channel.gcode", "#2f7d92", True),
     "C": ("p0_detector_stencil.gcode", "#b8902a", True),
     "D": ("p0_carrier_pcb.gcode", "#444", False),
 }
@@ -343,11 +321,6 @@ def render_die_panel(key, panel_x, panel_y, panel_w, panel_h, draw_x, draw_y, s)
     ry += 24
     block, ry = text_lines(t["mat"], rx, ry, 14, "sm")
     parts.append(block)
-    if key == "B":
-        parts.append(f'<text x="{rx}" y="{ry+10}" class="lab b" fill="#c0392b">Why this is the entanglement layer</text>')
-        ry += 26
-        block, ry = text_lines(t["why"], rx, ry, 14, "sm")
-        parts.append(block)
     parts.append("</g>")
     return "".join(parts)
 
@@ -467,7 +440,7 @@ MATERIALS = """<g id="panelG">
     <text x="823" y="1608">20x20x1.1 mm ITO glass (150 nm ITO, CONTINUOUS common anode) . PEDOT:PSS . TFB (chlorobenzene)</text>
     <text x="823" y="1622">green Cd-free CQD-PVA . ZnO nanopowder . Ag paste (64 cathodes) . silver epoxy (EM_ANODE) . Kapton 50 um</text>
   </g>
-  <text x="823" y="1646" class="lab b">L2 waveguide + NV (middle layer)</text>
+  <text x="823" y="1646" class="lab b">L2 host layer (middle)</text>
   <g class="sm">
     <text x="823" y="1664">20x20x1 mm borosilicate glass . Ti-doped TEOS sol (n~1.55)</text>
     <text x="823" y="1678">NV- microdiamonds 150-200 um (Adamas FMDNVLN, T1~5.9-10.2 ms) . Cu wire (MW loop)</text>
@@ -568,8 +541,6 @@ def build_svg() -> str:
     svg.append(render_die_panel("A", 20, 90, 630, 430, 40, 150, 12.0))
     # Panel C: L3 Au/Cr detector stencil on ITO glass, die crop, scale 12 px/mm (top-right)
     svg.append(render_die_panel("C", 670, 90, 630, 430, 690, 150, 12.0))
-    # Panel B: L2 serpentine entanglement bus, wide die crop, scale 15 px/mm (middle)
-    svg.append(render_die_panel("B", 20, 535, 1280, 545, 40, 595, 15.0))
     # Panel D: FR4 carrier, full carrier, scale 3.4 px/mm (bottom-right)
     svg.append(render_carrier_panel("D", 670, 1095, 630, 430, 685, 1155, 3.4))
     # Assembly-order notes panel (bottom-left)
