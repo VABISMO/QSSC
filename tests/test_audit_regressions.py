@@ -136,3 +136,19 @@ def test_sensor_magneto_differential_removes_gradient(client):
                         params={**base, "differential": "true"})
     assert r_plain.status_code == 200 and r_diff.status_code == 200
     assert r_diff.json()["mean_b_mag_ut"] < r_plain.json()["mean_b_mag_ut"]
+
+
+# --- audit #7b: model-only endpoints must not look like hardware -----------
+def test_model_only_sensor_endpoints_label_their_source(client):
+    """The six sensor endpoints with no hardware path say ``source="model"``.
+
+    They take ``mode=sim|real`` as a *noise-model* choice and echo it; without
+    the source label a reader takes mode="real" for "measured on the board".
+    """
+    for path in ("/api/compass", "/api/magneto", "/api/sensor/magneto",
+                 "/api/ferro", "/api/nav", "/api/thermal", "/api/current"):
+        r = client.get(path, params={"seed": 42, "n_avg": 100})
+        assert r.status_code == 200, (path, r.text)
+        j = r.json()
+        assert j.get("source") == "model", (path, j.get("source"))
+        assert j.get("mode") in ("sim", "real"), (path, j.get("mode"))

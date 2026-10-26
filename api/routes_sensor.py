@@ -97,6 +97,7 @@ def api_compass(
     out = _sensor_as_dict(compass_measure(profile, b_vector_t=B,
                                           n_avg=_sensor_mode_n_avg(n_avg, mode),
                                           rng=rng))
+    out["source"] = "model"   # no hardware path in this endpoint
     out["mode"] = mode
     return out
 
@@ -206,7 +207,7 @@ def api_magneto(
                          linewidth_mhz=lw_mhz, contrast_depth=0.05)
     return {
         "profile": prof.short, "grid": grid, "n_pixels": grid * grid,
-        "n_avg": n_eff, "mode": mode, "linewidth_mhz": float(lw_mhz),
+        "n_avg": n_eff, "source": "model", "mode": mode, "linewidth_mhz": float(lw_mhz),
         "sensitivity_ut": round(float(sens_ut), 4), "pixels": pixels,
         "dip_curve": {"frequencies_ghz": [round(float(x), 5) for x in f],
                       "contrast": [round(float(x), 5) for x in c]},
@@ -268,6 +269,7 @@ def api_sensor_magneto(
         rng=rng)
     return {
         "profile": res.profile, "grid": res.grid, "n_pixels": res.n_pixels,
+        "source": "model",  # no hardware path in this endpoint
         "mode": res.mode, "n_avg": res.n_avg, "linewidth_mhz": res.linewidth_mhz,
         "sensitivity_ut": res.sensitivity_ut, "differential": res.differential,
         "average": res.average,
@@ -519,7 +521,7 @@ def api_ferro(
     bearing = (float(np.degrees(np.arctan2(oy, ox))) + 360.0) % 360.0
     detected = abs(peak) > noise_ut
     return {
-        "profile": get_profile(profile).short, "mode": mode, "grid": grid,
+        "profile": get_profile(profile).short, "source": "model", "mode": mode, "grid": grid,
         "unit": "µT", "vmin": round(min(vals), 3), "vmax": round(max(vals), 3),
         "cells": cells, "noise_ut": round(noise_ut, 4), "n_avg": n_eff,
         "detected": bool(detected), "peak_ut": round(float(peak), 3),
@@ -587,7 +589,7 @@ def api_nav(
     cells = [{"x": x, "y": y, "value": round(float(amap[y, x]), 4)}
              for y in range(grid) for x in range(grid)]
     return {
-        "profile": get_profile(profile).short, "mode": mode, "grid": grid,
+        "profile": get_profile(profile).short, "source": "model", "mode": mode, "grid": grid,
         "unit": "µT", "vmin": round(float(amap.min()), 3),
         "vmax": round(float(amap.max()), 3), "cells": cells,
         "measured_ut": round(meas, 4), "noise_ut": round(noise_ut, 4),
@@ -647,7 +649,7 @@ def api_thermal(
     peak = max(vals)
     detected = (hotspot_k - base_temp_k) > temp_noise
     return {
-        "profile": prof.short, "mode": mode, "grid": grid,
+        "profile": prof.short, "source": "model", "mode": mode, "grid": grid,
         "unit": "°C", "vmin": round(min(vals), 2), "vmax": round(max(vals), 2),
         "cells": cells, "temp_noise_k": round(temp_noise, 3), "n_avg": n_eff,
         "detected": bool(detected),
@@ -698,7 +700,7 @@ def api_current(
     peak = max(vals, key=abs)
     detected = abs(peak) > noise_ut
     return {
-        "profile": get_profile(profile).short, "mode": mode, "grid": grid,
+        "profile": get_profile(profile).short, "source": "model", "mode": mode, "grid": grid,
         "unit": "µT", "vmin": round(min(vals), 3), "vmax": round(max(vals), 3),
         "cells": cells, "noise_ut": round(noise_ut, 4), "n_avg": n_eff,
         "detected": bool(detected), "peak_ut": round(float(peak), 3),
