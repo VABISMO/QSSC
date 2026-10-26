@@ -1,0 +1,96 @@
+# FPGA RTL verification -- pyverilog parse, iverilog functional simulation and
+# the yosys synthesis / resource-fit gate.
+#
+# This lives in its own workflow instead of ci.yml for one reason: it costs
+# ~47 minutes per run (yosys ABC9 dominates; a cache miss also pulls a 700 MB
+# oss-cad-suite tarball), which is 2.4% of the 2000 free Actions minutes a
+# private repo gets each month.  The `paths` filters below make it run ONLY
+# when FPGA sources, the XDC port checker or this workflow change, so ordinary
+# commits cost nothing and only FPGA work pays for the FPGA gate.
+#
+#   run on demand for any ref:  gh workflow run "FPGA RTL" --ref <branch>
+#   run entirely locally:       bash fpga/synth/run_synth.sh
+#
+name: FPGA RTL
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "fpga/**"
+      - "tools/check_xdc_ports.py"
+      - ".github/workflows/fpga.yml"
+  pull_request:
+    branches: [main, master]
+    paths:
+      - "fpga/**"
+      - "tools/check_xdc_ports.py"
+      - ".github/workflows/fpga.yml"
+  # Manual trigger: run the gate on any ref regardless of which files changed.
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────
+  # FPGA RTL — parse-verify (pyverilog) + functional simulate (iverilog)
+  # + synthesise (yosys)
+  # ──────────────────────────────────────────────────────────────────────
+  fpga:
+    name: FPGA RTL (parse + simulate + synth)
+    runs-on: ubuntu-latest
+    env:
+      # Pinned oss-cad-suite release that provides yosys for the synth step.
+      OSS_CAD_SUITE_TAG: "2026-08-26"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install iverilog + pyverilog
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog
+          pip install pyverilog
+      - name: pyverilog parse all RTL modules
+        run: |
+          set -e
+          for f in fpga/rtl/*.v; do
+            python -c "from pyverilog.vparser.parser import VerilogParser as P; p=P(); p.parse(open('$f').read(),'')" || { echo "PARSE FAIL: $f"; exit 1; }
+            echo "OK  $f"
+          done
+      - name: XDC <-> top_level.v port consistency
+        run: python3 tools/check_xdc_ports.py
+      - name: iverilog functional simulation (self-checking testbench)
+        run: |
+          cd fpga
+          # FAST_SIM collapses the UART bit period and the 1 ms emitter pump
+          # so the 64-pixel CALIBRATE sweep runs in seconds, not minutes.
+          # Production timing is untouched (the define is sim-only).
+          iverilog -g2012 -DFAST_SIM -o /tmp/qssc_tb.vvp -s tb_top_level rtl/*.v sim/tb_top_level.v
+          vvp /tmp/qssc_tb.vvp | tee /tmp/sim.log
+          grep -q "ALL CHECKS PASSED" /tmp/sim.log
+      - name: Cache oss-cad-suite (yosys)
+        id: ocs-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/oss-cad-suite
+          key: oss-cad-suite-${{ env.OSS_CAD_SUITE_TAG }}
+      - name: Install oss-cad-suite (yosys)
+        if: steps.ocs-cache.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          tag="${OSS_CAD_SUITE_TAG}"
+          url="https://github.com/YosysHQ/oss-cad-suite-build/releases/download/${tag}/oss-cad-suite-linux-x64-${tag//-/}.tgz"
+          curl -fL -o /tmp/ocs.tgz "$url"
+          tar xzf /tmp/ocs.tgz -C "$HOME"
+          rm -f /tmp/ocs.tgz
+      - name: yosys synth_xilinx (synthesizability + resource fit, xc7)
+        run: |
+          set -e
+          bash fpga/synth/run_synth.sh
+          # Gate: synthesis must reach the COMPLETE banner, infer no latches,
+          # map no blackboxes, and the report must say it fits the XC7A35T.
+          grep -q "synth_xilinx COMPLETE" fpga/synth/synth.log
+          ! grep -qi "inferred latch" fpga/synth/synth.log
+          grep -q "Fits XC7A35T.*yes" fpga/synth/SYNTH_REPORT.md

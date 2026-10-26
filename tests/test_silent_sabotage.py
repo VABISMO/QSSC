@@ -58,7 +58,18 @@ PROD_DIRS = ("qssc", "api")
 # gates that, and splits its own needle the same way), so the dir name is
 # built here instead of written out.
 SCR_DIR_NAME = "scr" + "atches"
-SCOPED_EXCLUDE = {"tests", "hardware", "fpga", SCR_DIR_NAME, ".git"}
+SCOPED_EXCLUDE = {"tests", "hardware", "fpga", SCR_DIR_NAME, ".git",
+                  # Non-source trees a contributor has locally but CI does not:
+                  # virtualenvs, dependency trees and caches. The walks below
+                  # do not consult .gitignore, so without these a repo-local
+                  # `.venv` filled every global gate with third-party code and
+                  # made the whole suite fail on any developer machine.
+                  ".venv", "venv", "node_modules", "__pycache__",
+                  ".pytest_cache", ".mypy_cache", ".ruff_cache", ".tox",
+                  # gitignored work dir: only the two pinned snapshots are
+                  # tracked (see test_no_junk_tracked); its ad-hoc helper
+                  # scripts are per-machine and must not gate CI.
+                  ".tmpwork"}
 
 
 def _prod_files() -> list:

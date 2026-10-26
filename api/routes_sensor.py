@@ -82,7 +82,7 @@ def api_compass(
     bx: float = 150.0, by: float = 50.0, bz: float = -100.0,  # uT (lab field)
     n_avg: int = 1000,
     mode: str = "real",
-    seed: Optional[int] = None,
+    seed: int = 42,
 ):
     """ODMR compass: 4-axis <111> doublet split -> B-vector + heading.
 
@@ -108,7 +108,7 @@ def api_gyro(
     free_precession_us: Optional[float] = None,
     n_avg: int = 100,
     mode: str = "real",
-    seed: Optional[int] = None,
+    seed: int = 42,
     hardware: bool = False,
     sensor_t2_us: Optional[float] = None,
 ):
@@ -160,7 +160,7 @@ def api_magneto(
     base_bx_ut: float = 25.0,
     base_bz_ut: float = -40.0,
     mode: str = "real",
-    seed: Optional[int] = None,
+    seed: int = 42,
 ):
     """Magneto-optic image: per-pixel |B.n| across the 8x8 array.
 
@@ -233,7 +233,7 @@ def api_sensor_magneto(
     mode: str = "real",
     differential: bool = False,
     average: bool = True,
-    seed: Optional[int] = None,
+    seed: int = 42,
 ):
     """64-pixel VECTOR magnetometer.
 
@@ -294,7 +294,7 @@ def api_sensor_tensor(
     dipole_y_mm: float = -1.0,
     dipole_z_mm: float = 10.0,
     differential: bool = True,
-    seed: Optional[int] = None,
+    seed: int = 42,
 ):
     """64-pixel TENSOR gradiometer + dipole localization.
 
@@ -356,7 +356,7 @@ def api_sensor_tensor(
         try:
             fpga = connect_fpga(port=port, profile=profile,
                                 temperature_k=300.0,
-                                seed=int(seed if seed is not None else 42))
+                                seed=int(seed))
         except NoFPGADetected as exc:
             return {"error": "no-fpga-detected", "message": str(exc)}
         try:
@@ -386,7 +386,7 @@ def api_sensor_tensor(
             freqs_ghz = np.linspace(f_start * 1e3, f_stop * 1e3, n) / 1e9
             calib = calibrate_array_from_codes(
                 matrix, freqs_ghz, prof, gradient_mhz_per_um=0.0,
-                pixel_size_um=200.0, seed=int(seed if seed is not None else 42),
+                pixel_size_um=200.0, seed=int(seed),
                 temperature_k=300.0, integration_shots=n_shots,
                 cap_to_resolvable=False)
             # (8,8,3) B-vector map in Tesla -> µT (the tensor gradiometer input).
@@ -422,7 +422,7 @@ def api_sensor_tensor(
             dipole_moment_am2=0.0) if differential else None)
         res = tensor_gradient_sweep(
             profile=profile, b_field_map_ut=fmap, baseline_map_ut=baseline,
-            pitch_mm=pitch_mm, n_avg=n_eff, seed=(seed if seed is not None else 42),
+            pitch_mm=pitch_mm, n_avg=n_eff, seed=seed,
             fit_dipole=True, differential=differential)
         # rebuild the (grid,grid,3) recovered B-vector map from the tensor pixels.
         fmap_ut = np.zeros((grid, grid, 3))
@@ -492,7 +492,7 @@ def api_ferro(
     offset_y_mm: float = 3.0,
     n_avg: int = 500,
     mode: str = "real",
-    seed: Optional[int] = None,
+    seed: int = 42,
 ):
     """Ferromagnetic-object detection: a magnetic dipole (the object) at a
     distance is imaged by the 8x8 array through non-magnetic media. The peak
@@ -551,7 +551,7 @@ def api_nav(
     anomaly_ut: float = 2.0,
     n_avg: int = 500,
     mode: str = "real",
-    seed: Optional[int] = None,
+    seed: int = 42,
 ):
     """Geomagnetic anomaly navigation: match the local crustal-field anomaly
     against a stored anomaly map to estimate position -- works where GPS and
@@ -619,7 +619,7 @@ def api_thermal(
     hotspot_y: float = 4.0,
     n_avg: int = 500,
     mode: str = "real",
-    seed: Optional[int] = None,
+    seed: int = 42,
 ):
     """NV thermometry: the D zero-field splitting shifts with temperature, so
     the 8x8 array is a contactless temperature image (a chip hotspot, a
@@ -675,7 +675,7 @@ def api_current(
     depth_mm: float = 3.0,
     n_avg: int = 500,
     mode: str = "real",
-    seed: Optional[int] = None,
+    seed: int = 42,
 ):
     """Current imaging (Ampere): a current in a wire/trace produces a B field
     the array images contactlessly -- short-circuit localization, battery-cell

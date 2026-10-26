@@ -348,8 +348,12 @@ def test_no_junk_tracked():
     junk = [rel for rel in _tracked_files() for pat in JUNK_PATTERNS if pat.search(rel)]
     assert not junk, f"junk tracked in git: {junk}"
     tmpwork = [rel for rel in _tracked_files() if rel.startswith(".tmpwork/")]
-    assert tmpwork == [".tmpwork/pins.json"], (
-        f".tmpwork must contain only the pinned pins.json snapshot: {tmpwork}"
+    # Two pinned snapshots, both read at import time by the board generators:
+    # pins.json (standard-KiCad symbol pinout) and fpga_csg324_map.json (the
+    # FPGA ballmap). Committing either is what makes a fresh clone runnable
+    # (issue #166); nothing else may accumulate in there.
+    assert tmpwork == [".tmpwork/fpga_csg324_map.json", ".tmpwork/pins.json"], (
+        f".tmpwork must contain only the pinned snapshots: {tmpwork}"
     )
 
 
@@ -713,41 +717,79 @@ def test_head_sheet_byte_identical():
 def test_bom_delta_is_exactly_rgrad_feed():
     """Pin the reviewed BOM delta against the baseline.
 
-    Reviewed deltas (issues #168/#169 + the Rgrad_feed addition):
-      + Rgrad_feed (grad coil 0R feed)
+    Reviewed deltas (issues #162/#166/#167/#168/#169):
       ~ Udrv MPN LM358P -> LM358DR (SOIC-8 ordering needs the D/DR suffix)
       ~ J9 MPN 61300411121 -> 61301011121 (2x05 needs 10 contacts)
+      + Rgrad_feed (grad coil 0R feed)
+      - the two #FLG*/PWR_FLAG phantom rows (issue #167: not purchasable
+        parts, never become a footprint)
+      - the six hand-typed grad rows, replaced by the full gradient section
+        gen_bom.py now generates (issue #162), grouped exactly as the two
+        sandwich boards are grouped
+
+    The pin stays exact in both directions: a row that silently reverts an
+    MPN repair fails the `removed` side, and a row that appears or disappears
+    unreviewed fails the `added` side.
     """
     before = _baseline_blob("hardware/datasheets/BOM.csv").decode("utf-8")
     after = _text("hardware/datasheets/BOM.csv")
     b_lines, a_lines = before.splitlines(), after.splitlines()
     removed = sorted(set(b_lines) - set(a_lines))
     added = sorted(set(a_lines) - set(b_lines))
-    assert removed == sorted([
-        (
-            "grad,Udrv,1,LM358,Package_SO:SOIC-8_3.9x4.9mm_P1.27mm,Texas "
-            "Instruments,LM358P,https://www.ti.com/lit/ds/symlink/lm358.pdf"
-        ),
-        (
-            "main,J9,1,JTAG,Connector_PinHeader_2.54mm:"
-            "PinHeader_2x05_P2.54mm_Vertical,Würth,61300411121,"
-        ),
-    ]), f"BOM rows removed vs baseline: {removed}"
-    assert added == sorted([
-        (
-            "grad,Udrv,1,LM358,Package_SO:SOIC-8_3.9x4.9mm_P1.27mm,Texas "
-            "Instruments,LM358DR,https://www.ti.com/lit/ds/symlink/lm358.pdf"
-        ),
-        "grad,Rgrad_feed,1,0R,Resistor_SMD:R_0805_2012Metric,,,",
-        (
-            "main,J9,1,JTAG,Connector_PinHeader_2.54mm:"
-            "PinHeader_2x05_P2.54mm_Vertical,Würth,61301011121,"
-        ),
-    ]), (
-        "BOM delta must be exactly the reviewed rows "
-        "(Rgrad_feed + the #169 MPN repairs): " + f"{added}"
-    )
-
+    assert removed == [
+            'grad,"C_grad1, C_grad2",2,100nF,Capacitor_SMD:C_0603_1608Metric,,,',
+            'grad,Udrv,1,LM358,Package_SO:SOIC-8_3.9x4.9mm_P1.27mm,Texas Instruments,LM358P,https://www.ti.com/lit/ds/symlink/lm358.pdf',
+            'head,"#FLG10, #FLG11, #FLG12, #FLG9",4,PWR_FLAG,,,,',
+            'main,"#FLG1, #FLG2, #FLG3, #FLG4, #FLG5, #FLG6, #FLG7, #FLG8",8,PWR_FLAG,,,,',
+            'main,J9,1,JTAG,Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical,Würth,61300411121,',
+        ], f"BOM rows removed vs baseline: {removed}"
+    assert added == [
+            'grad,"C31, C33",2,220p,Capacitor_SMD:C_0603_1608Metric,,,',
+            'grad,"C34, C35",2,100p,Capacitor_SMD:C_0603_1608Metric,,,',
+            'grad,"C36, C37, C41",3,100n,Capacitor_SMD:C_0603_1608Metric,,,',
+            'grad,"C49, C50, C85",3,22uF,Capacitor_SMD:C_0805_2012Metric,,,',
+            'grad,"C52, C53, C54, C57, C84",5,4.7uF,Capacitor_SMD:C_0805_2012Metric,,,',
+            'grad,"C_grad1, C_grad2, C1, C2, C3, C4, C5, C6, C7, C8, C9, C10, C11, C12, C13, C14, C15, C16, C17, C18, C19, C20, C40, C44, C46, C48, C55, C56, C58, C59, C60, C61, C62, C63, C64, C65, C68, C86, Cem0, Cem1, Cem2",41,100nF,Capacitor_SMD:C_0603_1608Metric,,,',
+            'grad,"C_in, C21, C22, C23, C24, C25, C26, C27, C28, C29, C30, C42, C43, C45, C47, C51",16,10uF,Capacitor_SMD:C_0805_2012Metric,,,',
+            'grad,"D1, D2, D3, D4, D5, D6, D7, D8, D9, D10",10,ESD5V0,Diode_SMD:D_SOD-923,ON Semi,ESD5V0S3B-U,https://www.onsemi.com/pub/Collateral/ESD5V0S3B-U-D.PDF',
+            'grad,"R71, R72",2,5.1k,Resistor_SMD:R_0603_1608Metric,,,',
+            'grad,"R73, R75, R76, R77, R80, R81, R82",7,4.7k,Resistor_SMD:R_0603_1608Metric,,,',
+            'grad,"R78, R79",2,27R,Resistor_SMD:R_0603_1608Metric,,,',
+            'grad,"Riref0, Riref1, Riref2",3,4.87k,Resistor_SMD:R_0603_1608Metric,,,',
+            'grad,"UE0, UE1, UE2",3,TLC5947,Package_SO:HTSSOP-32-1EP_6.1x11mm_P0.65mm_EP5.2x11mm_Mask4.11x4.36mm_ThermalVias,Texas Instruments,TLC5947,https://www.ti.com/lit/ds/symlink/tlc5947.pdf',
+            'grad,C32,1,10n,Capacitor_SMD:C_0603_1608Metric,,,',
+            'grad,D_USB,1,SS14 Schottky,Diode_SMD:D_SMA,,,',
+            'grad,F1,1,2A PTC,Fuse:Fuse_1206_3216Metric,Littelfuse,nanoSMDC020F,https://www.littelfuse.com/media?resourcetype=datasheets&value=0810070',
+            'grad,F2,1,1A PTC,Fuse:Fuse_1206_3216Metric,,,',
+            'grad,FB1,1,600Ω@100MHz,Inductor_SMD:L_0603_1608Metric,Murata,BLM18AG601SN1D,https://www.murata.com/products/productdata/8796738650146/ENFA0003.pdf',
+            'grad,J1,1,FT232RL,Package_SO:SSOP-28_5.3x10.2mm_P0.65mm,FTDI,FT232RL,https://www.ftdichip.com/Support/Documents/DataSheets/ICs/DS_FT232R.pdf',
+            'grad,J10,1,USB-C,Connector_USB:USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal,GCT,USB4105-GF-610-50-B,https://www.gct.cc/connector/usb4105/',
+            'grad,J12,1,BTB_HOST,qssc:Conn_02x10_BTB,Würth Elektronik,61302011121,https://www.we-online.com/en/components/products/WR-PHD_2_54_MM_SMT_PIN_HEADER_61302011121',
+            'grad,J2,1,5V Barrel,Connector_BarrelJack:BarrelJack_CUI_PJ-102AH_Horizontal,CUI,PJ-102AH,https://www.cui.com/product/resource/pj-102a.pdf',
+            'grad,J3,1,SMA,Connector_Coaxial:SMA_Amphenol_132289_EdgeMount,Amphenol,132289,https://www.amphenolrf.com/132289.html',
+            'grad,J4,1,12V LED,Connector_BarrelJack:BarrelJack_CUI_PJ-102AH_Horizontal,,,',
+            'grad,J7,1,RESET,Button_Switch_THT:SW_PUSH_6mm_H5mm,Würth,430182050816,',
+            'grad,J8,1,MW_GATE,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,Würth,61300211121,',
+            'grad,J9,1,JTAG,Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical,Würth,61301011121,',
+            'grad,L2,1,100nH,Inductor_SMD:L_0603_1608Metric,,,',
+            'grad,LED1,1,Green,LED_SMD:LED_0603_1608Metric,,,',
+            'grad,R67,1,1k,Resistor_SMD:R_0603_1608Metric,,,',
+            'grad,R68,1,2.2k,Resistor_SMD:R_0603_1608Metric,,,',
+            'grad,R70,1,330,Resistor_SMD:R_0603_1608Metric,,,',
+            'grad,R83,1,10k,Resistor_SMD:R_0603_1608Metric,,,',
+            'grad,REG1,1,AMS1117-3.3,Package_TO_SOT_SMD:SOT-223-3_TabPin2,AMS,AMS1117-3.3,https://www.mouser.com/datasheet/2/260/AMS1117-Datasheet-1273816.pdf',
+            'grad,REG2,1,AMS1117-1.8,Package_TO_SOT_SMD:SOT-223-3_TabPin2,AMS,AMS1117-1.8,https://www.mouser.com/datasheet/2/260/AMS1117-Datasheet-1273816.pdf',
+            'grad,REG3,1,AP2127K-1.0,Package_TO_SOT_SMD:SOT-23-5,Diodes Inc,AP2127K-1.0,https://www.diodes.com/assets/Datasheets/AP2127K.pdf',
+            'grad,Rgrad_feed,1,0R,Resistor_SMD:R_0805_2012Metric,,,',
+            'grad,U1,1,XC7A35T-1CSG324C,Package_BGA:Xilinx_CSG324,AMD/Xilinx,XC7A35T-1CSG324C,https://docs.amd.com/r/en-US/ds181-Artix-7-Data-Sheet',
+            'grad,U3,1,ADF4351BCPZ,Package_DFN_QFN:QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm,,,',
+            'grad,U5,1,GVA-84+,Package_TO_SOT_SMD:SOT-89-3,Mini-Circuits,GVA-84+,https://www.minicircuits.com/WebStore/dashboard.html?model=GVA-84%2B',
+            'grad,U8,1,W25Q128JVSIQ,Package_SO:SOIC-8_3.9x4.9mm_P1.27mm,Winbond,W25Q128JVSIQ,https://www.winbond.com/resource-files/w25q128jv%20revh%2004082019%20plus.pdf',
+            'grad,Uchip,1,ChipSocket_2.54_EM,qssc:ChipSocket_2.54_EM,,,',
+            'grad,Udrv,1,LM358,Package_SO:SOIC-8_3.9x4.9mm_P1.27mm,Texas Instruments,LM358DR,https://www.ti.com/lit/ds/symlink/lm358.pdf',
+            'grad,Y1,1,100MHz XO,Oscillator:Oscillator_SMD_Abracon_ASE-4Pin_3.2x2.5mm,,,',
+            'main,J9,1,JTAG,Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical,Würth,61301011121,',
+        ], f"BOM rows added vs baseline: {added}"
 
 # ------------------------------------------------- simulator constants
 

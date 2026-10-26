@@ -27,13 +27,42 @@ gone (the readout is now 4x AD7616 parallel ADC, the range is HW-pin-strapped,
 and the TLC5947 drives the 64 emitters over 4 SPI wires, not 64 GPIO).
 """
 from __future__ import annotations
-import re, json
+import os, re, json
 from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SYM = Path("/usr/share/kicad/symbols/FPGA_Xilinx_Artix7.kicad_sym")
-FP = Path("/usr/share/kicad/footprints/Package_BGA.pretty/Xilinx_CSG324.kicad_mod")
+
+
+def _kicad_data_dir(*rel: str) -> Path:
+    """Locate a stock KiCad data file instead of hardcoding /usr/share/kicad.
+
+    The symbol/footprint libraries move between installs (distro package,
+    flatpak, appimage, macOS bundle), and a hardcoded path is what made this
+    generator unrunnable outside one machine (issue #166).
+    """
+    env = os.environ.get("KICAD_SYMBOL_DIR")
+    candidates = []
+    if env:
+        candidates.append(Path(env).parent)
+    candidates += [Path(p) for p in (
+        "/usr/share/kicad",
+        "/usr/local/share/kicad",
+        "/app/share/kicad",
+        "/usr/share/kicad-nightly",
+        "/Applications/KiCad/KiCad.app/Contents/SharedSupport/kicad",
+    )]
+    for base in candidates:
+        if (base / Path(*rel)).is_file():
+            return base / Path(*rel)
+    raise SystemExit(
+        f"cannot find {'/'.join(rel)}: tried {', '.join(str(c) for c in candidates)}.\n"
+        "Install the KiCad symbol/footprint libraries, or point KICAD_SYMBOL_DIR\n"
+        "at the directory that contains 'symbols/' and 'footprints/'.")
+
+
+SYM = _kicad_data_dir("symbols", "FPGA_Xilinx_Artix7.kicad_sym")
+FP = _kicad_data_dir("footprints", "Package_BGA.pretty", "Xilinx_CSG324.kicad_mod")
 OUT = ROOT / ".tmpwork" / "fpga_csg324_map.json"
 
 

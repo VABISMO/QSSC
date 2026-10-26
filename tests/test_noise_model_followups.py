@@ -23,7 +23,6 @@ the provenance wording moved with them).
 from __future__ import annotations
 
 import dataclasses
-import math
 
 import pytest
 

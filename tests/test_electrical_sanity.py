@@ -589,6 +589,12 @@ KNOWN_NO_MPN = {
     ("main", "Y1"), ("main", "J4"), ("main", "F2"), ("main", "U3"),
     ("main", "LED1"), ("main", "D_USB"), ("main", "Uchip"),
     ("head", "Uchip"),
+    # The gradient board carries the same power/RF/connector parts as the main
+    # board (build_gradient_board reuses build_main_board(grad=True)), so each
+    # of them has a grad twin with the same blank MPN -- gen_bom emits the full
+    # grad section now (issue #162) instead of six hand-typed rows.
+    ("grad", "Y1"), ("grad", "J4"), ("grad", "F2"), ("grad", "U3"),
+    ("grad", "LED1"), ("grad", "D_USB"), ("grad", "Uchip"),
 }
 # rows whose designator MUST carry an MPN (active parts, connectors, fuses)
 _NEEDS_MPN = re.compile(r"^(U|Y|J|D|R?EG\d|F|Q|LED)")

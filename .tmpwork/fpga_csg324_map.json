@@ -1,0 +1,186 @@
+{
+  "config": {
+    "CCLK": "E9",
+    "D00": "K17",
+    "D01": "K18",
+    "D02": "L14",
+    "D03": "M14",
+    "DONE": "P10",
+    "FCS_B": "L13",
+    "INIT_B": "P7",
+    "M0": "P12",
+    "M1": "P13",
+    "M2": "P11",
+    "PROGRAM_B": "P9"
+  },
+  "jtag": {
+    "TCK": "E10",
+    "TDI": "E11",
+    "TDO": "E13",
+    "TMS": "E12"
+  },
+  "power": {
+    "CFGBVS": [
+      "P8"
+    ],
+    "GND": [
+      "A12",
+      "A2",
+      "B15",
+      "B5",
+      "C18",
+      "C8",
+      "D1",
+      "D11",
+      "E14",
+      "E4",
+      "F11",
+      "F17",
+      "F7",
+      "F9",
+      "G10",
+      "G12",
+      "G8",
+      "H11",
+      "H13",
+      "H3",
+      "H7",
+      "J12",
+      "J16",
+      "J6",
+      "J8",
+      "K11",
+      "K7",
+      "L12",
+      "L2",
+      "L8",
+      "M11",
+      "M15",
+      "M5",
+      "M7",
+      "M9",
+      "N10",
+      "N12",
+      "N18",
+      "N8",
+      "P1",
+      "R14",
+      "R4",
+      "T17",
+      "T7",
+      "U10",
+      "V13",
+      "V3"
+    ],
+    "GNDADC": [
+      "H9"
+    ],
+    "VCCADC": [
+      "H10"
+    ],
+    "VCCAUX": [
+      "F12",
+      "H12",
+      "K12",
+      "M12"
+    ],
+    "VCCBATT": [
+      "E8"
+    ],
+    "VCCBRAM": [
+      "F10",
+      "G11"
+    ],
+    "VCCINT": [
+      "F8",
+      "G7",
+      "G9",
+      "H8",
+      "J11",
+      "J7",
+      "K8",
+      "L11",
+      "L7",
+      "M10",
+      "M8",
+      "N11",
+      "N7",
+      "N9"
+    ],
+    "VCCO_0": [
+      "R9"
+    ],
+    "VCCO_14": [
+      "L17",
+      "N13",
+      "P16",
+      "T12",
+      "U15",
+      "V18"
+    ],
+    "VCCO_15": [
+      "A17",
+      "C13",
+      "D16",
+      "G15",
+      "H18",
+      "K14"
+    ],
+    "VCCO_16": [
+      "B10"
+    ],
+    "VCCO_34": [
+      "K4",
+      "N3",
+      "P6",
+      "T2",
+      "U5",
+      "V8"
+    ],
+    "VCCO_35": [
+      "A7",
+      "C3",
+      "D6",
+      "F2",
+      "G5",
+      "J1"
+    ],
+    "VREFN": [
+      "J9"
+    ],
+    "VREFP": [
+      "K10"
+    ]
+  },
+  "signals": {
+    "ADF_MUXOUT": "H1",
+    "SPI_CLK": "E1",
+    "SPI_DATA": "F1",
+    "SPI_LE": "G1",
+    "adc_busy": "E18",
+    "adc_convst": "A18",
+    "adc_cs0": "F18",
+    "adc_cs1": "G18",
+    "adc_cs2": "J18",
+    "adc_cs3": "L18",
+    "adc_miso": "D18",
+    "adc_resetn": "M18",
+    "adc_sclk": "B18",
+    "clk_100mhz": "B8",
+    "em_blank": "V5",
+    "em_sclk": "V1",
+    "em_sin": "V2",
+    "em_xlat": "V4",
+    "mod_sync": "K1",
+    "mw_gate": "L1",
+    "refclk_out": "A8",
+    "reset": "A1",
+    "rx": "C1",
+    "tx": "B1"
+  },
+  "source": "tools/gen_fpga_ballmap_csg324.py from FPGA_Xilinx_Artix7:XC7A35T-CSG324 (324 pads)",
+  "xadc": {
+    "VN": "K9",
+    "VP": "J10"
+  }
+}

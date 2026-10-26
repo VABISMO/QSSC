@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import pcbnew, sys
 from pathlib import Path
-REPO = Path("/home/cryptocalypse/projects/QCHIP/qssc")
+# Resolve the repo root from this file's own location: a hardcoded absolute
+# path breaks on every machine except the author's (issue #167).
+REPO = Path(__file__).resolve().parents[1]
 board = sys.argv[1] if len(sys.argv) > 1 else "main"
 path = REPO / "hardware/pcb" / ("qssc.kicad_pcb" if board == "main" else "chip_module.kicad_pcb")
 refs = sys.argv[2].split(",") if len(sys.argv) > 2 else []

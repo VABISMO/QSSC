@@ -6,7 +6,9 @@ Head: DET{i} -> DET_IN{i} -> TLV9004 TIA (UT{j}) input pad; and the TIA output
 Nets are fixed (routing only adds copper), so this is valid mid-FreeRouting."""
 import pcbnew
 from pathlib import Path
-REPO = Path("/home/cryptocalypse/projects/QCHIP/qssc")
+# Resolve the repo root from this file's own location: a hardcoded absolute
+# path breaks on every machine except the author's (issue #167).
+REPO = Path(__file__).resolve().parents[1]
 
 def load(name):
     return pcbnew.LoadBoard(str(REPO / "hardware/pcb" / name))

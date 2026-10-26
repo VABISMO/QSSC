@@ -1,0 +1,43 @@
+# check_lite.ys -- cheap structural check of the QMTECH port.
+#
+# Deliberately does NOT run synth_xilinx / abc9: that flow needs ~6 GB and
+# minutes on this design.  This runs in a few hundred MB and validates the
+# failure modes that actually kept breaking the build:
+#
+#   * hierarchy resolves -> catches unknown primitives (MMCME2_BASE, BUFG,
+#     ODDR2) that yosys does not provide for family xc7
+#   * no latch survives the front end -> hard assert, same as the project's
+#     own fpga/synth/synth_yosys.ys
+#   * `check` reports undriven / multiply-driven nets
+#   * module/port counts of the wrapper
+#
+# Resource counts are NOT produced here; they come from the full run and are
+# recorded in README.md.
+#
+# Run from the repo root:
+#   yosys -l /tmp/qmtech_lite.log -s fpga/qmtech/yosys_check/check_lite.ys
+
+read_verilog fpga/qmtech/yosys_check/stubs.v
+read_verilog fpga/rtl/uart_rx.v
+read_verilog fpga/rtl/uart_tx.v
+read_verilog fpga/rtl/spi_master.v
+read_verilog fpga/rtl/tlc5947_ctrl.v
+read_verilog fpga/rtl/emitter_array.v
+read_verilog fpga/rtl/adc_reader.v
+read_verilog fpga/rtl/adf4351_ctrl.v
+read_verilog fpga/rtl/qrng_entropy.v
+read_verilog fpga/rtl/dac_ctrl.v
+read_verilog fpga/rtl/command_parser.v
+read_verilog fpga/rtl/top_level.v
+read_verilog fpga/qmtech/top_qmtech.v
+
+hierarchy -check -top top_qmtech
+stat
+
+proc
+select -assert-none t:$_DLATCH_*
+select -clear
+
+check
+
+log "=== QMTECH lite check COMPLETE (hierarchy OK, no latches) ==="
