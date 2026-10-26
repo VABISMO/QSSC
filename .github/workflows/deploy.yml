@@ -1,20 +1,22 @@
 # Deploy — fires ONLY after the CI workflow has completed successfully on main.
 # (Gated on tests: a red CI run never reaches this workflow.)
 #
+# Frontend (static React dashboard) -> GitHub Pages (build_type=workflow;
+#   https://vabismo.github.io/QSSC/). Pages was enabled on this repo via
+#   Settings -> Pages -> Source = GitHub Actions, so the job below publishes
+#   with actions/deploy-pages rather than a gh-pages branch.
 # API (FastAPI + qiskit/aer, Docker) -> Render free web service, triggered via
 #   Render's deploy hook so the deploy happens after CI is green, not on every
 #   push.
 #
-# The frontend used to publish to GitHub Pages here as well, but Pages is not
-# enabled on this repository, so the job could only ever fail ("Get Pages site
-# failed ... verify that the repository has Pages enabled"). The dashboard is
-# built and gate-checked by the CI workflow's "Frontend build" job; publish it
-# wherever you actually serve it from.
-#
-# Required repo configuration (Settings → Secrets):
+# Required repo configuration (Settings → Secrets/Variables):
+#   * Repository variable VITE_API_BASE = the public API URL, e.g.
+#     https://qssc-api.onrender.com  (the dashboard calls this for /api/*;
+#     without it the built app falls back to same-origin and every API call
+#     404s on Pages).
 #   * Repository secret RENDER_DEPLOY_HOOK_URL = Render's deploy-hook URL
 #     (Render dashboard → the qssc-api service → Settings → Deploy Hook).
-#     If unset, the API deploy step is skipped.
+#     If unset, the API deploy step is skipped (the frontend still deploys).
 name: Deploy
 
 on:
@@ -97,6 +99,42 @@ jobs:
             fi
           fi
           echo "ok=true" >> "$GITHUB_OUTPUT"
+
+  # Publish the dashboard to GitHub Pages. Job-level permissions: the rest of
+  # the workflow stays read-only, and only this job gets what the Pages OIDC
+  # deploy needs (id-token for the signed artifact upload, pages to publish).
+  deploy-frontend:
+    name: Frontend → GitHub Pages
+    needs: require-green-ci
+    if: ${{ needs.require-green-ci.outputs.ok == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build dashboard (API base = VITE_API_BASE)
+        working-directory: frontend
+        env:
+          VITE_API_BASE: ${{ vars.VITE_API_BASE }}
+        run: |
+          npm ci
+          npm run build
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: frontend/dist
+      - id: deploy
+        uses: actions/deploy-pages@v5
 
   deploy-api:
     name: API → Render (deploy hook)
