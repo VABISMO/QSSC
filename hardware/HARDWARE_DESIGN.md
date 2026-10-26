@@ -483,21 +483,42 @@ ASCII. Detector codes are **16-bit ADC samples (0–65535)** of the
 photoluminescence intensity, sent as ASCII decimal, space-separated for
 `READ_DETECTORS` and newline-terminated.
 
-| Command                                                    | Action                                   | Reply |
-|------------------------------------------------------------|------------------------------------------|-------|
-| `DRIVE_EMITTER <index> <duration_ms>\n`                     | Fire emitter `<index>` (0–63) for duration_ms | `OK\n` |
-| `APPLY_PULSE <qubit> <freq_khz> <amp> <duration_ns> <phase>\n` | Program ADF4351 to freq_khz         | `OK\n` |
-| `READ_DETECTOR <site>\n`                                   | Read one detector channel (site 0–63)      | `<16-bit ADC sample>\n` |
-| `READ_DETECTORS\n`                                         | Snapshot all 64 detector channels           | `<sample> <sample> ... \n` (64 samples) |
-| `CALIBRATE\n`                                              | Fire each emitter + read all 64 channels, build emitter→detector LUT | `OK\n` |
-| (unknown / malformed)                                      | —                                        | `ERR\n` |
-
-`freq_khz` is the desired RF output in kHz, e.g. `2870000` for 2.87 GHz (NV⁻) or
-`3460000` for 3.46 GHz (hBN V_B⁻). The `adf4351_ctrl` module computes INT/FRAC/MOD
-and the RF divider so the VCO stays in 2.2–4.4 GHz (see §6). `amp` (0–3) maps to
-the ADF4351 output power index, `duration_ns`/`phase` are parsed and reserved
-for a future RF-gate/phase-register extension. `<index>` and `<site>` are 0–63
-integers (one per channel — parallel, not row/col).
+  All **19 verbs** are implemented in `fpga/rtl/command_parser.v`; an unknown
+  verb, a missing argument or an out-of-range value answers `ERR`. Every reply
+  is one `
+`-terminated ASCII line (except `READ_DETECTORS`/`RUN_ALL_ODMR`,
+  which stream their samples first).
+  
+  | Command | Action | Reply |
+  |---|---|---|
+  | `ID` | board-identity probe (the host sends it on open) | `QSSC v1` |
+  | `STATUS` | rails / PLL / ADC / die-temperature self-status | `PLL_LOCKED … VCC3V3_mv … TEMP_C …` |
+  | `RESET` | soft-reset TLC5947 / ADF4351 / ADC peripheral state | `OK` |
+  | `DRIVE_EMITTER <index> <duration_ms>` | fire emitter `<index>` (0–63) at full grayscale | `OK / ERR` |
+  | `SET_EMITTER <index> <level>` | arm one channel's 12-bit grayscale (0–4095) | `OK / ERR` |
+  | `DRIVE_PATTERN <duration_ms>` | fire **all** armed channels in parallel | `OK / ERR` |
+  | `CLEAR_EMITTERS` | disarm every channel (gs = 0) | `OK` |
+  | `APPLY_PULSE <qubit> <freq_khz> <amp> <duration_ns> <phase_mrad>` | program the ADF4351 carrier **and** gate the MW pulse for `duration_ns` | `OK / ERR` |
+  | `READ_DETECTOR <site>` | digitise one detector channel (site 0–63) | `<0–65535> / ERR` |
+  | `READ_DETECTORS` | snapshot all 64 channels in one parallel frame | `<sample> × 64` |
+  | `CLEAR_DETECTORS` | ADC no-op (no counters to clear) | `OK` |
+  | `CALIBRATE` | fire each emitter + read all channels, build the emitter→detector LUT | `OK / ERR` |
+  | `READ_RNG <n_bytes>` | harvest von-Neumann-debiased AD7616 LSB noise (n = 1–256) | `<hex> <raw> 0 0 / ERR` |
+  | `ODMR_SWEEP <qubit> <f0_khz> <f1_khz> <n>` | sweep the ADF4351 across the resonance, one sample per point | `<n> f0 c0 f1 c1 … / ERR` |
+  | `RUN_ALL_ODMR <f0_khz> <f1_khz> <n>` | 64-parallel sweep: all channels at every point | `n × 64 codes + OK / ERR` |
+  | `RUN_SEQUENCE <site> <kind> <n> <t_step>` | pulse engine (ramsey / hahn / cpmg) → readout codes | `<n> c0 c1 … / ERR` |
+  | `READ_LOCKIN <site> <n_cycles>` | self-timed on/off lock-in accumulation (n = 1–10000) | `<sum_on> <sum_off> <n_on> <n_off> / ERR` |
+  | `READ_LOCKINP <site> <n_samples> <prime_idx>` | prime-period IQ lock-in (prime_idx 0–15 selects p = 2, 3, 5 … 53) | `<I> <Q> <n> / ERR` |
+  | `SET_GRADIENT <code>` | program the gradient-coil DAC (MCP4921, 0–4095) | `OK / ERR` |
+  | (unknown / malformed / out of range) | — | `ERR` |
+  
+  `freq_khz` is the desired RF output in kHz, e.g. `2870000` for 2.87 GHz (NV⁻) or
+  `3460000` for 3.46 GHz (hBN V_B⁻). The `adf4351_ctrl` module computes INT/FRAC/MOD
+  and the RF divider so the VCO stays in 2.2–4.4 GHz (see §6). `amp` (0–3) maps to
+  the ADF4351 output-power index, `phase_mrad` is written to the ADF4351 PHASE
+  register (R1), and `duration_ns` drives the `mw_gate` RF-switch pin — a gate
+  timer counts `duration_ns/10` cycles at 100 MHz. `<index>` and `<site>` are
+  0–63 integers (one per channel — parallel, not row/col).
 
 > **Detector readout is the full 16-bit analog waveform, not a photon count.**
 > The pre-pivot protocol returned 12-bit XADC codes (0–4095) from a serial MUX
