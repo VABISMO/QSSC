@@ -39,17 +39,19 @@ CHIP_PROTOCOL: List[Section] = [
              "(532 nm excitation band) — no external pump laser needed.",
         steps=[
             Step("Precursor solution", "15–30 min",
-                 "Grind citric acid / orange peel, dissolve 3–5 g in 30–50 mL water "
-                 "with 1–2 g urea, stir at 50–60 °C.",
-                 {"precursor_g": "3–5", "water_mL": "30–50", "urea_g": "1–2",
-                  "temp_C": "50–60"}),
-            Step("Hydrothermal synthesis", "4–6 h",
-                 "Seal in Teflon autoclave (≤70% fill), heat 180–220 °C for 4 h, "
-                 "cool naturally. Lower T→blue, higher T→longer wavelength.",
-                 {"temp_C": "180–220", "time_h": 4, "pressure_bar": "<20"}),
-            Step("Purification", "30–60 min",
-                 "Filter, centrifuge 3000–5000 rpm, optional 24 h dialysis.",
-                 {"rpm": "3000–5000"}),
+                 "Dissolve 1.0 g citric acid + 1.0 g urea in 10 mL DI water; "
+                 "stir 5 min until clear (citric-acid + urea hydrothermal route).",
+                 {"precursor_g": "1.0", "urea_g": "1.0", "water_mL": "10"}),
+            Step("Hydrothermal synthesis", "6–10 h",
+                 "Seal in the Teflon autoclave (≤70 % fill) and hold in an oven "
+                 "preheated to 220 °C for 6–10 h (green CQDs, ~520–540 nm), then "
+                 "cool naturally. 180 °C gives the blue emitters instead.",
+                 {"temp_C": "220", "time_h": "6–10", "pressure_bar": "<20"}),
+            Step("Purification", "48 h",
+                 "Centrifuge 10 000 rpm (≈9 000 × g) 15 min and discard the "
+                 "pellet, push the supernatant through a 0.22 µm PVDF filter, "
+                 "then dialyze against DI water for 48 h.",
+                 {"rpm": "10000", "filter_um": "0.22", "dialysis_h": 48}),
             Step("CQD array film", "1–2 h",
                  "Disperse ~10 mg/mL, spin-coat/drop-cast 100–200 nm on cleaned "
                  "ITO glass, dry 60–80 °C.",
@@ -62,9 +64,10 @@ CHIP_PROTOCOL: List[Section] = [
             Step("Anneal", "30 min", "150–250 °C, 15–30 min, air or N₂.",
                  {"temp_C": "150–250"}),
             Step("Electrical/optical test", "≈30 min",
-                 "Drive 5–20 V, observe EL at 450–620 nm; pulsed 10²–10³ A/cm² "
-                 "for ASE narrowing.",
-                 {"voltage_V": "5–20"}),
+                 "Ramp from 0 V: turn-on expected at 4–8 V, visible green EL at "
+                 "~520–540 nm under dim room light. Pulsed 10²–10³ A/cm² for "
+                 "ASE narrowing.",
+                 {"turn_on_V": "4–8", "el_nm": "520–540"}),
         ],
         expected="EQY 10–20%, detectable ASE narrowing, area 1–5 cm².",
     ),
@@ -73,10 +76,11 @@ CHIP_PROTOCOL: List[Section] = [
         goal="Few-layer hBN flakes with optically addressable VB- spin defects "
              "(D ≈ 3.46 GHz) embedded in a PMMA matrix.",
         steps=[
-            Step("Liquid exfoliation", "1–2 h",
-                 "100–200 mg hBN powder in 20–50 mL IPA, sonicate 1–2 h, "
-                 "centrifuge 1500–3000 rpm, collect supernatant.",
-                 {"hBN_mg": "100–200", "solvent": "IPA", "layers": "2–10"}),
+            Step("Liquid exfoliation", "12 h",
+                 "100 mg hBN powder in 20 mL NMP, bath-sonicate 12 h (<35 °C), "
+                 "centrifuge 1500 rpm 20 min and keep the top 70 %; wash twice "
+                 "and redisperse in IPA at 1 mg/mL.",
+                 {"hBN_mg": 100, "solvent": "NMP", "layers": "3–8"}),
             Step("Defect engineering", "1–3 h",
                  "Gold standard: create VB- by irradiation (neutron, or focused "
                  "ion beam Xe/Ar/N), then vacuum anneal 800–900 °C (Ar/N₂) 1–2 h to "
@@ -101,16 +105,18 @@ CHIP_PROTOCOL: List[Section] = [
              "A 650 nm red long-pass filter blocks the green pump and passes the "
              "~850 nm defect PL.",
         steps=[
-            Step("Dispersion", "30 min",
-                 "100–200 mg graphene/MoS₂ in 20 mL ethanol, sonicate 30 min."),
-            Step("Patterning + deposit", "1–2 h",
-                 "Drop-cast into resin-moulded sites (~20–30 µm), add optical "
-                 "isolation trenches, dry 80 °C."),
-            Step("Grid electrodes + anneal", "30 min",
-                 "Cu/Ag ink row/column grid, cure 100 °C, anneal 150–200 °C.",
-                 {"responsivity_AW": "0.05–0.3", "frame_Hz": "10–100"}),
+            Step("CVD graphene transfer", "≈36 h",
+                 "PMMA-coat commercial CVD graphene on Cu, etch the Cu in 0.5 M "
+                 "FeCl₃ for 12 h, scoop the membrane onto the host, dry 24 h + "
+                 "180 °C 1 h, then strip the PMMA in acetone.",
+                 {"pmma_nm": 200, "etch_h": 12}),
+            Step("Electrodes + isolation", "1–2 h",
+                 "Shadow-mask Au/Cr (10/80 nm) source–drain electrodes with a "
+                 "100 µm channel, then O₂ plasma (100 W, 30 s, 50 mTorr) through "
+                 "a resist window to isolate the sheet into detectors.",
+                 {"channel_um": 100, "responsivity_AW": "0.01–0.1", "frame_Hz": "10–100"}),
         ],
-        expected="On-chip scanning readout, responsivity 0.05–0.3 A/W.",
+        expected="On-chip scanning readout, 0.01–0.1 A/W (graphene) / 10–10² A/W (MoS₂).",
     ),
     Section(
         id="assembly", title="4 · Stacking, contacts & thermal path",
@@ -416,11 +422,11 @@ CHIP_PROTOCOLS: Dict[str, List[Section]] = {
 }
 
 
-def protocol_as_dict(platform: str = "hBN-VB") -> List[dict]:
+def protocol_as_dict(platform: str = "NV") -> List[dict]:
     return [asdict(s) for s in CHIP_PROTOCOLS.get(platform, CHIP_PROTOCOL)]
 
 
-def protocol_summary(platform: str = "hBN-VB") -> dict:
+def protocol_summary(platform: str = "NV") -> dict:
     proto = CHIP_PROTOCOLS.get(platform, CHIP_PROTOCOL)
     summaries = {
         "hBN-VB": dict(name="Quantum Solid State Chip (room temperature)",
