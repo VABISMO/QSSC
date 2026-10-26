@@ -1,7 +1,7 @@
 # QSSC — Component datasheets & verified pinouts
 
 Local reference folder for every active component on the QSSC merged single
-board (FPGA + 128-pad quantum die + 64-ch parallel detector front-end +
+board (FPGA + 130-pad quantum die + 64-ch parallel detector front-end +
 64-ch parallel emitter driver, all on one PCB).  Each entry has:
 
 - the **verified pinout** (extracted from the installed KiCad 8 symbol library
@@ -27,7 +27,7 @@ PDFs already fetched locally are in `./pdfs/`.  The BOM is in `BOM.csv`.
 
 ## Main control board
 
-The main board is a 6-layer HDI 210×140 mm board that sits BELOW the die,
+The main board is a 6-layer HDI 150×118 mm board that sits BELOW the die,
 contacting the die BOTTOM (emitter) face on its F.Cu via an **Ironwood SBT
 spring-pin socket** (soldered down — F.Paste on the 65 pads — NOT ACF pressure
 contact; the detector TOP face on the head board is the ACF/pogo one).  It
@@ -68,7 +68,7 @@ die EM face, and the BTB HOST connector J12.
 
 ### U3 — ADF4351BCPZ  (Analog Devices wideband fractional-N PLL + VCO)
 - **Function:** 2.87 GHz (NV⁻) / 3.46 GHz (hBN V_B⁻) ODMR microwave source.
-  SPI from FPGA, 25 MHz REFIN from FPGA ball A14, loop filter -> VTUNE,
+  SPI from FPGA, 25 MHz REFIN from FPGA ball A8, loop filter -> VTUNE,
   RF_OUT_A -> GVA-84+ amp -> SMA.
 - **Package:** QFN-32-1EP, 5x5 mm, 0.5 mm pitch (footprint pad 33 = EP).
 - **Datasheet:** https://www.analog.com/media/en/technical-documentation/data-sheets/ADF4351.pdf
@@ -105,7 +105,7 @@ die EM face, and the BTB HOST connector J12.
 | 26  | PDB_RF  | +3V3               | **RF power-down is active-LOW: tie HIGH = RF enabled** |
 | 27  | DGND    | GND                | |
 | 28  | DVDD    | +3V3               | |
-| 29  | REFIN   | refclk_25m         | 25 MHz from FPGA ball A14 |
+| 29  | REFIN   | refclk_25m         | 25 MHz from FPGA ball A8 |
 | 30  | MUXOUT  | ADF_MUXOUT         | -> FPGA status |
 | 31  | SDGND   | GND                | |
 | 32  | SDVDD   | +3V3               | |
@@ -160,9 +160,9 @@ die EM face, and the BTB HOST connector J12.
 
 | pad | name | direction | net on QSSC | note |
 |----:|------|-----------|-------------|------|
-| 1   | TXD  | output    | UART_RX     | -> FPGA rx (P17). Net is FPGA-perspective: the FT232 *transmit* drives the FPGA *receive* line. |
+| 1   | TXD  | output    | UART_RX     | -> FPGA rx (C1). Net is FPGA-perspective: the FT232 *transmit* drives the FPGA *receive* line. |
 | 4   | VCCIO| power     | +3V3        | I/O supply |
-| 5   | RXD  | input     | UART_TX     | <- FPGA tx (P18). |
+| 5   | RXD  | input     | UART_TX     | <- FPGA tx (B1). |
 | 15  | USBD+ | bidir    | USB_DP_F    | -> R78 series-damping -> USB_DP -> USB-C |
 | 16  | USBD- | bidir    | USB_DM_F    | -> R79 series-damping -> USB_DM -> USB-C |
 | 17  | 3V3OUT| output   | 3V3OUT      | internal regulator out — **decoupled by C57 100nF to GND** (regulator stability; NOT no-connect) |
@@ -203,7 +203,7 @@ die EM face, and the BTB HOST connector J12.
 - **Local PDF:** not fetched (Diodes Inc blocks headless).
 - **Verified pinout:** 1 = VIN, 2 = GND, 3 = EN, 4 = BP (bypass), 5 = VOUT.
 
-### Y1 — ASE-100MHz  (Abracon TCXO)
+### Y1 — 100 MHz XO  (Abracon ASE-100.000MHZ-LR)
 - **Function:** 100 MHz FPGA main clock (clkin).
 - **Package:** 4-pin 3.2x2.5 mm SMD oscillator.
 - **Datasheet:** https://abracon.com/Oscillators/ASE.pdf
@@ -280,7 +280,7 @@ die EM face, and the BTB HOST connector J12.
 
 ## Detector head board
 
-The detector head is a 4-layer 150×140 mm board that sits ABOVE the die,
+The detector head is a 6-layer 110×102 mm board that sits ABOVE the die,
 contacting the die TOP (detector) face on its B.Cu via ACF pressure contact
 (no B.Paste — it is a contact interface, not soldered).  It carries the 64-ch
 TIA front-end, 4× AD7616 ADCs, and the BTB DAUGHTER connector that returns the
@@ -338,7 +338,7 @@ edge spacer + electrical link.  No FPGA, no RF, no USB, no emitter driver.
 
 ### Passives / misc (head board)
 - UT0-15 TLV9004 — Cut0-15 100nF (VCC decoupling).  Rf0-63 1 M + Cf0-63 1 p —
-  TIA feedback.  Rref1/Rref2 5.1k + Cref — DET_REF = 1.65 V virtual-ground
+  TIA feedback.  Rref1/Rref2 10k + Cref — DET_REF = 1.65 V virtual-ground
   divider.
 - UAD0-3 AD7616 — Cua/CuaB/Cud/Cur/Crio/Crgc/Crgd per-ADC decoupling.
 - FB_A 600 Ω ferrite + C_Abulk 10 µF + C_ahf 100 nF — +5V_A analog rail.
@@ -367,9 +367,9 @@ a different mechanism (the die is **removable**):
   datasheet.  See `docs/FABRICATION_PROTOCOL.md` for the CQD stack
   (ITO shared anode / Ag per-pixel cathode) and EL specs (turn-on 4-8 V,
   drive 2-20 mA/pixel, ~520-540 nm green).
-- **Die:** 20 x 20 mm, 129 pads @ 0.30 mm pitch (0.15 x 0.30 mm): 64 DET pads
-  on the TOP face + 64 EM cathode pads on the BOTTOM face + 1 EM_ANODE pad
-  (the shared common anode).
+- **Die:** 20 x 20 mm, 130 pads @ 2.5 mm pitch (65 per face): 64 DET pads +
+  DET_COMMON on the TOP face, 64 EM cathode pads + EM_ANODE on the BOTTOM
+  face (one shared common per face).
 - **Two footprints, one die:** `Ironwood_SBT` places the 64 EM cathodes +
   EM_ANODE on the **main board F.Cu + F.Paste + F.Mask** — these are the
   SOLDER pads of a commercial **Ironwood SBT** open-top / clamshell spring-pin
@@ -477,11 +477,11 @@ schematic + netlist + placement are DRC 0/0/0.
   | 1   | OUTA  | GRAD_GATE      |
   | 2   | INA−  | GRAD_SENSE     |
   | 3   | INA+  | GRAD_DAC_OUT   |
-  | 4   | VCC   | +5V            |
+  | 4   | V-    | GND            |
   | 5   | INB+  | GND            |
   | 6   | INB−  | GRAD_NFB       |
   | 7   | OUTB  | GRAD_NFB       |
-  | 8   | GND   | GND            |
+  | 8   | V+    | +5V            |
 
 - **Datasheet:** <https://www.ti.com/lit/ds/symlink/lm358.pdf> (`pdfs/LM358.pdf`)
 
@@ -562,7 +562,7 @@ Source: `https://github.com/ChinaQMTECH/QMTECH_XC7A15T_35T_CSG325_CORE_BOARD`
 - Boots Master SPI (`M[2:0] = 1:0:0`).
 
 **Gotchas when porting from the custom board** — several balls used in
-`../constraints.xdc` are ground or absent on CSG325 (e.g. B8, A18, B18, G1,
+`../../fpga/constraints.xdc` are ground or absent on CSG325 (e.g. B8, A18, B18, G1,
 A8, A1, B1, C1), so they must be re-assigned.  The QMTECH port lives in
 [`fpga/qmtech/`](../../fpga/qmtech/) with its own `constraints_qmtech.xdc`.
 
