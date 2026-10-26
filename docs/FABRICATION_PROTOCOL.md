@@ -194,7 +194,7 @@ This follows the citric-acid + urea hydrothermal route, a well-established "bott
 
 ### 2.2 Film deposition
 
-7. **Substrate:** 5 × 5 mm² Si (300 nm SiO₂) or glass, cleaned (Sec. 1.10), UV-ozone 15 min.
+7. **Substrate:** 5 × 5 mm² Si (300 nm SiO₂) or glass, cleaned, UV-ozone 15 min.
 8. **Drop-cast / spin.** For a continuous thin film: spin 200 µL of 1 mg/mL hBN/IPA at **2000 rpm, 60 s**, repeat 3× to build coverage. Anneal **200 °C, 30 min** in air to burn off organics and improve flake adhesion.
    - For **isolated single flakes** (preferred for single-defect addressing): dilute to 0.01 mg/mL, drop-cast 20 µL, air dry; flakes will be sparse, separable by > 5 µm.
 
@@ -234,7 +234,7 @@ The negatively-charged boron vacancy, VB−, is a spin-1 (S=1) defect with zero-
 
 ### 3.2 MoS₂ transfer (optional, for higher-responsivity channel)
 
-5. CVD monolayer MoS₂ on SiO₂/Si (commercial). Pattern Au contact pads first (Sec. 4.6), then transfer MoS₂ by **water-assisted delamination**: coat with PMMA, etch SiO₂ in **1 % HF** (50 s), scoop membrane onto target.
+5. CVD monolayer MoS₂ on SiO₂/Si (commercial). Pattern Au contact pads first, then transfer MoS₂ by **water-assisted delamination**: coat with PMMA, etch SiO₂ in **1 % HF** (50 s), scoop membrane onto target.
 6. Anneal **200 °C, 2 h in Ar** to remove bubbles and residue.
 
 ### 3.3 Electrodes and channel definition
@@ -371,11 +371,9 @@ If the §5.1 photodiode instead measures near "~1 mW at the sample", the emitter
 | Spin coherence T₂ (RT) | 0.5–5 µs | Sec. 5.3 |
 | Spin relaxation T₁ (RT) | 10–100 µs | Sec. 5.3 |
 | Emitter → detector coupling | 20–60 % | Sec. 5.4 |
-| Sol-gel SiO₂ propagation loss | < 0.5 dB/cm @ 850 nm (fluorescence-free) | Sec. 4.1 |
 | Graphene photodetector responsivity | 0.01–0.1 A/W | Sec. 3.4 |
 | MoS₂ photodetector responsivity | 10–10² A/W (photogating) | Sec. 3.4 |
-| Operating temperature | 288–300 K (set 295 K) | Sec. 4.4 |
-| TEC power | < 5 W | Sec. 4.4 |
+| Operating temperature | 288–300 K (ambient) | Sec. 4.2 |
 | Total chip footprint | 25 × 25 mm² | Sec. 2.4 |
 
 ---

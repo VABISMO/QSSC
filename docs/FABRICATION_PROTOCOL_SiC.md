@@ -310,8 +310,7 @@ Inject calibrated 730 nm light at the emitter edge and measure the on-chip detec
 | **Compute at 300 K?** | Shallow only (Bell, small QFT, Ramsey); deep (Shor) needs DD + cool | Sec. 5.3 |
 | Emitter → detector coupling | 20–60 % | Sec. 5.4 |
 | Graphene detector responsivity | 0.01–0.1 A/W (few-layer MoS₂ restores some gain) | Sec. 3 |
-| Operating temperature | 288–300 K (set 295 K) | Sec. 4.4 |
-| TEC power | < 5 W | Sec. 4.4 |
+| Operating temperature | 288–300 K (ambient) | Sec. 4.4 |
 | Chip footprint | 25 × 25 mm² (host = 4H-SiC wafer ~5×5×0.5 mm) | Sec. 2 |
 
 ---

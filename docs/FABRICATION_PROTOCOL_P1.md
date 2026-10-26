@@ -172,8 +172,6 @@ Drive pin (i,j) cathode vs EM_ANODE anode. The paste diode (pin → ZnO → CQD 
 | 8 | 2.54 mm female socket | 8×8 = 64-pos, or two 8-pin rows ×8 | breakout motherboard interface |
 | 9 | ITO glass | 20×20×1.1 mm ×2 (sensor + emitter) | DET_COMMON (sensor) / EM_ANODE (emitter) |
 
-(P0 L2 bus BOM — TEOS, NV microdiamonds Adamas FMDNVLN, glass wafer — unchanged; see P0 §3.)
-
 ---
 
 ## 7. Physics (datasheet-grounded, no external numbers)

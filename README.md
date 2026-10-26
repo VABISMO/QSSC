@@ -365,13 +365,13 @@ result is labelled `source: hardware · I/O: real`. With **no board** (or
 `QSSC_FPGA_PORT` unset), the same switch shows a red *No FPGA detected* banner
 and never silently falls back to the simulator.
 
-**Firmware status.** Implemented in the RTL today: `DRIVE_EMITTER`,
+**Firmware status.** All 19 verbs are implemented in the RTL: `DRIVE_EMITTER`,
 `SET_EMITTER`, `DRIVE_PATTERN`, `CLEAR_EMITTERS`, `READ_DETECTOR`,
-`READ_DETECTORS`, `APPLY_PULSE`, `READ_RNG`. Not implemented yet: `ID`,
-`STATUS`, `RESET`, `ODMR_SWEEP`. Because `ID` is not in the firmware,
-`/api/fpga/probe` reports `connected: false` instead of guessing, and the verbs
-that need the lock-in accumulator or the pulse engine (`READ_GYRO`,
-`READ_LOCKIN`, `RUN_SEQUENCE`) are served by the simulator in Hardware mode
+`READ_DETECTORS`, `CLEAR_DETECTORS`, `APPLY_PULSE`, `CALIBRATE`, `READ_RNG`,
+`ID`, `STATUS`, `RESET`, `ODMR_SWEEP`, `RUN_SEQUENCE`, `READ_LOCKIN`,
+`READ_LOCKINP`, `RUN_ALL_ODMR`, `SET_GRADIENT`. `/api/fpga/probe` asks the
+board for `ID` (it answers `QSSC v1`) and reports `connected: false` when
+nothing answers. `READ_GYRO` still runs on the simulator in Hardware mode
 under an explicit *simulated* label — the switch never falls back silently.
 
 ## Fabrication protocol

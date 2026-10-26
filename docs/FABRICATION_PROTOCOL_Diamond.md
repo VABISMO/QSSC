@@ -29,8 +29,7 @@
 >    compute-material figure.
 >
 > This protocol documents the bulk-CVD compute route; a full microdiamond
-> sensor-array protocol rewrite is flagged as a follow-up (the P0 prototype
-> covers the home-lab version today).
+> sensor-array protocol rewrite is flagged as a follow-up.
 
 ---
 
@@ -52,7 +51,7 @@ NV⁻ is optically excited at **532 nm** — the same green band the citric-acid
 
 ### 2.3 Why the detector and filter are reused unchanged
 
-NV⁻ photoluminescence is the zero-phonon line at **637 nm** plus a broad phonon sideband extending to **~800 nm** (red/NIR). The **650 nm red photographic long-pass** passes the 637–800 nm PL and blocks the 532 nm green pump — the **same filter** used for the hBN chip. The graphene/MoS₂ photodetector reads 637–800 nm; MoS₂ (monolayer bandgap ~690 nm) actually absorbs a larger share of the NV PL than it does of the hBN 850 nm emission, so the detector works **at least as well** here.
+NV⁻ photoluminescence is the zero-phonon line at **637 nm** plus a broad phonon sideband extending to **~800 nm** (red/NIR). The **650 nm red photographic long-pass** passes the **650–800 nm phonon sideband** and blocks the 532 nm green pump (the 637 nm ZPL sits below the filter edge) — the **same filter** used for the hBN chip. The graphene/MoS₂ photodetector reads the 650–800 nm band; MoS₂ (monolayer bandgap ~690 nm) actually absorbs a larger share of the NV PL than it does of the hBN 850 nm emission, so the detector works **at least as well** here.
 
 ### 2.4 Architecture overview
 
@@ -217,7 +216,7 @@ Drive each pixel 0–15 V, confirm turn-on 4–8 V and broadband green EL; ASE c
 > is added to the chip itself.
 
 ### 5.2 ODMR of NV⁻ in diamond
-4. **Optical:** on-chip green CQD emitter (~532 nm, ~1 mW at the sample) — no external laser. Collect NV⁻ PL at **637–800 nm** through the **650 nm red photographic long-pass filter** (passes the red/NIR NV PL, blocks the 532 nm green pump) into the **on-chip graphene/MoS₂ detector array**. No Si APD / discrete photodiode.
+4. **Optical:** on-chip green CQD emitter (~532 nm, ~1 mW at the sample) — no external laser. Collect the NV⁻ sideband at **650–800 nm** through the **650 nm red photographic long-pass filter** (passes the red/NIR sideband, blocks the 532 nm green pump) into the **on-chip graphene/MoS₂ detector array**. No Si APD / discrete photodiode.
 
 > **Radiance → watt link budget (audit issue #14).** The two headline optical
 > numbers are measured at different points in the chain and are **not
@@ -254,7 +253,7 @@ Drive each pixel 0–15 V, confirm turn-on 4–8 V and broadband green EL; ASE c
 Inject calibrated 532 nm light at the emitter edge and measure the on-chip detector photocurrent. Target 20–60 % of the emitted pump reaching the detector.
 
 ### 5.5 End-to-end functional test
-12. Drive the CQD pixel electrically → green EL pumps the NV⁻ ensemble → collect 637–800 nm NV PL (through the 650 nm long-pass filter) at the on-chip graphene/MoS₂ detector → photocurrent modulated by MW at **2.87 GHz** → FPGA/lock-in reads the ODMR dip. Successful end-to-end ODMR with the **on-chip CQD pump** (no external laser) is the chip's defining demonstration — identical concept to the hBN chip, at a different MW frequency and with ~900× more coherence headroom.
+12. Drive the CQD pixel electrically → green EL pumps the NV⁻ ensemble → collect the 650–800 nm NV sideband (through the 650 nm long-pass filter) at the on-chip graphene/MoS₂ detector → photocurrent modulated by MW at **2.87 GHz** → FPGA/lock-in reads the ODMR dip. Successful end-to-end ODMR with the **on-chip CQD pump** (no external laser) is the chip's defining demonstration — identical concept to the hBN chip, at a different MW frequency and with ~900× more coherence headroom.
 
 ### 5.6 Emitter↔qubit↔detector calibration (software pulse-capture) — unchanged
 13. Same automated FPGA sweep as the hBN chip: for each emitter pixel fire a green pump pulse, sample every detector electrode, record which sees a modulated NV-PL response under MW at **2.87 GHz** → build the emitter-pixel→qubit-site→detector-electrode lookup table. No camera, no alignment jig. (The only change is the MW frequency in the sweep.)
@@ -295,7 +294,6 @@ Inject calibrated 532 nm light at the emitter edge and measure the on-chip detec
 | **Compute at 300 K?** | **YES** (with DD; small Shor N=15 fits T₂) | Sec. 5.3 |
 | Graphene detector responsivity | 0.01–0.1 A/W (MoS₂ 10–10² A/W) | Sec. 3 |
 | Operating temperature | 288–300 K (ambient) | Sec. 4.2 |
-| TEC power | < 5 W | Sec. 4.4 |
 | Chip footprint | 25 × 25 mm² (host = diamond plate ~3×3×0.5 mm) | Sec. 2 |
 
 ---

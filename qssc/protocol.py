@@ -228,7 +228,7 @@ NV_PROTOCOL: List[Section] = [
                  {"responsivity_AW": "0.01–0.1 (graphene), 10–10² (MoS₂)",
                   "pl_nm": "637–800"}),
         ],
-        expected="On-chip readout of NV PL 637–800 nm; MoS₂ gain ≥ hBN case.",
+        expected="On-chip readout of the NV 650–800 nm sideband; MoS₂ gain ≥ hBN case.",
     ),
     Section(
         id="assembly", title="4 · Stacking, filter & microwave launch",
@@ -241,9 +241,9 @@ NV_PROTOCOL: List[Section] = [
                  "the detector face reads it directly.",
                  {"host": "CVD diamond", "faces": 2}),
             Step("Filter (UNCHANGED)", "—",
-                 "650 nm red photographic long-pass: passes NV PL 637–800 nm, "
-                 "blocks 532 nm green pump.",
-                 {"filter": "650 nm long-pass", "passes_nm": "637–800"}),
+                 "650 nm red photographic long-pass: passes the 650–800 nm NV "
+                 "sits below the edge).",
+                 {"filter": "650 nm long-pass", "passes_nm": "650–800"}),
             Step("Passive thermal path", "≈1 h",
                  "Cu/Al heat-spreader under the carrier. Diamond thermal "
                  "conductivity ~2000 W/m·K and the chip runs uncooled.",
