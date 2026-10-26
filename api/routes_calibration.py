@@ -14,6 +14,7 @@ from typing import Optional
 
 import numpy as np
 from fastapi import APIRouter
+from ._guards import no_fpga_response
 
 logger = logging.getLogger(__name__)
 
@@ -216,14 +217,13 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
     if hardware:
         port = os.getenv("QSSC_FPGA_PORT", "").strip()
         if not port:
-            return {"error": "no-fpga-detected",
-                    "message": "No FPGA detected — connect the board and set "
-                               "QSSC_FPGA_PORT, or switch to Simulator."}
+            return no_fpga_response(
+                "messageNo FPGA detected — connect the board and set QSSC_FPGA_PORT, or switch to Simulator.")
         try:
             fpga = connect_fpga(port=port, profile=profile,
                                 temperature_k=temperature_k, seed=seed)
         except NoFPGADetected as exc:
-            return {"error": "no-fpga-detected", "message": str(exc)}
+            return no_fpga_response(str(exc))
         try:
             em = EmitterController(fpga)
             det = DetectorInterface(fpga)

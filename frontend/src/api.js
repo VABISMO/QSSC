@@ -2,26 +2,36 @@
 // works both through the Vite dev proxy and a same-origin production build.
 const BASE = import.meta.env.VITE_API_BASE || ''
 
-async function get(path) {
-  const r = await fetch(`${BASE}${path}`)
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+// Non-2xx responses keep their JSON body (e.g. the 503
+// {"error": "no-fpga-detected", "message": ...} that a hardware endpoint
+// returns when no board answered). Surface that message instead of a bare
+// "503 Service Unavailable", and carry the machine-readable code on the Error
+// so components can branch on it (CircuitRunner's banner).
+async function handle(r) {
+  if (!r.ok) {
+    let body = null
+    try { body = await r.json() } catch (e) { body = null }
+    const err = new Error(body && body.message ? body.message : `${r.status} ${r.statusText}`)
+    if (body && body.error) err.code = body.error
+    throw err
+  }
   return r.json()
+}
+
+async function get(path) {
+  return handle(await fetch(`${BASE}${path}`))
 }
 
 async function post(path, body) {
-  const r = await fetch(`${BASE}${path}`, {
+  return handle(await fetch(`${BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  })
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
-  return r.json()
+  }))
 }
 
 async function del(path) {
-  const r = await fetch(`${BASE}${path}`, { method: 'DELETE' })
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
-  return r.json()
+  return handle(await fetch(`${BASE}${path}`, { method: 'DELETE' }))
 }
 
 const q = (o) => new URLSearchParams(o).toString()

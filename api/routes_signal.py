@@ -11,6 +11,7 @@ import math
 
 import numpy as np
 from fastapi import APIRouter
+from ._guards import no_fpga_response
 
 from qssc import (
     get_profile, coherence_at_temperature,
@@ -62,14 +63,13 @@ def signal(profile: str = "NV", temperature_k: float = 300.0,
     if hardware and seq in ("ramsey", "hahn", "cpmg"):
         port = os.getenv("QSSC_FPGA_PORT", "").strip()
         if not port:
-            return {"error": "no-fpga-detected",
-                    "message": "No FPGA detected — connect the board and set "
-                               "QSSC_FPGA_PORT, or switch to Simulator."}
+            return no_fpga_response(
+                "messageNo FPGA detected — connect the board and set QSSC_FPGA_PORT, or switch to Simulator.")
         try:
             fpga = connect_fpga(port=port, profile=profile,
                                 temperature_k=temperature_k, seed=seed)
         except NoFPGADetected as exc:
-            return {"error": "no-fpga-detected", "message": str(exc)}
+            return no_fpga_response(str(exc))
         kind = {"ramsey": 0, "hahn": 1, "cpmg": 2}[seq]
         n = max(8, min(int(points), 1024))
         # window the sequence over ~6*T2 so the decay is visible, matching the
@@ -172,9 +172,8 @@ def signal_array(profile: str = "NV", temperature_k: float = 300.0,
     if hardware:
         port = os.getenv("QSSC_FPGA_PORT", "").strip()
         if not port:
-            return {"error": "no-fpga-detected",
-                    "message": "No FPGA detected — connect the board and set "
-                               "QSSC_FPGA_PORT, or switch to Simulator."}
+            return no_fpga_response(
+                "messageNo FPGA detected — connect the board and set QSSC_FPGA_PORT, or switch to Simulator.")
 
     # Base normalized PL trace (0..1) for the selected sequence -- the same
     # model as /api/signal. The spin dynamics are a defect+gradient property,

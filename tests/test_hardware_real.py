@@ -170,11 +170,12 @@ def test_run_circuit_no_fpga_detected_body(monkeypatch):
               "profile": "NV", "temperature_k": 300.0, "seed": 42,
               "noise_mode": "real", "hardware": True},
     )
-    assert r.status_code == 200
+    # a hardware run that could not happen is not a 200: the endpoint answers
+    # 503 with the same error body the dashboard reads
+    assert r.status_code == 503
     body = r.json()
-    result = body["result"]
-    assert result.get("error") == "no-fpga-detected"
-    assert "message" in result
+    assert body.get("error") == "no-fpga-detected"
+    assert "message" in body
 
 
 def test_calibration_no_fpga_detected_body(monkeypatch):
@@ -184,7 +185,7 @@ def test_calibration_no_fpga_detected_body(monkeypatch):
     from fastapi.testclient import TestClient
     client = TestClient(main.app)
     r = client.post("/api/calibration/run?profile=NV&hardware=true")
-    assert r.status_code == 200
+    assert r.status_code == 503
     body = r.json()
     assert body.get("error") == "no-fpga-detected"
 
@@ -356,7 +357,7 @@ def test_api_gyro_hardware_no_board(monkeypatch):
     from fastapi.testclient import TestClient
     client = TestClient(main.app)
     r = client.get("/api/gyro?hardware=true&n_avg=8")
-    assert r.status_code == 200
+    assert r.status_code == 503
     assert r.json().get("error") == "no-fpga-detected"
 
 
@@ -367,7 +368,7 @@ def test_api_signal_hardware_no_board(monkeypatch):
     from fastapi.testclient import TestClient
     client = TestClient(main.app)
     r = client.get("/api/signal?hardware=true&sequence=ramsey&points=16")
-    assert r.status_code == 200
+    assert r.status_code == 503
     assert r.json().get("error") == "no-fpga-detected"
 
 

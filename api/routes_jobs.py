@@ -11,6 +11,7 @@ from api import jobs
 
 from ._guards import (
     _rate_limited, _check_sync, _check_custom_circuit, _check_write, _req_dict,
+    no_fpga_response,
 )
 from .models import (
     RunRequest, CustomCircuitRequest, ParallelRunRequest, CalibrateArrayRequest,
@@ -37,7 +38,10 @@ def run_circuit(req: RunRequest, sync: bool = False, request: Request = None):
     if sync:
         from api.runner import run_circuit as _run
         try:
-            return {"job_id": None, "status": "finished", "result": _run(payload)}
+            res = _run(payload)
+            if isinstance(res, dict) and res.get("error") == "no-fpga-detected":
+                return no_fpga_response(res.get("message", "No FPGA detected"))
+            return {"job_id": None, "status": "finished", "result": res}
         except Exception as exc:  # noqa: BLE001 - surface sim errors, not a 500
             return {"job_id": None, "status": "failed",
                     "result": {"error": str(exc)}}
@@ -67,7 +71,10 @@ def run_custom_circuit(req: CustomCircuitRequest, sync: bool = False,
     if sync:
         from api.runner import run_custom as _run
         try:
-            return {"job_id": None, "status": "finished", "result": _run(payload)}
+            res = _run(payload)
+            if isinstance(res, dict) and res.get("error") == "no-fpga-detected":
+                return no_fpga_response(res.get("message", "No FPGA detected"))
+            return {"job_id": None, "status": "finished", "result": res}
         except Exception as exc:  # noqa: BLE001 - surface sim errors, not a 500
             return {"job_id": None, "status": "failed",
                     "result": {"error": str(exc)}}
@@ -105,7 +112,10 @@ def run_parallel_circuits(req: ParallelRunRequest, sync: bool = False,
     if sync:
         from api.runner import run_parallel as _run
         try:
-            return {"job_id": None, "status": "finished", "result": _run(payload)}
+            res = _run(payload)
+            if isinstance(res, dict) and res.get("error") == "no-fpga-detected":
+                return no_fpga_response(res.get("message", "No FPGA detected"))
+            return {"job_id": None, "status": "finished", "result": res}
         except Exception as exc:  # noqa: BLE101 - surface sim errors, not a 500
             return {"job_id": None, "status": "failed",
                     "result": {"error": str(exc)}}
@@ -140,7 +150,10 @@ def calibrate_array_endpoint(req: CalibrateArrayRequest, sync: bool = False,
     if sync:
         from api.runner import run_calibrate_array as _run
         try:
-            return {"job_id": None, "status": "finished", "result": _run(payload)}
+            res = _run(payload)
+            if isinstance(res, dict) and res.get("error") == "no-fpga-detected":
+                return no_fpga_response(res.get("message", "No FPGA detected"))
+            return {"job_id": None, "status": "finished", "result": res}
         except Exception as exc:  # noqa: BLE101 - surface errors, not a 500
             return {"job_id": None, "status": "failed",
                     "result": {"error": str(exc)}}

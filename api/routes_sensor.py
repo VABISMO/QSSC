@@ -14,6 +14,7 @@ from typing import Optional
 
 import numpy as np
 from fastapi import APIRouter
+from ._guards import no_fpga_response
 
 from qssc import (
     get_profile, coherence_at_temperature,
@@ -123,14 +124,13 @@ def api_gyro(
     if hardware:
         port = os.getenv("QSSC_FPGA_PORT", "").strip()
         if not port:
-            return {"error": "no-fpga-detected",
-                    "message": "No FPGA detected — connect the board and set "
-                               "QSSC_FPGA_PORT, or switch to Simulator."}
+            return no_fpga_response(
+                "messageNo FPGA detected — connect the board and set QSSC_FPGA_PORT, or switch to Simulator.")
         try:
             fpga = connect_fpga(port=port, profile=profile,
                                 temperature_k=temperature_k, seed=seed)
         except NoFPGADetected as exc:
-            return {"error": "no-fpga-detected", "message": str(exc)}
+            return no_fpga_response(str(exc))
         try:
             # free-precession window T (us -> ns); default ~T2 of the profile.
             t_us = float(free_precession_us) if free_precession_us else (
@@ -350,15 +350,14 @@ def api_sensor_tensor(
         # possible on a fixed bench), not a baseline subtraction.
         port = os.getenv("QSSC_FPGA_PORT", "").strip()
         if not port:
-            return {"error": "no-fpga-detected",
-                    "message": ("No FPGA detected — connect the board and set "
-                                "QSSC_FPGA_PORT, or use source=sim.")}
+            return no_fpga_response(
+                "messageNo FPGA detected — connect the board and set QSSC_FPGA_PORT, or use source=sim.")
         try:
             fpga = connect_fpga(port=port, profile=profile,
                                 temperature_k=300.0,
                                 seed=int(seed))
         except NoFPGADetected as exc:
-            return {"error": "no-fpga-detected", "message": str(exc)}
+            return no_fpga_response(str(exc))
         try:
             if not hasattr(fpga, "run_all_odmr"):
                 return {"error": "real tensor needs a board with run_all_odmr "
