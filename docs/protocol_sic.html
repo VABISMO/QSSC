@@ -100,18 +100,18 @@ td code{font-size:12px}
 <h3 id="24-site-density-and-surface-proximity">2.4 Site density and surface proximity</h3>
 <h3 id="25-no-pmma-on-host-step">2.5 No PMMA-on-host step</h3>
 <h2 id="section-3-on-chip-fluorescence-photodetector-array-graphene-mos2-changed-graphene-led-for-ir">Section 3 — On-Chip Fluorescence Photodetector Array (Graphene / MoS₂) (CHANGED: graphene-led for IR)</h2>
-<h2 id="section-4-waveguides-stacking-bulk-geometry-filter-thermal-contacts">Section 4 — Waveguides, Stacking (bulk geometry), Filter, Thermal, Contacts</h2>
-<h3 id="41-su-8-waveguides-on-sic">4.1 SU-8 waveguides (on SiC)</h3>
-<h3 id="42-coupling-the-cis-emitter-to-the-waveguide-850-nm-long-pass-filter">4.2 Coupling the CIS emitter to the waveguide + <strong>850 nm long-pass filter</strong></h3>
-<h3 id="43-stacking-bulk-not-2d">4.3 Stacking (bulk, not 2D)</h3>
-<h3 id="44-peltier-thermal-management-unchanged">4.4 Peltier thermal management (unchanged)</h3>
-<h3 id="45-contacts-and-encapsulation-unchanged">4.5 Contacts and encapsulation (unchanged)</h3>
-<h3 id="46-coplanar-waveguide-mw-for-odmr-unchanged-frequency-changes">4.6 Coplanar waveguide (MW) for ODMR (unchanged, frequency changes)</h3>
+<h2 id="section-4-stacking-bulk-geometry-filter-thermal-path-contacts">Section 4 — Stacking (bulk geometry), Filter, Thermal Path, Contacts</h2>
+<h3 id="41-surface-preparation">4.1 Surface preparation</h3>
+<h3 id="42-850-nm-long-pass-filter">4.2 <strong>850 nm long-pass filter</strong></h3>
+<h3 id="43-stacking-bulk-geometry">4.3 Stacking (bulk geometry)</h3>
+<h3 id="44-thermal-path">4.4 Thermal path</h3>
+<h3 id="45-contacts-and-encapsulation">4.5 Contacts and encapsulation</h3>
+<h3 id="46-coplanar-waveguide-mw-for-odmr-frequency-changes">4.6 Coplanar waveguide (MW) for ODMR (frequency changes)</h3>
 <h2 id="section-5-characterization-testing">Section 5 — Characterization &amp; Testing</h2>
 <h3 id="51-electroluminescence-cis-qd-array">5.1 Electroluminescence (CIS-QD array)</h3>
 <h3 id="52-odmr-of-v_si-in-4h-sic">5.2 ODMR of V_Si in 4H-SiC</h3>
 <h3 id="53-spin-coherence-t2">5.3 Spin coherence (T₂)</h3>
-<h3 id="54-coupling-efficiency-waveguide-detector-unchanged">5.4 Coupling efficiency (waveguide → detector) — unchanged</h3>
+<h3 id="54-emitter-detector-coupling">5.4 Emitter → detector coupling</h3>
 <h3 id="55-end-to-end-functional-test">5.5 End-to-end functional test</h3>
 <h3 id="56-emitterqubitdetector-calibration-software-pulse-capture-unchanged">5.6 Emitter↔qubit↔detector calibration (software pulse-capture) — unchanged</h3>
 <h2 id="section-6-safety">Section 6 — Safety</h2>
@@ -119,21 +119,21 @@ td code{font-size:12px}
 <h2 id="8-validation-against-known-studies">8. Validation Against Known Studies</h2>
 <h3 id="81-v_si-v2-in-4h-sic-d-odmr-coherence">8.1 V_Si (V2) in 4H-SiC — D, ODMR, coherence</h3>
 <h3 id="82-ciszns-qds-and-nir-qleds">8.2 CIS/ZnS QDs and NIR QLEDs</h3>
-<h3 id="83-detector-waveguides-peltier">8.3 Detector / waveguides / Peltier</h3>
-<h2 id="references-platform-specific-cqddetectorwaveguide-refs-are-in-the-hbn-base">References (platform-specific; CQD/detector/waveguide refs are in the hBN base)</h2>
+<h3 id="83-detector-and-thermal-path">8.3 Detector and thermal path</h3>
+<h2 id="references-platform-specific-cqddetector-refs-are-in-the-hbn-base">References (platform-specific; CQD/detector refs are in the hBN base)</h2>
   <h1 id="quantum-solid-state-chip-room-temperature-fabrication-protocol-sic-variant">Quantum Solid State Chip (Room Temperature) — Fabrication Protocol · SiC variant</h1>
 <p><strong>Project:</strong> QSSC (Quantum Solid State Chip, room-temperature demonstrator)
 <strong>Document type:</strong> Laboratory fabrication protocol (standalone variant)
 <strong>Version:</strong> 1.0
 <strong>Variant:</strong> Silicon-carbide silicon-vacancy (V_Si, V2 line in 4H-SiC)
-<strong>Scope:</strong> Same chip architecture as the hBN base protocol — (1) an electrically-pumped quantum-dot emitter array, (2) SU-8/PDMS polymer waveguides, (3) an on-chip 2D-material (graphene/MoS₂) photodetector array with FPGA readout and software pulse-capture calibration — but the <strong>middle spin-host block is a commercial 4H-SiC wafer hosting V_Si centres</strong> (S=3/2, 2|D| ≈ 70 MHz, ZPL ≈ 916 nm, T₂ ≈ 40 µs at 300 K). Unlike the diamond variant (which reuses the green CQD emitter unchanged), the SiC variant requires <strong>three real changes</strong> to the optical chain: (i) the on-chip emitter must shift from green (532 nm) to <strong>red/NIR (~730–760 nm)</strong> to pump V_Si — done with an <strong>on-chip CuInS₂/ZnS (CIS) colloidal quantum-dot LED, not a big diode</strong>; (ii) the optical filter must shift from a 650 nm long-pass to an <strong>850 nm long-pass</strong> (the 650 would pass the 730–760 pump); (iii) the detector leans on <strong>graphene</strong> (the 916 nm PL is in the IR where MoS₂'s monolayer gain drops).</p>
+<strong>Scope:</strong> Same chip architecture as the hBN base protocol — (1) an electrically-pumped quantum-dot emitter array and (2) an on-chip 2D-material (graphene/MoS₂) photodetector array with FPGA readout and software pulse-capture calibration — but the <strong>middle spin-host block is a commercial 4H-SiC wafer hosting V_Si centres</strong> (S=3/2, 2|D| ≈ 70 MHz, ZPL ≈ 916 nm, T₂ ≈ 40 µs at 300 K). Unlike the diamond variant (which reuses the green CQD emitter unchanged), the SiC variant requires <strong>three real changes</strong> to the optical chain: (i) the on-chip emitter must shift from green (532 nm) to <strong>red/NIR (~730–760 nm)</strong> to pump V_Si — done with an <strong>on-chip CuInS₂/ZnS (CIS) colloidal quantum-dot LED, not a big diode</strong>; (ii) the optical filter must shift from a 650 nm long-pass to an <strong>850 nm long-pass</strong> (the 650 would pass the 730–760 pump); (iii) the detector leans on <strong>graphene</strong> (the 916 nm PL is in the IR where MoS₂'s monolayer gain drops).</p>
 <blockquote>
 <p><strong>Note.</strong> The SiC variant is the <strong>most reworked</strong> of the three: the host is easier (commercial wafer, defects as-grown + irradiation, ~20× better coherence than hBN), but the on-chip emitter is harder. <strong>Carbon CQDs (citrato+urea) cannot reach 730–760 nm</strong> — their ceiling is green ~540 nm. Pumping V_Si on-chip requires <strong>semiconductor colloidal QDs (CuInS₂/ZnS, "CIS")</strong>, a hot-injection colloidal synthesis with indium/copper/sulfur precursors under inert atmosphere. This is a real step up in chemistry from boiling citric acid, but it keeps the <strong>on-chip, no-big-diode</strong> constraint the user requires. The divacancy (V_SiV_C, D ≈ 1.3 GHz, T₂ ~ ms with DD, ZPL ~1.1 µm) is noted as an optional upgrade but is <strong>not</strong> the primary protocol here (the QSSC simulator profiles V_Si, 70 MHz).</p>
 <p><strong>On-chip emitter (no big diodes).</strong> This variant uses an <strong>on-chip CIS/ZnS quantum-dot LED</strong> as the ~730–760 nm pump. No external laser diode. A commercial 730/808 nm diode would be simpler but is explicitly excluded by the design constraint.</p>
 </blockquote>
 <hr />
 <h2 id="1-abstract">1. Abstract</h2>
-<p>This document specifies a complete, equipment-minimal fabrication protocol for a room-temperature solid-state quantum photonic chip (QSSC) built on a <strong>4H-SiC wafer hosting V_Si centres</strong>. The chip combines three functional blocks on a single 25 × 25 mm² carrier: (i) a <strong>red/NIR (~730–760 nm)</strong> CuInS₂/ZnS colloidal quantum-dot (CIS-QD) emitter array in a polymeric QLED stack (ITO/PEDOT:PSS/poly-TPD/CIS-ZnS/ZnO/Ag) that pumps the V_Si (optical excitation band below its 916 nm ZPL) — no external pump laser; (ii) a <strong>commercial 4H-SiC wafer</strong> with V_Si (V2) centres (2|D| ≈ 70 MHz, ZPL 916 nm, T₂ ≈ 40 µs at 300 K), defects formed by as-grown + electron/proton irradiation + anneal; and (iii) SU-8/PDMS waveguides routing the 916 nm V_Si PL through an <strong>850 nm long-pass filter</strong> to an <strong>on-chip graphene/MoS₂ photodetector array</strong> read directly by the FPGA, with software pulse-capture calibration (no camera, no alignment jig). A Peltier holds the wafer at 288–300 K. Equipment footprint ~USD 3,500–4,500 (the CIS hot-injection setup adds a Schlenk line / Ar glovebag over the carbon-CQD autoclave).</p>
+<p>This document specifies a complete, equipment-minimal fabrication protocol for a room-temperature solid-state spin-defect quantum chip (QSSC) built on a <strong>4H-SiC wafer hosting V_Si centres</strong>. The chip combines three functional blocks on a single 25 × 25 mm² carrier: (i) a <strong>red/NIR (~730–760 nm)</strong> CuInS₂/ZnS colloidal quantum-dot (CIS-QD) emitter array in a polymeric QLED stack (ITO/PEDOT:PSS/poly-TPD/CIS-ZnS/ZnO/Ag) that pumps the V_Si (optical excitation band below its 916 nm ZPL); (ii) a <strong>commercial 4H-SiC wafer</strong> with V_Si (V2) centres (2|D| ≈ 70 MHz, ZPL 916 nm, T₂ ≈ 40 µs at 300 K), defects formed by as-grown + electron/proton irradiation + anneal; and (iii) an <strong>850 nm long-pass filter</strong> in front of an <strong>on-chip graphene/MoS₂ photodetector array</strong> that reads the 916 nm V_Si PL directly, with software pulse-capture calibration. A passive heat-spreader holds the wafer at 288–300 K. Equipment footprint ~USD 3,500–4,500 (the CIS hot-injection setup adds a Schlenk line / Ar glovebag over the carbon-CQD autoclave).</p>
 <hr />
 <h2 id="2-introduction-scientific-basis">2. Introduction &amp; Scientific Basis</h2>
 <h3 id="21-why-sic-v_si-for-the-same-chip">2.1 Why SiC (V_Si) for the same chip</h3>
@@ -158,11 +158,11 @@ td code{font-size:12px}
    │  with V_Si (V2) centres (2|D|≈70 MHz, ZPL 916)│
    │  emitter + detector sit ON TOP (bulk 3D)    │
    ──────────────────────────────────────────────┘
-        ↘ waveguide coupling ↙  (850 nm long-pass filter in path)
-   ┌─────────── SU-8/PDMS waveguides ───────────┐       ← Section 3/4 (CHANGED filter)
-   │  → graphene-led / MoS₂ photodetector array │
+        ↘ photoluminescence (916 nm) ↙
+   ┌─────────────────────────────────────────────┐
+   │  → graphene / MoS₂ photodetector array      │  ← Section 3/4
    └─────────────────────────────────────────────┘
-   Peltier (TEC) clamped under Si carrier      ← Section 4
+   Heat-spreader under the Si carrier       ← Section 4
 </code></pre>
 <hr />
 <h2 id="3-materials-bill-of-materials-bom-deltas-from-the-hbn-base">3. Materials &amp; Bill of Materials (BOM) — deltas from the hBN base</h2>
@@ -293,7 +293,7 @@ td code{font-size:12px}
 </tr>
 </tbody>
 </table>
-<p>Everything else (hotplate, autoclave, sonicator, spin coater, UV, Peltier, sourcemeter, lock-in, ADF4351) is unchanged. The 650 nm filter is <strong>replaced</strong> by the 850 nm long-pass.</p>
+<p>Everything else (hotplate, autoclave, sonicator, spin coater, UV, sourcemeter, lock-in, ADF4351) is unchanged. The 650 nm filter is <strong>replaced</strong> by the 850 nm long-pass.</p>
 <hr />
 <h2 id="section-1-ciszns-quantum-dot-emitter-array-changed-rednir-not-green">Section 1 — CIS/ZnS Quantum-Dot Emitter Array (CHANGED: red/NIR, not green)</h2>
 <p><strong>Goal:</strong> Synthesize <strong>CuInS₂/ZnS (CIS) colloidal quantum dots</strong> emitting ~730–760 nm and integrate them into a patterned ITO/PEDOT:PSS/poly-TPD/CIS-ZnS/ZnO/Ag electroluminescent QLED array (8 × 8 pixels, 1 mm² each) on a 25 × 25 mm² ITO-glass substrate. The red/NIR emitter doubles as the on-chip pump for V_Si (no external 730 nm laser). Target: EL peak 730–760 nm, turn-on 3–8 V, detectable ASE/edge narrowing under overdrive.</p>
@@ -344,7 +344,7 @@ td code{font-size:12px}
 <p><strong>Timing, Section 1:</strong> CIS synthesis ~1 day (hot-injection + shell + purify) + film stack 1 day + cathode half day. <strong>Total: ≈ 2.5–3 working days</strong> (comparable to the carbon-CQD route but with the Schlenk step).</p>
 <hr />
 <h2 id="section-2-4h-sic-wafer-v_si-defect-engineering-replaces-the-hbn-section">Section 2 — 4H-SiC Wafer + V_Si Defect Engineering (REPLACES the hBN section)</h2>
-<p><strong>Goal:</strong> Obtain a 4H-SiC wafer sample hosting V_Si (V2) centres (2|D| ≈ 70 MHz, ZPL 916 nm) at ensemble density for 8 × 8 site addressing, with the surface ready for the emitter/waveguide/detector stack.</p>
+<p><strong>Goal:</strong> Obtain a 4H-SiC wafer sample hosting V_Si (V2) centres (2|D| ≈ 70 MHz, ZPL 916 nm) at ensemble density for 8 × 8 site addressing, with the surface ready for the emitter and detector.</p>
 <h3 id="21-procurement">2.1 Procurement</h3>
 <ol>
 <li><strong>Buy the wafer.</strong> Order a <strong>4H-SiC</strong> sample (semi-insulating or N-doped, 5×5 mm to 2-inch, double-side polished). 4H-SiC power-electronic wafers are mass-produced and inexpensive. Expect ~$30–$120.</li>
@@ -369,7 +369,7 @@ td code{font-size:12px}
 </ol>
 <h3 id="25-no-pmma-on-host-step">2.5 No PMMA-on-host step</h3>
 <ol start="9">
-<li>No PMMA passivation on the SiC. Proceed directly to waveguide/emitter/detector deposition (Section 4). Planarize with SU-8 if the polished surface is too rough for waveguide adhesion.</li>
+<li>SiC needs no passivation: proceed directly to emitter and detector deposition (Section 4). Spin a planarization layer first if the polished surface is too rough for adhesion.</li>
 </ol>
 <p><strong>Timing, Section 2:</strong> clean 1 h + (optional) irradiation (outsourced) + anneal 4 h. <strong>Total: ~0.5–1 working day + irradiation turnaround</strong> (the easiest host in the QSSC family).</p>
 <hr />
@@ -382,31 +382,49 @@ td code{font-size:12px}
 <li>CVD graphene transfer, Au/Cr source-drain electrodes, O₂-plasma isolation, bias 0.1–1 V, lock-in readout — as in the hBN base protocol. No discrete photodiodes, no external camera. <strong>Use few-layer MoS₂ (not monolayer) for this variant.</strong></li>
 </ul>
 <hr />
-<h2 id="section-4-waveguides-stacking-bulk-geometry-filter-thermal-contacts">Section 4 — Waveguides, Stacking (bulk geometry), Filter, Thermal, Contacts</h2>
-<h3 id="41-su-8-waveguides-on-sic">4.1 SU-8 waveguides (on SiC)</h3>
+<h2 id="section-4-stacking-bulk-geometry-filter-thermal-path-contacts">Section 4 — Stacking (bulk geometry), Filter, Thermal Path, Contacts</h2>
+<h3 id="41-surface-preparation">4.1 Surface preparation</h3>
 <ol>
-<li>SiC index n ≈ 2.6 (very high); spin a ~5 µm SU-8 planarization layer (1000 rpm, flood-expose, hard-bake) so waveguide modes are not pulled into the wafer. Then spin SU-8 2002 core (2000 rpm → ~2 µm), pattern 5–10 µm wide guides, PDMS cladding (n 1.41) over SU-8 (n 1.58). Same as the hBN protocol modulo the thicker planarization.</li>
+<li>Clean the 4H-SiC surface (piranha or O₂ plasma, then DI rinse). Spin a
+   planarization layer first if the polished wafer is too rough for the layers
+   deposited on top.</li>
 </ol>
-<h3 id="42-coupling-the-cis-emitter-to-the-waveguide-850-nm-long-pass-filter">4.2 Coupling the CIS emitter to the waveguide + <strong>850 nm long-pass filter</strong></h3>
+<h3 id="42-850-nm-long-pass-filter">4.2 <strong>850 nm long-pass filter</strong></h3>
 <ol start="2">
-<li>Cleave the CIS stack so the red/NIR gain-strip edge faces the SU-8 input facet; butt-couple in the jig; UV-cure NOA 61. Coupling 20–60 %.</li>
-<li><strong>850 nm long-pass filter.</strong> Place an <strong>850 nm long-pass</strong> in the collection path (between the SiC PL output and the detector array, or as a coating on the detector facet). It <strong>passes the 916 nm V_Si PL and blocks the 730–760 nm CIS pump</strong>. (The hBN chip's 650 nm filter is <strong>not</strong> used here — it would pass the 730–760 pump.) If pumping at the red edge (~760 nm), verify the 850 nm filter edge is steep enough; pumping at ~730 nm gives the cleanest separation.</li>
+<li>Place an <strong>850 nm long-pass</strong> in the collection path (between the SiC PL
+   output and the detector array, or as a coating on the detector facet). It
+   <strong>passes the 916 nm V_Si PL and blocks the 730–760 nm CIS pump</strong>. If
+   pumping at the red edge (~760 nm), verify the filter edge is steep enough;
+   pumping at ~730 nm gives the cleanest separation.</li>
 </ol>
-<h3 id="43-stacking-bulk-not-2d">4.3 Stacking (bulk, not 2D)</h3>
+<h3 id="43-stacking-bulk-geometry">4.3 Stacking (bulk geometry)</h3>
+<ol start="3">
+<li><strong>Stack order (bottom→top):</strong> Si/SiO₂ carrier → <strong>4H-SiC wafer</strong> (face up)
+   → CIS emitter chip (edge-coupled) → 850 nm LP filter → graphene /
+   few-layer-MoS₂ detector over the wafer. Bond the corners with
+   PDMS/cyanoacrylate; cure 80 °C, 1 h. Wire-bond or silver-paste the CIS
+   anode/cathode and the detector source/drain to a PCB fan-out.</li>
+</ol>
+<h3 id="44-thermal-path">4.4 Thermal path</h3>
 <ol start="4">
-<li><strong>Stack order (bottom→top):</strong> Si/SiO₂ carrier → Peltier TEC → <strong>4H-SiC wafer</strong> (face up) → SU-8 waveguides → PDMS → CIS emitter chip (edge-coupled) → 850 nm LP filter → graphene/few-layer-MoS₂ detector at waveguide output. The SiC replaces the hBN chip; the rest mirrors the hBN stack. Bond corners with PDMS/cyanoacrylate; cure 80 °C, 1 h. Wire-bond/silver-paste to PCB fan-out.</li>
+<li>Cu/Al heat-spreader clamped under the carrier with thermal paste. SiC
+   thermal conductivity (~370 W/m·K) holds the die at ambient with the
+   emitter's &lt; 5 W dissipation.</li>
 </ol>
-<h3 id="44-peltier-thermal-management-unchanged">4.4 Peltier thermal management (unchanged)</h3>
+<h3 id="45-contacts-and-encapsulation">4.5 Contacts and encapsulation</h3>
 <ol start="5">
-<li>2-stage TEC (or TEC1-12706), NTC, PID <strong>295 K ± 0.1 K</strong>, &lt; 5 W. SiC thermal conductivity (~370 W/m·K) is excellent; temperature stability is easy.</li>
+<li>Au wire / silver-paste to header: ITO anode (×8 rows), Ag cathode (×8 cols),
+   detector drains (×N), gate (×1). PDMS encapsulation, detector aperture
+   exposed.</li>
 </ol>
-<h3 id="45-contacts-and-encapsulation-unchanged">4.5 Contacts and encapsulation (unchanged)</h3>
+<h3 id="46-coplanar-waveguide-mw-for-odmr-frequency-changes">4.6 Coplanar waveguide (MW) for ODMR (frequency changes)</h3>
 <ol start="6">
-<li>Au wire / silver-paste to header: ITO anode (×8 rows), Ag cathode (×8 cols), detector drains (×N), gate (×1), thermistor (×2), TEC ± (×2). PDMS encapsulation, output facet exposed.</li>
-</ol>
-<h3 id="46-coplanar-waveguide-mw-for-odmr-unchanged-frequency-changes">4.6 Coplanar waveguide (MW) for ODMR (unchanged, frequency changes)</h3>
-<ol start="7">
-<li>Hand-etch 50 Ω CPW on FR4/Rogers; mount the SiC wafer face-down over the signal line (≤ 50 µm gap) or flip-chip with anisotropic paste. <strong>Microwave frequency changes to 70 MHz</strong> (V_Si V2, 2|D| = 70 MHz) — well within the ADF4351 range (35 MHz–4.4 GHz); at 70 MHz you may alternatively use a low-frequency function generator directly. <strong>No hardware change</strong> to the PLL chain.</li>
+<li>Hand-etch 50 Ω CPW on FR4/Rogers; mount the SiC wafer face-down over the
+   signal line (≤ 50 µm gap) or flip-chip with anisotropic paste.
+   <strong>Microwave frequency changes to 70 MHz</strong> (V_Si V2, 2|D| = 70 MHz) — well
+   within the ADF4351 range (35 MHz–4.4 GHz); at 70 MHz you may alternatively
+   drive it from a low-frequency function generator. The PLL chain is reused
+   as-is.</li>
 </ol>
 <blockquote>
 <p><strong>Optional divacancy upgrade (not the primary protocol):</strong> the SiC <strong>divacancy</strong> V_SiV_C (S=1, D ≈ 1.3 GHz, ZPL ~1.1 µm, T₂ ~ ms with DD) would compute small Shor at room temperature. It needs a <strong>~808/980 nm pump</strong> (CIS QDs reach ~800; for 980 use PbS — Pb, toxic — or a 980 diode) and a <strong>~1000 nm long-pass filter</strong>. The QSSC simulator profiles V_Si (70 MHz), so this variant stays V_Si-primary; the divacancy is documented as a future upgrade path.</p>
@@ -430,8 +448,8 @@ td code{font-size:12px}
 <li><strong>Pulsed ODMR</strong> (Hahn echo at 70 MHz). Vary τ from 0.1 µs to <strong>100 µs</strong>. Fit echo vs τ to exp[−(2τ/T₂)^n].</li>
 <li><strong>Expected T₂:</strong> <strong>20–60 µs at room temperature</strong> (natural abundance, ensemble), up to <strong>~100 µs isotopically purified</strong> (⁴H-²⁸SiC), extended with dynamical decoupling. T₁ typically <strong>~340 µs</strong>. This is <strong>~20× longer than V_B⁻</strong> — enough for shallow algorithms (Bell pairs, small QFT, Ramsey sensing) at 300 K, but <strong>deep algorithms (Shor N=15) do not fit T₂ at 300 K without DD + isotopic purification</strong>; cool to raise T₂ further.</li>
 </ol>
-<h3 id="54-coupling-efficiency-waveguide-detector-unchanged">5.4 Coupling efficiency (waveguide → detector) — unchanged</h3>
-<p>Inject calibrated 730 nm light into the SU-8 facet; measure output + on-chip detector photocurrent through the 850 nm LP. Target 20–60 % coupling, &lt; 1 dB/cm loss.</p>
+<h3 id="54-emitter-detector-coupling">5.4 Emitter → detector coupling</h3>
+<p>Inject calibrated 730 nm light at the emitter edge and measure the on-chip detector photocurrent through the 850 nm LP. Target 20–60 % of the incident pump reaching the detector.</p>
 <h3 id="55-end-to-end-functional-test">5.5 End-to-end functional test</h3>
 <ol start="13">
 <li>Drive the CIS pixel electrically → red/NIR EL pumps the V_Si ensemble → collect 916 nm PL (through the 850 nm long-pass filter) at the on-chip graphene/few-layer-MoS₂ detector → photocurrent modulated by MW at <strong>70 MHz</strong> → FPGA/lock-in reads the ODMR dip. Successful end-to-end ODMR with the <strong>on-chip CIS-QD pump</strong> (no external laser, no big diode) is the chip's defining demonstration.</li>
@@ -483,7 +501,7 @@ td code{font-size:12px}
 <td>Low risk; keep &gt; 30 cm</td>
 </tr>
 <tr>
-<td>Peltier / hot surfaces</td>
+<td>Hot surfaces (hotplate, tube furnace)</td>
 <td>Heat-resistant gloves</td>
 </tr>
 <tr>
@@ -569,9 +587,9 @@ td code{font-size:12px}
 <td>Sec. 5.3</td>
 </tr>
 <tr>
-<td>Waveguide coupling</td>
+<td>Emitter → detector coupling</td>
 <td>20–60 %</td>
-<td>Sec. 4.2</td>
+<td>Sec. 5.4</td>
 </tr>
 <tr>
 <td>Graphene detector responsivity</td>
@@ -615,14 +633,14 @@ td code{font-size:12px}
 <li><strong>CIS-QD electroluminescent NIR QLEDs (ITO/PEDOT:PSS/poly-TPD/CIS/ZnO/metal):</strong> the poly-TPD interlayer + ZnO ETL stack is the standard red/NIR QLED architecture, supporting Section 1.4–1.5b.</li>
 <li>CIS QDs are chosen specifically because <strong>carbon quantum dots (citric-acid+urea) do not reach 730–760 nm</strong> (their ceiling is green ~540 nm).</li>
 </ul>
-<h3 id="83-detector-waveguides-peltier">8.3 Detector / waveguides / Peltier</h3>
+<h3 id="83-detector-and-thermal-path">8.3 Detector and thermal path</h3>
 <ul>
-<li>Graphene (broadband, reads 916 nm IR) and few-layer MoS₂ (bandgap ~1.2 eV, absorbs ~1030 nm and thus 916 nm) detector performance is consistent with the hBN base protocol validation (graphene: Xia et al. 2009; MoS₂: Lopez-Sanchez et al. 2013; photogating: Konstantatos et al. 2012). SU-8/PDMS waveguide coupling and Peltier stability are as in the hBN base.</li>
+<li>Graphene (broadband, reads 916 nm IR) and few-layer MoS₂ (bandgap ~1.2 eV, absorbs ~1030 nm and thus 916 nm) detector performance is consistent with the hBN base protocol validation (graphene: Xia et al. 2009; MoS₂: Lopez-Sanchez et al. 2013; photogating: Konstantatos et al. 2012).</li>
 </ul>
 <hr />
-<p><em>End of SiC V_Si variant. This document is a maker-lab demonstrator specification. It reuses the hBN chip's detector concept, waveguides, FPGA and software calibration; it changes the on-chip emitter (green carbon CQD → red/NIR CIS/ZnS QDs, on-chip, no big diode), the optical filter (650 → 850 nm long-pass), the host (hBN film → 4H-SiC wafer) and the MW frequency (3.46 GHz → 70 MHz). Where primary literature is cited, consult the cited paper before relying on a specific numerical parameter.</em></p>
+<p><em>End of SiC V_Si variant. This document is a maker-lab demonstrator specification. It reuses the hBN chip's detector concept, FPGA and software calibration; it changes the on-chip emitter (green carbon CQD → red/NIR CIS/ZnS QDs, on-chip, no big diode), the optical filter (650 → 850 nm long-pass), the host (hBN film → 4H-SiC wafer) and the MW frequency (3.46 GHz → 70 MHz). Where primary literature is cited, consult the cited paper before relying on a specific numerical parameter.</em></p>
 <hr />
-<h2 id="references-platform-specific-cqddetectorwaveguide-refs-are-in-the-hbn-base">References (platform-specific; CQD/detector/waveguide refs are in the hBN base)</h2>
+<h2 id="references-platform-specific-cqddetector-refs-are-in-the-hbn-base">References (platform-specific; CQD/detector refs are in the hBN base)</h2>
 <ul>
 <li>[15] H. Kraus et al., "Room-temperature quantum microwave emitters based on spin defects in silicon carbide," Nature Physics 10, 157–162 (2014). doi:10.1038/nphys2826</li>
 <li>[16] M. Widmann et al., "Coherent control of single spins in silicon carbide at room temperature," Nature Materials 14, 164–168 (2015). doi:10.1038/nmat4145</li>
@@ -636,7 +654,7 @@ td code{font-size:12px}
 <li>Lekavicius et al., PRX Quantum 3, 010343 (2022). doi:10.1103/PRXQuantum.3.010343</li>
 <li>H. Zhong et al., and the CuInS₂/ZnS colloidal-QD / NIR-QLED literature (size-tunable 550–800 nm, Cd/Pb-free).</li>
 </ul>
-  <div class="foot">QSSC — Quantum Solid State Chip (room temperature) · fabrication protocol · branded document · 33121 source bytes</div>
+  <div class="foot">QSSC — Quantum Solid State Chip (room temperature) · fabrication protocol · branded document · 32315 source bytes</div>
 </div>
 </body>
 </html>

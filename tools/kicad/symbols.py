@@ -310,9 +310,8 @@ def chip_pin_list_em():
 def chip_pin_list_det():
     """Schematic pins for the die TOP (detector) face: 64 DET electrodes on the
     top edge + 1 DET_COMMON common back-electrode (the continuous ITO film that
-    is the shared detector common masa, edge-contacted -- see
-    FABRICATION_PROTOCOL_P0.md: 130 contacts = 64 DET + 64 EM-cathode + 2 ITO
-    commons).  This face contacts the DETECTOR HEAD's B.Cu.  1.0 mm SYMBOL pitch
+    is the shared detector common masa, edge-contacted.  The die carries 130
+    contacts: 64 DET + 64 EM-cathode + 2 ITO commons.  This face contacts the DETECTOR HEAD's B.Cu.  1.0 mm SYMBOL pitch
     (independent of the 2.54 mm PCB grid pitch)."""
     pins = []
     sp = 1.0

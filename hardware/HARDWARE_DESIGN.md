@@ -194,7 +194,7 @@ flowchart TD
     J12H -.->|"mates"| J12D
     J3 --> A1["A1 Loop/CPW Antenna"]
     A1 -->|"MW 2.87/3.46GHz"| Sub["CVD diamond / hBN / SiC host"]
-    CHIP_EM -->|"green pump + SU-8/PDMS waveguide"| Sub
+    CHIP_EM -->|"green pump"| Sub
     Sub -->|"PL 637-800nm + 650nm LP filter"| DET
 ```
 
@@ -235,7 +235,7 @@ backend connects.
 ### 1B. Physical assembly (montaje)
 
 The die is **sandwiched between two PCBs**. The chip stack (emitter array +
-detectors + diamond host + waveguides) is bonded onto the **two-faced QSSC
+detectors + diamond host) is bonded onto the **two-faced QSSC
 die**: the die BOTTOM (emitter) face contacts the **main board F.Cu** (above
 the FPGA-side logic) via ACF; the die TOP (detector) face contacts the
 **detector head B.Cu** via ACF. The 64-channel TIA + 4× AD7616 front-end is on
@@ -258,7 +258,6 @@ flowchart TB
   DET["Graphene/MoS2 detector array (64 electrodes, TOP face)"]:::chip
   FILT["650 nm long-pass filter"]:::chip
   HOST["CVD diamond NV- host (64 sites)"]:::chip
-  WG["SU-8 / PDMS waveguides"]:::chip
   EM["64x CQD ASE/LED emitters (BOTTOM face)"]:::chip
   SUB["ITO glass substrate + Cu contacts"]:::chip
   HEAD["**Detector head** (6-layer) -- 16x TLV9004 TIA + 4x AD7616 ADC (die top on B.Cu ACF)"]:::fe
@@ -269,7 +268,7 @@ flowchart TB
   SMA["J3 SMA -> MW antenna feed"]:::pcb
 
   ANT -. "2.87 GHz MW field" .-> HOST
-  ENC --- DET --- FILT --- HOST --- WG --- EM --- SUB
+  ENC --- DET --- FILT --- HOST --- EM --- SUB
   SUB --- HEAD
   SUB --- DRV
   HEAD -->|"DET_TIA[63:0] -> 4x AD7616 -> 9-wire SPI"| J12
@@ -280,14 +279,14 @@ flowchart TB
   PCB --> SMA --> ANT
 ```
 
-The chip stack (encapsulation → detector → filter → diamond host → waveguides
+The chip stack (encapsulation → detector → filter → diamond host
 → emitter → ITO substrate) is the optical/electrode assembly from the
 fabrication protocol; the **front-end** drives the emitters (FPGA → 3× TLC5947
 constant-current sink → pixel cathodes; common anode on +12V_EMIT, all on the
 main board) and reads the detectors (die top → head TIA → 4× AD7616 → 9-wire
 SPI across J12 → FPGA), the **main board** delivers the microwave (SMA →
-antenna) and sinks the heat (Peltier/cold plate under the substrate). No camera,
-no alignment jig — every readout signal is an electrical connection across the
+antenna) and spreads the heat through a metal heat-spreader under the substrate;
+every readout signal is an electrical connection across the
 two-board sandwich.
 
 ---
@@ -332,10 +331,9 @@ two-board sandwich.
 | 29 | main  | RF amp choke inductor            | L2       | 100 nH ±10%                    | 1   | DC bias choke on RF output                                     | 0603                          | Bias decoupling |
 | 30 | main  | Microwave antenna                | A1       | Loop / CPW resonator (custom)  | 1   | MW delivery to the host                                        | Custom SMD/wire               | 2–3 GHz, 50 Ω |
 | 31 | on-chip | Long-pass optical filter         | OPT      | 650 nm long-pass               | 1   | Block green CQD pump, pass NV PL (637–800 nm)                  | On-chip / holder              | Non-electronic on-chip part |
-| 32 | on-chip | SU-8/PDMS waveguide layer        | —        | SU-8/PDMS optical waveguides    | 1   | Couple CQD emission + site PL into the detector electrodes      | On-chip (non-electronic)      | Part of the chip stack |
-| 33 | main  | ESD protection diodes            | D1–D10   | TVS ESD5V0                     | 10  | ESD on USB/RF/sensitive I/O                                    | SOD-923                       | Clamp 5 V |
-| 34 | main  | LED series resistor              | R70      | 330 Ω ±1%                      | 1   | LED1 current limit                                             | 0603                          | — |
-| 35 | on-chip | Host substrate (canonical)       | —        | CVD diamond plate (NV⁻)        | 1   | Canonical compute host: 12C-enriched CVD diamond, NV centres   | Optical plate (non-electronic)| T₂ ≈ 1.8 ms @ 300 K — "compute at 300 K: YES" |
+| 32 | main  | ESD protection diodes            | D1–D10   | TVS ESD5V0                     | 10  | ESD on USB/RF/sensitive I/O                                    | SOD-923                       | Clamp 5 V |
+| 33 | main  | LED series resistor              | R70      | 330 Ω ±1%                      | 1   | LED1 current limit                                             | 0603                          | — |
+| 34 | on-chip | Host substrate (canonical)       | —        | CVD diamond plate (NV⁻)        | 1   | Canonical compute host: 12C-enriched CVD diamond, NV centres   | Optical plate (non-electronic)| T₂ ≈ 1.8 ms @ 300 K — "compute at 300 K: YES" |
 | 36 | on-chip | Host substrate (sensor variants) | —        | hBN (V_B⁻) / SiC (V_Si)        | —   | Sensor variants; same board, MW freq + substrate change        | Optical plate                 | hBN T₂ ~2 µs (sensor, not compute) |
 
 > **Removed vs. the pre-pivot (two-board) BOM:** the ADG732BCPZ 64:1 analog MUX
@@ -949,14 +947,15 @@ toward the die; F.Cu carries the SMD analog.
 
 ---
 
-## 14. CNC G-Code Files (Emitter / Waveguide Substrate Tooling)
+## 14. CNC G-Code Files (Carrier / Fixture Tooling)
 
 The `hardware/gcode/` directory contains CNC toolpaths for machining the
-PMMA / acrylic optical substrate that hosts the emitter and waveguide structures
-over the 64-site array. They are produced for a 3-axis CNC mill and are not part
-of the electronic PCB. These are **macro carrier/substrate toolpaths (mm scale)** —
-they machine the substrate that hosts the emitter/waveguide, **not** the microchip
-features, which are made by lithography at 2.5 µm pitch (§1).
+PMMA / acrylic carriers and fixtures that hold the emitter and detector
+assemblies over the 64-site array. They are produced for a 3-axis CNC mill and
+are not part of the electronic PCB. These are **macro carrier/substrate
+toolpaths (mm scale)** — they machine the carrier that holds the emitter and
+detector, **not** the microchip features, which are made by lithography at
+2.5 µm pitch (§1).
 
 The three files are **regenerated deterministically** by
 [`tools/gen_qssc_gcode.py`](../tools/gen_qssc_gcode.py) (re-run it to rewrite all
@@ -969,11 +968,6 @@ had:
 | `square_chip_cnc.gcode`    | 2 mm flat   | Pockets a 30×30×3 mm acrylic sheet to leave an 8×8 array of **round 2 mm-diameter cylinders** (64 sites) on a 1 mm base. A rough cross-hatch leaves square posts, then a `G02` circular finish pass rounds each to a true 2 mm cylinder. Outline through-cuts the 30 mm part with 4 bridges (tabs). |
 | `cylinder_chip.gcode`      | 2 mm flat   | Pockets a ~65×65×3 mm sheet to leave **four** identical 30×30 mm arrays (2×2 grid, 5 mm separation), each an 8×8 array of round 2 mm cylinders — a multi-chip production run. **Outlines free all four arrays** (each with 4 bridges). |
 | `fluorescence-sensor.gcode`| 1 mm 90° V (grooves) → 2 mm flat (outline) | Routes 8 vertical + 8 horizontal V-bit grooves (3.75 mm pitch, −0.15 mm depth), **segmented with 250 µm gaps at each crossing** so the 8×8 intersections stay as solid pixel pads. The through-cut outline is a **separate end-mill section** with an explicit tool-change note. |
-
-The camera-era `microlens-chip.gcode` toolpath (Fresnel micro-lens domes over each
-site) was removed: the on-chip readout stack (CQD emitter → waveguide → diamond →
-filter → graphene detector) has no microlens layer, so it was a carried-over
-leftover from the free-space-optics design with no role on this chip.
 
 All three toolpaths assume mm units (`G21`), absolute positioning (`G90`),
 feed-per-minute (`G94`), XY-plane (`G17`), and a **safe-start block**: Z retracts

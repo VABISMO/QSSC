@@ -78,7 +78,7 @@ td code{font-size:12px}
 <h2 id="2-introduction-scientific-basis">2. Introduction &amp; Scientific Basis</h2>
 <h3 id="21-why-a-room-temperature-quantum-chip-demonstrator">2.1 Why a room-temperature quantum chip demonstrator</h3>
 <h3 id="22-why-carbon-quantum-dots-as-the-on-chip-source">2.2 Why carbon quantum dots as the on-chip source</h3>
-<h3 id="23-why-polymer-waveguides-and-2d-material-photodetectors">2.3 Why polymer waveguides and 2D-material photodetectors</h3>
+<h3 id="23-why-an-on-chip-2d-material-photodetector">2.3 Why an on-chip 2D-material photodetector</h3>
 <h3 id="24-architecture-overview">2.4 Architecture overview</h3>
 <h2 id="3-materials-bill-of-materials-bom">3. Materials &amp; Bill of Materials (BOM)</h2>
 <h3 id="31-chemicals-and-reagents">3.1 Chemicals and reagents</h3>
@@ -102,19 +102,17 @@ td code{font-size:12px}
 <h3 id="32-mos2-transfer-optional-for-higher-responsivity-channel">3.2 MoS₂ transfer (optional, for higher-responsivity channel)</h3>
 <h3 id="33-electrodes-and-channel-definition">3.3 Electrodes and channel definition</h3>
 <h3 id="34-operation">3.4 Operation</h3>
-<h2 id="section-4-waveguides-layer-stacking-bonding-thermal-management-contacts">Section 4 — Waveguides, Layer Stacking, Bonding, Thermal Management, Contacts</h2>
-<h3 id="41-teos-sol-gel-silica-waveguide-fabrication">4.1 TEOS sol-gel silica waveguide fabrication</h3>
-<h3 id="42-coupling-the-cqd-emitter-to-the-waveguide">4.2 Coupling the CQD emitter to the waveguide</h3>
-<h3 id="43-layer-stacking-and-bonding">4.3 Layer stacking and bonding</h3>
-<h3 id="44-peltier-thermal-management">4.4 Peltier thermal management</h3>
-<h3 id="45-contacts-and-encapsulation">4.5 Contacts and encapsulation</h3>
-<h3 id="46-coplanar-waveguide-mw-for-odmr">4.6 Coplanar waveguide (MW) for ODMR</h3>
+<h2 id="section-4-layer-stacking-bonding-thermal-path-contacts">Section 4 — Layer Stacking, Bonding, Thermal Path, Contacts</h2>
+<h3 id="41-layer-stacking-and-bonding">4.1 Layer stacking and bonding</h3>
+<h3 id="42-thermal-path">4.2 Thermal path</h3>
+<h3 id="43-contacts-and-encapsulation">4.3 Contacts and encapsulation</h3>
+<h3 id="44-coplanar-waveguide-mw-for-odmr">4.4 Coplanar waveguide (MW) for ODMR</h3>
 <h2 id="section-5-characterization-testing">Section 5 — Characterization &amp; Testing</h2>
 <h3 id="51-electroluminescence-cqd-array">5.1 Electroluminescence (CQD array)</h3>
 <h3 id="52-odmr-of-vb-in-hbn">5.2 ODMR of VB− in hBN</h3>
 <h3 id="521-optical-link-budget-explicit">5.2.1 Optical link budget (explicit)</h3>
 <h3 id="53-spin-coherence-t2">5.3 Spin coherence (T₂)</h3>
-<h3 id="54-coupling-efficiency-waveguide-detector">5.4 Coupling efficiency (waveguide → detector)</h3>
+<h3 id="54-emitter-detector-coupling">5.4 Emitter → detector coupling</h3>
 <h3 id="55-end-to-end-functional-test">5.5 End-to-end functional test</h3>
 <h3 id="56-emitterqubitdetector-calibration-software-pulse-capture">5.6 Emitter↔qubit↔detector calibration (software pulse-capture)</h3>
 <h2 id="section-6-safety">Section 6 — Safety</h2>
@@ -124,30 +122,34 @@ td code{font-size:12px}
 <h3 id="112-cqd-electroluminescence-and-ase">11.2 CQD electroluminescence and ASE</h3>
 <h3 id="113-liquid-exfoliation-of-hbn">11.3 Liquid exfoliation of hBN</h3>
 <h3 id="114-vb-defect-d-346-ghz-room-temperature-spin">11.4 VB− defect, D ≈ 3.46 GHz, room-temperature spin</h3>
-<h3 id="115-waveguide-coupling-2060">11.5 Waveguide coupling (20–60 %)</h3>
+<h3 id="115-emitter-detector-coupling-2060">11.5 Emitter → detector coupling (20–60 %)</h3>
 <h3 id="116-on-chip-2d-material-photodetector-responsivity">11.6 On-chip 2D-material photodetector responsivity</h3>
-<h3 id="117-peltier-tec-cooling-for-stable-room-temperature-operation">11.7 Peltier / TEC cooling for stable room-temperature operation</h3>
+<h3 id="117-passive-thermal-path-for-room-temperature-operation">11.7 Passive thermal path for room-temperature operation</h3>
 <h3 id="118-related-defect-platforms-nv-diamond-sic-v_si-and-decoupling">11.8 Related defect platforms (NV-diamond, SiC V_Si) and decoupling</h3>
 <h2 id="references">References</h2>
   <h1 id="quantum-solid-state-chip-room-temperature-fabrication-protocol">Quantum Solid State Chip (Room Temperature) — Fabrication Protocol</h1>
 <p><strong>Project:</strong> QSSC (Quantum Solid State Chip, room-temperature demonstrator)
 <strong>Document type:</strong> Laboratory fabrication protocol (standalone)
 <strong>Version:</strong> 1.0
-<strong>Scope:</strong> Home / maker-lab demonstrator integrating (1) an electrically-pumped carbon-quantum-dot (CQD) ASE/LED emitter array, (2) <strong>TEOS sol-gel silica (SiO₂) waveguides</strong> — chosen over SU-8 for negligible autofluorescence under the 532 nm pump, essential for reading the weak ODMR PL — and (3) a PMMA-coated hexagonal boron nitride (hBN) layer hosting optically-addressable spin defects (negatively-charged boron vacancy, VB−, zero-field splitting D ≈ 3.46 GHz, plus carbon-related centers), with on-chip 2D-material (graphene/MoS₂) photodetector readout and Peltier thermal management, operating at room temperature.</p>
+<strong>Scope:</strong> Home / maker-lab demonstrator integrating (1) an electrically-pumped carbon-quantum-dot (CQD) ASE/LED emitter array, (2) a PMMA-coated hexagonal boron nitride (hBN) layer hosting optically-addressable spin defects (negatively-charged boron vacancy, VB−, zero-field splitting D ≈ 3.46 GHz, plus carbon-related centers), and (3) an on-chip 2D-material (graphene/MoS₂) photodetector readout over a passive heat-spreader, operating at room temperature.</p>
 <blockquote>
 <p><strong>Note on the emitter claim.</strong> True <em>electrically-pumped lasing</em> from carbon quantum dots is <strong>not</strong> claimed in this protocol, and the reader should not infer it from the literature cited. What is targeted and demonstrated here is <strong>electroluminescence (EL) and amplified spontaneous emission (ASE) / high-brightness edge emission</strong> from a CQD–polymer composite diode stack, used as a compact optical pump and on-chip source. ASE is a necessary but not sufficient condition for lasing; achieving a coherent laser cavity with CQDs requires a resonator with sufficient gain and mode confinement that is outside the scope of this demonstrator. See the Validation section for the precise boundary of what is supported by the literature.</p>
 </blockquote>
 <hr />
 <h2 id="1-abstract">1. Abstract</h2>
-<p>This document specifies a complete, equipment-minimal fabrication protocol for a room-temperature solid-state quantum photonic chip (QSSC). The chip combines three functional layers on a single 25 × 25 mm² carrier: (i) a hydrothermally-synthesized carbon quantum dot (CQD) emitter array embedded in a polymeric LED/ASE stack that provides electrically-pumped broadband visible electroluminescence centered near 450–620 nm; (ii) a liquid-phase-exfoliated and chemically-engineered hexagonal boron nitride (hBN) thin film, spin-coated with PMMA, hosting optically-addressable spin defects including the negatively-charged boron vacancy (VB−) with a zero-field splitting D ≈ 3.46 GHz and carbon-related color centers; and (iii) <strong>TEOS sol-gel silica (SiO₂) waveguides</strong> that route pump and defect fluorescence to an on-chip 2D-material (graphene / MoS₂) photodetector array. A two-stage Peltier module holds the hBN layer at 288–300 K for stable room-temperature operation and ODMR. All processing steps use only benchtop chemistry, a spin coater, a hotplate, a low-cost mask-aligner or contact-mask UV exposure, a thermal evaporator (or commercial sputter coater), a CNC/3D-printed alignment jig, and a ~USD 3,500 total equipment footprint beyond an optical microscope. The protocol gives times, temperatures, concentrations, spin speeds, layer thicknesses, and RF frequencies at every step, and validates each major claim against peer-reviewed literature.</p>
+<p>This document specifies a complete, equipment-minimal fabrication protocol for a room-temperature solid-state spin-defect quantum chip (QSSC). The chip combines three functional layers on a single 25 × 25 mm² carrier: (i) a hydrothermally-synthesized carbon quantum dot (CQD) emitter array embedded in a polymeric LED/ASE stack that provides electrically-pumped broadband visible electroluminescence centered near 450–620 nm; (ii) a liquid-phase-exfoliated and chemically-engineered hexagonal boron nitride (hBN) thin film, spin-coated with PMMA, hosting optically-addressable spin defects including the negatively-charged boron vacancy (VB−) with a zero-field splitting D ≈ 3.46 GHz and carbon-related color centers; and (iii) an on-chip 2D-material (graphene / MoS₂) photodetector array that reads the defect fluorescence directly. A passive heat-spreader under the carrier holds the hBN layer at 288–300 K for stable room-temperature operation and ODMR. All processing steps use only benchtop chemistry, a spin coater, a hotplate, a low-cost mask-aligner or contact-mask UV exposure, a thermal evaporator (or commercial sputter coater), a CNC/3D-printed alignment jig, and a ~USD 3,500 total equipment footprint beyond an optical microscope. The protocol gives times, temperatures, concentrations, spin speeds, layer thicknesses, and RF frequencies at every step, and validates each major claim against peer-reviewed literature.</p>
 <hr />
 <h2 id="2-introduction-scientific-basis">2. Introduction &amp; Scientific Basis</h2>
 <h3 id="21-why-a-room-temperature-quantum-chip-demonstrator">2.1 Why a room-temperature quantum chip demonstrator</h3>
 <p>Most solid-state spin-qubit platforms (NV centers in diamond, GaAs quantum dots, superconducting qubits) require cryogenic operation (&lt; 10 K) or specialized microwave hardware. Optically-addressable spin defects in hexagonal boron nitride are a recent and notable exception: the negatively-charged boron vacancy, VB−, exhibits a spin-1 triplet with zero-field splitting <strong>D ≈ 3.46 GHz</strong>, optical initialization and readout, and measurable spin coherence at room temperature. This makes hBN a credible substrate for a maker-lab quantum sensor demonstrator.</p>
 <h3 id="22-why-carbon-quantum-dots-as-the-on-chip-source">2.2 Why carbon quantum dots as the on-chip source</h3>
 <p>Carbon quantum dots (CQDs, also called carbon nanodots, C-dots) are fluorescent carbon nanoparticles (2–10 nm) synthesized by bottom-up hydrothermal carbonization of citric acid + nitrogen dopants (e.g., urea, ethylenediamine). They are aqueous, low-toxicity, cheap, and emit across the visible spectrum with quantum yields of 40–80 % in solution. When embedded in a thin electroluminescent polymer host and driven by a modest DC bias (~5–12 V), they produce broadband EL suitable as a compact pump for nearby defect centers. We do <strong>not</strong> claim a CQD laser; we claim an electrically-pumped CQD LED/ASE source.</p>
-<h3 id="23-why-polymer-waveguides-and-2d-material-photodetectors">2.3 Why polymer waveguides and 2D-material photodetectors</h3>
-<p><strong>TEOS sol-gel silica (SiO₂)</strong> is the waveguide material here: fluorescence-free, UV–NIR transparent, densified at 300–400 °C, and patterned by soft-lithography / UV embossing — all compatible with benchtop processing. It is chosen over organic photoresists (e.g. SU-8) because its negligible autofluorescence under the 532 nm pump is essential for reading the weak ODMR PL. Graphene and MoS₂ photodetectors offer broadband absorption, gate-tunable responsivity, and integration directly on the waveguide facet — eliminating discrete photodiodes and enabling on-chip readout of ODMR fluorescence.</p>
+<h3 id="23-why-an-on-chip-2d-material-photodetector">2.3 Why an on-chip 2D-material photodetector</h3>
+<p>Graphene and MoS₂ photodetectors offer broadband absorption, gate-tunable
+responsivity and direct integration over the host, which puts the readout on
+the chip itself: no discrete photodiodes and no external optical bench for the
+ODMR fluorescence. Both transfer by the wet processes already used for the hBN
+film, so they stay inside the benchtop equipment set.</p>
 <h3 id="24-architecture-overview">2.4 Architecture overview</h3>
 <pre><code>                ┌─────────────────────────────────────────────┐
    top Ag cathode (silver-paste syringe) ─────────────────── │
@@ -163,11 +165,11 @@ td code{font-size:12px}
    │  hBN thin film (≈3–8 layers, 2–4 nm) w/ VB−        │
    │  SiO₂/Si or glass substrate                        │
    ──────────────────────────────────────────────────────┘
-        ↘ waveguide coupling ↙
-   ┌─────────── TEOS sol-gel SiO₂ waveguides ───────────┐       ← Section 3/4
-   │  → graphene / MoS₂ photodetector array             │
-   └─────────────────────────────────────────────────────┘
-   Peltier (2-stage TEC) clamped under Si carrier  ← Section 4
+        ↘ photoluminescence ↙
+   ┌─────────────────────────────────────────────┐
+   │  → graphene / MoS₂ photodetector array      │  ← Section 3/4
+   └─────────────────────────────────────────────┘
+   Heat-spreader under the Si carrier       ← Section 4
 </code></pre>
 <hr />
 <h2 id="3-materials-bill-of-materials-bom">3. Materials &amp; Bill of Materials (BOM)</h2>
@@ -392,11 +394,6 @@ td code{font-size:12px}
 <td>$300 (used)</td>
 </tr>
 <tr>
-<td>Peltier TEC module (2-stage, e.g., TE Technology 9500/127/060 B) + PID controller + NTC thermistor</td>
-<td>thermal management</td>
-<td>$60</td>
-</tr>
-<tr>
 <td>DC bench supply (0–30 V, 0–3 A) + Keithley-style sourcemeter (used 2400)</td>
 <td>electrical drive &amp; characterization</td>
 <td>$300 (used)</td>
@@ -474,7 +471,7 @@ td code{font-size:12px}
 <h3 id="15-cqdpva-emissive-layer">1.5 CQD–PVA emissive layer</h3>
 <ol start="13">
 <li>Spin-coat CQD–PVA ink at <strong>2000 rpm, 40 s</strong> → ~80 nm. (Thicker films for ASE: <strong>1500 rpm, 60 s</strong> → ~120–150 nm.) Bake <strong>80 °C, 20 min</strong> under vacuum desiccator to remove residual water (water kills EL).</li>
-<li><strong>ASE waveguide geometry:</strong> to favor in-plane ASE, deposit a second, thicker (~250 nm) neat-CQD strip on the pixel edge by drop-casting through a shadow mask (0.5 mm wide) and slow drying at 60 °C. This forms the gain strip into which the diode EL is edge-coupled.</li>
+<li><strong>ASE edge-gain strip:</strong> to favor in-plane ASE, deposit a second, thicker (~250 nm) neat-CQD strip on the pixel edge by drop-casting through a shadow mask (0.5 mm wide) and slow drying at 60 °C. This forms the gain strip into which the diode EL is edge-coupled.</li>
 </ol>
 <h3 id="15b-zno-electron-transport-layer-etl">1.5b ZnO electron-transport layer (ETL)</h3>
 <p>14b. <strong>ZnO ETL.</strong> Disperse <strong>ZnO nanopowder</strong> (~20–40 nm particles; ball-mill coarser ZnO if needed) in <strong>ethanol or butanol</strong> at <strong>20 mg/mL</strong>, sonicate 30 min, filter 0.45 µm. Spin-coat on the CQD–PVA layer at <strong>3000 rpm, 30 s</strong> → <strong>~30–50 nm</strong> ETL. Bake <strong>150 °C, 10 min</strong> on hotplate. ZnO (bandgap 3.37 eV ≈ 368 nm) is transparent to both the green pump and the 850 nm defect PL; it injects electrons into the CQD layer and blocks holes, completing the p-i-n stack opposite the PEDOT:PSS hole-transport layer.</p>
@@ -527,7 +524,7 @@ Pattern 8 × 8 matching pads on the ZnO ETL.</li>
 </ol>
 <h3 id="24-pmma-encapsulation">2.4 PMMA encapsulation</h3>
 <ol start="14">
-<li>Spin <strong>2 % PMMA 950K in anisole</strong> at <strong>4000 rpm, 45 s</strong> → ~50 nm. Bake <strong>180 °C, 2 min</strong> on hotplate. PMMA serves as (a) oxygen/moisture barrier stabilizing VB− charge state, (b) index-matching layer (n ≈ 1.49) between hBN (n ≈ 2.1 out-of-plane effective ~1.7) and the TEOS sol-gel core (n ≈ 1.50), and (c) planarization for the subsequent waveguide.</li>
+<li>Spin <strong>2 % PMMA 950K in anisole</strong> at <strong>4000 rpm, 45 s</strong> → ~50 nm. Bake <strong>180 °C, 2 min</strong> on hotplate. PMMA serves as (a) oxygen/moisture barrier stabilizing VB− charge state, (b) an index-matching cap (n ≈ 1.49) over the hBN film (n ≈ 2.1 out-of-plane, effective ~1.7), and (c) planarization for the layers deposited on top.</li>
 </ol>
 <p><strong>Timing, Section 2:</strong> exfoliation 12 h + centrifugation/wash 3 h + film 1 h + defect engineering 4 h (anneal-dominated) + PMMA 1 h. <strong>Total: ≈ 2 working days.</strong></p>
 <hr />
@@ -537,7 +534,7 @@ Pattern 8 × 8 matching pads on the ZnO ETL.</li>
 <ol>
 <li><strong>Source.</strong> Commercial CVD graphene on Cu foil (Graphenea). Coat graphene face with <strong>PMMA A4</strong> (spin 2000 rpm, 60 s, ~200 nm), bake 180 °C, 2 min.</li>
 <li><strong>Etch Cu.</strong> Float on <strong>0.5 M FeCl₃</strong> (or ammonium persulfate 0.1 M) for 12 h; PMMA/graphene membrane releases. Rinse in 3 × DI water baths, 10 min each.</li>
-<li><strong>Transfer.</strong> Scoop onto target substrate (waveguide facet or pre-patterned Au electrode pair, 100 µm gap) using a bent Si wafer as a "fishing" scoop. Dry 24 h in air, then <strong>180 °C, 1 h</strong> to improve adhesion.</li>
+<li><strong>Transfer.</strong> Scoop onto target substrate (the hBN film or a pre-patterned Au electrode pair, 100 µm gap) using a bent Si wafer as a "fishing" scoop. Dry 24 h in air, then <strong>180 °C, 1 h</strong> to improve adhesion.</li>
 <li><strong>Remove PMMA.</strong> Soak in acetone 2 h, IPA rinse, N₂ blow dry. Some PMMA residue is acceptable.</li>
 </ol>
 <h3 id="32-mos2-transfer-optional-for-higher-responsivity-channel">3.2 MoS₂ transfer (optional, for higher-responsivity channel)</h3>
@@ -555,43 +552,40 @@ Pattern 8 × 8 matching pads on the ZnO ETL.</li>
 <li>Bias drain–source <strong>0.1–1 V</strong>; responsivity typically <strong>0.01–0.1 A/W (graphene, bare)</strong>, <strong>10–10² A/W (MoS₂ photogating with trap states)</strong>; detectable down to nW optical powers with a lock-in. Use the same lock-in used for ODMR.</li>
 </ol>
 <hr />
-<h2 id="section-4-waveguides-layer-stacking-bonding-thermal-management-contacts">Section 4 — Waveguides, Layer Stacking, Bonding, Thermal Management, Contacts</h2>
-<h3 id="41-teos-sol-gel-silica-waveguide-fabrication">4.1 TEOS sol-gel silica waveguide fabrication</h3>
-<blockquote>
-<p><strong>Why not SU-8.</strong> SU-8 is a novolac–epoxy photoresist with strong <strong>autofluorescence</strong> under visible excitation and C–H-overtone NIR absorption around 850 nm. For ODMR the VB− PL is at <strong>~850 nm</strong> with only <strong>0.5–3 % contrast</strong> on top of a 532 nm pump background — an autofluorescent waveguide would bury the signal. SU-8 also decomposes above ~300–400 °C, incompatible with the densification/post-anneal thermal budget. <strong>TEOS-derived sol-gel SiO₂</strong> is the correct material: fluorescence-free, UV–NIR transparent, and thermally stable. Core/clad index contrast is set by a silane dopant (MTEOS or Ti), not by an organic polymer.</p>
-</blockquote>
+<h2 id="section-4-layer-stacking-bonding-thermal-path-contacts">Section 4 — Layer Stacking, Bonding, Thermal Path, Contacts</h2>
+<h3 id="41-layer-stacking-and-bonding">4.1 Layer stacking and bonding</h3>
 <ol>
-<li><strong>Core sol (n ≈ 1.50).</strong> Mix <strong>TEOS : EtOH : H₂O : HCl = 1 : 4 : 2 : 0.02 (mol)</strong>; stir 2 h at 60 °C for hydrolysis/condensation. Add <strong>15 mol % MTEOS</strong> (methyltriethoxysilane) relative to TEOS — raises the refractive index and adds hydrophobicity. Age the sol 24 h at room temperature in a sealed vial; filter 0.22 µm PVDF.</li>
-<li><strong>Cladding sol (n ≈ 1.45).</strong> Same TEOS:EtOH:H₂O:HCl recipe, <strong>no dopant</strong>. Age 24 h, filter 0.22 µm.</li>
-<li><strong>Core deposition + patterning.</strong> On the PMMA-capped hBN substrate, spin core sol at <strong>2000 rpm, 30 s</strong> → ~0.5–1 µm; soft-bake <strong>80 °C, 10 min</strong>. Pattern waveguides <strong>5–10 µm wide, 0.5–1 µm tall, 5–20 mm long, 1 cm radius bends</strong> by <strong>soft-lithography / UV embossing</strong>: press a PDMS stamp (cast from a photolithographed or commercially-ruled master) into the wet sol, cure under 365 nm if a photo-initiator is added, release the stamp. (Shadow-mask + HF-vapor etch is an alternative — HF-vapor only in a fume hood with calcium-gluconate gel on hand.) Densify <strong>300–400 °C, 1 h</strong> on the hotplate or in the tube furnace → dense SiO₂; the index stabilises at ~1.50.</li>
-<li><strong>Cladding.</strong> Spin cladding sol at <strong>1500 rpm, 30 s</strong> → ~1 µm over the patterned core; bake 80 °C, 10 min; densify <strong>300 °C, 30 min</strong>. Δn ≈ 0.05 (core 1.50 / clad 1.45) — single or few-mode at both 532 nm and 850 nm. For a thicker cladding, repeat 2–3×.</li>
-<li><strong>Propagation-loss target: &lt; 0.5 dB/cm at 850 nm</strong> (densified sol-gel silica, no organic fluorescence background). Sidewall roughness from the embossing stamp sets the practical loss; a reflow/rounding bake at 350 °C smooths edges.</li>
+<li><strong>Stack order (bottom→top):</strong> Si/SiO₂ carrier → 5 × 5 mm hBN-on-SiO₂ chip
+   (PMMA-capped) → CQD emitter chip, edge-coupled toward the film →
+   2D-material photodetector over the hBN film.</li>
+<li>Bond each layer with thin PDMS or cyanoacrylate at the corners only (avoid
+   the active area). Cure 80 °C, 1 h. Wire-bond or silver-paste the CQD
+   anode/cathode and the photodetector source/drain to a PCB fan-out.</li>
 </ol>
-<h3 id="42-coupling-the-cqd-emitter-to-the-waveguide">4.2 Coupling the CQD emitter to the waveguide</h3>
-<ol start="5">
-<li>Dice / cleave the CQD stack (Sec. 1) so the ASE gain-strip edge faces the sol-gel SiO₂ input facet. Mount the CQD chip and hBN+waveguide chip in the 3D-printed alignment jig. Use a 3-axis micrometer to bring the gain strip within &lt; 5 µm of the sol-gel SiO₂ input facet.</li>
-<li>UV-cure a small drop of NOA 61 optical adhesive (or cured PDMS as a "tack" layer) to lock the alignment. Butt-coupling efficiencies of <strong>20–60 %</strong> are realistic for end-fire coupling from an edge emitter into a 5–10 µm <strong>TEOS sol-gel SiO₂</strong> core when the gaps are &lt; 2 µm and the NA is matched.</li>
+<h3 id="42-thermal-path">4.2 Thermal path</h3>
+<ol start="3">
+<li>Cu/Al heat-spreader clamped under the carrier with thermal paste, finned
+   aluminium sink and a small 40 mm fan. The film runs at ambient; the
+   emitter's &lt; 5 W dissipation keeps the carrier within a few tenths of a
+   kelvin.</li>
 </ol>
-<h3 id="43-layer-stacking-and-bonding">4.3 Layer stacking and bonding</h3>
-<ol start="7">
-<li><strong>Stack order (bottom→top):</strong> Si/SiO₂ carrier → Peltier TEC top plate → 5 × 5 mm hBN-on-SiO₂ chip → PMMA → TEOS sol-gel SiO₂ waveguides (core+clad) → CQD emitter chip (edge-coupled) → 2D-material photodetector at waveguide output.</li>
-<li>Bond each layer with thin PDMS or cyanoacrylate at the corners only (avoid active area). Cure 80 °C, 1 h. Wire-bond or silver-paste the CQD anode/cathode and the photodetector source/drain to a PCB fan-out.</li>
+<h3 id="43-contacts-and-encapsulation">4.3 Contacts and encapsulation</h3>
+<ol start="4">
+<li>Au wire bonds or silver-paste tracks to a 0.1" header for: ITO anode (×8
+   rows), Ag cathode (×8 cols), photodetector drains (×N, one electrode per
+   addressed qubit site), gate (×1, optional electrolyte gate).</li>
+<li>Encapsulate the active area under a <strong>1 mm PDMS slab</strong> (oxygen/moisture
+   barrier, optical clear).</li>
 </ol>
-<h3 id="44-peltier-thermal-management">4.4 Peltier thermal management</h3>
-<ol start="9">
-<li><strong>Module:</strong> 2-stage TEC, e.g., TE Technology 9500/127/060 B (or generic TEC1-12706 single-stage for budget). Mount TEC cold side up, thermal-paste (Arctic Silver) to the Si carrier underside; TEC hot side to a finned aluminum heat sink with a small 40 mm fan.</li>
-<li><strong>Control:</strong> NTC 10 kΩ thermistor epoxied to the Si carrier next to the hBN chip. PID controller (e.g., Arduino + MAX6675/MCP9600 + MOSFET PWM) set to <strong>295 K (22 °C)</strong>, ±0.1 K stability. Operating range 288–300 K acceptable for room-temperature ODMR.</li>
-<li><strong>Power:</strong> TEC draws 1–3 A at 3–6 V from the bench supply; total chip dissipation &lt; 5 W — compatible with a maker-lab power budget.</li>
+<h3 id="44-coplanar-waveguide-mw-for-odmr">4.4 Coplanar waveguide (MW) for ODMR</h3>
+<ol start="6">
+<li>Hand-etch a 50 Ω coplanar waveguide (G-S-G, signal 200 µm / gap 100 µm) on
+   a single-sided FR4 or Rogers PCB. Mount the hBN chip face-down over the
+   signal line (≤ 50 µm gap from chip backside to line) or flip-chip with
+   anisotropic conductive paste. Microwave feedthrough to the on-board SMA
+   launcher.</li>
 </ol>
-<h3 id="45-contacts-and-encapsulation">4.5 Contacts and encapsulation</h3>
-<ol start="12">
-<li>Au wire bonds or silver-paste tracks to a 0.1" header for: ITO anode (×8 rows), Ag cathode (×8 cols), photodetector drains (×N, one electrode per addressed qubit site), gate (×1, optional electrolyte gate), thermistor (×2), TEC + and − (×2).</li>
-<li>Encapsulate active area under a <strong>1 mm PDMS slab</strong> (oxygen/moisture barrier, optical clear). Leave waveguide output facet exposed for optional off-chip fiber coupling.</li>
-</ol>
-<h3 id="46-coplanar-waveguide-mw-for-odmr">4.6 Coplanar waveguide (MW) for ODMR</h3>
-<ol start="14">
-<li>Hand-etch a 50 Ω coplanar waveguide (G-S-G, signal 200 µm / gap 100 µm) on a single-sided FR4 or Rogers PCB. Mount the hBN chip face-down over the signal line (≤ 50 µm gap from chip backside to line) or flip-chip with anisotropic conductive paste. Microwave feedthrough to the on-board SMA launcher.</li>
-</ol>
+<hr />
 <hr />
 <h2 id="section-5-characterization-testing">Section 5 — Characterization &amp; Testing</h2>
 <h3 id="51-electroluminescence-cqd-array">5.1 Electroluminescence (CQD array)</h3>
@@ -622,10 +616,10 @@ Pattern 8 × 8 matching pads on the ZnO ETL.</li>
 <li><strong>Pulsed ODMR</strong> (requires pulse-capable source or fast PIN switch): run Hahn echo (π/2 – τ – π – τ – echo) at the resonance. Vary τ from 0.1–20 µs. Fit echo amplitude vs τ to exp[−(2τ/T₂)^n] with n ≈ 1–2.</li>
 <li><strong>Expected T₂:</strong> <strong>0.5–5 µs at room temperature</strong> for ensembles in exfoliated hBN, limited by ¹⁰B/¹¹B nuclear spins and paramagnetic impurities. T₁ typically 10–100 µs.</li>
 </ol>
-<h3 id="54-coupling-efficiency-waveguide-detector">5.4 Coupling efficiency (waveguide → detector)</h3>
+<h3 id="54-emitter-detector-coupling">5.4 Emitter → detector coupling</h3>
 <ol start="11">
-<li>Inject calibrated light (e.g., 532 nm, 1 µW) into the sol-gel SiO₂ input facet with a tapered fiber; measure power at the output facet with a power meter and the on-chip graphene detector photocurrent.</li>
-<li><strong>Coupling efficiency target: 20–60 %</strong> (input) and propagation loss &lt; 1 dB/cm; on-chip detector responsivity measured from the known input power.</li>
+<li>Illuminate the hBN film through the CQD emitter (calibrate the pump off-chip first, e.g. 532 nm at 1 µW) and read the on-chip graphene detector photocurrent.</li>
+<li><strong>Coupling target: 20–60 %</strong> of the incident pump reaching the detector; the detector responsivity is computed from that known input power.</li>
 </ol>
 <h3 id="55-end-to-end-functional-test">5.5 End-to-end functional test</h3>
 <ol start="13">
@@ -674,7 +668,7 @@ Pattern 8 × 8 matching pads on the ZnO ETL.</li>
 <td>Low risk; avoid direct contact with antenna; keep &gt; 30 cm</td>
 </tr>
 <tr>
-<td>Peltier / hot surfaces</td>
+<td>Hot surfaces (hotplate, tube furnace)</td>
 <td>Heat-resistant gloves; allow hotplate cool-down</td>
 </tr>
 <tr>
@@ -765,9 +759,9 @@ Pattern 8 × 8 matching pads on the ZnO ETL.</li>
 <td>Sec. 5.3</td>
 </tr>
 <tr>
-<td>Waveguide coupling</td>
+<td>Emitter → detector coupling</td>
 <td>20–60 %</td>
-<td>Sec. 4.2, 5.4</td>
+<td>Sec. 5.4</td>
 </tr>
 <tr>
 <td>Sol-gel SiO₂ propagation loss</td>
@@ -827,19 +821,26 @@ Pattern 8 × 8 matching pads on the ZnO ETL.</li>
 <li><strong>Defect density ~0.3 /µm²</strong> is within the range routinely reported for irradiated or annealed hBN samples used for ensemble ODMR; the chemical route in Section 2.3 is a maker-lab approximation of ion-implantation results in [5–7].</li>
 <li><strong>hBN as a quantum-emitter host</strong>: single-photon emission from hBN monolayers <strong>Tran et al., <em>Nat. Nanotechnol.</em> 2016</strong> [26], hBN photonics review <strong>Caldwell et al., <em>Nat. Rev. Mater.</em> 2019</strong> [27], and a quantum-coherent spin in hBN at ambient conditions <strong>Stern et al., <em>Nat. Mater.</em> 2024</strong> [28] (a carbon-related defect, distinct from VB−).</li>
 </ul>
-<h3 id="115-waveguide-coupling-2060">11.5 Waveguide coupling (20–60 %)</h3>
+<h3 id="115-emitter-detector-coupling-2060">11.5 Emitter → detector coupling (20–60 %)</h3>
 <ul>
-<li><strong>Butt/end-fire coupling of edge emitters into micrometer-scale silica waveguides</strong> with 20–60 % efficiency is standard in integrated photonics and consistent with values reported in sol-gel silica and polymer-waveguide quantum-photonic work; see polymer integrated optics <strong>Bêche et al., <em>Microelectron. J.</em> 2006</strong> [31] and soft-lithography patterning <strong>Xia &amp; Whitesides 1998</strong> [32], <strong>Qin et al., <em>Nat. Protoc.</em> 2010</strong> [33]. The 5–10 µm <strong>TEOS sol-gel SiO₂</strong> core and &lt; 2 µm gap specified in Section 4.2 are within the regime where end-fire efficiency is dominated by mode-overlap and routinely reaches tens of percent. TEOS sol-gel silica is preferred over SU-8 here because its <strong>negligible autofluorescence</strong> under 532 nm excitation is essential for reading the weak (~0.5–3 % contrast) V_B⁻ ODMR PL at 850 nm without waveguide-background burial.</li>
+<li><strong>Butt-coupled edge emitters with sub-2 µm gaps</strong> deliver tens-of-percent
+  transfer in integrated sources, with the efficiency set by mode overlap
+  between the gain strip and the receiving aperture; see polymer integrated
+  optics <strong>Bêche et al., <em>Microelectron. J.</em> 2006</strong> [31], soft-lithography
+  patterning <strong>Xia &amp; Whitesides 1998</strong> [32] and <strong>Qin et al., <em>Nat. Protoc.</em>
+  2010</strong> [33]. The geometry specified in Section 4.1 sits in that regime.</li>
 </ul>
 <h3 id="116-on-chip-2d-material-photodetector-responsivity">11.6 On-chip 2D-material photodetector responsivity</h3>
 <ul>
 <li><strong>Graphene photodetectors</strong>: <strong>Xia et al., <em>Nat. Nanotechnol.</em> 2009</strong> [9] (ultrafast graphene photodetector) and subsequent reviews establish bare-graphene responsivities of <strong>0.01–0.1 A/W</strong>, matching our target.</li>
 <li><strong>MoS₂ and hybrid 2D photodetectors with high responsivity (10–10² A/W) via photogating</strong>: <strong>Konstantatos et al., <em>Nat. Nanotechnol.</em> 2012</strong> [10] (hybrid graphene–quantum-dot phototransistor with ultrahigh gain), ultrasensitive monolayer-MoS₂ photodetectors <strong>Lopez-Sanchez et al., <em>Nat. Nanotechnol.</em> 2013</strong> [24], and vertical graphene heterostructure transistors <strong>Britnell et al., <em>Science</em> 2012</strong> [25] establish the photogating regime used in Section 3.4.</li>
-<li><strong>Integration of 2D photodetectors on waveguides</strong> for on-chip readout is consistent with 2D-material photodetection reviews (e.g., F. Xia et al., <em>Nat. Photonics</em> reviews).</li>
+<li><strong>On-chip integration of 2D photodetectors</strong> over the host, for direct readout, is consistent with 2D-material photodetection reviews (e.g., F. Xia et al., <em>Nat. Photonics</em> reviews).</li>
 </ul>
-<h3 id="117-peltier-tec-cooling-for-stable-room-temperature-operation">11.7 Peltier / TEC cooling for stable room-temperature operation</h3>
+<h3 id="117-passive-thermal-path-for-room-temperature-operation">11.7 Passive thermal path for room-temperature operation</h3>
 <ul>
-<li>Thermoelectric (Peltier) cooling to stabilize solid-state photonics and single-photon detectors to ±0.1 K is standard engineering; no specific landmark citation is required. Generic thermoelectric-cooler references and vendor application notes suffice. The ±0.1 K stability in Section 4.4 is well within commercial TEC + PID capability.</li>
+<li>A metal heat-spreader under the carrier with a low-resistance interface holds
+  a few-watt chip within a fraction of a kelvin of ambient; TIM and finned-sink
+  application notes suffice, so no landmark citation is required.</li>
 </ul>
 <h3 id="118-related-defect-platforms-nv-diamond-sic-v_si-and-decoupling">11.8 Related defect platforms (NV-diamond, SiC V_Si) and decoupling</h3>
 <p>The chip is VB−-centric, but the same control stack drives other room-temperature solid-state spin defects. These references support that generality and the calibration/decoupling toolbox:</p>
@@ -887,7 +888,7 @@ Pattern 8 × 8 matching pads on the ZnO ETL.</li>
 <p>[32] Y. Xia and G. M. Whitesides, "Soft lithography," Annual Review of Materials Research 28, 153-184 (1998). doi:10.1146/annurev.matsci.28.1.153</p>
 <p>[33] D. Qin, Y. Xia, and G. M. Whitesides, "Soft lithography for micro- and nanoscale patterning," Nature Protocols 5, 491-502 (2010). doi:10.1038/nprot.2009.234</p>
 <p>[34] A. R. Bülau et al., "A highly efficient, low-cost microwave resonator for exciting a diamond sample from a miniaturized quantum magnetometer," Metrology 5, 69 (2025). doi:10.3390/metrology5040069</p>
-  <div class="foot">QSSC — Quantum Solid State Chip (room temperature) · fabrication protocol · branded document · 53300 source bytes</div>
+  <div class="foot">QSSC — Quantum Solid State Chip (room temperature) · fabrication protocol · branded document · 48656 source bytes</div>
 </div>
 </body>
 </html>
