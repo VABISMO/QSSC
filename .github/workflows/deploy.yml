@@ -147,9 +147,8 @@ jobs:
           HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
         run: |
           if [ -z "$HOOK" ]; then
-            echo "RENDER_DEPLOY_HOOK_URL not set — skipping API deploy."
-            echo "Set it (Settings → Secrets) to enable the Render deploy."
-            exit 0
+            echo "::error title=API not deployed::RENDER_DEPLOY_HOOK_URL is not set, so the API was NOT redeployed. render.yaml sets autoDeploy: false on purpose (pushes must not ship before CI is green), which makes this hook the only thing that ever updates the service. With it missing, Render keeps serving the last built image while main moves on, and the dashboard then calls endpoints that build does not have (404 from GitHub Pages). Fix: Render dashboard -> qssc-api -> Settings -> Deploy Hook -> copy the URL into GitHub Settings -> Secrets and variables -> Actions -> RENDER_DEPLOY_HOOK_URL."
+            exit 1
           fi
           echo "Triggering Render deploy hook..."
           curl -fsS -X POST "$HOOK"

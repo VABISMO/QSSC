@@ -7,9 +7,14 @@
 
 A room-temperature **solid-state spin-defect** quantum platform: a Qiskit
 backend, an FPGA control stack with PCB design, a validated chip-fabrication
-protocol, and a web dashboard. This project remasters and merges two earlier
-projects by the same author — an hBN spin-defect *chip design* and a Qiskit
-NV-diamond *simulator* — into one coherent, renamed deliverable.
+protocol, and a web dashboard.
+
+Two properties define the design. **The qubits are spins, and they entangle
+through their spin–spin (magnetic-dipole) coupling** — microwave-driven gates,
+never photon-mediated ones; nothing in the chip relies on optical interference
+or indistinguishable photons. And **the device runs at ~300 K**: NV⁻ centres in
+CVD diamond, zero-field splitting D ≈ 2.87 GHz, ODMR readout, no dilution
+refrigerator, no optical bench — no waveguides, no active cooling, no camera.
 
 <img width="1751" height="977" alt="image" src="https://github.com/user-attachments/assets/8506774f-5f71-4088-ba79-f775bb8d93b8" />
 
@@ -30,11 +35,9 @@ NV-diamond *simulator* — into one coherent, renamed deliverable.
 | **REST backend** | `api/` | FastAPI app exposing the simulator, ODMR model, protocol and a circuit runner |
 | **Frontend** | `frontend/` | React 18 + Vite dashboard (ODMR chart, qubit grid, circuit runner, protocol viewer) |
 | **FPGA RTL** | `fpga/rtl` | 11 Verilog modules (Artix-7) — UART, SPI/ADF4351 PLL, 64-ch CQD emitter drive (3× TLC5947 + `dac_ctrl` gradient DAC), detector readout (TLV9004 TIA → 4× AD7616 parallel 16-bit ADC, 1 kHz lock-in host-side), hardware QRNG (`qrng_entropy` von-Neumann extractor), command parser, top-level |
-| **Hardware** | `hardware/` | KiCad PCBs (main + detector head), XDC constraints, CNC G-code, datasheets, `HARDWARE_DESIGN.md` |
-| **Protocol** | `docs/FABRICATION_PROTOCOL.md` | 5-section lab fabrication protocol, validated against published studies |
-| **Protocol (HTML)** | `docs/protocol.html` | Branded, print-ready HTML render of the protocol (regenerate with `python3 tools/build_protocol_html.py`) |
-| **Presentation** | `presentation/index.html` | Self-contained HTML deck with software mocks and diagrams |
-| **PDFs** | `presentation/QSSC_presentation.pdf`, `docs/QSSC_fabrication_protocol.pdf` | Headless-Chromium exports of the presentation and protocol |
+| **Hardware** | `hardware/` | KiCad boards (main control, detector head, gradient), XDC constraints, CNC G-code, datasheets, `HARDWARE_DESIGN.md` |
+| **Protocol** | `docs/FABRICATION_PROTOCOL.md` | lab fabrication protocol, validated against published studies (canonical source: `qssc/protocol.py`) |
+| **Protocol (HTML)** | `docs/protocol.html` | print-ready HTML render of the protocol (regenerate with `python3 tools/build_protocol_html.py`) |
 | **Tests** | `tests/` | software/physics tests (defects, simulator, circuits, backend, API, crypto, cross-platform) — **1174 collected**, of which 1135 run in CI — plus a PCB gate track (DRC, connectivity, pin audit, routing, board integrity) that runs locally against an installed KiCad |
 
 ## Quick start
@@ -268,16 +271,25 @@ a missing consumer-ack — now fixed.) Pin assignments live in
 live in [`fpga/synth/`](fpga/synth) (see
 [`hardware/HARDWARE_DESIGN.md`](hardware/HARDWARE_DESIGN.md) §17).
 
-> **Which board + cable?** The RTL drives an **external AD7616 ADC** over SPI,
-> so it is no longer tied to the Xilinx XADC hard block — the **same firmware
-> runs on any FPGA with a spare SPI port**; only the `.xdc` pin map changes.
-> Three options are documented in
-> [`HARDWARE_DESIGN.md`](hardware/HARDWARE_DESIGN.md) §1A: the custom QSSC PCB
-> (XC7A35T-1CSG324C, programmed over JTAG with a Xilinx Platform Cable USB II
-> / Digilent JTAG-HS3), the **Digilent Arty A7-35T** (on-board USB-JTAG; remap
-> pins for the CSG324 package), and the **Digilent Cmod A7-35T** (same CSG324
-> package, limited I/O). Toolchain: free Xilinx **Vivado**. Host link is always a
-> USB cable to the board's USB-UART bridge (FT232RL / FT2232H) at 115200-8-N-1.
+### Boards
+
+The same RTL drives both board variants — the readout goes to an external AD7616
+over SPI, so nothing depends on the Xilinx XADC hard block, and only the `.xdc`
+pin map changes. Toolchain for both is the free Xilinx **Vivado**; the host link
+is a USB cable to the board's USB-UART bridge at **115200-8-N-1**.
+
+| Variant | FPGA | Where | Status |
+|---|---|---|---|
+| **Custom QSSC PCB** | Artix-7 **XC7A35T-1CSG324C** | [`hardware/pcb/`](hardware/pcb), pins in [`fpga/constraints.xdc`](fpga/constraints.xdc) | design artefact: boards, XDC and yosys synthesis complete; bitstream packaging outstanding |
+| **Home-lab QMTECH** | Artix-7 **XC7A15T** (stock dev board) | [`fpga/qmtech/`](fpga/qmtech) | **verified on hardware**: bitstream built and flashed, JTAG reports `init 1 done 1` |
+
+- **QMTECH (home lab):** `bash fpga/qmtech/build.sh`, then
+  `bash fpga/qmtech/flash_qmtech.sh`. Wiring: [`fpga/INTERCONNECT.md`](fpga/INTERCONNECT.md);
+  pin map: [`fpga/qmtech/PINMAP.md`](fpga/qmtech/PINMAP.md).
+- **Custom QSSC PCB:** JTAG through a Digilent JTAG-HS3 or Xilinx Platform Cable
+  USB II into the 6-pin header (`TCK=E10 TMS=E12 TDI=E11 TDO=E13`), UART through
+  the on-board FT232RL. The Digilent Arty A7-35T and Cmod A7-35T also run this
+  firmware with a remapped pin file ([`HARDWARE_DESIGN.md`](hardware/HARDWARE_DESIGN.md) §1A).
 
 The host protocol is a small ASCII UART command set (115200 baud, 8-N-1,
 `\n`-terminated; all numbers decimal integers — see
@@ -350,8 +362,6 @@ TCL
 
 > The repo ships the already-synthesised `fpga/synth/qssc_top.edif`, so you can
 > skip step 1 and go straight to Vivado with the EDIF + `fpga/constraints.xdc`.
-> A packaged `build_bitstream.tcl` + `Makefile bitstream` target is part of the
-> pending PR2 (`hw/rtl-verbs-bitstream`).
 
 **Flash.** Open Vivado **Hardware Manager**: *Open target → Auto-connect* (the
 JTAG-HS3 / Platform Cable appears), *Program device → select qssc_top.bit*.
@@ -376,28 +386,30 @@ result is labelled `source: hardware · I/O: real`. With **no board** (or
 `QSSC_FPGA_PORT` unset), the same switch shows a red *No FPGA detected* banner
 and never silently falls back to the simulator.
 
-> **Firmware status (truthful).** PR1 (`hw/real-mode`) wired the host for the
-> real board — the `ID` handshake, `NoFPGADetected`, the Hardware switch, real
-> ODMR calibration, truthful `source`/`io` labels. The core verbs
-> (`DRIVE_EMITTER`, `SET_EMITTER`, `DRIVE_PATTERN`, `CLEAR_EMITTERS`,
-> `READ_DETECTOR`, `READ_DETECTORS`, `APPLY_PULSE`, `READ_RNG`) are implemented
-> in the RTL today. The `ID` / `STATUS` / `RESET` / `ODMR_SWEEP` verbs + the
-> packaged bitstream Tcl are **PR2-pending** — so until PR2 flashes a board,
-> `/api/fpga/probe` correctly returns `connected: false` (no `ID` answer yet),
-> and the sensor verbs that need the lock-in accumulator / pulse engine
-> (`READ_GYRO`, `READ_LOCKIN`, `RUN_SEQUENCE`) are routed to the simulator with
-> a *simulated · pending #58* label in Hardware mode.
+**Firmware status.** Implemented in the RTL today: `DRIVE_EMITTER`,
+`SET_EMITTER`, `DRIVE_PATTERN`, `CLEAR_EMITTERS`, `READ_DETECTOR`,
+`READ_DETECTORS`, `APPLY_PULSE`, `READ_RNG`. Not implemented yet: `ID`,
+`STATUS`, `RESET`, `ODMR_SWEEP`. Because `ID` is not in the firmware,
+`/api/fpga/probe` reports `connected: false` instead of guessing, and the verbs
+that need the lock-in accumulator or the pulse engine (`READ_GYRO`,
+`READ_LOCKIN`, `RUN_SEQUENCE`) are served by the simulator in Hardware mode
+under an explicit *simulated* label — the switch never falls back silently.
 
 ## Fabrication protocol
 
-`docs/FABRICATION_PROTOCOL.md` is a complete, parameterised lab build in five
-sections — CQD emitter array, hBN exfoliation + defect engineering + PMMA,
-on-chip 2D photodetectors, waveguides/stacking/thermal management, and safety —
-each step with target parameters and expected outcomes. It is grounded in
-landmark publications (Gottscholl *Nature Physics* 2020; Hernandez *Nature
-Nanotechnol.* 2008; Coleman *Science* 2011; Kianinia *ACS Photonics* 2020) and
-is explicit about what is established versus aspirational (e.g. the CQD source
-is described as amplified spontaneous emission, **not** a laser).
+`docs/FABRICATION_PROTOCOL.md` is a parameterised lab build — CQD emitter
+array, diamond + NV⁻ defect engineering, on-chip 2D photodetectors, device
+assembly and safety — each step with target parameters and expected outcomes.
+It is grounded in landmark publications (Gottscholl *Nature Physics* 2020;
+Hernandez *Nature Nanotechnol.* 2008; Coleman *Science* 2011; Kianinia
+*ACS Photonics* 2020) and is explicit about what is established versus
+aspirational (the CQD source is amplified spontaneous emission, **not** a laser).
+
+The API and dashboard read the protocol from structured Python data in
+[`qssc/protocol.py`](qssc/protocol.py) (`/api/protocol`). The lab-facing
+document is [`docs/FABRICATION_PROTOCOL.md`](docs/FABRICATION_PROTOCOL.md);
+its HTML renders (`docs/protocol*.html`) are rebuilt with
+`python3 tools/build_protocol_html.py`.
 
 ## Features & inventions
 
@@ -550,19 +562,19 @@ failed test/parse/sim run blocks both deploys). It then:
   trace geometry, CNC G-code files, the KiCad
   project, and a references list (ADF4351 / XC7A35T / GVA-84+ / AD7616 /
   TLC5947 / TLV9004 / NV readout).
-- [`fpga/rtl/`](fpga/rtl) — 10 Verilog modules: `top_level`, `command_parser`,
+- [`fpga/rtl/`](fpga/rtl) — 11 Verilog modules: `top_level`, `command_parser`,
   `uart_rx`/`uart_tx`, `spi_master` (ADF4351), `adf4351_ctrl`, `tlc5947_ctrl`
   (emitter PWM), `emitter_array` (64 parallel CQD emitters via 3× TLC5947),
-  `adc_reader` (4× AD7616 parallel 16-bit ADC, 1 kHz lock-in host-side),
-  `qrng_entropy` (dark-channel LSB von-Neumann extractor, `READ_RNG` +
-  entropy-health-gated key material, HARDWARE_DESIGN.md §15E).
+  `dac_ctrl` (MCP4921 gradient-coil DAC), `adc_reader` (4× AD7616 parallel
+  16-bit ADC, 1 kHz lock-in host-side), `qrng_entropy` (dark-channel LSB
+  von-Neumann extractor, `READ_RNG` + entropy-health-gated key material,
+  HARDWARE_DESIGN.md §15E).
 - [`fpga/constraints.xdc`](fpga/constraints.xdc) — Artix-7 CSG324 pin
   assignments and timing constraints (100 MHz TCXO, TLC5947 emitter SPI,
   AD7616 detector SPI, ADF4351 SPI; no camera domain).
 - [`fpga/sim/tb_top_level.v`](fpga/sim/tb_top_level.v) — self-checking testbench.
-- [`hardware/gcode/`](hardware/gcode) — CNC G-code substrate toolpaths for the
-  microfluidic cylinder array, waveguide/sensor-grid routing, and square cavity
-  chip carrier (described in `HARDWARE_DESIGN.md` §14).
+- [`hardware/gcode/`](hardware/gcode) — CNC G-code toolpaths for the chip
+  carriers and sensor fixtures (described in `HARDWARE_DESIGN.md` §14).
 - [`hardware/pcb/`](hardware/pcb) — KiCad PCB project for BOTH sandwich boards
   (`qssc.kicad_*` main + `chip_module.kicad_*` detector head, generated by
   `tools/gen_qssc_kicad.py` and routed headless by
@@ -577,25 +589,20 @@ failed test/parse/sim run blocks both deploys). It then:
   **local-only**: they need a system KiCad (`kicad-cli pcb drc` + the `pcbnew`
   binding) and no hosted runner provides a usable version, so CI runs them
   nowhere — run `pytest tests/test_pcb_*.py` on a machine with KiCad.
-  KNOWN: the head's die-bus escape (In1.Cu/
-  In3.Cu), removed in commit 33c2a12, is re-routed since the FreeRouting
-  cycle 1 (2b24f91) — 100 of the 129 regressed die-bus nets are closed, 15
-  DET_IN + 14 DET_TIA remain (ratcheted in `tests/test_pcb_connectivity.py`).
+  KNOWN: the head's die-bus escape is re-routed and 100 of the 129 regressed
+  die-bus nets are closed, with 15 DET_IN + 14 DET_TIA still open (ratcheted in
+  `tests/test_pcb_connectivity.py`).
   On the main board only the USB-C D- pair tie (USB_DM) remains split.
 
 ### Fabrication protocol
 
-- The canonical protocols live as **structured Python data** in
-  [`qssc/protocol.py`](qssc/protocol.py) — served by the REST API
-  (`/api/protocol`) and rendered by the dashboard protocol viewer. The
-  standalone `docs/FABRICATION_PROTOCOL*.md` / `.html` / `.pdf` renderings
-  were removed in `a3ab46b` so the API and dashboard consume one source
+- [`qssc/protocol.py`](qssc/protocol.py) — the protocol as structured Python
+  data, served by `/api/protocol` and rendered by the dashboard; the
+  `.md`/`.html` in `docs/` are the lab-facing document and its renders
   (decision: [ADR-0007](docs/adr/0007-fabrication-protocol-as-python-data.md)).
 - [`docs/fabrication/QSSC_fabrication_protocol_diamond.pdf`](docs/fabrication/QSSC_fabrication_protocol_diamond.pdf)
-  — non-canonical reference PDF export of the NV-diamond protocol
-  (CQD emitter array, CVD diamond + NV⁻ engineering, on-chip
-  graphene/MoS₂ photodetectors, waveguides/stacking/thermal management,
-  safety).
+  — PDF export of the NV-diamond protocol (CQD emitter array, CVD diamond +
+  NV⁻ engineering, on-chip graphene/MoS₂ photodetectors, safety).
 
 ### Architecture & decision records
 
@@ -610,13 +617,6 @@ failed test/parse/sim run blocks both deploys). It then:
 - [`hardware/datasheets/DATASHEETS.md`](hardware/datasheets/DATASHEETS.md)
   — per-component datasheet index; the authoritative component reference
   (kept next to the hardware design doc, see ADR-0008).
-
-### Presentation
-
-- [`presentation/index.html`](presentation/index.html) — self-contained HTML
-  deck with software mocks and diagrams.
-- [`presentation/QSSC_presentation.pdf`](presentation/QSSC_presentation.pdf) —
-  PDF export of the deck.
 
 ## License
 

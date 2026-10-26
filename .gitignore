@@ -165,3 +165,9 @@ benchmark_report.html
 # Local array-calibration cache (api/runner.py _CALIB_FILE writes this
 # machine-specific 72 KB+ JSON; never commit it -- audit #121)
 hardware/calibration/array_calibration.json
+
+# Local-only material: never publish. The presentation deck and the internal
+# "memoria" write-ups are working documents for the author, not part of the
+# public project -- keep them on disk, keep them out of git.
+presentation/
+docs/propiedad-intelectual/
