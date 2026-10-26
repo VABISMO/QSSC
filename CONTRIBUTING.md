@@ -21,9 +21,9 @@ mutually consistent.
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
-pip install -e ".[api,dev]"
+pip install -e ".[api,dev,hw]"
 
-python -m pytest -rs          # baseline: 129 passed, 4 skipped
+python -m pytest -rs          # baseline: 1106 passed, 5 skipped, 1 xfailed
 ruff check --select=E9,F63,F7,F82,F401,F841 .   # the CI lint set (ci.yml)
 ```
 
