@@ -34,15 +34,15 @@ main,"D1, D2, D3, D4, D5, D6, D7, D8, D9, D10",10,ESD5V0,Diode_SMD:D_SOD-923,ON 
 grad,"D1, D2, D3, D4, D5, D6, D7, D8, D9, D10",10,ESD5V0,Diode_SMD:D_SOD-923,ON Semi,ESD5V0S3B-U,https://www.onsemi.com/pub/Collateral/ESD5V0S3B-U-D.PDF
 grad,Rgrad_feed,1,0R,Resistor_SMD:R_0805_2012Metric,,,
 grad,Rsense,1,1,Resistor_SMD:R_2512_6332Metric,,,
-main,Y1,1,100MHz XO,Oscillator:Oscillator_SMD_Abracon_ASE-4Pin_3.2x2.5mm,,,
-grad,Y1,1,100MHz XO,Oscillator:Oscillator_SMD_Abracon_ASE-4Pin_3.2x2.5mm,,,
+main,Y1,1,100MHz XO,Oscillator:Oscillator_SMD_Abracon_ASE-4Pin_3.2x2.5mm,Abracon,ASE-100.000MHZ-LR,https://abracon.com/Oscillators/ASE.pdf
+grad,Y1,1,100MHz XO,Oscillator:Oscillator_SMD_Abracon_ASE-4Pin_3.2x2.5mm,Abracon,ASE-100.000MHZ-LR,https://abracon.com/Oscillators/ASE.pdf
 head,"C_ahf, Cref, Crio0, Crio1, Crio2, Crio3, Cua0, Cua1, Cua2, Cua3, Cud0, Cud1, Cud2, Cud3, Cur0, Cur1, Cur2, Cur3, Cut0, Cut1, Cut2, Cut3, Cut4, Cut5, Cut6, Cut7, Cut8, Cut9, Cut10, Cut11, Cut12, Cut13, Cut14, Cut15",34,100nF,Capacitor_SMD:C_0603_1608Metric,,,
 head,"Rref1, Rref2",2,10k,Resistor_SMD:R_0603_1608Metric,,,
 main,"C_in, C21, C22, C23, C24, C25, C26, C27, C28, C29, C30, C42, C43, C45, C47, C51",16,10uF,Capacitor_SMD:C_0805_2012Metric,,,
 head,"C_5V, C_Abulk, CuaB0, CuaB1, CuaB2, CuaB3",6,10uF,Capacitor_SMD:C_0805_2012Metric,,,
 grad,"C_in, C21, C22, C23, C24, C25, C26, C27, C28, C29, C30, C42, C43, C45, C47, C51",16,10uF,Capacitor_SMD:C_0805_2012Metric,,,
-main,J4,1,12V LED,Connector_BarrelJack:BarrelJack_CUI_PJ-102AH_Horizontal,,,
-grad,J4,1,12V LED,Connector_BarrelJack:BarrelJack_CUI_PJ-102AH_Horizontal,,,
+main,J4,1,12V LED,Connector_BarrelJack:BarrelJack_CUI_PJ-102AH_Horizontal,CUI,PJ-102AH,https://www.cui.com/product/resource/pj-102a.pdf
+grad,J4,1,12V LED,Connector_BarrelJack:BarrelJack_CUI_PJ-102AH_Horizontal,CUI,PJ-102AH,https://www.cui.com/product/resource/pj-102a.pdf
 main,F2,1,1A PTC,Fuse:Fuse_1206_3216Metric,,,
 grad,F2,1,1A PTC,Fuse:Fuse_1206_3216Metric,,,
 head,"Rf0, Rf1, Rf2, Rf3, Rf4, Rf5, Rf6, Rf7, Rf8, Rf9, Rf10, Rf11, Rf12, Rf13, Rf14, Rf15, Rf16, Rf17, Rf18, Rf19, Rf20, Rf21, Rf22, Rf23, Rf24, Rf25, Rf26, Rf27, Rf28, Rf29, Rf30, Rf31, Rf32, Rf33, Rf34, Rf35, Rf36, Rf37, Rf38, Rf39, Rf40, Rf41, Rf42, Rf43, Rf44, Rf45, Rf46, Rf47, Rf48, Rf49, Rf50, Rf51, Rf52, Rf53, Rf54, Rf55, Rf56, Rf57, Rf58, Rf59, Rf60, Rf61, Rf62, Rf63",64,1M,Resistor_SMD:R_0603_1608Metric,,,
@@ -58,8 +58,8 @@ main,FB1,1,600Ω@100MHz,Inductor_SMD:L_0603_1608Metric,Murata,BLM18AG601SN1D,htt
 head,FB_A,1,600Ω@100MHz,Inductor_SMD:L_0603_1608Metric,Murata,BLM18AG601SN1D,https://www.murata.com/products/productdata/8796738650146/ENFA0003.pdf
 grad,FB1,1,600Ω@100MHz,Inductor_SMD:L_0603_1608Metric,Murata,BLM18AG601SN1D,https://www.murata.com/products/productdata/8796738650146/ENFA0003.pdf
 head,"UAD0, UAD1, UAD2, UAD3",4,AD7616,Package_QFP:LQFP-80_14x14mm_P0.65mm,Analog Devices,AD7616BSTZ,https://www.analog.com/media/en/technical-documentation/data-sheets/ad7616.pdf
-main,U3,1,ADF4351BCPZ,Package_DFN_QFN:QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm,,,
-grad,U3,1,ADF4351BCPZ,Package_DFN_QFN:QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm,,,
+main,U3,1,ADF4351BCPZ,Package_DFN_QFN:QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm,Analog Devices,ADF4351BCPZ,https://www.analog.com/media/en/technical-documentation/data-sheets/ADF4351.pdf
+grad,U3,1,ADF4351BCPZ,Package_DFN_QFN:QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm,Analog Devices,ADF4351BCPZ,https://www.analog.com/media/en/technical-documentation/data-sheets/ADF4351.pdf
 main,REG2,1,AMS1117-1.8,Package_TO_SOT_SMD:SOT-223-3_TabPin2,AMS,AMS1117-1.8,https://www.mouser.com/datasheet/2/260/AMS1117-Datasheet-1273816.pdf
 grad,REG2,1,AMS1117-1.8,Package_TO_SOT_SMD:SOT-223-3_TabPin2,AMS,AMS1117-1.8,https://www.mouser.com/datasheet/2/260/AMS1117-Datasheet-1273816.pdf
 main,REG1,1,AMS1117-3.3,Package_TO_SOT_SMD:SOT-223-3_TabPin2,AMS,AMS1117-3.3,https://www.mouser.com/datasheet/2/260/AMS1117-Datasheet-1273816.pdf
