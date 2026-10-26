@@ -636,10 +636,14 @@ def build_gradient_board():
                         "7": "GND", "8": "GRAD_DAC_OUT"})
     # Udrv: LM358 dual op-amp (SOIC-8). Amp A servo: INA+=DAC, INA-=sense,
     # OUTA=gate. Amp B parked: INB+=GND, INB-=OUTB (GRAD_NFB feedback wire).
+    # Supply pins are 4 = V- (GND) and 8 = V+ (+5V): a dual op-amp, not a
+    # quad. This table used to carry the quad convention (4=+5V, 8=GND),
+    # which regenerated a board that disagreed with the repaired artifacts
+    # and with qssc-lib.kicad_sym (issue #168).
     add("Udrv", "qssc:LM358", "LM358", "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm",
         385, 150, pins={"1": "GRAD_GATE", "2": "GRAD_SENSE", "3": "GRAD_DAC_OUT",
-                        "4": "+5V", "5": "GND", "6": "GRAD_NFB", "7": "GRAD_NFB",
-                        "8": "GND"})
+                        "4": "GND", "5": "GND", "6": "GRAD_NFB", "7": "GRAD_NFB",
+                        "8": "+5V"})
     # Qgrad: IRLML2502 N-MOSFET (SOT-23-3). G=gate, S=sense, D=coil return.
     add("Qgrad", "qssc:IRLML2502", "IRLML2502", "Package_TO_SOT_SMD:SOT-23-3",
         405, 150, pins={"1": "GRAD_GATE", "2": "GRAD_SENSE", "3": "GRAD_COIL_N"})
