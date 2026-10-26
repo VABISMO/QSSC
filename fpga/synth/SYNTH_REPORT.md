@@ -9,33 +9,33 @@
 
 | Resource | Used | Available | Utilisation |
 |---|---:|---:|---:|
-| LUT (6-input) | 11727 | 20800 | 56.4% |
-| Flip-flop | 5181 | 41600 | 12.5% |
-| CARRY4 | 4856 | 5200 | 93.4% |
+| LUT (6-input) | 8377 | 20800 | 40.3% |
+| Flip-flop | 7442 | 41600 | 17.9% |
+| CARRY4 | 1313 | 5200 | 25.2% |
 | Block RAM 36Kb | 0 | 50 | 0.0% |
-| DSP48E1 | 7 | 90 | 7.8% |
+| DSP48E1 | 9 | 90 | 10.0% |
 | I/O buffer | 28 | 250 | 11.2% |
 | Global clock BUFG | 1 | 32 | 3.1% |
 
-*Total tech-mapped cells: 23187*
+*Total tech-mapped cells: 18528*
 
 ## Cell breakdown (top categories)
 
 | Cell | Count |
 |---|---:|
-| `LUT3` | 5399 |
-| `FDRE` | 5125 |
-| `CARRY4` | 4856 |
-| `LUT2` | 3656 |
-| `INV` | 1335 |
-| `LUT5` | 1073 |
-| `LUT6` | 902 |
-| `LUT4` | 697 |
+| `FDRE` | 7386 |
+| `LUT3` | 2729 |
+| `LUT2` | 1544 |
+| `LUT5` | 1471 |
+| `LUT4` | 1327 |
+| `CARRY4` | 1313 |
+| `LUT6` | 1306 |
+| `INV` | 1261 |
+| `MUXF7` | 77 |
 | `FDSE` | 54 |
-| `MUXF7` | 34 |
 | `OBUF` | 19 |
-| `MUXF8` | 13 |
-| `DSP48E1` | 7 |
+| `MUXF8` | 15 |
+| `DSP48E1` | 9 |
 | `IBUF` | 5 |
 | `RAM64M` | 5 |
 | `IOBUF` | 4 |
@@ -46,19 +46,13 @@
 
 - **Inferred latches:** 0 ✅ none
 - **Blackbox / unmapped cells:** 0 ✅ none
-- **Width / driver warnings:** 0 ✅ none (seq_line[6..7] / sweep_line[14..15] tied off in command_parser.v — see note below)
+- **Width / driver warnings:** 0 ✅ none
 - **Fits XC7A35T:** ✅ yes (synthesis estimate)
 
-### Width / driver warnings
-
-> A prior regen of this report surfaced 32 ``seq_line[6..7]`` /
-> ``sweep_line[14..15]`` "used but has no driver" warnings: the two
-> reply-line buffers in ``command_parser.v`` are 8-/16-wide but only the
-> low 6 / 14 words are streamed (the send FSMs stop at ``str_idx==5`` /
-> ``==13``). The unused words are now tied to ``8'h00`` in the encode
-> states (zero behaviour change -- those indices were never read; the
-> iverilog testbench still passes 7/7), so a fresh yosys pass reports 0
-> width/driver warnings.
+### Blackbox / unmapped
+```
+Replacing existing blackbox module `\ODDR2' at ~/oss-cad-suite/lib/../share/yosys/xilinx/cells_xtra.v:6127.1-6141.10.
+```
 
 ## What this is / what it is not
 

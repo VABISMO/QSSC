@@ -16,6 +16,10 @@ through-silicon vias (TSVs)**, so each face is contacted by its own PCB:
   - **Detector head** (6-layer 110×102 mm) above the die — 16× TLV9004 TIA +
     4× AD7616 ADC, contacting the die TOP (detector) face on B.Cu via ACF
     pressure contact (B.Cu + B.Mask, no B.Paste).
+    - **Gradient variant** (`qssc-grad.kicad_pcb`, 6-layer 150×118 mm, 134
+      parts) — the main-board stack plus the field-gradient coil driver
+      (MCP4921 DAC → LM358 servo → IRLML2502 → coil); its parts are in
+      `BOM.csv` under `grad`, its datasheets in `DATASHEETS.md`.
   - **J12 board-to-board connector** (2×10, 2.54 mm) joins the two boards and
     carries the 9-wire AD7616 SPI + GND/+3V3/+5V.
 
@@ -29,7 +33,7 @@ supply gives the constant-current sink headroom). All 64 emitters fire in
 parallel at independent 12-bit intensities over a 4-wire FPGA interface
 (em_sclk/em_sin/em_xlat/em_blank). Microwave pulses for ODMR spin control
 (V_B⁻) are synthesised by an ADF4351 PLL + GVA-84+ MMIC amplifier. A host PC
-communicates over USB-UART (FT232). Master clock is a 100 MHz TCXO. Power is
+communicates over USB-UART (FT232). Master clock is a 100 MHz CMOS oscillator. Power is
 derived from a 5 V input through 3.3 V / 1.8 V / 1.0 V LDOs.
 
 **There is no camera and no alignment jig for readout.** This board does not do
@@ -123,7 +127,7 @@ The design is **two PCBs sandwiching the die**:
 - **U3 — ADF4351BCPZ** wideband PLL synthesizer (microwave generation).
 - **U5 — GVA-84+** RF MMIC amplifier (RF power boost; self-biased +5 V).
 - **U8 — W25Q128JVSIQ** config flash (Artix-7 QSPI x4 boot).
-- **Y1 — 100 MHz TCXO** master clock.
+- **Y1 — 100 MHz CMOS oscillator (Abracon ASE-100.000MHZ-LR)** master clock.
 - **REG1/REG2/REG3 + FB1** — 3.3 V / 1.8 V / 1.0 V LDO regulators (REG3 is an
   AP2127K-1.0; the AMS1117 family has no 1.0 V option) + **FB1** ferrite-bead
   π-filter from +5V → +5V_RF for the RF amp.
@@ -168,7 +172,7 @@ flowchart TD
         REG1 --> REG2["REG2 LDO 1.8V"]
         REG1 --> REG3["REG3 AP2127K-1.0V"]
         J2 -->|"+5V"| FB1["FB1 ferrite + C-pi filter"]
-        Y1["Y1 100MHz TCXO"] --> U1["U1 Artix-7 FPGA (CSG324)"]
+        Y1["Y1 100MHz XO"] --> U1["U1 Artix-7 FPGA (CSG324)"]
         U1 -->|"UART 115200"| J1["J1 FT232RL + J10 USB-C"]
         U1 -->|"SPI QSPI x4 boot"| W25["U8 W25Q128 config flash"]
         U1 -->|"SPI LE/CLK/DATA + refclk 25MHz"| U3["U3 ADF4351 PLL"]
@@ -316,7 +320,7 @@ two-board sandwich.
 | 14 | main  | RF decoupling caps               | C1–C20   | 100 nF X7R 16 V                | 20  | High-frequency decoupling at every IC VCC pin                  | 0603                          | As close as possible to each pin |
 | 15 | main  | Bulk caps                        | C21–C30  | 10 µF X7R 16 V                 | 10  | Rail stabilization / bulk energy                               | 1206/1210                     | Near regulators & FPGA |
 | 16 | main  | PLL loop filter C1/C2/C3         | C31/C32/C33 | 220 pF / 10 nF / 220 pF     | 3   | 3rd-order loop filter (with R67/R68)                           | 0603                          | ~17.2 kHz BW (validated, see §6) |
-| 17 | main  | Master clock oscillator          | Y1       | 100 MHz TCXO ±2.5 ppm          | 1   | FPGA master clock; divided to 25 MHz (ADF4351 REF)             | SMD 3225/5032                 | TCXO for stability |
+| 17 | main  | Master clock oscillator          | Y1       | 100 MHz CMOS XO (Abracon ASE)   | 1   | FPGA master clock; divided to 25 MHz (ADF4351 REF)             | SMD 3225/5032                 | stability per the ASE datasheet |
 | 18 | main  | 3.3 V LDO                        | REG1     | AMS1117-3.3                    | 1   | 3.3 V rail: I/O, ADF4351, FT232, head via J12                  | SOT-223                       | ≥1 A |
 | 19 | main  | 1.8 V LDO                        | REG2     | AMS1117-1.8                    | 1   | 1.8 V FPGA aux                                                 | SOT-223                       | ≥1 A |
 | 20 | main  | 1.0 V LDO                        | REG3     | AP2127K-1.0 (Diodes Inc)       | 1   | 1.0 V FPGA core (VCCINT)                                       | SOT-23-5                      | AMS1117 has NO 1.0 V option; AP2127K-1.0 600 mA — MARGINAL at 56% LUT / 93% CARRY4 (see §3): upsize to ≥1 A or verify post-P&R power <500 mA; C87 47 µF VCCINT bulk required |
@@ -445,7 +449,7 @@ well within source; the 12 V emitter budget is on its own J4 input.
 
 ## 4. Clocking
 
-- **Y1 — 100 MHz TCXO (±2.5 ppm)** feeds the FPGA `clk_100mhz` pin (a CCIO of
+- **Y1 — 100 MHz CMOS oscillator** feeds the FPGA `clk_100mhz` pin (a CCIO of
   bank 34). This is the `sys_clk` primary in `constraints.xdc`.
 - The FPGA divides 100 MHz by 4 to produce **`refclk_out` = 25 MHz** for the
   ADF4351 `REF_IN` (top_level.v: 2-bit counter). With R-counter = 1, doubler
@@ -456,7 +460,7 @@ well within source; the 12 V emitter budget is on its own J4 input.
   lock-in-demodulates the per-channel ADC sample stream to reject background
   light. There is no external pixel clock and no separate clock domain — the
   whole readout path runs on `sys_clk`, so no CDC false-paths are needed.
-- A 100 MHz TCXO (rather than a simple crystal) is chosen for frequency
+- A 100 MHz oscillator (rather than a bare crystal) is chosen for frequency
   stability, which matters because the ADF4351 RF output accuracy is directly
   derived from it. The 4× AD7616 `adc_convst` (simultaneous sample) is also
   driven from `sys_clk`, so the 64-channel frame is time-coherent.
@@ -1093,7 +1097,7 @@ headlessly:
 >   pairs, ADF4351 unused RF outputs / LD / SW / TEMP; 2 `pin_to_pin` and 1
 >   `label_dangling` (`mod_sync`) — all benign. `kicad-cli sch export netlist`
 >   succeeds.)
-> - **PCB:** all BOM footprints placed on a **210 × 140 mm 6-layer** FR4 board
+> - **PCB:** all BOM footprints placed on a **150 × 118 mm 6-layer** FR4 board
 >   (581 footprints, 113 active ICs/connectors), full netlist assigned to pads,
 >   correct 6-layer stackup (F.Cu signal / In1.Cu GND plane / In2.Cu +3V3 PWR
 >   plane / In3.Cu signal / In4.Cu signal / B.Cu signal — verified
@@ -1103,13 +1107,13 @@ headlessly:
 >   0.15 mm). `kicad-cli pcb drc` in project → **0 violations / 0 unconnected /
 >   0 footprint errors**.
 > - **Copper-plane foundation (headless, `route_qssc_pcb.py`):** solid
->   **In1.Cu GND** plane + solid **In2.Cu +3V3** plane (2 zones) + **563 GND
+>   **In1.Cu GND** plane + solid **In2.Cu +3V3** plane (2 zones) + **297 GND
 >   stitching vias** tying all copper layers to one ground reference.
 >   DRC-clean. Verified by `tests/test_pcb_route.py`.
 > - **BGA fanout + chip dog-bone + signal/power routing (headless,
 >   `route_signals.py`):** committed and **DRC-clean (0 violations)**. On the
->   merged board it routes **53 of 498 non-plane nets** (1182 track segments,
->   583 vias incl. 128 chip dog-bones + 238 BGA fanout vias). **Cannot short by
+>   committed main board carries **2148 track segments and 796 vias** (incl.
+>   chip dog-bones and BGA fanout vias). **Cannot short by
 >   construction** — the via-footprint check + multi_keepout/multi_vip guards
 >   (above) make every placed track/via DRC-correct. The headless router is a
 >   **1st pass, not a full autorouter** — the line router is at its density
@@ -1241,7 +1245,7 @@ errors, DRC 0 violations / 0 unconnected / 0 footprint errors**.
 - **ADF4351 per-supply 100 nF.** `C60`–`C65` — one per AVDD/DVDD/RF_AVDD/RF_DVDD
   pin (the PLL has 6 separate supply pins, each needs its own local bypass).
 - **FT232 decoupling.** `C55`(3V3OUT 4.7 µF)/`C56`(VCC 100 nF)/`C57`(VCCIO 100
-  nF); `C58` TCXO Vdd, `C59` W25Q128 VCC.
+  nF); `C58` oscillator Vdd, `C59` W25Q128 VCC.
 - **JTAG pulls.** `R80`/`R81`/`R82` 4.7 k on TCK/TMS/TDO (TDI driven by J9).
 - **Reset integrity.** `J7` is the active-high fabric `reset` (drives
   `top_level.v` `input reset`, used by every submodule). `R83` 10 k pulls
@@ -1273,7 +1277,7 @@ errors, DRC 0 violations / 0 unconnected / 0 footprint errors**.
 > runs on +3V3 (TLV9004) + +5V_A (AD7616 AVDD), both fed via J12 from the main
 > board; the AD7616 VDRIVE is +3V3.
 
-All added parts carry real LCSC/JLC sourcing in `hardware/datasheets/BOM.csv`.
+ICs and connectors carry manufacturer part numbers in `hardware/datasheets/BOM.csv`; passives are MPN-less by policy (DATASHEETS.md).
 
 ---
 
@@ -1437,8 +1441,8 @@ removable):
   territory (not sub-0.5 mm HDI spring pins), so this is a standard quote, not a
   research part. The socket adds 4 NPTH M2 mount holes; the die centre stays
   (80, 55) so the socket body centres on the same origin as the die.
-  MPN = "Ironwood SBT custom (quote)" — tracked in the BOM as a mechanical
-  (non-Digi-Key) line.
+  MPN = "Ironwood SBT custom (quote)" — a made-to-order mechanical part with
+  no distributor number; BOM.csv leaves Uchip's MPN blank.
 - **Detector face (head board, TOP face) — ACF / pogo pressure contact.** The
   head board's **B.Cu + B.Mask** contacts the die TOP (detector) face via ACF
   pressure contact (**no B.Paste** — it is a contact interface, not a solder
@@ -1464,7 +1468,7 @@ are finalized from the Ironwood quote drawing; the footprint uses sane
 defaults (±12.5 mm body, ±13.5 mm courtyard, M2 mount holes at ±11.5 mm,
 2.5 mm drill) that keep the board DRC-clean pending the drawing.
 
-The board (210 × 140 mm) fits the die + the 64-channel front-end above + the
+The board (150 × 118 mm) fits the die + the 64-channel front-end above + the
 64-channel driver below + the FPGA/RF/USB/power with DRC-clean courtyards.
 
 ### C4. Per-IC pin→net audit (datasheet compliance)
@@ -1517,7 +1521,7 @@ open. The stack height itself is deferred to the Ironwood quote drawing
 head contact gap).
 
 - **Decided registration spec (documented here):** ≥ 2 **M2 locating standoffs
-  on diagonal corners** of the 150 × 140 mm head board, on the existing §C3
+  on diagonal corners** of the 110 × 102 mm head board, on the existing §C3
   M2 mount-hole pattern so one drill table serves both boards. The standoffs
   set the head↔main parallelism; J12 sets the in-plane registration; the
   Ironwood SBT socket's alignment features set the die↔main registration.

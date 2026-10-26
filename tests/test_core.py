@@ -1030,9 +1030,14 @@ def test_backend_shor_15():
 # -- protocol ----------------------------------------------------------------
 
 def test_protocol_data():
+    # The default protocol is the NV-diamond chip (canonical per the README and
+    # /api/protocol), so the summary must be the NV numbers, not hBN's.
     sections = protocol_as_dict()
     assert len(sections) >= 5
     assert all(s["steps"] for s in sections)
     s = protocol_summary()
     assert "room temperature" in s["operating_temp"].lower()
-    assert s["d_GHz"] == pytest.approx(3.46)
+    assert s["d_GHz"] == pytest.approx(2.87)
+    # the other variants stay served and keep their own D values
+    assert protocol_summary("hBN-VB")["d_GHz"] == pytest.approx(3.46)
+    assert protocol_summary("SiC-VSi")["d_GHz"] == pytest.approx(0.07, abs=0.005)

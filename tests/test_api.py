@@ -295,6 +295,35 @@ def test_circuit_run_qrand_crypto(client):
     assert int(res["serial"], 16) < 2 ** 159       # RFC 5280 serial bound
 
 
+def test_circuit_run_qrand_seed_is_a_client_decision(client):
+    """Over HTTP, a default seed is not a client decision.
+
+    `RunRequest.seed` defaults to 42 so the deterministic algorithms stay
+    deterministic, but the payload assembly used to inject that default
+    unconditionally -- `runner_algorithms` reads "seed" as "the caller asked
+    for a fixed seed", so every qrand run from the dashboard came back with the
+    same key. Sent explicitly it must still be reproducible; withheld it must
+    draw fresh entropy each time.
+    """
+    def run(extra):
+        body = {"algorithm": "qrand", "profile": "NV", "num_qubits": 8,
+                "num_bytes": 16, "shots": 8192, "noise_mode": "ideal"}
+        body.update(extra)
+        r = client.post("/api/circuit/run", params={"sync": True}, json=body)
+        assert r.status_code == 200, r.text
+        res = r.json()["result"]
+        assert "error" not in res, res.get("error")
+        return res["entropy_hex"], res["symmetric_key_hex"]
+
+    fresh1 = run({})
+    fresh2 = run({})
+    assert fresh1 != fresh2, "qrand without a seed returned identical entropy twice"
+
+    seeded1 = run({"seed": 1234})
+    seeded2 = run({"seed": 1234})
+    assert seeded1 == seeded2, "an explicit seed must reproduce exactly"
+
+
 def test_circuit_run_bb84_qkd(client):
     """bb84 returns a QBER + sifted key (no circuit counts)."""
     r = client.post("/api/circuit/run", params={"sync": True},

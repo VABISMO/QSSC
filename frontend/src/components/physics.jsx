@@ -20,7 +20,6 @@ import React from 'react'
 //   readout noise ~ N0 * sqrt(T/300)        (graphene dark current + TIA thermal)
 //   ODMR contrast ~ C0 * clamp(1 + 0.5*(300-T)/300, 0.5, 1.6)  (spin polarisation)
 //   ASE gain      ~ 1.15 * (1 + 0.10*(300-T)/300)              (semiconductor gain)
-//   WG loss       ~ 0.5 * (0.7 + 0.3*T/300) dB/cm              (polymer loss)
 // dip = BRIGHT * contrast ; SNR = dip / noise. Cooling raises contrast and
 // lowers noise, so the lock-in SNR climbs sharply — the readout improves cold.
 // ---------------------------------------------------------------------------

@@ -43,7 +43,9 @@ STAT_LINE = re.compile(r"^\s+(\d+)\s+([A-Z][A-Z0-9_]*)\s*$")
 
 
 def parse(log: str):
-    lines = log.splitlines()
+    # Never let the builder's home directory into the committed report: yosys
+    # echoes absolute paths (library files, RTL) and this file is checked in.
+    lines = [re.sub(r"/home/[^/\s]+", "~", ln) for ln in log.splitlines()]
     cells: dict[str, int] = {}
     warnings = []
     latches = []
@@ -149,12 +151,21 @@ def main(log_path: str, out_path: str) -> int:
     # Quality gates
     lines.append("## Logic-quality checks\n")
     nlatch = len(latches)
-    nbbox = len([x for x in blackboxes if "blackbox" in x.lower()])
+    # yosys prints "Replacing existing blackbox module `X' ..." when it swaps
+    # our declaration for the library's own cell -- a substitution, not a
+    # missing module, so it must not count as a defect.
+    nbbox = len([x for x in blackboxes
+                 if "blackbox" in x.lower()
+                 and "replacing existing blackbox" not in x.lower()])
     nw = len(width)
     lines.append(f"- **Inferred latches:** {nlatch} {'⚠️ (review combinational always blocks)' if nlatch else '✅ none'}")
     lines.append(f"- **Blackbox / unmapped cells:** {nbbox} {'⚠️ (missing module / unsynthesizable primitive)' if nbbox else '✅ none'}")
     lines.append(f"- **Width / driver warnings:** {nw} {'⚠️' if nw else '✅ none'}")
+    # CARRY4 must gate too: a netlist that runs out of carry chains cannot be
+    # placed. Leaving it out made "Fits" vacuous -- a design at 168 % of the
+    # A35T's 5200 carry chains still read "yes".
     fits = (b["LUT"] <= CAPACITY["LUT"] and b["FF"] <= CAPACITY["FF"]
+            and b["CARRY4"] <= CAPACITY["CARRY4"]
             and b["BRAM36"] <= CAPACITY["BRAM36"] and b["DSP48"] <= CAPACITY["DSP48"])
     lines.append(f"- **Fits XC7A35T:** {'✅ yes (synthesis estimate)' if fits else '⚠️ exceeds capacity'}\n")
 

@@ -7,8 +7,16 @@
 # catches inferred latches, width mismatches, blackboxes and unmapped cells.
 #
 # Run:
-#   bash fpga/synth/run_synth.sh        # locates yosys, runs, builds the report
-#   yosys -s fpga/synth/synth_yosys.ys  # raw yosys script mode (native commands)
+#   bash fpga/synth/run_synth.sh        # stages the shipped RTL, runs yosys, builds the report
+#   python3 fpga/synth/stage_rtl.py     # staging only (what run_synth.sh does first)
+#   yosys -s fpga/synth/synth_yosys.ys  # raw yosys script mode (needs the stage step)
+#
+# What is synthesised: the *shipped* configuration, i.e. fpga/rtl staged
+# through the same patch chain the Vivado build applies (fpga/qmtech/*.py ->
+# fpga/qmtech/build/). fpga/rtl/ itself is never written to. Gating the raw
+# files would gate a configuration nobody flashes: raw command_parser.v needs
+# 8738 CARRY4 (168 % of an XC7A35T) from its combinational formatters, the
+# staged tree needs ~784.
 
 # --- Xilinx primitive used by top_level.v -----------------------------------
 # top_level.v instantiates ODDR2 (audit #110 -- a Spartan-6/Virtex-6
@@ -24,17 +32,23 @@
 read_verilog -lib fpga/synth/oddr2_stub.v
 
 # --- read all behavioural RTL (top + every submodule) -----------------------
+# Plain files: unchanged by the build patches.
 read_verilog fpga/rtl/uart_rx.v
 read_verilog fpga/rtl/uart_tx.v
 read_verilog fpga/rtl/spi_master.v
 read_verilog fpga/rtl/tlc5947_ctrl.v
 read_verilog fpga/rtl/emitter_array.v
 read_verilog fpga/rtl/adc_reader.v
-read_verilog fpga/rtl/adf4351_ctrl.v
 read_verilog fpga/rtl/qrng_entropy.v
 read_verilog fpga/rtl/dac_ctrl.v
-read_verilog fpga/rtl/command_parser.v
-read_verilog fpga/rtl/top_level.v
+# Staged by fpga/synth/stage_rtl.py (the files the Vivado build ships):
+# sequential double-dabble formatting and division instead of the
+# combinational ones in fpga/rtl, plus the ODDR2-free, gate-delayed top.
+read_verilog fpga/qmtech/build/adf4351_ctrl_wait.v
+read_verilog fpga/qmtech/build/command_parser_wait.v
+read_verilog fpga/qmtech/dec_fmt.v
+read_verilog fpga/qmtech/div_seq.v
+read_verilog fpga/qmtech/build/top_level_final.v
 
 # --- hierarchy + selection --------------------------------------------------
 hierarchy -check -top top_level

@@ -137,8 +137,7 @@ both centred on that die:
    applying to the as-built microdiamond sensor array — it is a bulk-CVD
    compute-material figure.</p>
 <p>This protocol documents the bulk-CVD compute route; a full microdiamond
-sensor-array protocol rewrite is flagged as a follow-up (the P0 prototype
-covers the home-lab version today).</p>
+sensor-array protocol rewrite is flagged as a follow-up.</p>
 </blockquote>
 <hr />
 <h2 id="1-abstract">1. Abstract</h2>
@@ -150,7 +149,7 @@ covers the home-lab version today).</p>
 <h3 id="22-why-the-green-cqd-emitter-is-reused-unchanged">2.2 Why the green CQD emitter is reused unchanged</h3>
 <p>NV⁻ is optically excited at <strong>532 nm</strong> — the same green band the citric-acid+urea CQDs already produce at ~220 °C hydrothermal temperature. So the entire Section-1 emitter (ITO/PEDOT:PSS/CQD–PVA/ZnO/Ag, green, silver-paste cathode) is reused <strong>without modification</strong>. The on-chip emitter pumps the NV⁻ directly; no external 532 nm laser is needed for the end-to-end demo.</p>
 <h3 id="23-why-the-detector-and-filter-are-reused-unchanged">2.3 Why the detector and filter are reused unchanged</h3>
-<p>NV⁻ photoluminescence is the zero-phonon line at <strong>637 nm</strong> plus a broad phonon sideband extending to <strong>~800 nm</strong> (red/NIR). The <strong>650 nm red photographic long-pass</strong> passes the 637–800 nm PL and blocks the 532 nm green pump — the <strong>same filter</strong> used for the hBN chip. The graphene/MoS₂ photodetector reads 637–800 nm; MoS₂ (monolayer bandgap ~690 nm) actually absorbs a larger share of the NV PL than it does of the hBN 850 nm emission, so the detector works <strong>at least as well</strong> here.</p>
+<p>NV⁻ photoluminescence is the zero-phonon line at <strong>637 nm</strong> plus a broad phonon sideband extending to <strong>~800 nm</strong> (red/NIR). The <strong>650 nm red photographic long-pass</strong> passes the <strong>650–800 nm phonon sideband</strong> and blocks the 532 nm green pump (the 637 nm ZPL sits below the filter edge) — the <strong>same filter</strong> used for the hBN chip. The graphene/MoS₂ photodetector reads the 650–800 nm band; MoS₂ (monolayer bandgap ~690 nm) actually absorbs a larger share of the NV PL than it does of the hBN 850 nm emission, so the detector works <strong>at least as well</strong> here.</p>
 <h3 id="24-architecture-overview">2.4 Architecture overview</h3>
 <pre><code>                ┌─────────────────────────────────────────────┐
    top Ag cathode (silver-paste syringe) ─────────────────── │
@@ -328,7 +327,7 @@ is added to the chip itself.</p>
 </blockquote>
 <h3 id="52-odmr-of-nv-in-diamond">5.2 ODMR of NV⁻ in diamond</h3>
 <ol start="4">
-<li><strong>Optical:</strong> on-chip green CQD emitter (~532 nm, ~1 mW at the sample) — no external laser. Collect NV⁻ PL at <strong>637–800 nm</strong> through the <strong>650 nm red photographic long-pass filter</strong> (passes the red/NIR NV PL, blocks the 532 nm green pump) into the <strong>on-chip graphene/MoS₂ detector array</strong>. No Si APD / discrete photodiode.</li>
+<li><strong>Optical:</strong> on-chip green CQD emitter (~532 nm, ~1 mW at the sample) — no external laser. Collect the NV⁻ sideband at <strong>650–800 nm</strong> through the <strong>650 nm red photographic long-pass filter</strong> (passes the red/NIR sideband, blocks the 532 nm green pump) into the <strong>on-chip graphene/MoS₂ detector array</strong>. No Si APD / discrete photodiode.</li>
 </ol>
 <blockquote>
 <p><strong>Radiance → watt link budget (audit issue #14).</strong> The two headline optical
@@ -367,7 +366,7 @@ the on-chip-pumped ODMR.
 <p>Inject calibrated 532 nm light at the emitter edge and measure the on-chip detector photocurrent. Target 20–60 % of the emitted pump reaching the detector.</p>
 <h3 id="55-end-to-end-functional-test">5.5 End-to-end functional test</h3>
 <ol start="12">
-<li>Drive the CQD pixel electrically → green EL pumps the NV⁻ ensemble → collect 637–800 nm NV PL (through the 650 nm long-pass filter) at the on-chip graphene/MoS₂ detector → photocurrent modulated by MW at <strong>2.87 GHz</strong> → FPGA/lock-in reads the ODMR dip. Successful end-to-end ODMR with the <strong>on-chip CQD pump</strong> (no external laser) is the chip's defining demonstration — identical concept to the hBN chip, at a different MW frequency and with ~900× more coherence headroom.</li>
+<li>Drive the CQD pixel electrically → green EL pumps the NV⁻ ensemble → collect the 650–800 nm NV sideband (through the 650 nm long-pass filter) at the on-chip graphene/MoS₂ detector → photocurrent modulated by MW at <strong>2.87 GHz</strong> → FPGA/lock-in reads the ODMR dip. Successful end-to-end ODMR with the <strong>on-chip CQD pump</strong> (no external laser) is the chip's defining demonstration — identical concept to the hBN chip, at a different MW frequency and with ~900× more coherence headroom.</li>
 </ol>
 <h3 id="56-emitterqubitdetector-calibration-software-pulse-capture-unchanged">5.6 Emitter↔qubit↔detector calibration (software pulse-capture) — unchanged</h3>
 <ol start="13">
@@ -504,11 +503,6 @@ the on-chip-pumped ODMR.
 <td>Sec. 4.2</td>
 </tr>
 <tr>
-<td>TEC power</td>
-<td>&lt; 5 W</td>
-<td>Sec. 4.4</td>
-</tr>
-<tr>
 <td>Chip footprint</td>
 <td>25 × 25 mm² (host = diamond plate ~3×3×0.5 mm)</td>
 <td>Sec. 2</td>
@@ -548,7 +542,7 @@ the on-chip-pumped ODMR.
 <li>G. Balasubramanian et al., "Ultralong spin coherence time in isotopically engineered diamond," Nature Materials 8, 383–387 (2009). doi:10.1038/nmat2420</li>
 <li>K. Jarmola et al., "Temperature- and magnetic-field-dependent luminescence of NV⁻ in diamond," PRL 108, 197601 (2012). doi:10.1103/PhysRevLett.108.197601</li>
 </ul>
-  <div class="foot">QSSC — Quantum Solid State Chip (room temperature) · fabrication protocol · branded document · 26820 source bytes</div>
+  <div class="foot">QSSC — Quantum Solid State Chip (room temperature) · fabrication protocol · branded document · 26825 source bytes</div>
 </div>
 </body>
 </html>

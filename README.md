@@ -3,7 +3,7 @@
 [![CI](https://github.com/VABISMO/QSSC/actions/workflows/ci.yml/badge.svg)](https://github.com/VABISMO/QSSC/actions/workflows/ci.yml)
 [![License: Apache-2.0 (non-commercial)](https://img.shields.io/badge/license-Apache--2.0%20NC-lightgrey.svg)](LICENSE)
 [![Python 3.10–3.12](https://img.shields.io/badge/python-3.10–3.12-blue.svg)](https://www.python.org)
-[![Tests](https://img.shields.io/badge/tests-1106%20passed-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-1108%20passed-brightgreen.svg)](#testing)
 
 A room-temperature **solid-state spin-defect** quantum platform: a Qiskit
 backend, an FPGA control stack with PCB design, a validated chip-fabrication
@@ -37,7 +37,7 @@ benchtop electronics: zero-field splitting D ≈ 2.87 GHz, ODMR readout,
 | **FPGA RTL** | `fpga/rtl` | 11 Verilog modules (Artix-7) — UART, SPI/ADF4351 PLL, 64-ch CQD emitter drive (3× TLC5947 + `dac_ctrl` gradient DAC), detector readout (TLV9004 TIA → 4× AD7616 parallel 16-bit ADC, 1 kHz lock-in host-side), hardware QRNG (`qrng_entropy` von-Neumann extractor), command parser, top-level |
 | **Hardware** | `hardware/` | KiCad boards (main control, detector head, gradient), XDC constraints, CNC G-code, datasheets, `HARDWARE_DESIGN.md` |
 | **Protocol** | `docs/FABRICATION_PROTOCOL_Diamond.md` | NV-diamond fabrication protocol: CQD emitter array, CVD diamond + NV⁻ defect engineering, on-chip photodetectors, assembly, safety |
-| **Tests** | `tests/` | software/physics tests (defects, simulator, circuits, backend, API, crypto, cross-platform) — **1151 collected**, of which 1134 run in CI — plus a PCB gate track (DRC, connectivity, pin audit, routing, board integrity) that runs locally against an installed KiCad |
+| **Tests** | `tests/` | software/physics tests (defects, simulator, circuits, backend, API, crypto, cross-platform) — **1153 collected**, of which 1114 run in CI — plus a PCB gate track (DRC, connectivity, pin audit, routing, board integrity) that runs locally against an installed KiCad |
 
 ## Quick start
 
@@ -49,7 +49,7 @@ pip install -e ".[api,dev,hw]"
 
 # run the test suite
 python -m pytest --ignore-glob='tests/test_pcb_*'
-#   1106 passed, 5 skipped, 1 xfailed  (see ## Testing)
+#   1108 passed, 5 skipped, 1 xfailed  (see ## Testing)
 
 # try the CLI
 qssc info                              # backend / defect summary (defaults to NV)
@@ -237,10 +237,13 @@ functionally simulated with iverilog, and synthesised with yosys
 `READ_DETECTORS` (asserts the 64-sample stream `1234 1234 … 1234\n`,
 320 bytes, 19/19 checks pass). The yosys synthesis maps the design to the
 Series-7 cell library and confirms it fits the XC7A35T-1CSG324C
-(**11727 LUT / 56.4 %, 5181 FF / 12.5 %, 4856 CARRY4 / 93.4 %, 7 DSP48E1 /
-7.8 %, 0 inferred latches, 0 blackboxes**, 23187 tech-mapped cells — the
+(**8377 LUT / 40.3 %, 7442 FF / 17.9 %, 1313 CARRY4 / 25.2 %, 9 DSP48E1 /
+10.0 %, 0 inferred latches, 0 blackboxes**, 18528 tech-mapped cells — the
 committed numbers live in [`fpga/synth/SYNTH_REPORT.md`](fpga/synth/SYNTH_REPORT.md)).
-Those three checks run in CI **whenever `fpga/**` changes** (the FPGA job is
+Synthesis runs the **staged** tree — `fpga/rtl` passed through the same patch
+chain the Vivado build applies ([`fpga/synth/stage_rtl.py`](fpga/synth/stage_rtl.py)) —
+so the gate measures the configuration that ships. Those three checks run in CI
+**whenever `fpga/**` changes** (the FPGA job is
 path-filtered: a full yosys run costs ~45 min) and locally with
 `bash fpga/synth/run_synth.sh`. (A first iverilog
 run caught two real handshake bugs pyverilog could not — a readout busy race and
@@ -364,13 +367,13 @@ result is labelled `source: hardware · I/O: real`. With **no board** (or
 `QSSC_FPGA_PORT` unset), the same switch shows a red *No FPGA detected* banner
 and never silently falls back to the simulator.
 
-**Firmware status.** Implemented in the RTL today: `DRIVE_EMITTER`,
+**Firmware status.** All 19 verbs are implemented in the RTL: `DRIVE_EMITTER`,
 `SET_EMITTER`, `DRIVE_PATTERN`, `CLEAR_EMITTERS`, `READ_DETECTOR`,
-`READ_DETECTORS`, `APPLY_PULSE`, `READ_RNG`. Not implemented yet: `ID`,
-`STATUS`, `RESET`, `ODMR_SWEEP`. Because `ID` is not in the firmware,
-`/api/fpga/probe` reports `connected: false` instead of guessing, and the verbs
-that need the lock-in accumulator or the pulse engine (`READ_GYRO`,
-`READ_LOCKIN`, `RUN_SEQUENCE`) are served by the simulator in Hardware mode
+`READ_DETECTORS`, `CLEAR_DETECTORS`, `APPLY_PULSE`, `CALIBRATE`, `READ_RNG`,
+`ID`, `STATUS`, `RESET`, `ODMR_SWEEP`, `RUN_SEQUENCE`, `READ_LOCKIN`,
+`READ_LOCKINP`, `RUN_ALL_ODMR`, `SET_GRADIENT`. `/api/fpga/probe` asks the
+board for `ID` (it answers `QSSC v1`) and reports `connected: false` when
+nothing answers. `READ_GYRO` still runs on the simulator in Hardware mode
 under an explicit *simulated* label — the switch never falls back silently.
 
 ## Fabrication protocol
@@ -450,13 +453,13 @@ support.
 ## Testing
 
 ```bash
-# what CI runs on every push/PR — 1112 tests, no KiCad required
+# what CI runs on every push/PR — 1114 tests, no KiCad required
 python -m pytest --ignore-glob='tests/test_pcb_*'
-#   1106 passed, 5 skipped, 1 xfailed     ← the "Tests" badge above
+#   1108 passed, 5 skipped, 1 xfailed     ← the "Tests" badge above
 
 # everything, including the PCB gate track — needs a system KiCad
 # (kicad-cli + the pcbnew python binding)
-python -m pytest                          # 1151 collected
+python -m pytest                          # 1153 collected
 
 # the two things that are *not* pytest, run separately
 bash fpga/synth/run_synth.sh              # yosys synthesis gate (~45 min)
@@ -466,7 +469,7 @@ cd fpga && iverilog -g2012 -DFAST_SIM -o /tmp/tb.vvp -s tb_top_level \
 
 | Track | Where it runs | Needs |
 |---|---|---|
-| Python suite — 1112 collected | CI, every push and PR | nothing beyond `pip install -e ".[api,dev,hw]"` |
+| Python suite — 1114 collected | CI, every push and PR | nothing beyond `pip install -e ".[api,dev,hw]"` |
 | FPGA parse (pyverilog) + simulate (iverilog) + synthesise (yosys) | CI, **only when `fpga/**` changes** (path-filtered — one run costs ~45 min) | iverilog, pyverilog, oss-cad-suite (CI installs all three) |
 | PCB DRC / connectivity / pin audit / routing — 39 tests in 13 files | **local only** | system KiCad with `kicad-cli pcb drc` |
 | Analog loop-filter bandwidth | CI, every push | ngspice |
@@ -605,7 +608,7 @@ failed test/parse/sim run blocks both deploys). It then:
 2. Code, comments and commit messages in English; commit style is
    `<area>(<scope>)?: <imperative summary>`.
 3. CI green before review. Locally: `pip install -e ".[api,dev,hw]"`, then
-   `pytest --ignore-glob='tests/test_pcb_*'` (**1106 passed, 5 skipped, 1 xfailed**)
+   `pytest --ignore-glob='tests/test_pcb_*'` (**1108 passed, 5 skipped, 1 xfailed**)
    and `ruff check --select=E9,F63,F7,F82,F401,F841 .`
 4. Hardware/PCB changes additionally run `pytest tests/test_pcb_*.py` with KiCad
    installed, and `python3 tools/gen_bom.py` when the BOM changes.
