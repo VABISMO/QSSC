@@ -1,9 +1,9 @@
 # QSSC — Quantum Solid State Chip (room temperature)
 
 [![CI](https://github.com/VABISMO/QSSC/actions/workflows/ci.yml/badge.svg)](https://github.com/VABISMO/QSSC/actions/workflows/ci.yml)
-[![License: Apache-2.0 NC](https://img.shields.io/badge/license-Apache--2.0%20NC-blue.svg)](LICENSE)
+[![License: Apache-2.0 (non-commercial)](https://img.shields.io/badge/license-Apache--2.0%20NC-lightgrey.svg)](LICENSE)
 [![Python 3.10–3.12](https://img.shields.io/badge/python-3.10–3.12-blue.svg)](https://www.python.org)
-[![Tests](https://img.shields.io/badge/tests-214%20passed-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-1127%20passed-brightgreen.svg)](#testing)
 
 A room-temperature **solid-state spin-defect** quantum platform: a Qiskit
 backend, an FPGA control stack with PCB design, a validated chip-fabrication
@@ -29,23 +29,25 @@ NV-diamond *simulator* — into one coherent, renamed deliverable.
 | **Python core** | `qssc/` | `QSSCBackend` (Qiskit `BackendV2`), simulator, defect profiles, quantum circuits, fabrication-protocol model |
 | **REST backend** | `api/` | FastAPI app exposing the simulator, ODMR model, protocol and a circuit runner |
 | **Frontend** | `frontend/` | React 18 + Vite dashboard (ODMR chart, qubit grid, circuit runner, protocol viewer) |
-| **FPGA RTL** | `fpga/rtl` | 10 Verilog modules (Artix-7) — UART, SPI/ADF4351 PLL, 64-ch CQD emitter drive (3× TLC5947), detector readout (TLV9004 TIA → 4× AD7616 parallel 16-bit ADC, 1 kHz lock-in host-side), hardware QRNG (`qrng_entropy` von-Neumann extractor), command parser, top-level |
+| **FPGA RTL** | `fpga/rtl` | 11 Verilog modules (Artix-7) — UART, SPI/ADF4351 PLL, 64-ch CQD emitter drive (3× TLC5947 + `dac_ctrl` gradient DAC), detector readout (TLV9004 TIA → 4× AD7616 parallel 16-bit ADC, 1 kHz lock-in host-side), hardware QRNG (`qrng_entropy` von-Neumann extractor), command parser, top-level |
 | **Hardware** | `hardware/` | KiCad PCBs (main + detector head), XDC constraints, CNC G-code, datasheets, `HARDWARE_DESIGN.md` |
 | **Protocol** | `docs/FABRICATION_PROTOCOL.md` | 5-section lab fabrication protocol, validated against published studies |
 | **Protocol (HTML)** | `docs/protocol.html` | Branded, print-ready HTML render of the protocol (regenerate with `python3 tools/build_protocol_html.py`) |
 | **Presentation** | `presentation/index.html` | Self-contained HTML deck with software mocks and diagrams |
 | **PDFs** | `presentation/QSSC_presentation.pdf`, `docs/QSSC_fabrication_protocol.pdf` | Headless-Chromium exports of the presentation and protocol |
-| **Tests** | `tests/` | software/physics tests (defects, simulator, circuits, backend, API, crypto, cross-platform) + a full PCB gate track (DRC, connectivity, pin audit, routing, board integrity) |
+| **Tests** | `tests/` | software/physics tests (defects, simulator, circuits, backend, API, crypto, cross-platform) — **1174 collected**, of which 1135 run in CI — plus a PCB gate track (DRC, connectivity, pin audit, routing, board integrity) that runs locally against an installed KiCad |
 
 ## Quick start
 
 ```bash
-cd qssc
+# clone, then work from the repository root (pyproject.toml lives there;
+# qssc/ is the package, not a directory you cd into)
 python -m venv .venv && . .venv/bin/activate
-pip install -e ".[api,dev]"
+pip install -e ".[api,dev,hw]"
 
 # run the test suite
-python -m pytest                       # 218 passed, 7 skipped (with KiCad + iverilog installed)
+python -m pytest --ignore-glob='tests/test_pcb_*'
+#   1127 passed, 7 skipped, 1 xfailed  (see ## Testing)
 
 # try the CLI
 qssc info                              # backend / defect summary (defaults to NV)
@@ -111,24 +113,18 @@ flowchart TB
   classDef mw fill:#2a1530,stroke:#4a2a55,color:#f9a
   classDef elec fill:#102018,stroke:#1f4a2a,color:#9fe
 
-  ENC["**Encapsulation** (PMMA / epoxy) ~1 µm"]:::layer
-  DET["**Graphene / MoS₂ photodetector array** — 64 electrodes, bias 0.1–1 V"]:::layer
-  FILT["**650 nm long-pass filter** — blocks green pump, passes NV PL"]:::layer
+  EM["**64 parallel CQD emitters (3× TLC5947)** — ITO/PEDOT:PSS/CQD-PVA/ZnO/Ag, 520–540 nm"]:::layer
   HOST["**CVD diamond spin-defect host** — NV⁻, D ≈ 2.87 GHz, T₂ ≈ 1.8 ms"]:::layer
-  WG["**SU-8 / PDMS polymer waveguides** — couple pump + site PL"]:::layer
-  EM["**64 parallel CQD ASE/LED emitters (3× TLC5947)** — ITO/PEDOT:PSS/CQD-PVA/ZnO/Ag, 520–540 nm"]:::layer
-  SUB["**ITO-coated glass substrate + Cu contacts** — 1–5 cm²"]:::layer
-  TEC["**Peltier (TEC1-12706) + liquid cooling** — 295 K"]:::layer
+  FILT["**650 nm long-pass filter** — blocks green pump, passes NV PL"]:::layer
+  DET["**Graphene / MoS₂ photodetector array** — 64 electrodes, bias 0.1–1 V"]:::layer
 
-  ENC --- DET --- FILT --- HOST --- WG --- EM --- SUB --- TEC
-
-  EM -- "green pump 520–540 nm (↑)" --> WG
-  WG -- "coupled pump (↑)" --> HOST
-  HOST -- "spin init → ms=0 bright" --> HOST
+  EM -- "green pump 520–540 nm (↑)" --> HOST
   HOST -- "NV PL 637–800 nm (↑)" --> FILT
   FILT -- "passes PL, blocks pump" --> DET
   DET -- "photocurrent (↓)" --> TIA["**TLV9004 TIA ×16**"]:::elec
   TIA --> ADC["**4× AD7616 16-bit ADC · 1 kHz lock-in (host)**"]:::elec
+  ADC --> CTRL["**Artix-7 control FPGA** (`fpga/rtl`) — emitters, SPI, lock-in"]:::elec
+
   MW["**ADF4351 MW · 2.87 GHz**"]:::mw
   MW -. "resonant X-gate (phase ≈ π) → ms=±1 dark" .-> HOST
   DET -. "ODMR dip = reduced photocurrent → bit 1" .-> ADC
@@ -259,9 +255,13 @@ functionally simulated with iverilog, and synthesised with yosys
 `" 00064 0 0"` raw-sample stats footer) and
 `READ_DETECTORS` (asserts the 64-sample stream `1234 1234 … 1234\n`,
 320 bytes, 19/19 checks pass). The yosys synthesis maps the design to the
-Series-7 cell library and confirms it fits the XC7A35T-1CSG324C with ~80 % of
-the part free (≈4091 LUTs / 19.7 %, 3998 FFs / 9.6 %, 668 CARRY4, 7 DSP48E1 /
-7.8 %, 0 inferred latches, 0 blackboxes). All three checks run in CI. (A first iverilog
+Series-7 cell library and confirms it fits the XC7A35T-1CSG324C
+(**11727 LUT / 56.4 %, 5181 FF / 12.5 %, 4856 CARRY4 / 93.4 %, 7 DSP48E1 /
+7.8 %, 0 inferred latches, 0 blackboxes**, 23187 tech-mapped cells — the
+committed numbers live in [`fpga/synth/SYNTH_REPORT.md`](fpga/synth/SYNTH_REPORT.md)).
+Those three checks run in CI **whenever `fpga/**` changes** (the FPGA job is
+path-filtered: a full yosys run costs ~45 min) and locally with
+`bash fpga/synth/run_synth.sh`. (A first iverilog
 run caught two real handshake bugs pyverilog could not — a readout busy race and
 a missing consumer-ack — now fixed.) Pin assignments live in
 [`fpga/constraints.xdc`](fpga/constraints.xdc); the synthesis flow + report
@@ -459,6 +459,33 @@ fabrication protocol is validated against the literature; the FPGA RTL and PCB
 are design artefacts. No result is claimed that the underlying science does not
 support.
 
+## Testing
+
+```bash
+# what CI runs on every push/PR — 1135 tests, no KiCad required
+python -m pytest --ignore-glob='tests/test_pcb_*'
+#   1127 passed, 7 skipped, 1 xfailed     ← the "Tests" badge above
+
+# everything, including the PCB gate track — needs a system KiCad
+# (kicad-cli + the pcbnew python binding)
+python -m pytest                          # 1174 collected
+
+# the two things that are *not* pytest, run separately
+bash fpga/synth/run_synth.sh              # yosys synthesis gate (~45 min)
+cd fpga && iverilog -g2012 -DFAST_SIM -o /tmp/tb.vvp -s tb_top_level \
+        rtl/*.v sim/tb_top_level.v && vvp /tmp/tb.vvp   # → ALL CHECKS PASSED
+```
+
+| Track | Where it runs | Needs |
+|---|---|---|
+| Python suite — 1135 collected | CI, every push and PR | nothing beyond `pip install -e ".[api,dev,hw]"` |
+| FPGA parse (pyverilog) + simulate (iverilog) + synthesise (yosys) | CI, **only when `fpga/**` changes** (path-filtered — one run costs ~45 min) | iverilog, pyverilog, oss-cad-suite (CI installs all three) |
+| PCB DRC / connectivity / pin audit / routing — 39 tests in 13 files | **local only** | system KiCad with `kicad-cli pcb drc` |
+| Analog loop-filter bandwidth | CI, every push | ngspice |
+
+CI is the merge gate and the deploy gate: `.github/workflows/ci.yml` must be
+green, and `deploy.yml` re-checks that before publishing anything.
+
 ## Deployment (free hosting + CI/CD)
 
 The whole stack — static dashboard **plus** the full Python simulator API — runs on
@@ -546,8 +573,11 @@ failed test/parse/sim run blocks both deploys). It then:
   The test suite gates
   DRC, zone-fill freshness, connectivity graph, per-datasheet pin audit,
   routing rules, board-uuid uniqueness, track-width rules, and the J12
-  board-to-board pinout mirror — see `tests/test_pcb_*.py` (CI installs KiCad
-  and runs them unconditionally). KNOWN: the head's die-bus escape (In1.Cu/
+  board-to-board pinout mirror — see `tests/test_pcb_*.py`. These PCB gates are
+  **local-only**: they need a system KiCad (`kicad-cli pcb drc` + the `pcbnew`
+  binding) and no hosted runner provides a usable version, so CI runs them
+  nowhere — run `pytest tests/test_pcb_*.py` on a machine with KiCad.
+  KNOWN: the head's die-bus escape (In1.Cu/
   In3.Cu), removed in commit 33c2a12, is re-routed since the FreeRouting
   cycle 1 (2b24f91) — 100 of the 129 regressed die-bus nets are closed, 15
   DET_IN + 14 DET_TIA remain (ratcheted in `tests/test_pcb_connectivity.py`).
