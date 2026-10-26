@@ -113,25 +113,22 @@ CHIP_PROTOCOL: List[Section] = [
         expected="On-chip scanning readout, responsivity 0.05–0.3 A/W.",
     ),
     Section(
-        id="assembly", title="4 · Waveguides, stacking & thermal management",
-        goal="Couple CQD emission into hBN defects and read fluorescence on-chip, "
-             "with active Peltier cooling.",
+        id="assembly", title="4 · Stacking, contacts & thermal path",
+        goal="Read the hBN fluorescence on-chip: bond the emitter face to the "
+             "die carrier and take the PL straight to the detector.",
         steps=[
-            Step("Waveguides", "1–2 h",
-                 "SU-8 (~2–5 µm) UV-patterned or PDMS cast; 10–50 µm channels, "
-                 "n≈1.5–1.6, loss 0.5–2 dB/cm.",
-                 {"coupling_pct": "20–60"}),
             Step("Layer stacking + bond", "≈1 h",
-                 "Align PMMA/hBN over waveguides, dry-transfer, bond 100–150 °C "
-                 "15–30 min."),
-            Step("Thermal management", "≈1 h",
-                 "Cu/Al heat-spreader + Peltier (TEC1-12706) + liquid loop.",
-                 {"peltier_V": "5–12"}),
+                 "Align the hBN layer over the host, dry-transfer, bond "
+                 "100–150 °C 15–30 min."),
             Step("Contacts + encapsulation", "30 min",
                  "Extend Cu contacts, add microwave strips for ODMR, encapsulate "
                  "PMMA/epoxy, cure 80 °C."),
+            Step("Passive thermal path", "≈1 h",
+                 "Cu/Al heat-spreader under the carrier. No active cooling: the "
+                 "chip runs at room temperature.",
+                 {"temp_K": 300}),
             Step("Final test", "30 min",
-                 "Anneal 150 °C 15 min, verify EL→waveguide→hBN→sensor chain; "
+                 "Anneal 150 °C 15 min, verify EL→host→detector chain; "
                  "ODMR with microwave source.",
                  {"T2_us": "~µs", "coherence": "room temperature"}),
         ],
@@ -143,7 +140,7 @@ CHIP_PROTOCOL: List[Section] = [
         steps=[
             Step("Pressure", "—", "Autoclave at 220 °C is a pressure hazard; use a ≥3 MPa rated vessel."),
             Step("Solvents", "—", "NMP is toxic — substitute IPA. Ventilate for UV resins."),
-            Step("Electrical/thermal", "—", "Insulate Peltier & CQD emitter-driver wiring; avoid shorts."),
+            Step("Electrical/thermal", "—", "Insulate the CQD emitter-driver wiring; avoid shorts."),
             Step("PPE", "—", "Gloves, eye protection, ventilation for all chemicals."),
         ],
         expected="Safe reproducible fabrication.",
@@ -234,27 +231,23 @@ NV_PROTOCOL: List[Section] = [
         expected="On-chip readout of NV PL 637–800 nm; MoS₂ gain ≥ hBN case.",
     ),
     Section(
-        id="assembly", title="4 · Waveguides, bulk stacking, filter, thermal",
-        goal="SU-8/PDMS waveguides on the diamond (planarize first; diamond "
-             "n≈2.4 is high), 650 nm red long-pass filter, "
-             "Peltier at 295 K, CPW for MW at 2.87 GHz.",
+        id="assembly", title="4 · Stacking, filter & microwave launch",
+        goal="650 nm red long-pass filter over the detector face, the two-faced "
+             "die bonded into its carrier, and a 50 Ω CPW for MW at 2.87 GHz.",
         steps=[
-            Step("Waveguides on diamond", "1–2 h",
-                 "SU-8 planarization ~5 µm (diamond n≈2.4 high-index); SU-8 "
-                 "2002 core ~2 µm, 5–10 µm wide; PDMS cladding. Coupling 20–60%.",
-                 {"coupling_pct": "20–60", "index_n": 2.4}),
             Step("Stacking (bulk)", "≈1 h",
-                 "Carrier → Peltier → diamond plate (face up) → waveguides → "
-                 "PDMS → CQD emitter (edge-coupled) → detector. Bond corners; "
-                 "cure 80 °C 1 h."),
+                 "Two-faced die onto the carrier, emitter face out; bond the "
+                 "corners; cure 80 °C 1 h. The emitter face pumps the host and "
+                 "the detector face reads it directly.",
+                 {"host": "CVD diamond", "faces": 2}),
             Step("Filter (UNCHANGED)", "—",
                  "650 nm red photographic long-pass: passes NV PL 637–800 nm, "
-                 "blocks 532 nm green pump. Same filter as the hBN chip.",
+                 "blocks 532 nm green pump.",
                  {"filter": "650 nm long-pass", "passes_nm": "637–800"}),
-            Step("Thermal management", "≈1 h",
-                 "2-stage TEC + NTC + PID 295 K ±0.1 K, <5 W. Diamond thermal "
-                 "conductivity ~2000 W/m·K makes stability EASIER than hBN.",
-                 {"peltier_V": "5–12", "temp_K": 295}),
+            Step("Passive thermal path", "≈1 h",
+                 "Cu/Al heat-spreader under the carrier. Diamond thermal "
+                 "conductivity ~2000 W/m·K and the chip runs uncooled.",
+                 {"temp_K": 300}),
             Step("CPW for MW", "≈30 min",
                  "50 Ω CPW on FR4/Rogers; diamond face-down over signal line. "
                  "MW frequency = 2.87 GHz (ADF4351 covers it, no HW change).",
@@ -373,29 +366,24 @@ SIC_PROTOCOL: List[Section] = [
         expected="On-chip readout of V_Si PL 916 nm via graphene.",
     ),
     Section(
-        id="assembly", title="4 · Waveguides, bulk stacking, 850 nm filter, thermal",
-        goal="SU-8/PDMS waveguides on SiC (planarize; n≈2.6 high), 850 nm "
-             "long-pass filter (CHANGED — 650 would pass the 730–760 pump), "
-             "Peltier at 295 K, CPW for MW at 70 MHz.",
+        id="assembly", title="4 · Stacking, 850 nm filter & microwave launch",
+        goal="850 nm long-pass filter (CHANGED — 650 would pass the 730–760 "
+             "pump), the SiC die bonded into its carrier, and a CPW for MW at "
+             "70 MHz.",
         steps=[
-            Step("Waveguides on SiC", "1–2 h",
-                 "SU-8 planarization ~5 µm (SiC n≈2.6 very high); SU-8 2002 "
-                 "core ~2 µm, 5–10 µm wide; PDMS cladding. Coupling 20–60%.",
-                 {"coupling_pct": "20–60", "index_n": 2.6}),
             Step("Stacking (bulk)", "≈1 h",
-                 "Carrier → Peltier → SiC wafer (face up) → waveguides → PDMS → "
-                 "CIS emitter (edge-coupled) → 850 nm LP filter → detector. "
-                 "Bond corners; cure 80 °C 1 h."),
+                 "Carrier → SiC wafer (face up) → CIS emitter → 850 nm LP "
+                 "filter → detector. Bond corners; cure 80 °C 1 h."),
             Step("Filter (CHANGED)", "—",
                  "850 nm long-pass: passes V_Si PL 916 nm, blocks CIS pump "
                  "730–760 nm. The hBN chip's 650 nm filter is NOT used (it "
                  "would pass the 730–760 pump). Pump at ~730 nm for cleanest "
                  "separation.",
                  {"filter": "850 nm long-pass", "passes_nm": 916}),
-            Step("Thermal management", "≈1 h",
-                 "TEC + NTC + PID 295 K ±0.1 K, <5 W. SiC thermal conductivity "
-                 "~370 W/m·K; easy stability.",
-                 {"peltier_V": "5–12", "temp_K": 295}),
+            Step("Passive thermal path", "≈1 h",
+                 "Cu/Al heat-spreader under the carrier. SiC thermal "
+                 "conductivity ~370 W/m·K; the chip runs uncooled.",
+                 {"temp_K": 300}),
             Step("CPW for MW", "≈30 min",
                  "50 Ω CPW; SiC face-down over signal line. MW frequency = "
                  "70 MHz (V_Si V2). ADF4351 covers it (35 MHz–4.4 GHz); at "

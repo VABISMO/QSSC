@@ -25,8 +25,8 @@ def simulate_cqd_pulse(intensity: float = 1.0, duration: float = 1e-6,
     Models an electrically-pumped CQD ASE/LED channel: even a green LED-level pump
     polarises the NV spin, and the ``ase_gain`` factor represents the
     amplified-spontaneous-emission edge coupling that concentrates the emission
-    spectrally/into the waveguide (the protocol is explicit that this is ASE, not
-    a laser). ``adc`` is a 16-bit AD7616 code (0..65535).
+    spectrally towards the detector face (the protocol is explicit that this is
+    ASE, not a laser). ``adc`` is a 16-bit AD7616 code (0..65535).
     """
     inten = float(np.clip(rng.normal(intensity, 0.05 * intensity), 0, 2)) * ase_gain
     dur = float(max(duration + rng.normal(0, 0.1e-6), 1e-9))
