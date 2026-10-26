@@ -2,7 +2,7 @@
 
 The QSSC detector is a continuous graphene/MoS2+PEDOT sheet on ITO
 (``DET_COMMON``) read by 64 discrete pads on a 2.5 mm pitch (8x8 grid, 1.0x1.0 mm
-active pad area — ``docs/FABRICATION_PROTOCOL_P0.md``, ``qssc/magnetometry.py``).
+active pad area — see ``qssc/magnetometry.py``).
 A fluorescence spot landing on the sheet splits its photocurrent across the
 neighbouring pads by the sheet's lateral charge-spreading length; measuring the
 per-pad ratio localizes the spot to a fraction of the pad pitch. This is the

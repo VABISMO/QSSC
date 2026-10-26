@@ -90,44 +90,59 @@ td code{font-size:12px}
 <h3 id="22-surface-cleaning">2.2 Surface cleaning</h3>
 <h3 id="23-nv-activation-only-if-the-plate-needs-it">2.3 NV⁻ activation (ONLY if the plate needs it)</h3>
 <h3 id="24-site-density-and-surface-proximity">2.4 Site density and surface proximity</h3>
-<h3 id="25-no-pmma-on-host-step">2.5 No PMMA-on-host step</h3>
+<h3 id="25-host-surface-condition">2.5 Host surface condition</h3>
 <h2 id="section-3-on-chip-fluorescence-photodetector-array-graphene-mos2-unchanged">Section 3 — On-Chip Fluorescence Photodetector Array (Graphene / MoS₂) (UNCHANGED)</h2>
-<h2 id="section-4-waveguides-stacking-bulk-geometry-thermal-contacts">Section 4 — Waveguides, Stacking (bulk geometry), Thermal, Contacts</h2>
-<h3 id="41-teos-sol-gel-silica-waveguides-on-the-diamond">4.1 TEOS sol-gel silica waveguides (on the diamond)</h3>
-<h3 id="42-coupling-the-cqd-emitter-to-the-waveguide-unchanged">4.2 Coupling the CQD emitter to the waveguide (unchanged)</h3>
-<h3 id="43-stacking-bulk-not-2d">4.3 Stacking (bulk, not 2D)</h3>
-<h3 id="44-peltier-thermal-management-unchanged">4.4 Peltier thermal management (unchanged)</h3>
-<h3 id="45-contacts-and-encapsulation-unchanged">4.5 Contacts and encapsulation (unchanged)</h3>
-<h3 id="46-coplanar-waveguide-mw-for-odmr-unchanged-frequency-changes">4.6 Coplanar waveguide (MW) for ODMR (unchanged, frequency changes)</h3>
+<h2 id="section-4-stacking-bulk-geometry-thermal-path-contacts">Section 4 — Stacking (bulk geometry), Thermal Path, Contacts</h2>
+<h3 id="41-stacking-bulk-geometry">4.1 Stacking (bulk geometry)</h3>
+<h3 id="42-thermal-path">4.2 Thermal path</h3>
+<h3 id="43-contacts-and-encapsulation">4.3 Contacts and encapsulation</h3>
+<h3 id="44-coplanar-waveguide-mw-for-odmr-frequency-changes">4.4 Coplanar waveguide (MW) for ODMR (frequency changes)</h3>
 <h2 id="section-5-characterization-testing">Section 5 — Characterization &amp; Testing</h2>
 <h3 id="51-electroluminescence-cqd-array-unchanged">5.1 Electroluminescence (CQD array) — unchanged</h3>
 <h3 id="52-odmr-of-nv-in-diamond">5.2 ODMR of NV⁻ in diamond</h3>
-<h3 id="521-optical-link-budget-explicit">5.2.1 Optical link budget (explicit)</h3>
 <h3 id="53-spin-coherence-t2">5.3 Spin coherence (T₂)</h3>
-<h3 id="54-coupling-efficiency-waveguide-detector-unchanged">5.4 Coupling efficiency (waveguide → detector) — unchanged</h3>
+<h3 id="54-emitter-detector-coupling">5.4 Emitter → detector coupling</h3>
 <h3 id="55-end-to-end-functional-test">5.5 End-to-end functional test</h3>
 <h3 id="56-emitterqubitdetector-calibration-software-pulse-capture-unchanged">5.6 Emitter↔qubit↔detector calibration (software pulse-capture) — unchanged</h3>
 <h2 id="section-6-safety">Section 6 — Safety</h2>
 <h2 id="7-expected-performance-table-nv-diamond-variant">7. Expected Performance Table (NV-diamond variant)</h2>
 <h2 id="8-validation-against-known-studies">8. Validation Against Known Studies</h2>
 <h3 id="81-nv-centre-d-odmr-coherence">8.1 NV⁻ centre — D, ODMR, coherence</h3>
-<h3 id="82-cqd-green-emitter-graphene-detector-waveguides">8.2 CQD green emitter / graphene detector / waveguides</h3>
+<h3 id="82-cqd-green-emitter-graphene-detector">8.2 CQD green emitter / graphene detector</h3>
 <h3 id="83-diamond-surface-preparation">8.3 Diamond surface preparation</h3>
-<h2 id="references-platform-specific-cqddetectorwaveguide-refs-are-in-the-hbn-base">References (platform-specific; CQD/detector/waveguide refs are in the hBN base)</h2>
+<h2 id="references-platform-specific-cqddetector-refs-are-in-the-hbn-base">References (platform-specific; CQD/detector refs are in the hBN base)</h2>
   <h1 id="quantum-solid-state-chip-room-temperature-fabrication-protocol-nv-diamond-variant">Quantum Solid State Chip (Room Temperature) — Fabrication Protocol · NV-Diamond variant</h1>
 <p><strong>Project:</strong> QSSC (Quantum Solid State Chip, room-temperature demonstrator)
 <strong>Document type:</strong> Laboratory fabrication protocol (standalone variant)
 <strong>Version:</strong> 1.0
 <strong>Variant:</strong> NV-diamond (negatively-charged nitrogen-vacancy, NV⁻)
-<strong>Scope:</strong> Same chip architecture as the hBN base protocol — (1) an electrically-pumped carbon-quantum-dot (CQD) green ASE/LED emitter array, (2) <strong>TEOS sol-gel silica (SiO₂) waveguides</strong> (replacing SU-8 for negligible autofluorescence under the 532 nm pump), and (3) an on-chip 2D-material (graphene/MoS₂) photodetector array with FPGA readout and software pulse-capture calibration — but the <strong>middle spin-host block is a CVD diamond plate hosting NV⁻ centres</strong> (zero-field splitting D ≈ 2.87 GHz, PL 637–800 nm, T₂ ≈ 1.8 ms at 300 K). The optical/electronic chain (green CQD pump, 650 nm red long-pass filter, graphene detector, ADF4351 MW) is <strong>unchanged</strong> from the hBN chip; only the host, the defect-creation step, the geometry (bulk vs 2D) and the MW frequency change.</p>
+<strong>Scope:</strong> Same chip architecture as the hBN base protocol — (1) an electrically-pumped carbon-quantum-dot (CQD) green ASE/LED emitter array and (2) an on-chip 2D-material (graphene/MoS₂) photodetector array with FPGA readout and software pulse-capture calibration — but the <strong>middle spin-host block is a CVD diamond plate hosting NV⁻ centres</strong> (zero-field splitting D ≈ 2.87 GHz, PL 637–800 nm, T₂ ≈ 1.8 ms at 300 K). The optical/electronic chain (green CQD pump, 650 nm red long-pass filter, graphene detector, ADF4351 MW) is <strong>unchanged</strong> from the hBN chip; only the host, the defect-creation step, the geometry (bulk vs 2D) and the MW frequency change.</p>
 <blockquote>
-<p><strong>Microdiamond-layer option (home-lab / budget).</strong> Instead of a bulk CVD plate, the spin host can be a <strong>layer of commercial NV⁻ microdiamonds (~100 nm, pre-activated, $30–60/100 mg) dispersed in a TEOS sol-gel SiO₂ matrix</strong> and spin-coated on a 10×10 mm glass carrier. This trades the bulk plate's ~ms T₂ for µs-scale ensemble T₂ (surface-proximity-limited) but <strong>removes the tube-furnace and the $50–250 plate</strong>, making it the route used by the home-lab prototype <code>FABRICATION_PROTOCOL_P0.md</code>.</p>
+<p><strong>Microdiamond-layer option (home-lab / budget).</strong> Instead of a bulk CVD plate, the spin host can be a <strong>layer of commercial NV⁻ microdiamonds (~100 nm, pre-activated, $30–60/100 mg) dispersed in a TEOS sol-gel SiO₂ matrix</strong> and spin-coated on a 10×10 mm glass carrier. This trades the bulk plate's ~ms T₂ for µs-scale ensemble T₂ (surface-proximity-limited) but <strong>removes the tube-furnace and the $50–250 plate</strong>, making it the route used by the home-lab prototype.</p>
 <p><strong>Note.</strong> The NV⁻ variant is the <strong>easiest platform swap</strong> in the QSSC family because the NV⁻ is pumped at <strong>532 nm green</strong> — exactly the colour the on-chip CQD emitter already makes — and its red/NIR PL (637–800 nm) passes the <strong>same 650 nm long-pass filter</strong> and is read by the <strong>same graphene/MoS₂ array</strong> as the hBN chip. The emitter, filter, detector and FPGA are reused verbatim. What you give up relative to hBN is the 2D / van-der-Waals integrability and the atomically-flat surface proximity: diamond is a <strong>bulk 3D plate</strong>, so the emitter and detector sit <em>on top</em> of the diamond rather than in a stacked 2D heterostructure. What you gain is <strong>~900× better room-temperature coherence</strong> (T₂ 1.8 ms vs 2 µs), enough to run small quantum algorithms at 300 K with dynamical decoupling.</p>
 <p><strong>On-chip emitter (no big diodes).</strong> This variant keeps the <strong>on-chip CQD emitter</strong> as the pump — no external laser diode is required. (The SiC variant is the one that needs a different on-chip emitter; diamond reuses the green CQD unchanged.)</p>
+<p><strong>Two diamond routes, one canonical die (audit issue #15).</strong> The QSSC chip is
+built around a single canonical <strong>20 × 20 mm two-faced die</strong> (130 pads, 2.5 mm
+pitch, 64 electrodes + 1 common per face — see
+<code>hardware/HARDWARE_DESIGN.md</code>). The diamond host can be realized two ways,
+both centred on that die:
+1. <strong>Bulk ¹²C-enriched CVD diamond</strong> — the <strong>compute</strong> route described in this
+   protocol (T₂ ≈ 1.8 ms at 300 K, enough to run small Shor-15). This is the
+   route the <code>NV</code> simulator profile's 300 K compute claim is scoped to.
+2. <strong>Spin-coated NV⁻ microdiamond in TEOS sol-gel</strong> — the <strong>sensor-array</strong>
+   route (the microdiamond-layer option above):
+   ~100 nm pre-activated microdiamonds give µs–tens-of-µs ensemble T₂
+   (surface-proximity-limited), suitable for sensing, <strong>not</strong> for running
+   quantum algorithms. Do <strong>not</strong> read the 1.8 ms / 300 K-compute figure as
+   applying to the as-built microdiamond sensor array — it is a bulk-CVD
+   compute-material figure.</p>
+<p>This protocol documents the bulk-CVD compute route; a full microdiamond
+sensor-array protocol rewrite is flagged as a follow-up (the P0 prototype
+covers the home-lab version today).</p>
 </blockquote>
 <hr />
 <h2 id="1-abstract">1. Abstract</h2>
-<p>This document specifies a complete, equipment-minimal fabrication protocol for a room-temperature solid-state quantum photonic chip (QSSC) built on a <strong>CVD diamond plate hosting NV⁻ centres</strong>. The chip combines three functional blocks on a single 25 × 25 mm² carrier: (i) a hydrothermally-synthesized <strong>green (~520–540 nm)</strong> carbon quantum dot (CQD) emitter array in a polymeric LED/ASE stack (ITO/PEDOT:PSS/CQD–PVA/ZnO/Ag) that doubles as the optical pump for the NV⁻ (532 nm excitation band) — no external pump laser; (ii) a <strong>commercial CVD diamond plate with NV⁻ centres</strong> (D ≈ 2.87 GHz, ZPL 637 nm, phonon sideband to ~800 nm, T₂ ≈ 1.8 ms at 300 K), cleaned and (if needed) annealed to activate implanted vacancies; and (iii) <strong>TEOS sol-gel silica (SiO₂) waveguides</strong> routing the red/NIR NV PL to an <strong>on-chip graphene/MoS₂ photodetector array</strong> read directly by the FPGA, with software pulse-capture calibration (no camera, no alignment jig). A Peltier module holds the diamond at 288–300 K. All processing uses benchtop chemistry, a spin coater, a hotplate, contact-mask UV, a tube furnace (for the optional NV-activation anneal) and a ~USD 3,000–3,500 equipment footprint beyond an optical microscope.</p>
+<p>This document specifies a complete, equipment-minimal fabrication protocol for a room-temperature solid-state spin-defect quantum chip (QSSC) built on a <strong>CVD diamond plate hosting NV⁻ centres</strong>. The chip combines three functional blocks on a single 25 × 25 mm² carrier: (i) a hydrothermally-synthesized <strong>green (~520–540 nm)</strong> carbon quantum dot (CQD) emitter array in a polymeric LED/ASE stack (ITO/PEDOT:PSS/CQD–PVA/ZnO/Ag) that doubles as the optical pump for the NV⁻ (532 nm excitation band); (ii) a <strong>commercial CVD diamond plate with NV⁻ centres</strong> (D ≈ 2.87 GHz, ZPL 637 nm, phonon sideband to ~800 nm, T₂ ≈ 1.8 ms at 300 K), cleaned and (if needed) annealed to activate implanted vacancies; and (iii) an <strong>on-chip graphene/MoS₂ photodetector array</strong> that reads the red/NIR NV PL directly, with software pulse-capture calibration. The die sits on a passive heat-spreader at 288–300 K. All processing uses benchtop chemistry, a spin coater, a hotplate, contact-mask UV, a tube furnace (for the optional NV-activation anneal) and a ~USD 3,000–3,500 equipment footprint beyond an optical microscope.</p>
 <hr />
 <h2 id="2-introduction-scientific-basis">2. Introduction &amp; Scientific Basis</h2>
 <h3 id="21-why-nv-diamond-for-the-same-chip">2.1 Why NV-diamond for the same chip</h3>
@@ -152,15 +167,15 @@ td code{font-size:12px}
    │  emitter + detector sit ON TOP (not a 2D    │
    │  stack — bulk 3D geometry)                  │
    ──────────────────────────────────────────────┘
-        ↘ waveguide coupling ↙
-   ┌─────────── TEOS sol-gel SiO₂ waveguides ───────────┐       ← Section 3/4 (UNCHANGED optics, new material)
-   │  → graphene / MoS₂ photodetector array             │
-   └─────────────────────────────────────────────────────┘
-   Peltier (TEC) clamped under Si carrier      ← Section 4
+        ↘ photoluminescence (637–800 nm) ↙
+   ┌─────────────────────────────────────────────┐
+   │  → graphene / MoS₂ photodetector array      │  ← Section 3/4
+   └─────────────────────────────────────────────┘
+   Heat-spreader under the Si carrier       ← Section 4
 </code></pre>
 <hr />
 <h2 id="3-materials-bill-of-materials-bom-deltas-from-the-hbn-base">3. Materials &amp; Bill of Materials (BOM) — deltas from the hBN base</h2>
-<p>Only the <strong>host</strong> and one optional anneal change. Everything else (CQD chemicals, emitter stack, graphene/MoS₂, <strong>TEOS/MTEOS sol-gel</strong>, Peltier, FPGA/ADF4351, 650 nm filter) is the same BOM as the hBN protocol.</p>
+<p>Only the <strong>host</strong> and one optional anneal change. Everything else (CQD chemicals, emitter stack, graphene/MoS₂, FPGA/ADF4351, 650 nm filter) is the same BOM as the hBN protocol.</p>
 <h3 id="31-added-substituted-reagents">3.1 Added / substituted reagents</h3>
 <table>
 <thead>
@@ -211,7 +226,7 @@ td code{font-size:12px}
 <h3 id="33-equipment-deltas">3.3 Equipment deltas</h3>
 <ul>
 <li>The tube furnace (to 1100 °C) is <strong>only needed if the purchased plate requires an NV-activation/vacancy-anneal step</strong> (~800 °C). Many CVD-NV plates arrive NV-active and need only a clean. If buying "NV-ready" plate, the furnace is optional.</li>
-<li>Everything else (hotplate, autoclave, sonicator, spin coater, UV, Peltier, sourcemeter, lock-in, 650 nm filter, ADF4351) is unchanged from the hBN BOM.</li>
+<li>Everything else (hotplate, autoclave, sonicator, spin coater, UV, sourcemeter, lock-in, 650 nm filter, ADF4351) is unchanged from the hBN BOM.</li>
 </ul>
 <hr />
 <h2 id="section-1-cqd-emitter-array-unchanged-from-hbn-base">Section 1 — CQD Emitter Array (UNCHANGED from hBN base)</h2>
@@ -222,7 +237,7 @@ td code{font-size:12px}
 <p><strong>Timing:</strong> ≈ 3 working days (synthesis 8 h + dialysis 48 h unattended + film stack 1 day).</p>
 <hr />
 <h2 id="section-2-diamond-plate-preparation-nv-replaces-the-hbn-section">Section 2 — Diamond Plate Preparation + NV⁻ (REPLACES the hBN section)</h2>
-<p><strong>Goal:</strong> Obtain a clean CVD diamond plate hosting optically-addressable NV⁻ centres (D ≈ 2.87 GHz) at ensemble density suitable for 8 × 8 site addressing, with the surface ready to receive the emitter/waveguide/detector stack on top.</p>
+<p><strong>Goal:</strong> Obtain a clean CVD diamond plate hosting optically-addressable NV⁻ centres (D ≈ 2.87 GHz) at ensemble density suitable for 8 × 8 site addressing, with the surface ready to receive the emitter and detector on top.</p>
 <h3 id="21-procurement">2.1 Procurement</h3>
 <ol>
 <li><strong>Buy the plate.</strong> Order a <strong>CVD diamond plate with NV⁻ centres</strong> (~2×2×0.5 mm to ~3×3×0.5 mm, optical/CVD grade, NV density ~10¹⁰–10¹² cm⁻³). Search terms: "CVD diamond NV centre", "nitrogen vacancy diamond plate", "Type Ib diamond". For a budget demonstration, a small Type Ib HPHT plate (natural substitutional nitrogen, which forms NV⁻ on anneal) is adequate. Expect ~$50–$250 retail.</li>
@@ -250,9 +265,9 @@ td code{font-size:12px}
 <li><strong>Density.</strong> Ensemble NV⁻ density ~10¹⁰–10¹² cm⁻³ is typical for CVD-NV plates; at the plate surface this gives resolvable ensemble spots for 8 × 8 ODMR. If single-site addressing is desired, buy a low-density (~10⁹ cm⁻³) plate.</li>
 <li><strong>Depth caveat.</strong> Unlike 2D hBN where defects sit at the surface, NV⁻ in a bulk plate are <strong>distributed through the ~0.5 mm thickness</strong>. For sensing you may want shallow NV⁻ (within ~10 nm of the surface); specify "shallow NV" or "delta-doped" with the vendor. For the QSSC compute/sensor demonstrator, ensemble bulk NV⁻ is fine; the trade-off vs hBN is <strong>worse surface proximity, far better coherence</strong>.</li>
 </ol>
-<h3 id="25-no-pmma-on-host-step">2.5 No PMMA-on-host step</h3>
+<h3 id="25-host-surface-condition">2.5 Host surface condition</h3>
 <ol start="10">
-<li>Unlike hBN, <strong>no PMMA passivation coat is applied to the diamond</strong>. Diamond is chemically inert and the NV⁻ charge state is intrinsically stable at the surface (unlike V_B⁻). Proceed directly to waveguide/emitter/detector deposition on the cleaned diamond surface (Section 4). A thin <strong>TEOS sol-gel SiO₂</strong> planarization layer may be spun on the diamond first if the surface is too rough for waveguide adhesion.</li>
+<li>Diamond is chemically inert and the NV⁻ charge state is intrinsically stable at the surface (unlike V_B⁻), so the cleaned surface goes straight to emitter and detector deposition (Section 4). Spin a thin <strong>TEOS sol-gel SiO₂</strong> planarization layer first if the surface is too rough for adhesion.</li>
 </ol>
 <p><strong>Timing, Section 2:</strong> clean 1 h + (optional) anneal 4 h. <strong>Total: ~0.5–1 working day</strong> (far faster than hBN exfoliation + defect engineering).</p>
 <hr />
@@ -262,102 +277,100 @@ td code{font-size:12px}
 <li>CVD graphene transfer, MoS₂ transfer, Au/Cr source-drain electrodes, O₂-plasma channel isolation, bias 0.1–1 V, lock-in readout — all as in the hBN base protocol. No discrete photodiodes, no external camera.</li>
 </ul>
 <hr />
-<h2 id="section-4-waveguides-stacking-bulk-geometry-thermal-contacts">Section 4 — Waveguides, Stacking (bulk geometry), Thermal, Contacts</h2>
-<h3 id="41-teos-sol-gel-silica-waveguides-on-the-diamond">4.1 TEOS sol-gel silica waveguides (on the diamond)</h3>
-<blockquote>
-<p><strong>Why not SU-8.</strong> SU-8 autofluoresces under the 532 nm green pump and has C–H-overtone NIR loss — it would bury the NV⁻ PL (637–800 nm, ODMR contrast 2–30 %) under waveguide background. <strong>TEOS sol-gel SiO₂</strong> is fluorescence-free, UV–NIR transparent, and survives the 300–400 °C densification. Core/clad contrast is set by a silane dopant (MTEOS), not an organic polymer.</p>
-</blockquote>
+<h2 id="section-4-stacking-bulk-geometry-thermal-path-contacts">Section 4 — Stacking (bulk geometry), Thermal Path, Contacts</h2>
+<h3 id="41-stacking-bulk-geometry">4.1 Stacking (bulk geometry)</h3>
 <ol>
-<li>If the diamond surface is rough (&gt; few nm Ra), spin a thin <strong>pure-TEOS sol-gel SiO₂ planarization layer</strong> (TEOS:EtOH:H₂O:HCl = 1:4:2:0.02 mol, aged 24 h; spin 1000 rpm → ~1 µm, bake 80 °C 10 min, densify 300 °C 30 min). Repeat 3–5× to build ~5 µm. Then spin the <strong>MTEOS-doped core sol</strong> (15 mol % MTEOS, n ≈ 1.50; 2000 rpm → ~0.5–1 µm) and pattern waveguides 5–10 µm wide, 5–20 mm long by soft-lithography / UV embossing with a PDMS stamp (see hBN protocol §4.1). Clad with pure-TEOS sol-gel (n ≈ 1.45); densify 300–400 °C, 1 h.
-   - Diamond's refractive index (n ≈ 2.4) is high; keep the sol-gel planarization layer thick enough (~5 µm) that waveguide modes are not pulled into the diamond. This is the main optical difference from the hBN chip (where the SiO₂/Si carrier is a cleaner substrate).</li>
+<li><strong>Stack order (bottom→top):</strong> Si/SiO₂ carrier → <strong>diamond plate</strong> (face up) →
+   CQD emitter chip (green face toward the diamond, edge-coupled) →
+   graphene/MoS₂ photodetector over the diamond's PL side. Bond the corners
+   with a thin cyanoacrylate layer; cure 80 °C, 1 h. Wire-bond or
+   silver-paste the CQD anode/cathode and the detector source/drain to a PCB
+   fan-out.</li>
 </ol>
-<h3 id="42-coupling-the-cqd-emitter-to-the-waveguide-unchanged">4.2 Coupling the CQD emitter to the waveguide (unchanged)</h3>
+<h3 id="42-thermal-path">4.2 Thermal path</h3>
 <ol start="2">
-<li>Cleave the CQD stack so the green gain-strip edge faces the sol-gel SiO₂ input facet; butt-couple in the alignment jig; UV-cure NOA 61. Coupling 20–60 % as in the hBN protocol.</li>
+<li>Cu/Al heat-spreader clamped under the carrier. Diamond's thermal
+   conductivity (~2000 W/m·K, 4× better than Si) holds the die at ambient on
+   its own, so the chip runs uncooled.</li>
 </ol>
-<h3 id="43-stacking-bulk-not-2d">4.3 Stacking (bulk, not 2D)</h3>
+<h3 id="43-contacts-and-encapsulation">4.3 Contacts and encapsulation</h3>
 <ol start="3">
-<li><strong>Stack order (bottom→top):</strong> Si/SiO₂ carrier → Peltier TEC top plate → <strong>diamond plate</strong> (face up) → TEOS sol-gel SiO₂ waveguides (core+clad) → CQD emitter chip (edge-coupled) → graphene/MoS₂ detector at waveguide output. The diamond replaces the hBN-on-SiO₂ chip; the rest of the stack is the same. Bond with thin PDMS/cyanoacrylate at corners; cure 80 °C, 1 h. Wire-bond or silver-paste the CQD anode/cathode and detector source/drain to a PCB fan-out.</li>
+<li>Au wire / silver-paste to a 0.1" header: ITO anode (×8 rows), Ag cathode
+   (×8 cols), detector drains (×N), gate (×1). Encapsulate under a 1 mm PDMS
+   slab, leaving the detector aperture open.</li>
 </ol>
-<h3 id="44-peltier-thermal-management-unchanged">4.4 Peltier thermal management (unchanged)</h3>
+<h3 id="44-coplanar-waveguide-mw-for-odmr-frequency-changes">4.4 Coplanar waveguide (MW) for ODMR (frequency changes)</h3>
 <ol start="4">
-<li>2-stage TEC (or TEC1-12706), NTC thermistor, PID set to <strong>295 K ± 0.1 K</strong>, &lt; 5 W. Diamond's thermal conductivity (~2000 W/m·K, 4× better than Si) makes temperature stability <strong>easier</strong> than the hBN chip — the diamond itself is an excellent heat spreader.</li>
-</ol>
-<h3 id="45-contacts-and-encapsulation-unchanged">4.5 Contacts and encapsulation (unchanged)</h3>
-<ol start="5">
-<li>Au wire / silver-paste to a 0.1" header: ITO anode (×8 rows), Ag cathode (×8 cols), detector drains (×N), gate (×1), thermistor (×2), TEC ± (×2). Encapsulate under a 1 mm PDMS slab, leaving the waveguide output facet exposed.</li>
-</ol>
-<h3 id="46-coplanar-waveguide-mw-for-odmr-unchanged-frequency-changes">4.6 Coplanar waveguide (MW) for ODMR (unchanged, frequency changes)</h3>
-<ol start="6">
-<li>Hand-etch a 50 Ω CPW on FR4/Rogers; mount the diamond plate face-down over the signal line (≤ 50 µm gap) or flip-chip with anisotropic conductive paste. <strong>Microwave frequency changes from 3.46 GHz (hBN) to 2.87 GHz (NV⁻)</strong> — well within the ADF4351 range (35 MHz–4.4 GHz), no hardware change.</li>
+<li>Hand-etch a 50 Ω CPW on FR4/Rogers; mount the diamond plate face-down over
+   the signal line (≤ 50 µm gap) or flip-chip with anisotropic conductive
+   paste. <strong>Microwave frequency changes from 3.46 GHz (hBN) to 2.87 GHz
+   (NV⁻)</strong> — well within the ADF4351 range (35 MHz–4.4 GHz), no hardware
+   change.</li>
 </ol>
 <hr />
 <h2 id="section-5-characterization-testing">Section 5 — Characterization &amp; Testing</h2>
 <h3 id="51-electroluminescence-cqd-array-unchanged">5.1 Electroluminescence (CQD array) — unchanged</h3>
 <p>Drive each pixel 0–15 V, confirm turn-on 4–8 V and broadband green EL; ASE check (FWHM narrowing &lt; 25 nm). As in the hBN protocol.</p>
-<p><strong>One addition over the hBN base:</strong> the hBN §5.1 at-the-sample optical-power measurement (calibrated µW-class photodiode, step 4 there) is <strong>mandatory here too</strong> — its reading is the pump-power input of the §5.2.1 link budget and the gate for any ODMR attempt.</p>
+<blockquote>
+<p><strong>At-the-sample optical power (mandatory, audit issue #14).</strong> The CQD
+radiance target (≥ 10 cd/m², Sec. 1) and the ODMR pump budget (~1 mW at the
+sample, Sec. 5.2) sit ~4 decades apart (see the §5.2 link budget). Before any
+ODMR run, place a <strong>calibrated lab optical power meter</strong> (µW-class thermal /
+Si photodiode sensor head + meter, e.g. a Thorlabs PM100 series power sensor)
+at the sample plane — <strong>directly where the diamond will sit</strong> — and record the
+green pump power with the driven pixel on. This is a <strong>characterization
+instrument</strong>, not a design part of the chip (it lives on the bench, never on
+the PCB): it reconciles the radiance spec with the watt-level pump budget and
+tells you whether the on-chip CQD emitter actually delivers the ~1 mW the
+ODMR step assumes, or whether an external 532 nm assist is needed for the
+first measurement. Record the reading in the run log. No discrete photodiode
+is added to the chip itself.</p>
+</blockquote>
 <h3 id="52-odmr-of-nv-in-diamond">5.2 ODMR of NV⁻ in diamond</h3>
-<ol start="5">
-<li><strong>Optical:</strong> on-chip green CQD emitter (~532 nm) at the pump power measured in §5.1 — at the §1 radiance target (≥ 10 cd/m²) that is <strong>≈ 45–50 nW per 1 mm² pixel</strong> (≈ 3 µW array-wide), <em>not</em> the ~1 mW quoted in earlier revisions: that figure contradicted the §1 radiance target by ~4 orders of magnitude, and the §5.2.1 budget below supersedes it — no external laser. Collect NV⁻ PL at <strong>637–800 nm</strong> through the <strong>650 nm red photographic long-pass filter</strong> (passes the red/NIR NV PL, blocks the 532 nm green pump) into the <strong>on-chip graphene/MoS₂ detector array</strong>. No Si APD / discrete photodiode.</li>
-<li><strong>Microwave:</strong> sweep <strong>2.80–2.94 GHz</strong> from the function generator / ADF4351 through the CPW. Modulate MW at 1 kHz for lock-in detection of the ODMR dip.</li>
-<li><strong>Expected resonance:</strong> a single dip at <strong>D ≈ 2.87 GHz</strong> (the ¹⁴N 3-line hyperfine, A ≈ 2.16 MHz, is sub-linewidth and usually merges into one dip at B=0; it splits into a doublet under a static B₀). ODMR contrast <strong>2–30 %</strong> (ensemble/single), linewidth <strong>1–10 MHz</strong>. NV⁻ ODMR contrast is <strong>higher</strong> than V_B⁻ (0.5–3 %), so readout is easier.</li>
-<li><strong>Magnetic field sweep:</strong> apply B₀ along the NV axis; observe D shift D(B) = D₀ ± γ_e·B₀, γ_e/2π ≈ 28 GHz/T; the resonance splits into a doublet — confirms the S=1 triplet.</li>
+<ol start="4">
+<li><strong>Optical:</strong> on-chip green CQD emitter (~532 nm, ~1 mW at the sample) — no external laser. Collect NV⁻ PL at <strong>637–800 nm</strong> through the <strong>650 nm red photographic long-pass filter</strong> (passes the red/NIR NV PL, blocks the 532 nm green pump) into the <strong>on-chip graphene/MoS₂ detector array</strong>. No Si APD / discrete photodiode.</li>
 </ol>
-<h3 id="521-optical-link-budget-explicit">5.2.1 Optical link budget (explicit)</h3>
-<p>At the §1 target (radiance ≥ 10 cd/m², 532 nm, 1 mm² Lambertian pixel):</p>
-<table>
-<thead>
-<tr>
-<th>Stage</th>
-<th>Value</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Radiance → radiant exitance</td>
-<td>10 cd/m² ≈ <strong>15 mW·sr⁻¹·m⁻²</strong> at 532 nm</td>
-</tr>
-<tr>
-<td>EL per pixel (π·L·A)</td>
-<td>≈ <strong>45–50 nW</strong></td>
-</tr>
-<tr>
-<td>NV⁻ absorption over the 0.5 mm plate (10¹⁰–10¹² cm⁻³)</td>
-<td>1.5–78 % → <strong>0.8–39 nW</strong> absorbed</td>
-</tr>
-<tr>
-<td>PL quantum yield</td>
-<td>~10 % → <strong>80 pW–4 nW</strong> NV⁻ PL emitted</td>
-</tr>
-<tr>
-<td>Escape cone ~1/(4n²), n_diamond ≈ 2.4</td>
-<td>≈ 4.3 % → <strong>≈ 3–160 pW at the detector</strong></td>
-</tr>
-<tr>
-<td>Graphene responsivity 0.01–0.1 A/W</td>
-<td>0.03–16 pA — <strong>below the 51 pA RMS TIA floor</strong> (HARDWARE_DESIGN.md §C1)</td>
-</tr>
-<tr>
-<td>MoS₂ photogating 10–10² A/W</td>
-<td><strong>30 pA–16 nA</strong> — marginal; the only channel that can close</td>
-</tr>
-</tbody>
-</table>
-<p>At the radiance target the graphene-only readout sits below the TIA noise floor and the MoS₂ channel is marginal — the chain closes only if the emitters deliver near the other figure of this pair. Deciding that is exactly what the §5.1 photodiode measurement is for: "~1 mW at the sample" would require ≈ 2×10⁵ cd/m² (~4 orders above the §1 target), so the measured value — not either prose figure — is the planning basis for the §5.5 end-to-end ODMR claim. If the measured P_EL lands at the radiance target, re-derive §5.5 expectations against this table (MoS₂ photogating, longer integration, 1 kHz lock-in) before declaring the readout failed.</p>
-<hr />
+<blockquote>
+<p><strong>Radiance → watt link budget (audit issue #14).</strong> The two headline optical
+numbers are measured at different points in the chain and are <strong>not
+contradictory</strong>:</p>
+<ul>
+<li><strong>Radiance ≥ 10 cd/m²</strong> (Sec. 1) is the CQD emitter's <em>surface brightness</em>
+  into 2π — the spec the EL/ASE check verifies. Converting: 10 cd/m² ≈
+  14.6 mW·sr⁻¹·m⁻² for a Lambertian green source (1 cd ≈ 1.46 mW·sr⁻¹ at
+  532 nm via the photopic-luminous-efficiency peak). A single 1 mm² pixel
+  radiating into 2π sr therefore emits ~14.6 mW·sr⁻¹·m⁻² × 1 mm² × … ≈
+  <strong>45–50 nW</strong> isotropic-equivalent at the source surface.</li>
+<li><strong>~1 mW at the sample</strong> (above) is the <em>pump irradiance</em> the NV⁻ ensemble
+  needs for measurable ODMR — the on-chip CQD emitter is driven harder
+  (overdrive into the ASE regime, Sec. 1.7) and the diamond is held within
+  ~tens of µm of the emitter, so the collected solid angle is large and the
+  drive is concentrated onto the ~3×3 mm plate, not spread over 2π.</li>
+</ul>
+<p>The ~4-decade gap is therefore the <strong>collection geometry + overdrive</strong> factor
+(Lambertian-spread → near-field concentration), not a missing watt. The build
+drives the <strong>on-chip CQD emitter</strong> to ~1 mW at the sample; verify it with the
+§5.1 power meter before relying on it for ODMR. If the on-chip emitter falls
+short, an external 532 nm laser diode through the same optical path is the
+fallback for the first characterization only — the chip's defining demo is
+the on-chip-pumped ODMR.
+5. <strong>Microwave:</strong> sweep <strong>2.80–2.94 GHz</strong> from the function generator / ADF4351 through the CPW. Modulate MW at 1 kHz for lock-in detection of the ODMR dip.
+6. <strong>Expected resonance:</strong> a single dip at <strong>D ≈ 2.87 GHz</strong> (the ¹⁴N 3-line hyperfine, A ≈ 2.16 MHz, is sub-linewidth and usually merges into one dip at B=0; it splits into a doublet under a static B₀). ODMR contrast <strong>2–30 %</strong> (ensemble/single), linewidth <strong>1–10 MHz</strong>. NV⁻ ODMR contrast is <strong>higher</strong> than V_B⁻ (0.5–3 %), so readout is easier.
+7. <strong>Magnetic field sweep:</strong> apply B₀ along the NV axis; observe D shift D(B) = D₀ ± γ_e·B₀, γ_e/2π ≈ 28 GHz/T; the resonance splits into a doublet — confirms the S=1 triplet.</p>
+</blockquote>
 <h3 id="53-spin-coherence-t2">5.3 Spin coherence (T₂)</h3>
-<ol start="9">
+<ol start="8">
 <li><strong>Pulsed ODMR</strong> (Hahn echo, π/2–τ–π–τ–echo). Vary τ from 1 µs to <strong>2 ms</strong>. Fit echo vs τ to exp[−(2τ/T₂)^n].</li>
 <li><strong>Expected T₂:</strong> <strong>0.5–1.8 ms at room temperature</strong> (≈0.5–0.7 ms natural-abundance, ≈1.8 ms in ¹²C-enriched CVD). T₁ typically <strong>3–7 ms</strong>. This is <strong>~900× longer than V_B⁻</strong> and is why this variant can run small quantum algorithms at 300 K. With dynamical decoupling (XY8/CPMG) T₂ extends further.</li>
 </ol>
-<h3 id="54-coupling-efficiency-waveguide-detector-unchanged">5.4 Coupling efficiency (waveguide → detector) — unchanged</h3>
-<p>Inject calibrated 532 nm light into the sol-gel SiO₂ facet; measure output + on-chip detector photocurrent. Target 20–60 % coupling, &lt; 0.5 dB/cm loss.</p>
+<h3 id="54-emitter-detector-coupling">5.4 Emitter → detector coupling</h3>
+<p>Inject calibrated 532 nm light at the emitter edge and measure the on-chip detector photocurrent. Target 20–60 % of the emitted pump reaching the detector.</p>
 <h3 id="55-end-to-end-functional-test">5.5 End-to-end functional test</h3>
-<ol start="13">
+<ol start="12">
 <li>Drive the CQD pixel electrically → green EL pumps the NV⁻ ensemble → collect 637–800 nm NV PL (through the 650 nm long-pass filter) at the on-chip graphene/MoS₂ detector → photocurrent modulated by MW at <strong>2.87 GHz</strong> → FPGA/lock-in reads the ODMR dip. Successful end-to-end ODMR with the <strong>on-chip CQD pump</strong> (no external laser) is the chip's defining demonstration — identical concept to the hBN chip, at a different MW frequency and with ~900× more coherence headroom.</li>
 </ol>
 <h3 id="56-emitterqubitdetector-calibration-software-pulse-capture-unchanged">5.6 Emitter↔qubit↔detector calibration (software pulse-capture) — unchanged</h3>
-<ol start="14">
+<ol start="13">
 <li>Same automated FPGA sweep as the hBN chip: for each emitter pixel fire a green pump pulse, sample every detector electrode, record which sees a modulated NV-PL response under MW at <strong>2.87 GHz</strong> → build the emitter-pixel→qubit-site→detector-electrode lookup table. No camera, no alignment jig. (The only change is the MW frequency in the sweep.)</li>
 </ol>
 <hr />
@@ -395,7 +408,7 @@ td code{font-size:12px}
 <td>Low risk; keep &gt; 30 cm from antenna</td>
 </tr>
 <tr>
-<td>Peltier / hot surfaces</td>
+<td>Hot surfaces (hotplate, tube furnace)</td>
 <td>Heat-resistant gloves</td>
 </tr>
 <tr>
@@ -481,19 +494,14 @@ td code{font-size:12px}
 <td>Sec. 5.3</td>
 </tr>
 <tr>
-<td>Waveguide coupling</td>
-<td>20–60 %</td>
-<td>Sec. 4.2</td>
-</tr>
-<tr>
 <td>Graphene detector responsivity</td>
 <td>0.01–0.1 A/W (MoS₂ 10–10² A/W)</td>
 <td>Sec. 3</td>
 </tr>
 <tr>
 <td>Operating temperature</td>
-<td>288–300 K (set 295 K)</td>
-<td>Sec. 4.4</td>
+<td>288–300 K (ambient)</td>
+<td>Sec. 4.2</td>
 </tr>
 <tr>
 <td>TEC power</td>
@@ -519,9 +527,9 @@ td code{font-size:12px}
 <li><strong>1.8 ms Hahn-echo T₂ at 300 K in ¹²C-enriched diamond:</strong> Balasubramanian et al., <em>Nature Materials</em> 8, 383 (2009) — the basis for the T₂ = 1.8 ms figure used by the QSSC simulator <code>NV</code> profile.</li>
 <li><strong>NV T₁ at room temperature:</strong> Jarmola et al., <em>PRL</em> 108, 197601 (2012).</li>
 </ul>
-<h3 id="82-cqd-green-emitter-graphene-detector-waveguides">8.2 CQD green emitter / graphene detector / waveguides</h3>
+<h3 id="82-cqd-green-emitter-graphene-detector">8.2 CQD green emitter / graphene detector</h3>
 <ul>
-<li>Identical to the hBN base protocol validation (citric-acid+urea CQD synthesis, CQD-LED/ASE, SU-8/PDMS waveguides, graphene/MoS₂ photodetectors) — see <code>FABRICATION_PROTOCOL.md</code> Section 8. The 532 nm pump / 650–800 nm PL / 650 nm long-pass filter combination is the standard NV-ODMR optical chain, used in every NV reference above.</li>
+<li>Identical to the hBN base protocol validation (citric-acid+urea CQD synthesis, CQD-LED/ASE, graphene/MoS₂ photodetectors) — see <code>FABRICATION_PROTOCOL.md</code> Section 8. The 532 nm pump / 650–800 nm PL / 650 nm long-pass filter combination is the standard NV-ODMR optical chain, used in every NV reference above.</li>
 </ul>
 <h3 id="83-diamond-surface-preparation">8.3 Diamond surface preparation</h3>
 <ul>
@@ -530,7 +538,7 @@ td code{font-size:12px}
 <hr />
 <p><em>End of NV-diamond variant. This document is a maker-lab demonstrator specification. It reuses the hBN chip's emitter, filter, detector and FPGA verbatim; only the host (diamond plate), the defect-creation/anneal step, the bulk geometry and the MW frequency (2.87 GHz) change. Where primary literature is cited, consult the cited paper before relying on a specific numerical parameter.</em></p>
 <hr />
-<h2 id="references-platform-specific-cqddetectorwaveguide-refs-are-in-the-hbn-base">References (platform-specific; CQD/detector/waveguide refs are in the hBN base)</h2>
+<h2 id="references-platform-specific-cqddetector-refs-are-in-the-hbn-base">References (platform-specific; CQD/detector refs are in the hBN base)</h2>
 <ul>
 <li>[11] M. W. Doherty et al., "The nitrogen-vacancy colour centre in diamond," Phys. Rep. 528, 1–45 (2013). doi:10.1016/j.physrep.2013.02.001</li>
 <li>[12] G. Balasubramanian et al., "Nanoscale imaging magnetometry with diamond spins under ambient conditions," Nature 455, 648–651 (2008). doi:10.1038/nature07278</li>
@@ -540,7 +548,7 @@ td code{font-size:12px}
 <li>G. Balasubramanian et al., "Ultralong spin coherence time in isotopically engineered diamond," Nature Materials 8, 383–387 (2009). doi:10.1038/nmat2420</li>
 <li>K. Jarmola et al., "Temperature- and magnetic-field-dependent luminescence of NV⁻ in diamond," PRL 108, 197601 (2012). doi:10.1103/PhysRevLett.108.197601</li>
 </ul>
-  <div class="foot">QSSC — Quantum Solid State Chip (room temperature) · fabrication protocol · branded document · 27347 source bytes</div>
+  <div class="foot">QSSC — Quantum Solid State Chip (room temperature) · fabrication protocol · branded document · 26820 source bytes</div>
 </div>
 </body>
 </html>

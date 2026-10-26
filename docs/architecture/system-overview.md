@@ -31,7 +31,7 @@ flowchart LR
         EM["64 CQD emitters\n(bottom face)"]
         DET["64 graphene/MoS₂\ndetectors (top face)"]
     end
-    OPT["Pump → waveguide (SU-8/PDMS)\n→ PL 637–800 nm → 650 nm LP"]
+    OPT["Pump → host\n→ PL 637–800 nm → 650 nm LP"]
 
     CLI -- "USB / J1" --> FT --> UART
     API --- CLI

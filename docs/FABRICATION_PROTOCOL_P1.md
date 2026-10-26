@@ -8,7 +8,7 @@
 - **Fluorescence sensor** (the graphene/MoS₂ photodetector) — **pin-molded paste**: fill each hole with a **graphene paste**, insert the pin, let it dry hardening into the shape of pin + hole; then repeat with a **MoS₂ + PEDOT:PSS paste**. Each pin becomes a coaxial **pin / graphene / MoS₂** pixel; the **ITO glass under the support is the common back-electrode** (DET_COMMON).
 - **CQD array** (the green emitter) — **pin-molded paste, symmetric to the detector**: mold the CQD-LED stack around each pin in the hole, layer by layer — **ZnO paste (inner, ETL) → CQD paste (EML) → PEDOT:PSS paste (outer, HIL)**. Pin = cathode, ITO glass under the support = EM_ANODE anode. The paste layers interdiffuse (not as sharp as a spin-coated 10–80 nm stack), so it is a **weaker/rougher LED than a spin-coated stack**, but it emits and the process is symmetric to the detector (see §2c).
 
-> **Why this P1.** P0 (see `FABRICATION_PROTOCOL_P0.md`) is the full vertical 3-layer stack, but its 64+64 = 128 pixel contacts are brought out by **hand-bonded magnet wire** to 130 carrier edge holes — slow, fragile, and the bare two-face die has no off-the-shelf socket (custom pogo clamshell only). P1 replaces that with a **pin-header scaffold**: each pixel's electrode is a commercial pin that **solders straight into a standard 2.54 mm female socket**. No wire-bonding, no pogo clamshell, no fan-out wires, no spin-coater. The pin is the electrode AND the fan-out. The same CNC'd 64-hole support serves both devices.
+> **Why this P1.** The full vertical 3-layer stack brings its 64+64 = 128 pixel contacts out by **hand-bonded magnet wire** to 130 carrier edge holes — slow, fragile, and the bare two-face die has no off-the-shelf socket (custom pogo clamshell only). P1 replaces that with a **pin-header scaffold**: each pixel's electrode is a commercial pin that **solders straight into a standard 2.54 mm female socket**. No wire-bonding, no pogo clamshell, no fan-out wires, no spin-coater. The pin is the electrode AND the fan-out. The same CNC'd 64-hole support serves both devices.
 
 ---
 
@@ -97,7 +97,7 @@ The graphene/MoS₂ photodetector, built by **molding paste around the pins in t
 ### 4.1 Materials (the user's)
 
 - **Graphene paste** — the user's **graphene-in-alcohol** flake ink, let the alcohol mostly evaporate to a paste consistency (thick enough to hold shape in a hole, thin enough to wet the pin).
-- **MoS₂ + PEDOT:PSS paste** — the user's **MoS₂ powder**, LPE to nanosheet ink (`FABRICATION_PROTOCOL_P0.md` F3.0: ~50–100 mg in 10 mL IPA, bath-sonicate 2–6 h, settle/centrifuge, keep the supernatant), then blend with **PEDOT:PSS** (aqueous dispersion, 1:1 to 1:3 MoS₂-ink:PEDOT:PSS by volume) and thicken — PEDOT:PSS is the p-type conductive binder that improves hole collection from the MoS₂.
+- **MoS₂ + PEDOT:PSS paste** — the user's **MoS₂ powder**, LPE to nanosheet ink (~50–100 mg in 10 mL IPA, bath-sonicate 2–6 h, settle/centrifuge, keep the supernatant), then blend with **PEDOT:PSS** (aqueous dispersion, 1:1 to 1:3 MoS₂-ink:PEDOT:PSS by volume) and thicken — PEDOT:PSS is the p-type conductive binder that improves hole collection from the MoS₂.
 - **ITO glass** 20×20×1.1 mm — the **ITO film = DET_COMMON** (edge-contacted by a silver-epoxy dot on a bare-ITO corner, as in P0).
 - **Pin-header support** (Job P1-A, 1.5 mm holes) + **64 pins**.
 
@@ -157,13 +157,7 @@ Drive pin (i,j) cathode vs EM_ANODE anode. The paste diode (pin → ZnO → CQD 
 
 ---
 
-## 6. The L2 entanglement bus (carried over from P0, unchanged)
-
-P1 reuses the **P0 L2 TEOS sol-gel serpentine entanglement bus** verbatim — the 20×20×1 mm glass wafer with the 1 mm serpentine channel threading all 64 NV microdiamond sites (8×8) in series, 532 nm pump in the LEFT facet, perimeter MW loop at 2.87 GHz. See `FABRICATION_PROTOCOL_P0.md` §F2. The pin-scaffold only changes **how the detector (L3) and emitter (L1) are fabricated and contacted**; the bus is identical. Stack the sensor support / L2 wafer / CQD-array support as in P0 (the 20×20 footprints align).
-
----
-
-## 7. BOM (P1 additions over P0)
+## 6. BOM (P1 additions)
 
 | # | Part | Spec | Note |
 |---|---|---|---|
@@ -182,7 +176,7 @@ P1 reuses the **P0 L2 TEOS sol-gel serpentine entanglement bus** verbatim — th
 
 ---
 
-## 8. Physics (datasheet-grounded, no external numbers)
+## 7. Physics (datasheet-grounded, no external numbers)
 
 - **NV⁻ microdiamonds (Adamas FMDNVLN datasheet, 150–200 µm HPHT, low-N, RT):** T₁ ≈ 5.9–10.2 ms (FMDNVLN1 = 10.16 ms, FMDNVLN2 = 5.91 ms, FMDNVLN3 = 5.57 ms); CW-ODMR contrast 4.4–4.9 %; 2E linewidth 2.86–4.15 MHz; NV < 3 ppm, N sub-50 ppm. The datasheet quotes T₁ (relaxation). The long coherence **T₂ ≈ 1.8 ms** (Hahn echo, RT) is the ¹²C-enriched-diamond value the in-repo simulator `qssc/defects.py` `NV_DIAMOND` uses and the P2 plate target — **not a P0/P1 microdiamond datasheet claim**. Do not write a µs-scale T₂ for the microdiamonds from external papers.
 - **Graphene / MoS₂ detector:** responsivity is **not quoted by the supplier** for the user's flake inks; the bulk-flake-composite caveat in §4.3 applies. State measured values when characterized; do not invent A/W figures.
@@ -190,7 +184,7 @@ P1 reuses the **P0 L2 TEOS sol-gel serpentine entanglement bus** verbatim — th
 
 ---
 
-## 9. Test plan
+## 8. Test plan
 
 | Test | Device | Pass criterion |
 |---|---|---|

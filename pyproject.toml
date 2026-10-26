@@ -26,7 +26,8 @@ plot = ["matplotlib>=3.7"]
 cv = ["opencv-python>=4.8"]
 hw = ["pyserial>=3.5"]
 dev = ["pytest>=8.0", "pytest-cov>=4.0", "matplotlib>=3.7",
-       "httpx>=0.27"]  # fastapi.testclient.TestClient (used by tests/test_api.py)
+       "httpx>=0.27",   # fastapi.testclient.TestClient (used by tests/test_api.py)
+       "markdown>=3.5"] # tools/build_protocol_html.py: protocol .md -> .html
 
 [project.scripts]
 qssc = "qssc.cli:cli"
