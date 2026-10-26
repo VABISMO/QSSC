@@ -9,12 +9,10 @@ A room-temperature **solid-state spin-defect** quantum platform: a Qiskit
 backend, an FPGA control stack with PCB design, a validated chip-fabrication
 protocol, and a web dashboard.
 
-Two properties define the design. **The qubits are spins, and they entangle
-through their spin–spin (magnetic-dipole) coupling** — microwave-driven gates,
-never photon-mediated ones; nothing in the chip relies on optical interference
-or indistinguishable photons. And **the device runs at ~300 K**: NV⁻ centres in
-CVD diamond, zero-field splitting D ≈ 2.87 GHz, ODMR readout, no dilution
-refrigerator, no optical bench — no waveguides, no active cooling, no camera.
+The qubits are **spins in NV⁻ centres in CVD diamond**, coupled by magnetic
+dipole and driven by microwaves. The device operates at **~300 K** with
+benchtop electronics: zero-field splitting D ≈ 2.87 GHz, ODMR readout,
+64 parallel emitter and detector channels on a 20×20 mm die.
 
 <img width="1751" height="977" alt="image" src="https://github.com/user-attachments/assets/8506774f-5f71-4088-ba79-f775bb8d93b8" />
 
@@ -97,7 +95,7 @@ the AD7616 readout and the TLC5947 emitter drivers. Everything below is
 specified relative to that canonical die.
 
 The chip integrates its own emitter and detector arrays and is read
-**electrically** — no camera, no alignment jig. The 64 CQD emitters (driven in
+**electrically**: photocurrent → transimpedance amplifier → ADC. The 64 CQD emitters (driven in
 parallel by 3× TLC5947 constant-current drivers) pump the NV⁻ ensemble
 (green ~520–540 nm); a resonant microwave X-gate
 (2.87 GHz) flips the spin to the dark ms=±1 state; the on-chip
@@ -155,9 +153,8 @@ Three noise modes (set via the backend `noise_mode` option):
   `signal_retention = exp(−t/T₂)·(1−d₁q)^n₁q·(1−d₂q)^n₂q`
   metric drives both the assessment and the analytic blend, so a 13-qubit Shor
   run on NV at 300 K retains ~4.7 % of the *spin* signal and still recovers the
-  factors (3, 5) — NV computes at room temperature (see *Optical-coherence
-  channel* below for why the on-chip 2q gate is a spin gate, not a photon gate);
-  cooling to 1 mK lifts retention only to ~5.5 % because NV is
+  factors (3, 5) — NV computes at room temperature; cooling to 1 mK lifts
+  retention only to ~5.5 % because NV is
   depolarization-limited, not coherence-limited.
 - **`phenomenological`** (fast analytic approximation) — ideal Aer statevector +
   post-hoc per-site readout bit-flip + the same coherence×depolarization
@@ -169,16 +166,15 @@ share the *same* real T₂/gate-time parameters, so their coherence verdicts
 agree — only the granularity of the noise differs.
 
 **On-chip 2-qubit gate = spin gate (room-temperature entanglement).** The QSSC
-entangles qubits with a **~200 ns microwave / magnetic-dipole spin gate**, not a
-photon-mediated gate. Spin entanglement at room temperature is documented for NV
+entangles qubits with a **~200 ns microwave / magnetic-dipole spin gate**.
+Spin entanglement at room temperature is documented for NV
 (Neumann 2008 — electron↔nucleus; Dolde 2013 — two NV electron spins via
 dipole-dipole, *Nature Physics* 9:139). Because NV's spin T₂ ≈ 1.8 ms at 300 K
 ≫ the 200 ns gate, the on-chip 2q gate works at room temperature and NV **computes
 at 300 K** (a 13-qubit Shor-15 recovers (3, 5); a Bell pair keeps its |00⟩+|11⟩
 correlations). hBN (T₂ ~ 2 µs) and SiC (~ 40 µs) are sensor variants — shallow
 circuits work at 300 K, deep ones (Shor) do not. The gate fidelity is governed
-by the spin T₁/T₂ + depolarization budget above (`signal_retention`), **not** by
-optical photon indistinguishability.
+by the spin T₁/T₂ + depolarization budget above (`signal_retention`).
 
 **Per-pixel NV register (within-pixel all-to-all dipole).** The 2q gate is a
 *within one microdiamond* interaction: each of the 64 die pixels holds a small
@@ -186,30 +182,12 @@ optical photon indistinguishability.
 (complete graph K_n, ODMR-frequency-addressed by one global MW antenna). The
 qiskit backend (`qssc/backend.py`) simulates ONE pixel's ~10-NV register as its
 circuit qubits (64×10 = 640 exceeds the 63-qubit MPS cap, so the 64 pixels are
-modelled as 64 **independent** parallel processors at 300 K — not one 640-qubit
-machine). Cross-pixel 2q is the **cryo optical bus** (V_HOM → 1 only at cryo);
-at 300 K the 1/r³ coupling is zero at the 2.5 mm pixel pitch, so cross-pixel
-entanglement is descriptive only. The 64-pixel hardware die (the detector
+modelled as 64 **independent** parallel processors at 300 K). Cross-pixel
+coupling at the 2.5 mm pixel pitch is negligible at 300 K, so the design treats
+the die as 64 independent registers. The 64-pixel hardware die (the detector
 array, `/api/calibration`, the FPGA 64-channel RTL) is unchanged — `num_qubits`
 ≈ 10 (the register) and `pixels` = 64 (the die) now diverge. The dipole physics
 is grounded in `qssc/dipole.py` (CZ gate time, addressing leakage, fidelity).
-
-**Optical-coherence channel (HOM visibility) — descriptive, remote-entanglement
-only.** A *photon-mediated* two-qubit gate (emit a photon from each defect,
-interfere them — the mechanism for entangling **remote** defects on separate
-chips) adds a second, separate budget: the two photons must be indistinguishable,
-quantified by the Hong-Ou-Mandel visibility `V_HOM ≈ T₂,opt/(2·T₁,opt)`. At 300 K
-phonons broaden the NV zero-phonon line (637 nm) to ~THz, so `T₂,opt ~ fs` and
-`V_HOM ~ 2×10⁻⁷`; at cryogenic T the ZPL narrows toward the transform limit and
-`V_HOM → 1`. The simulator **reports** `hom_visibility`, `optical_t2_us`,
-`optical_survival` and a `within_optical_coherence` flag as *descriptive material
-properties* of this remote-photon channel, but they are **not** multiplied into
-`signal_retention` and do **not** gate the on-chip spin 2q gate — the QSSC does
-not use photon-mediated gates for on-chip compute, so the 300 K photon budget is
-irrelevant to operation. (Lower `hom_visibility_max` below 1.0 to model a real
-tuned cryogenic device; the temperature scaling is a teaching-grade power law,
-like the spin one.) One-qubit circuits (QRNG, BB84, ODMR/sensing) have no 2q
-gate either way.
 
 Algorithms included: **Shor** (QPE period finding), **period finding**,
 **Grover search**, **Bell/GHZ**, and **quantum arithmetic** (add / sub / mul /
@@ -245,10 +223,9 @@ ASE/LED emitters** (green ~520–540 nm, constant-current-driven by 3× TLC5947
 PWM drivers off a +12 V emitter rail), the **on-chip graphene/MoS₂ photodetector
 array** read through 16× TLV9004 TIAs into **4× AD7616 parallel 16-bit ADCs**
 with **1 kHz lock-in** demodulation host-side, an **ADF4351** microwave PLL, and
-a host UART link. **There is no camera and no alignment jig** — the chip
-integrates its own emitter and detector arrays and is read electrically (ODMR
-dip = reduced photocurrent at resonance).
-The RTL ([`fpga/rtl/`](fpga/rtl), 10 modules + a self-checking
+a host UART link. The chip integrates its own emitter and detector arrays and is
+read electrically: the ODMR dip is a reduction of photocurrent at resonance.
+The RTL ([`fpga/rtl/`](fpga/rtl), 11 modules + a self-checking
 [testbench](fpga/sim/tb_top_level.v)) is **parse-verified with pyverilog,
 functionally simulated with iverilog, and synthesised with yosys
 `synth_xilinx` (xc7, `-abc9` pinned)** — the testbench drives
@@ -568,7 +545,7 @@ failed test/parse/sim run blocks both deploys). It then:
   HARDWARE_DESIGN.md §15E).
 - [`fpga/constraints.xdc`](fpga/constraints.xdc) — Artix-7 CSG324 pin
   assignments and timing constraints (100 MHz TCXO, TLC5947 emitter SPI,
-  AD7616 detector SPI, ADF4351 SPI; no camera domain).
+  AD7616 detector SPI, ADF4351 SPI).
 - [`fpga/sim/tb_top_level.v`](fpga/sim/tb_top_level.v) — self-checking testbench.
 - [`hardware/gcode/`](hardware/gcode) — CNC G-code toolpaths for the chip
   carriers and sensor fixtures (described in `HARDWARE_DESIGN.md` §14).
