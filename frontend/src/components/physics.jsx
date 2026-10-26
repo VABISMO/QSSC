@@ -6,8 +6,8 @@ import React from 'react'
 // ---------------------------------------------------------------------------
 // OpticalChainDiagram — SVG flow of the on-chip readout chain: the physics of
 // every chip component the simulator checks, RECALCULATED for the current
-// profile + temperature (each execution). CQD ASE emitter -> SU-8/PDMS
-// waveguide -> defect crystal (spin host / qubit: pump in, PL out) -> long-pass
+// profile + temperature (each execution). CQD ASE emitter -> defect crystal
+// (spin host / qubit: pump in, PL out) -> long-pass
 // filter -> 2D photodetector -> TIA -> 4x AD7616 (16-bit parallel) -> 1 kHz lock-in.
 //
 // The per-stage numbers are computed client-side from `profile` + `temperature`
@@ -32,7 +32,7 @@ const ADC_MAX = 65535, BRIGHT_CODE = 51200, LOCKIN_MOD_HZ = 1000
 const OPT_PROFILE = {
   'NV': {
     wl: 532, pumpMw: 3.36, forwardV: 2.8, etaEqe: 0.12, driveMa: 10,
-    etaEw: 0.05, etaWd: 0.05, wgLoss: 0.5, wgLen: 0.3,
+    etaEw: 0.05, etaWd: 0.05,
     filter: '650 nm long-pass', filtT: 0.92, filterPasses: 'PL 637–800 nm',
     detector: 'graphene/MoS₂', resp: 0.10, contrast0: 0.05, linewidthMHz: 5,
     dGhz: 2.87, crystal: 'NV-diamond', crystalIcon: '💎', plRange: '637–800 nm',
@@ -40,7 +40,7 @@ const OPT_PROFILE = {
   },
   'hBN-VB': {
     wl: 532, pumpMw: 3.36, forwardV: 2.8, etaEqe: 0.12, driveMa: 10,
-    etaEw: 0.05, etaWd: 0.05, wgLoss: 0.5, wgLen: 0.3,
+    etaEw: 0.05, etaWd: 0.05,
     filter: '650 nm long-pass', filtT: 0.92, filterPasses: 'PL 820–860 nm',
     detector: 'graphene/MoS₂', resp: 0.10, contrast0: 0.05, linewidthMHz: 5,
     dGhz: 3.46, crystal: 'hBN V_B⁻', crystalIcon: '⬡', plRange: '820–860 nm',
@@ -48,7 +48,7 @@ const OPT_PROFILE = {
   },
   'SiC-VSi': {
     wl: 916, pumpMw: 3.17, forwardV: 3.3, etaEqe: 0.08, driveMa: 12,
-    etaEw: 0.04, etaWd: 0.04, wgLoss: 0.6, wgLen: 0.3,
+    etaEw: 0.04, etaWd: 0.04,
     filter: '850 nm long-pass', filtT: 0.90, filterPasses: 'PL 890–940 nm',
     detector: 'few-layer MoS₂', resp: 0.08, contrast0: 0.03, linewidthMHz: 1.5,
     dGhz: 0.07, crystal: 'SiC V_Si', crystalIcon: '🔷', plRange: '890–940 nm',
@@ -62,18 +62,16 @@ function computeOpticalChain(profile, temperature) {
   const noise = 40 * Math.sqrt(T / 300)                                  // counts
   const contrast = p.contrast0 * Math.min(1.6, Math.max(0.5, 1 + 0.5 * (300 - T) / 300))
   const aseGain = 1.15 * Math.min(1.25, 1 + 0.10 * (300 - T) / 300)
-  const wgLoss = p.wgLoss * (0.7 + 0.3 * T / 300)
-  const wgProp = Math.pow(10, -(wgLoss * p.wgLen) / 10)
-  const etaEnd = p.etaEw * wgProp * p.etaWd * p.filtT
+  const etaEnd = p.etaEw * p.etaWd * p.filtT
   const afterAse = p.pumpMw * aseGain
-  const afterWg = afterAse * p.etaEw * wgProp * 1000                      // µW pump at crystal
+  const afterCpl = afterAse * p.etaEw * 1000                              // µW pump at the host face
   const atDet = afterAse * etaEnd * 1000                                  // µW PL at detector
   const bright = BRIGHT_CODE
   const dark = Math.round(bright * (1 - contrast))
   const dip = Math.round(bright - dark)
   const snr = dip / noise
   const iBright = (bright / ADC_MAX)                                     // µA (1 MΩ, 1 Vref)
-  return { ...p, noise, contrast, aseGain, wgProp, etaEnd, afterAse, afterWg,
+  return { ...p, noise, contrast, aseGain, etaEnd, afterAse, afterCpl,
     atDet, bright, dark, dip, snr, iBright, T }
 }
 
@@ -84,7 +82,7 @@ function fmtT2(us) {
 
 export function OpticalChainDiagram({ data, infoData, profile, temperature, activeSites }) {
   const o = data || {}
-  const em = o.emitter || {}, wg = o.waveguide || {}, fl = o.filter || {},
+  const em = o.emitter || {}, cp = o.coupling || {}, fl = o.filter || {},
         de = o.detector || {}, rd = o.readout || {}, lb = o.link_budget || {}
   // live client-side computation (always available); server `data` overrides
   // per-field when the API has served optical_readout.
@@ -92,8 +90,7 @@ export function OpticalChainDiagram({ data, infoData, profile, temperature, acti
   const wl = em.wavelength_nm ?? c.wl
   const pump = em.pump_optical_power_mw ?? c.pumpMw
   const afterAse = em.after_ase_mw ?? +c.afterAse.toFixed(2)
-  const wgProp = wg.propagation_efficiency ?? +c.wgProp.toFixed(3)
-  const afterWg = lb.after_waveguide_uw ?? +c.afterWg.toFixed(1)
+  const afterCpl = lb.after_coupling_uw ?? +c.afterCpl.toFixed(1)
   const filterLabel = (fl.type ?? c.filter)
   const filtT = fl.transmission ?? c.filtT
   const filterPasses = fl.passes ?? c.filterPasses
@@ -120,7 +117,7 @@ export function OpticalChainDiagram({ data, infoData, profile, temperature, acti
 
   const stages = [
     { icon: '💡', t: 'CQD ASE emitter', v: [`${wl} nm`, `${pump} mW pump`] },
-    { icon: '〜', t: 'SU-8 / PDMS', t2: 'waveguide', v: [`ηew·ηwd ${(c.etaEw * c.etaWd * 100).toFixed(0)}%`, `prop ${(wgProp * 100).toFixed(1)}%`] },
+    { icon: '〜', t: 'Face coupling', t2: 'emitter → host → detector', v: [`η ${(c.etaEw * c.etaWd * 100).toFixed(1)}%`] },
     { icon: c.crystalIcon, t: c.crystal, accent: true, v: [dLabel, `T₂ ${fmtT2(t2Us)}`] },
     { icon: '◆', t: filterLabel.length > 16 ? filterLabel.slice(0, 14) + '…' : filterLabel, v: [`T ${(filtT * 100).toFixed(0)}%`, filterPasses] },
     { icon: '◼', t: detLabel, v: [`R ${resp} A/W`, `${iBright} µA`] },
@@ -131,7 +128,7 @@ export function OpticalChainDiagram({ data, infoData, profile, temperature, acti
   // 8 stages -> 7 arrows. The crystal arrow is the pump->PL transduction
   // (wavelength, not a power level); the rest are the link-budget powers.
   const powers = [
-    `${afterAse} mW`, `${afterWg} µW pump`, `PL ${c.plRange}`,
+    `${afterAse} mW`, `${afterCpl} µW pump`, `PL ${c.plRange}`,
     `${atDet} µW`, `${iBright} µA`, `${vBright.toFixed(2)} V`, `${bright} code`,
   ]
 
@@ -258,7 +255,6 @@ function computeRunPhysics(result, profile, temperature, infoData) {
   const snrStatus = c.snr >= 3 ? 'ok' : c.snr >= 2 ? 'warn' : 'bad'      // 3sigma = confident single-shot ODMR dip
   const fidStatus = fidelity >= 0.9 ? 'ok' : fidelity >= 0.8 ? 'warn' : 'bad'
   const driveStatus = (c.driveMa >= 2 && c.driveMa <= 20) ? 'ok' : 'bad'  // CQD pixel 2-20 mA spec
-  const wgStatus = c.wgProp >= 0.8 ? 'ok' : c.wgProp >= 0.5 ? 'warn' : 'bad'
   const contrastPct = +(c.contrast * 100).toFixed(1)
   const contrastStatus = c.contrast >= 0.04 ? 'ok' : c.contrast >= 0.02 ? 'warn' : 'bad'
   // does the circuit fit the 8x8 = 64-site chip? (physical-execution gate)
@@ -266,14 +262,14 @@ function computeRunPhysics(result, profile, temperature, infoData) {
   // overall = worst meaningful signal (single-read SNR dominates: if the dip
   // doesn't resolve above noise in one shot, the readout doesn't work at this T)
   const worst = (arr) => arr.includes('bad') ? 'bad' : arr.includes('warn') ? 'warn' : 'ok'
-  const overall = worst([snrStatus, fidStatus, driveStatus, wgStatus, contrastStatus, gridStatus])
+  const overall = worst([snrStatus, fidStatus, driveStatus, contrastStatus, gridStatus])
   return { nActive, nMeasured, shots, driveMa: c.driveMa, forwardV: c.forwardV,
     elecPwrMw, pumpMw: c.pumpMw, optNjPerSite, optNjPerShot, totalOptUj,
     readoutMs, iBrightUa, iDarkUa, bright: c.bright, dark: c.dark, dip: c.dip,
     noise: +c.noise.toFixed(0), contrastPct, snr: +c.snr.toFixed(1), avgSnr: Math.round(avgSnr),
-    wgProp: c.wgProp, fidelity, readoutErr, T: Math.round(c.T), crystal: c.crystal,
+    fidelity, readoutErr, T: Math.round(c.T), crystal: c.crystal,
     measPhotocurrent, measBitstring,
-    snrStatus, fidStatus, driveStatus, wgStatus, contrastStatus, gridStatus, overall }
+    snrStatus, fidStatus, driveStatus, contrastStatus, gridStatus, overall }
 }
 
 const CHIP_LABEL = { ok: '✓ in spec', warn: '⚠ marginal', bad: '✗ out of spec' }
@@ -285,7 +281,7 @@ export function RunPhysics({ result, profile, temperature, infoData }) {
     return (
       <div className="card runphysics-card">
         <h2><span className="dot" />Execution component physics</h2>
-        <div className="hint">Run a circuit — the CQD emitter array, waveguides, photodetectors and lock-in readout physics are calculated for the actual circuit that runs, with a green/amber/red verdict on whether each value is inside the chip's operating spec.</div>
+        <div className="hint">Run a circuit — the CQD emitter array, photodetectors and lock-in readout physics are calculated for the actual circuit that runs, with a green/amber/red verdict on whether each value is inside the chip's operating spec.</div>
         <div className="muted" style={{ marginTop: 6 }}>No circuit run yet.</div>
       </div>
     )
@@ -325,7 +321,6 @@ export function RunPhysics({ result, profile, temperature, infoData }) {
         {p.measPhotocurrent != null
           ? stat('Measured readout', `${p.measPhotocurrent}`, `code · ${p.measBitstring ? `"${p.measBitstring.slice(0, 12)}${p.measBitstring.length > 12 ? '…' : ''}"` : 'mean det. code'}`, 'info')
           : null}
-        {stat('Waveguide paths', `${p.nMeasured}`, `η ${(p.wgProp * 100).toFixed(1)}%`, p.wgStatus, 'η ≥80%')}
         {stat('CQD pixels fired', `${p.nMeasured}`, '/shot', p.gridStatus, 'fits 8×8 grid')}
         {stat('Detector electrodes', `${p.nMeasured}`, '/shot', p.gridStatus, 'fits 8×8 grid')}
         {stat('Pump energy', p.totalOptUj >= 1000 ? (p.totalOptUj / 1000).toFixed(2) : p.totalOptUj.toFixed(2), p.totalOptUj >= 1000 ? 'mJ optical' : 'µJ optical', 'info')}

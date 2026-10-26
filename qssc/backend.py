@@ -1728,12 +1728,12 @@ class QSSCBackend(BackendV2):
         """End-to-end on-chip optical readout chain budget, **recalculated for
         the backend's defect profile and temperature**.
 
-        CQD ASE emitter -> SU-8/PDMS waveguide -> long-pass filter ->
+        CQD ASE emitter -> host crystal -> long-pass filter ->
         2D photodetector -> TIA -> 4x AD7616 16-bit parallel ADC ->
         1 kHz lock-in (host-side). The readout figures (bright/dark codes, dip,
         noise, lock-in SNR) are anchored to the *same* simulator constants the
         ``SimulatedFPGA`` uses (``BRIGHT_CODE`` is the saturated bright level),
-        while the detector noise, ODMR contrast, ASE gain and waveguide loss are
+        while the detector noise, ODMR contrast and ASE gain are
         **temperature-dependent** so the panel reflects the current run, not a
         fixed snapshot. Cooling cuts the graphene dark-current/thermal noise
         (~sqrt(T)) and raises the ensemble ODMR contrast (spin polarisation),
@@ -1749,7 +1749,7 @@ class QSSCBackend(BackendV2):
         if nir:
             drive_ma, forward_v, eta_eqe = 12.0, 3.3, 0.08    # CIS-QD NIR LED
             eta_ew, eta_wd = 0.04, 0.04                        # harder NIR coupling
-            wg_loss_db_cm_300, filt_t = 0.6, 0.90              # 850 nm long-pass
+            filt_t = 0.90                                      # 850 nm long-pass
             filt_type, filt_blocks, filt_passes = (
                 "850 nm long-pass", "NIR pump ~916 nm", "SiC PL 890-940 nm")
             det_type, responsivity = "few-layer MoS2 photodetector array", 0.08
@@ -1757,7 +1757,7 @@ class QSSCBackend(BackendV2):
         else:
             drive_ma, forward_v, eta_eqe = 10.0, 2.8, 0.12    # green CQD LED
             eta_ew, eta_wd = 0.05, 0.05
-            wg_loss_db_cm_300, filt_t = 0.5, 0.92            # 650 nm long-pass
+            filt_t = 0.92                                    # 650 nm long-pass
             filt_type, filt_blocks, filt_passes = (
                 "650 nm long-pass", "green pump 520-540 nm", "defect PL >650 nm")
             det_type, responsivity = "graphene/MoS2 photodetector array", 0.10
@@ -1771,10 +1771,10 @@ class QSSCBackend(BackendV2):
         noise_counts = READOUT_NOISE * math.sqrt(T / 300.0)
         contrast = contrast0 * min(1.6, max(0.5, 1.0 + 0.5 * (300.0 - T) / 300.0))
         ase_gain = ASE_GAIN * min(1.25, 1.0 + 0.10 * (300.0 - T) / 300.0)
-        wg_loss_db_cm = wg_loss_db_cm_300 * (0.7 + 0.3 * T / 300.0)
-        wg_len_cm = 0.3                                     # ~3 mm site->detector
-        eta_wg_prop = 10 ** (-(wg_loss_db_cm * wg_len_cm) / 10.0)
-        eta_end = eta_ew * eta_wg_prop * eta_wd * filt_t
+        # No waveguide stage: the emitter face pumps the host and the detector
+        # face reads it, so the only losses are the two face couplings and the
+        # long-pass filter.
+        eta_end = eta_ew * eta_wd * filt_t
         p_at_det_mw = pump_popt_mw * ase_gain * eta_end
         # --- detector + TIA + XADC (BRIGHT_CODE anchored) ------------------
         tia_rf = 1.0e6
@@ -1801,13 +1801,10 @@ class QSSCBackend(BackendV2):
                 "ase_gain": round(ase_gain, 3),
                 "after_ase_mw": round(pump_popt_mw * ase_gain, 2),
             },
-            "waveguide": {
-                "material": "SU-8/PDMS polymer",
-                "length_mm": wg_len_cm * 10,
-                "loss_db_cm": round(wg_loss_db_cm, 3),
-                "emitter_coupling": eta_ew,
-                "detector_coupling": eta_wd,
-                "propagation_efficiency": round(eta_wg_prop, 3),
+            "coupling": {
+                "path": "emitter face -> host crystal -> detector face",
+                "emitter_face": eta_ew,
+                "detector_face": eta_wd,
             },
             "filter": {
                 "type": filt_type,
@@ -1847,7 +1844,7 @@ class QSSCBackend(BackendV2):
             "link_budget": {
                 "pump_optical_power_mw": round(pump_popt_mw, 2),
                 "after_ase_mw": round(pump_popt_mw * ase_gain, 2),
-                "after_waveguide_uw": round(pump_popt_mw * ase_gain * eta_ew * eta_wg_prop * 1e3, 2),
+                "after_coupling_uw": round(pump_popt_mw * ase_gain * eta_ew * 1e3, 2),
                 "after_filter_uw": round(p_at_det_mw * 1e3, 2),
                 "at_detector_uw": round(p_at_det_mw * 1e3, 2),
                 "end_to_end_efficiency": round(eta_end, 5),

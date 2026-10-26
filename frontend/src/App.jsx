@@ -100,7 +100,7 @@ export default function App() {
   // ---- global control state (declared early so sensor handlers below can
   //      reference profile / temperature / seed in their useCallback deps) ----
   const [profile, setProfile] = useState('NV')
-  // Peltier liquid-cooling setpoint: 2-stage TEC + NTC + PID holds the chip at
+  // Thermal setpoint: 2-stage TEC + NTC + PID holds the chip at
   // 295 K +/- 0.1 K (see docs/FABRICATION_PROTOCOL_Diamond.md, protocol.py).
   const [temperature, setTemperature] = useState(295)
   const [seed, setSeed] = useState(42)
