@@ -218,7 +218,7 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
         port = os.getenv("QSSC_FPGA_PORT", "").strip()
         if not port:
             return no_fpga_response(
-                "messageNo FPGA detected — connect the board and set QSSC_FPGA_PORT, or switch to Simulator.")
+                "No FPGA detected — connect the board and set QSSC_FPGA_PORT, or switch to Simulator.")
         try:
             fpga = connect_fpga(port=port, profile=profile,
                                 temperature_k=temperature_k, seed=seed)

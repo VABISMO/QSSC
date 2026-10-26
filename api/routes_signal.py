@@ -54,6 +54,31 @@ def signal(profile: str = "NV", temperature_k: float = 300.0,
     t1, t2 = coherence_at_temperature(prof, temperature_k)
     rng = np.random.default_rng(seed)
     seq = sequence.lower()
+
+    # Hardware mode must reach a board for EVERY sequence: no port (or a
+    # dead link) answers 503. The pulsed sequences then run on it; odmr/pulse
+    # have no RUN_SEQUENCE equivalent, so after proving the board answers they
+    # fall back to the model trace -- labelled below.
+    if hardware:
+        _port = os.getenv("QSSC_FPGA_PORT", "").strip()
+        if not _port:
+            return no_fpga_response(
+                "No FPGA detected — connect the board and set QSSC_FPGA_PORT, "
+                "or switch to Simulator.")
+        if seq not in ("ramsey", "hahn", "cpmg"):
+            try:
+                _check = connect_fpga(port=_port, profile=profile,
+                                      temperature_k=temperature_k, seed=seed)
+                _check.close()
+            except NoFPGADetected as exc:
+                return no_fpga_response(str(exc))
+
+    # What produced this trace: the model (with the hardware-fallback note
+    # when hardware mode asked for a sequence the board cannot run).
+    source = "simulated"
+    if hardware and seq in ("odmr", "pulse"):
+        source = ("simulated (hardware fallback: no RUN_SEQUENCE "
+                  "equivalent for this sequence)")
     readout_ns = prof.readout_ns
     points = _clamp_points(points)
 
@@ -64,7 +89,7 @@ def signal(profile: str = "NV", temperature_k: float = 300.0,
         port = os.getenv("QSSC_FPGA_PORT", "").strip()
         if not port:
             return no_fpga_response(
-                "messageNo FPGA detected — connect the board and set QSSC_FPGA_PORT, or switch to Simulator.")
+                "No FPGA detected — connect the board and set QSSC_FPGA_PORT, or switch to Simulator.")
         try:
             fpga = connect_fpga(port=port, profile=profile,
                                 temperature_k=temperature_k, seed=seed)
@@ -115,6 +140,7 @@ def signal(profile: str = "NV", temperature_k: float = 300.0,
     noise = rng.normal(0, 0.012, size=sig.shape)
     sig = np.clip(sig + noise, 0, 1.05)
     return {
+    "source": source,
         "profile": prof.short, "sequence": seq,
         "temperature_k": temperature_k,
         "t2_us": round(t2 * 1e6, 4), "readout_ns": readout_ns,
@@ -173,7 +199,7 @@ def signal_array(profile: str = "NV", temperature_k: float = 300.0,
         port = os.getenv("QSSC_FPGA_PORT", "").strip()
         if not port:
             return no_fpga_response(
-                "messageNo FPGA detected — connect the board and set QSSC_FPGA_PORT, or switch to Simulator.")
+                "No FPGA detected — connect the board and set QSSC_FPGA_PORT, or switch to Simulator.")
 
     # Base normalized PL trace (0..1) for the selected sequence -- the same
     # model as /api/signal. The spin dynamics are a defect+gradient property,

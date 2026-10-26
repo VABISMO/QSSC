@@ -454,3 +454,43 @@ def test_api_signal_hardware_with_board(monkeypatch):
     assert body["source"] == "hardware"
     assert len(body["time_ns"]) == 8 and len(body["signal"]) == 8
     assert all(0.0 <= float(v) <= 1.05 for v in body["signal"])
+
+
+def test_api_signal_model_trace_is_labelled():
+    """The model answer says source=simulated (audit #7b: /api/signal used to
+    return its model traces with no source at all)."""
+    import api.main as main
+    from fastapi.testclient import TestClient
+    client = TestClient(main.app)
+    r = client.get("/api/signal?sequence=pulse&points=16")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["source"] == "simulated", body.get("source")
+
+
+@requires_serial
+def test_api_signal_hardware_odmr_falls_back_labelled(monkeypatch):
+    """hardware+odmr cannot run RUN_SEQUENCE: the board must still answer
+    (503 without one) and the model fallback must say it is a fallback."""
+    monkeypatch.setenv("QSSC_FPGA_PORT", "/dev/ttyFAKE0")
+    _patch_cmd_serial(monkeypatch)
+    import api.main as main
+    from fastapi.testclient import TestClient
+    client = TestClient(main.app)
+    r = client.get("/api/signal?hardware=true&sequence=odmr&points=32")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["source"].startswith("simulated (hardware fallback"), body.get("source")
+
+
+def test_api_signal_hardware_no_board_is_503_for_every_sequence(monkeypatch):
+    """hardware mode with no port answers 503 for ANY sequence -- odmr/pulse
+    used to fall silently to the model trace instead."""
+    monkeypatch.delenv("QSSC_FPGA_PORT", raising=False)
+    import api.main as main
+    from fastapi.testclient import TestClient
+    client = TestClient(main.app)
+    for seq in ("ramsey", "odmr", "pulse"):
+        r = client.get(f"/api/signal?hardware=true&sequence={seq}&points=16")
+        assert r.status_code == 503, (seq, r.status_code)
+        assert r.json().get("error") == "no-fpga-detected"
