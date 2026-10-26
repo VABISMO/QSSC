@@ -11,7 +11,7 @@ protocol, and a web dashboard. This project remasters and merges two earlier
 projects by the same author — an hBN spin-defect *chip design* and a Qiskit
 NV-diamond *simulator* — into one coherent, renamed deliverable.
 
-<img width="1820" height="951" alt="image" src="https://github.com/user-attachments/assets/8d7b3ccd-f5f2-4925-97b9-cd6bb6e4724e" />
+<img width="1751" height="977" alt="image" src="https://github.com/user-attachments/assets/8506774f-5f71-4088-ba79-f775bb8d93b8" />
 
 
 > Solid-state spin defects (NV-diamond, hBN V_B⁻, SiC V_Si) keep quantum
