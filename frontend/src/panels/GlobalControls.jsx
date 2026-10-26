@@ -71,7 +71,7 @@ export default function GlobalControls() {
                 </select>
               </div>
               <div className="field">
-                <label>Temperature (K) <span className="muted">· thermal setpoint 295 K</span></label>
+                <label>Temperature (K) <span className="muted">· model temperature, chip runs uncooled</span></label>
                 <input type="number" min="0.001" max="600" step="any" value={temperature} onChange={e => setTemperature(+e.target.value)} />
               </div>
               {hwMode === 'simulator' ? (

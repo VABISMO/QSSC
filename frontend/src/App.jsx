@@ -100,8 +100,9 @@ export default function App() {
   // ---- global control state (declared early so sensor handlers below can
   //      reference profile / temperature / seed in their useCallback deps) ----
   const [profile, setProfile] = useState('NV')
-  // Thermal setpoint: 2-stage TEC + NTC + PID holds the chip at
-  // 295 K +/- 0.1 K (see docs/FABRICATION_PROTOCOL_Diamond.md, protocol.py).
+  // Simulation temperature. The chip itself runs uncooled on a passive
+  // heat-spreader at ambient (~300 K); this value feeds the physics model
+  // (detector noise, ODMR contrast, ASE gain) and the analysis, not a cooler.
   const [temperature, setTemperature] = useState(295)
   const [seed, setSeed] = useState(42)
   const [noiseMode, setNoiseMode] = useState('real')
