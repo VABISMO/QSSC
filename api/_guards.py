@@ -93,9 +93,19 @@ def _backend(profile: str, temperature_k: float, seed: int, noise_mode: str,
 
 
 def _req_dict(model) -> dict:
-    """Pydantic model -> plain dict (dropping unset None noise fields)."""
+    """Pydantic model -> plain dict (dropping unset None noise fields).
+
+    A default is not a client decision. For ``qrand`` the contract is fresh
+    entropy per run, so ``seed`` is dropped when the caller did not send one --
+    ``runner_algorithms`` reads its absence as "seed the backend from OS
+    entropy". Every other consumer reads ``req.get("seed", 42)`` and keeps the
+    documented default, so non-qrand payloads are unchanged.
+    """
     d = model.model_dump()
-    return {k: v for k, v in d.items() if v is not None}
+    out = {k: v for k, v in d.items() if v is not None}
+    if out.get("algorithm") == "qrand" and "seed" not in model.model_fields_set:
+        out.pop("seed", None)
+    return out
 
 
 # ---------------------------------------------------------------------------
