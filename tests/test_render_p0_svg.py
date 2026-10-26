@@ -6,7 +6,7 @@ draws every cut segment / plunge the bit makes, so the drawing can never drift
 from the gcode. These checks guard that contract:
 
   * the SVG is well-formed XML and deterministic (two builds byte-identical)
-  * every one of the 4 job panels (A-D) + the assembly-order notes panel is present,
+  * every one of the 3 job panels (A, C, D) + the assembly-order notes panel is present,
     each job panel drawn from its gcode
   * the render uses the REAL toolpath counts (cut segments + plunges parsed
     from the gcode), not hand-drawn approximations
@@ -19,8 +19,8 @@ import xml.etree.ElementTree as ET
 
 import tools.render_p0_svg as rnd
 
-# 4 job panels (A cathode, B waveguide, C detector, D carrier) + the notes panel.
-PANEL_IDS = ["panelA", "panelB", "panelC", "panelD", "panelNotes"]
+# 3 job panels (A cathode, C detector, D carrier) + the notes panel.
+PANEL_IDS = ["panelA", "panelC", "panelD", "panelNotes"]
 
 
 def test_svg_is_well_formed_xml():
@@ -32,7 +32,7 @@ def test_render_is_deterministic():
     assert rnd.build_svg() == rnd.build_svg()
 
 
-def test_all_four_job_panels_present():
+def test_all_job_panels_present():
     svg = rnd.build_svg()
     for pid in PANEL_IDS:
         assert f'id="{pid}"' in svg, f"missing panel {pid}"

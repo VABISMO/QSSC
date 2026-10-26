@@ -51,7 +51,7 @@ BG_CODE = 1600                            # unpumped electrode -> detector backg
 # initialisation/projection imperfection, injected separately in the Qiskit
 # noise model -- it is decoupled from this detector SNR, as on real hardware.
 READOUT_NOISE = 640                       # std dev of lock-in photocurrent noise (16-bit counts)
-ASE_GAIN = 1.15                            # ASE concentrates the CQD emission into the waveguide
+ASE_GAIN = 1.15                            # ASE concentrates the CQD emission towards the detector face
 LOCKIN_MOD_HZ = 1000.0                    # MW modulation frequency for the lock-in readout
 DETECT_THRESHOLD = 16000                  # lock-in amplitude above which a site counts as coupled
 SITE_FAB_YIELD = 0.9                      # fraction of channels the fabrication step wires correctly

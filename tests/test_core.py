@@ -864,7 +864,7 @@ def test_backend_describe():
 
 
 def test_optical_readout_chain():
-    """The Backend-physics optical chain: emitter -> ASE -> waveguide ->
+    """The Backend-physics optical chain: emitter -> ASE -> host crystal ->
     filter -> graphene detector -> lock-in, anchored to the simulator's
     verified BRIGHT_CODE / ODMR contrast / lock-in SNR."""
     b = QSSCBackend("NV", sites=_quick_sites(), seed=0)
@@ -873,10 +873,12 @@ def test_optical_readout_chain():
     assert o["emitter"]["pixels"] == 16
     assert o["emitter"]["ase_gain"] == pytest.approx(1.15)
     assert o["emitter"]["pump_optical_power_mw"] > 0
-    # waveguide + filter stage present
-    assert o["waveguide"]["propagation_efficiency"] <= 1.0
+    # face coupling + filter stage present (there is no waveguide stage)
+    assert o["coupling"]["emitter_face"] <= 1.0
+    assert o["coupling"]["detector_face"] <= 1.0
+    assert "waveguide" not in o
     assert o["filter"]["transmission"] == pytest.approx(0.92)
-    # canonical on-chip design is waveguide-direct: no microlens stage at all
+    # no microlens stage either
     assert "microlens" not in o
     # detector + TIA + 4x AD7616 parallel 16-bit ADC (no MUX, no XADC)
     assert o["detector"]["adc_bits"] == 16

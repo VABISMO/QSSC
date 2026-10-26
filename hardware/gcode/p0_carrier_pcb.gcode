@@ -33,7 +33,7 @@ G1 Z-0.150 F50
 G0 Z10.000
 
 ; -- 1. [DIE POCKET] 20x20 x 1.1 mm @ (57.5,35.0) -- the vertical stack die --
-;    L3 graphene detector TOP / L2 TEOS+NV waveguide MID / L1 CQD emitter BOTTOM
+;    L3 graphene detector TOP / L2 host layer MID / L1 CQD emitter BOTTOM
 ;    LEFT facet X=57.5 = 532 nm PUMP input | NV PL exits UP to the L3 detector
 G0 X57.500 Y35.000
 G1 Z-0.100 F100
