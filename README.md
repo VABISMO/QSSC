@@ -16,6 +16,8 @@ benchtop electronics: zero-field splitting D ≈ 2.87 GHz, ODMR readout,
 
 <img width="1751" height="977" alt="image" src="https://github.com/user-attachments/assets/8506774f-5f71-4088-ba79-f775bb8d93b8" />
 
+<img width="1115" height="852" alt="image" src="https://github.com/user-attachments/assets/562a85f8-6aa8-4ff6-8e8c-3bbf2898d7cb" />
+
 
 > Solid-state spin defects (NV-diamond, hBN V_B⁻, SiC V_Si) keep quantum
 > coherence at **~300 K**, so the chip does not require a dilution refrigerator.
