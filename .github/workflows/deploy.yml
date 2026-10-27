@@ -5,18 +5,17 @@
 #   https://vabismo.github.io/QSSC/). Pages was enabled on this repo via
 #   Settings -> Pages -> Source = GitHub Actions, so the job below publishes
 #   with actions/deploy-pages rather than a gh-pages branch.
-# API (FastAPI + qiskit/aer, Docker) -> Render free web service, triggered via
-#   Render's deploy hook so the deploy happens after CI is green, not on every
-#   push.
+# API (FastAPI + qiskit/aer, Docker) -> Render free web service, deployed by
+#   hand from Render's dashboard. This workflow never touches Render: there
+#   is no deploy-api job here on purpose (the repo has never had
+#   RENDER_DEPLOY_HOOK_URL, and the hook job only ever produced red runs
+#   nobody asked for).
 #
 # Required repo configuration (Settings → Secrets/Variables):
 #   * Repository variable VITE_API_BASE = the public API URL, e.g.
 #     https://qssc-api.onrender.com  (the dashboard calls this for /api/*;
 #     without it the built app falls back to same-origin and every API call
 #     404s on Pages).
-#   * Repository secret RENDER_DEPLOY_HOOK_URL = Render's deploy-hook URL
-#     (Render dashboard → the qssc-api service → Settings → Deploy Hook).
-#     If unset, the API deploy step is skipped (the frontend still deploys).
 name: Deploy
 
 on:
@@ -30,8 +29,8 @@ on:
     workflows: ["CI"]
     types: [completed]
     branches: [main]
-  # Manual: Actions tab → "Deploy" → "Run workflow". Use this to (re)trigger the
-  # Render deploy on demand.
+  # Manual: Actions tab -> "Deploy" -> "Run workflow". Re-publishes the
+  # dashboard only; the API on Render is deployed by hand.
   workflow_dispatch:
 
 concurrency:
@@ -136,26 +135,6 @@ jobs:
       - id: deploy
         uses: actions/deploy-pages@v5
 
-  # Manual only. This job used to run after every green CI on main, and with
-  # RENDER_DEPLOY_HOOK_URL unset each of those runs came back red for a deploy
-  # nobody asked for -- pushes never ship anyway (render.yaml sets
-  # autoDeploy: false), so the hook is fired on demand instead:
-  # Actions -> Deploy -> Run workflow. The dashboard keeps publishing itself
-  # through deploy-frontend above.
-  deploy-api:
-    name: API → Render (deploy hook)
-    needs: require-green-ci
-    if: ${{ github.event_name == 'workflow_dispatch' && needs.require-green-ci.outputs.ok == 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger Render deploy hook (test-gated)
-        env:
-          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
-        run: |
-          if [ -z "$HOOK" ]; then
-            echo "::error title=API not deployed::RENDER_DEPLOY_HOOK_URL is not set, so the API was NOT redeployed. render.yaml sets autoDeploy: false on purpose (pushes must not ship before CI is green), which makes this hook the only thing that ever updates the service. With it missing, Render keeps serving the last built image while main moves on, and the dashboard then calls endpoints that build does not have (404 from GitHub Pages). Fix: Render dashboard -> qssc-api -> Settings -> Deploy Hook -> copy the URL into GitHub Settings -> Secrets and variables -> Actions -> RENDER_DEPLOY_HOOK_URL."
-            exit 1
-          fi
-          echo "Triggering Render deploy hook..."
-          curl -fsS -X POST "$HOOK"
-          echo "Render deploy triggered for commit of the latest green main."
+  # There is NO deploy-api job here on purpose: the API is deployed to
+  # Render by hand from its dashboard. This workflow publishes the
+  # dashboard (GitHub Pages) and nothing else.

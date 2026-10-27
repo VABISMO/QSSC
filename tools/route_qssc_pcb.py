@@ -77,8 +77,11 @@ IN4_CU = pcbnew.In4_Cu      # signal
 B_CU = pcbnew.B_Cu
 
 GRID_STEP_NM = 10_000_000          # 10 mm stitching grid
-VIA_DIAM_NM = 600_000              # 0.6 mm stitching / rail-pad via
-VIA_DRILL_NM = 300_000             # 0.3 mm drill
+# 0.6 mm stitching / rail-pad via; overridable for dense boards (head
+# analog field) with values the project rules still allow (min via 0.2 /
+# min hole 0.1 / min clearance 0.1 -- DRC remains the judge).
+VIA_DIAM_NM = int(os.environ.get("QSSC_VIA_DIAM_NM", 600_000))
+VIA_DRILL_NM = int(os.environ.get("QSSC_VIA_DRILL_NM", 300_000))   # 0.3 mm drill
 # COPPER_GAP is the minimum copper-to-copper gap this script enforces between
 # its own copper (via land / F.Cu tie trace) and any OTHER-net copper. The Power
 # netclass DRC rule needs 0.15 mm; 0.16 mm keeps 0.01 mm of margin over it while
@@ -87,7 +90,7 @@ VIA_DRILL_NM = 300_000             # 0.3 mm drill
 # half-diagonal, falsely blocked a via that clears a 0.25 mm pad's narrow side
 # by > 0.4 mm). With the rectangle-accurate pad model below, a 0.16 mm gap is the
 # real, tight, DRC-safe clearance.
-COPPER_GAP_NM = 160_000             # 0.16 mm copper-to-copper (Power rule 0.15)
+COPPER_GAP_NM = int(os.environ.get("QSSC_COPPER_GAP_NM", 160_000))  # 0.16 mm (Power rule 0.15)
 # Through-via-in-pad VIPs placed by route_signals._bga_fanout are 0.20 mm; this
 # script's own vias are 0.6 mm. _clear_routed strips only its own (wide) GND /
 # +3V3 vias and preserves the small BGA VIPs (owned by route_signals).
@@ -206,6 +209,18 @@ def _fill_only(pcb_path) -> int:
     """
     from _kicad_compat import fill_all_zones
     board = pcbnew.LoadBoard(str(pcb_path))
+    # QSSC_ZONE_CLEARANCE_NM / QSSC_ZONE_MIN_WIDTH_NM: apply the pour
+    # overrides to the EXISTING zones as well, so --fill can re-pour a
+    # finished board at different parameters without a full rebuild (which
+    # would strip the rail/stitching vias). Env unset = zones untouched.
+    _zc = os.environ.get("QSSC_ZONE_CLEARANCE_NM")
+    _zw = os.environ.get("QSSC_ZONE_MIN_WIDTH_NM")
+    if _zc or _zw:
+        for z in board.Zones():
+            if _zc:
+                z.SetLocalClearance(int(_zc))
+            if _zw:
+                z.SetMinThickness(int(_zw))
     zones = fill_all_zones(board)
     board.SetModified()
     pcbnew.SaveBoard(str(pcb_path), board)
@@ -217,8 +232,77 @@ def _fill_only(pcb_path) -> int:
     return 0
 
 
+def _micro_tie_only(pcb_path) -> int:
+    """``--micro-tie`` entry point: NON-DESTRUCTIVE microvia completion.
+
+    Loads a finished board -- nothing is stripped (no _clear_routed, no zone
+    rebuild, no through-via candidates) -- and ties every GND SMD rail pad the
+    board still leaves loose with the in-pad / offset microvia fallback
+    (F.Cu->In1 0.20/0.10, landing gated on the ALREADY-POURED fill), skipping
+    every pad an existing tie (fill contact, via, or trace) already serves.
+    Use it to complete a board whose existing weave must be preserved -- a
+    full build() would strip and rebuild that weave and lose tie work the
+    grid spiral cannot reproduce. Follow with --fill.
+    """
+    from router.planes import (
+        _find_netcode, _pad_obstacle, _signal_obstacles,
+        _capture_rail_pads, PlaneBuilder,
+    )
+    board = pcbnew.LoadBoard(str(pcb_path))
+    gnd = _find_netcode(board, "GND")
+    try:
+        p33 = _find_netcode(board, "+3V3")
+    except KeyError:
+        p33 = None
+    bbox = board.GetBoardEdgesBoundingBox()
+    pads = _pad_obstacle(board)
+    pb = PlaneBuilder(board, gnd, p33, bbox, pads)
+    # same pre-mutation snapshots run() takes, minus the clear/rebuild steps
+    (pb.sig_circles, pb.sig_segs,
+     pb.sig_segs_fcu, pb.sig_segs_in1) = _signal_obstacles(board)
+    pb.bga_xy, pb.rail_pads = _capture_rail_pads(board)
+    # Non-destructive mode: NOTHING is stripped here, so every via on the
+    # board -- including the wide GND/+3V3 rail/stitch vias that
+    # _surviving_via_centers excludes (it assumes _clear_routed removes them)
+    # -- is live copper the spacing checks must see. Blindness to them let the
+    # dense stitch land 0.14 mm from +3V3 rail vias; KiCad's save-time net
+    # propagation then re-netted the contact to +3V3 (hole_to_hole /
+    # clearance violations on phantom nets).
+    pb.via_centers = [(t.GetPosition().x, t.GetPosition().y, t.GetNetCode())
+                      for t in board.Tracks()
+                      if isinstance(t, pcbnew.PCB_VIA)]
+    pb.tie_segs = []
+    placed = pb._add_rail_pad_vias(gnd, rail_pads=pb.rail_pads,
+                                   micro_only=True)
+    stitch = []
+    if os.environ.get("QSSC_STITCH_STEP"):
+        # Opt-in dense stitching in the same non-destructive pass: each via
+        # anchors its pour region against island removal on the next refill --
+        # empty pockets the detector bus chopped off are deleted without a GND
+        # item in them, and a pocket that survives can chain onward to the main
+        # flood. The grid reuses the full clearance/hole checks against the
+        # copper already on the board.
+        stitch = pb._add_stitching_vias()
+        print(f"  micro-tie stitching: {len(stitch)} via(s) placed "
+              f"(QSSC_STITCH_STEP={os.environ['QSSC_STITCH_STEP']})")
+    print(f"  micro-tie: {len(placed)} microvia(s) placed "
+          f"(F.Cu->In1 0.20/0.10, non-destructive)")
+    board.SetModified()
+    pcbnew.SaveBoard(str(pcb_path), board)
+    return 0
+
+
 if __name__ == "__main__":
     if len(sys.argv) >= 2 and sys.argv[1] == "--fill":
         _rc = _fill_only(sys.argv[2] if len(sys.argv) > 2 else PCB_PATH)
         exit_cleanly(_rc)               # teardown GC is unsafe (see compat)
+    if len(sys.argv) >= 2 and sys.argv[1] == "--micro-tie":
+        _rc = _micro_tie_only(sys.argv[2] if len(sys.argv) > 2 else PCB_PATH)
+        exit_cleanly(_rc)
     main()
+    # Same treatment as --fill: after the full build + save + fill subprocess,
+    # the interpreter's final GC walks thousands of stale swig proxies and
+    # segfaults nondeterministically on KiCad 9 (see exit_cleanly's docstring;
+    # ~40% of runs on KiCad 10). Everything is on disk -- skip finalization so
+    # the test harness (check=True on this subprocess) sees a clean exit.
+    exit_cleanly(0)

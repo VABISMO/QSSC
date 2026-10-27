@@ -20,6 +20,7 @@ from typing import Optional
 
 import numpy as np
 from fastapi import HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from qssc import (
     QSSCBackend, DetectorInterface, MicrowaveController,
@@ -142,6 +143,19 @@ def _is_trusted_proxy(peer: str) -> bool:
         return ipaddress.ip_address(peer) in ipaddress.ip_network(cidr, strict=False)
     except ValueError:
         return False
+
+
+def no_fpga_response(message: str) -> JSONResponse:
+    """HTTP 503 carrying the ``no-fpga-detected`` body.
+
+    A hardware operation that could not run because no board answered is not
+    a success: the status must say so (503) while the body keeps the exact
+    ``{"error": "no-fpga-detected", "message": ...}`` shape the dashboard's
+    banner and the tests read.
+    """
+    return JSONResponse(status_code=503,
+                        content={"error": "no-fpga-detected",
+                                 "message": message})
 
 
 def _is_local(request: Request) -> bool:

@@ -92,8 +92,13 @@ def main():
         n = board.FindNet(nm)
         if n is None or n.GetNetCode() < 0:
             print(f"  {nm}: NO NET"); continue
-        if nm in tc.PLANE_NETS:
-            print(f"  {nm}: plane net (skip)"); continue
+        # Plane nets are no longer skipped unconditionally: ResidualCloser now
+        # clusters against the filled zone regions as well (see the zone-aware
+        # step in router.manhattan._cluster), so an explicit --only GND/+3V3
+        # targets exactly the fragments the pour failed to reach instead of
+        # flooding pairs the pour already connects. The default target selection
+        # (tc._split_nets) still excludes plane nets, so the bare invocation
+        # behaves as before.
         try:
             signal.alarm(NET_TIMEOUT)
             sg, vi, log = closer._connect_net(n.GetNetCode(), nm)

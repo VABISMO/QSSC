@@ -13,6 +13,7 @@ into a real deploy.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -43,3 +44,32 @@ def _reset_rate_limit_buckets():
         _m._rate_buckets.clear()
     except Exception:  # noqa: BLE001
         pass
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip tests parametrised for the local-only gradient board when absent.
+
+    ``hardware/pcb/qssc-grad.*`` is work in progress and is NOT published in
+    this repository (only qssc + chip_module are). Clones without the file
+    skip these tests; machines that have it run them as usual. Param-less
+    grad-reading tests carry an explicit ``_need_grad()`` guard in their own
+    module.
+    """
+    grad = (Path(__file__).resolve().parent.parent
+            / "hardware" / "pcb" / "qssc-grad.kicad_pcb")
+    if grad.exists():
+        return
+    skip = pytest.mark.skip(
+        reason="qssc-grad board is local-only (not published in this repo)")
+
+    def mentions_grad(v):
+        if isinstance(v, str):
+            return v == "grad" or "qssc-grad" in v
+        if isinstance(v, (list, tuple, set, frozenset)):
+            return any(mentions_grad(x) for x in v)
+        return False
+
+    for item in items:
+        cs = getattr(item, "callspec", None)
+        if cs and any(mentions_grad(v) for v in cs.params.values()):
+            item.add_marker(skip)

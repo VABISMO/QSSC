@@ -119,7 +119,32 @@ class MazeBridge3D:
 
     # ---- pad/via/track clustering by copper connectivity ----
     def cluster_pads_and_vias(self, items):
-        n = len(items); uf = tc._UF(n); geom = []
+        n = len(items)
+        # ---- zone fragments as copper nodes (zone-aware clustering) ----
+        # A poured plane's filled regions are copper too (same rationale as the
+        # residual closer's _cluster): without them a GND plane shreds into
+        # hundreds of false splits and the bridge targets already-poured pairs
+        # instead of the genuinely stranded fragments. Nets without zones add
+        # no nodes -- signal-net behavior is unchanged.
+        nc0 = items[0][1].GetNetCode() if items else -1
+        frags = []  # (layer, polyset, outline idx, outline pts, bbox)
+        for z in self.board.Zones():
+            if z.GetNetCode() != nc0:
+                continue
+            for lyr in z.GetLayerSet().CuStack():
+                poly = z.GetFilledPolysList(lyr)
+                for fi in range(poly.OutlineCount()):
+                    o = poly.Outline(fi)
+                    bb = o.BBox()
+                    pts = [(o.CPoint(k).x, o.CPoint(k).y)
+                           for k in range(o.PointCount())]
+                    if len(pts) < 3:
+                        continue
+                    frags.append((lyr, poly, fi, pts,
+                                  (bb.GetX(), bb.GetY(),
+                                   bb.GetX() + bb.GetWidth(),
+                                   bb.GetY() + bb.GetHeight())))
+        uf = tc._UF(n + len(frags)); geom = []
         for kind, it in items:
             if kind == "pad":
                 pos = it.GetPosition(); bbp = it.GetBoundingBox()
@@ -136,6 +161,52 @@ class MazeBridge3D:
                 s = it.GetStart(); e = it.GetEnd()
                 geom.append({"kind": "trk", "ax": s.x, "ay": s.y, "bx": e.x, "by": e.y,
                     "hw": track_width_nm(it) // 2, "layers": {it.GetLayer()}, "it": it})
+
+        def _edge2(ax, ay, bx, by, pts):
+            m = None
+            for k in range(len(pts)):
+                x1, y1 = pts[k]; x2, y2 = pts[(k + 1) % len(pts)]
+                d = tc._seg_seg_dist2(ax, ay, bx, by, x1, y1, x2, y2)
+                if m is None or d < m:
+                    m = d
+            return m
+
+        def _pt_edge2(px, py, pts):
+            m = None
+            for k in range(len(pts)):
+                x1, y1 = pts[k]; x2, y2 = pts[(k + 1) % len(pts)]
+                d = tc._seg_point_dist2(x1, y1, x2, y2, px, py)
+                if m is None or d < m:
+                    m = d
+            return m
+
+        for i, g in enumerate(geom):
+            gl = g.get("layers")
+            for fi, (lyr, poly, fidx, pts, fbb) in enumerate(frags):
+                if g["kind"] == "trk":
+                    if lyr not in gl:
+                        continue
+                    if (max(g["ax"], g["bx"]) + g["hw"] < fbb[0]
+                            or min(g["ax"], g["bx"]) - g["hw"] > fbb[2]
+                            or max(g["ay"], g["by"]) + g["hw"] < fbb[1]
+                            or min(g["ay"], g["by"]) - g["hw"] > fbb[3]):
+                        continue
+                    hit = (poly.Contains(pcbnew.VECTOR2I(int(g["ax"]), int(g["ay"])), fidx)
+                           or poly.Contains(pcbnew.VECTOR2I(int(g["bx"]), int(g["by"])), fidx)
+                           or (_edge2(g["ax"], g["ay"], g["bx"], g["by"], pts) or 0)
+                           <= g["hw"] * g["hw"])
+                else:
+                    if gl is not None and lyr not in gl:
+                        continue
+                    px, py, reach = g["x"], g["y"], g["r"]
+                    if (px < fbb[0] - reach or px > fbb[2] + reach
+                            or py < fbb[1] - reach or py > fbb[3] + reach):
+                        continue
+                    hit = (poly.Contains(pcbnew.VECTOR2I(int(px), int(py)), fidx)
+                           or (_pt_edge2(px, py, pts) or 0) <= reach * reach)
+                if hit:
+                    uf.union(i, n + fi)
+
         for i in range(n):
             for j in range(i + 1, n):
                 if tc._layers_share(geom[i].get("layers"), geom[j].get("layers")) and tc._touch(geom[i], geom[j]):
@@ -162,7 +233,10 @@ class MazeBridge3D:
     # ---- clearance checks (other-net copper only) ----
     def _via_clear(self, x, y, nc):
         """Through-hole via at (x,y) clear of all OTHER-net copper on all layers?"""
-        vr = self.VIA_DIA // 2 + self.KEEP; vr2 = vr * vr
+        # via radius + REAL_CLEAR only: KEEP already embeds TRK_W/2 for the
+        # track-path grids, and adding it again (plus the track half below)
+        # overstated every via spot by ~TRK_W/2 and rejected legal sites.
+        vr = self.VIA_DIA // 2 + self.REAL_CLEAR; vr2 = vr * vr
         for t in self.board.GetTracks():
             if t.GetNetCode() == nc: continue
             if t.GetClass() == "PCB_VIA":
@@ -176,6 +250,11 @@ class MazeBridge3D:
                 if p.GetNetCode() == nc: continue
                 players = tc._pad_layer_set(p)   # None = drilled -> ALL layers
                 if players is not None and not (self.F_Cu in players or self.B_Cu in players): continue
+                if (p.GetAttribute() == pcbnew.PAD_ATTRIB_NPTH
+                        and not list(p.GetLayerSet().CuStack())):
+                    # NPTH has no copper: the hole-to-hole loop below already
+                    # covers its drill; there is no copper rect to clear.
+                    continue
                 pb = p.GetBoundingBox()
                 if (pb.GetX() - vr) <= x <= (pb.GetX() + pb.GetWidth() + vr) and \
                    (pb.GetY() - vr) <= y <= (pb.GetY() + pb.GetHeight() + vr):
@@ -183,6 +262,29 @@ class MazeBridge3D:
                     cx1, cy1 = pb.GetX() + pb.GetWidth(), pb.GetY() + pb.GetHeight()
                     ddx = max(cx0 - x, 0, x - cx1); ddy = max(cy0 - y, 0, y - cy1)
                     if ddx * ddx + ddy * ddy < vr2: return False
+        # hole-to-hole: DRC's min_hole_to_hole applies between ANY two drills --
+        # same net included. The copper loops above skip same-net items, so
+        # without this a new via can land on an existing same-net drill
+        # (hole_to_hole, actual 0.0 mm). Centre floor = new drill/2 + existing
+        # drill/2 + 0.21 mm (board min 0.2, +10 um over KiCad's 0.1995).
+        r_new = self.VIA_DRILL // 2
+        gap = 210_000
+        for t in self.board.GetTracks():
+            if t.GetClass() != "PCB_VIA":
+                continue
+            pos = t.GetPosition()
+            rr = r_new + t.GetDrillValue() // 2 + gap
+            if (pos.x - x) ** 2 + (pos.y - y) ** 2 < rr * rr:
+                return False
+        for fp in self.board.GetFootprints():
+            for p in fp.Pads():
+                dr = p.GetDrillSize()
+                if dr.x <= 0 and dr.y <= 0:
+                    continue
+                pos = p.GetPosition()
+                rr = r_new + max(dr.x, dr.y) // 2 + gap
+                if (pos.x - x) ** 2 + (pos.y - y) ** 2 < rr * rr:
+                    return False
         return True
 
     def _trk_clear(self, x1, y1, x2, y2, layer, nc):
@@ -191,8 +293,13 @@ class MazeBridge3D:
         for t in self.board.GetTracks():
             if t.GetNetCode() == nc: continue
             if t.GetClass() == "PCB_VIA":
-                pos = t.GetPosition(); top, bot = t.TopLayer(), t.BottomLayer()
-                if not (top <= layer <= bot): continue
+                pos = t.GetPosition()
+                # IsOnLayer(): numeric inner-layer IDs (In3=8 under F=0/B=2)
+                # are outside [TopLayer(), BottomLayer()], so a span comparison
+                # silently skipped through-vias for inner-layer tracks -> the
+                # validation passed and DRC found the short.
+                if not t.IsOnLayer(layer):
+                    continue
                 rr = hw + track_width_nm(t) // 2
                 if _seg_dist2(pos.x, pos.y, x1, y1, x2, y2) < rr * rr: return False
             else:
@@ -204,6 +311,16 @@ class MazeBridge3D:
                 if p.GetNetCode() == nc: continue
                 players = tc._pad_layer_set(p)
                 if players is not None and layer not in players: continue
+                if (p.GetAttribute() == pcbnew.PAD_ATTRIB_NPTH
+                        and not list(p.GetLayerSet().CuStack())):
+                    # NPTH: no copper -- only the hole constrains, at
+                    # hole_clearance (0.15 mm), not a copper rect + copper gap.
+                    dr = p.GetDrillSize()
+                    pos = p.GetPosition()
+                    need = max(dr.x, dr.y) // 2 + 150_000 + self.TRK_W // 2
+                    if _seg_dist2(pos.x, pos.y, x1, y1, x2, y2) < need * need:
+                        return False
+                    continue
                 pb = p.GetBoundingBox()
                 rx0, ry0 = pb.GetX(), pb.GetY()
                 rx1, ry1 = pb.GetX() + pb.GetWidth(), pb.GetY() + pb.GetHeight()
@@ -234,16 +351,55 @@ class MazeBridge3D:
                     return vx, vy, padlay, cp["x"], cp["y"]
         return None
 
-    def endpoint_plan(self, cluster, nc):
+    def endpoint_plan(self, cluster, nc, anchor=None, want=4):
+        """Candidate endpoints for one cluster side, as a LIST the bridge can
+        retry: existing cluster vias first (nearest the opposite cluster's
+        centroid when `anchor` is given, so a long bridge does not start at the
+        cluster's far edge), else up to `want` spiral clear-spots (first valid
+        spot PER RING, each with its verified pad stub). One boxed first-choice
+        spot -- e.g. a via trapped in a dense escape field at the board edge --
+        must not fail the whole net."""
+        pads = cluster["pads"]
+        px = sum(p["x"] for p in pads) // len(pads)
+        py = sum(p["y"] for p in pads) // len(pads)
         if cluster["vias"]:
-            px = sum(p["x"] for p in cluster["pads"]) // len(cluster["pads"])
-            py = sum(p["y"] for p in cluster["pads"]) // len(cluster["pads"])
-            v = min(cluster["vias"], key=lambda v: (v["x"] - px) ** 2 + (v["y"] - py) ** 2)
-            return {"x": v["x"], "y": v["y"], "needs_via": False}
-        spot = self._find_clear_via_spot(cluster, nc)
-        if spot is None: return None
-        vx, vy, padlay, padx, pady = spot
-        return {"x": vx, "y": vy, "needs_via": True, "padlay": padlay, "padx": padx, "pady": pady}
+            ax_, ay_ = anchor if anchor is not None else (px, py)
+            cands = []
+            for v in sorted(cluster["vias"],
+                            key=lambda v: (v["x"] - ax_) ** 2 + (v["y"] - ay_) ** 2):
+                cands.append({"x": v["x"], "y": v["y"], "needs_via": False})
+                if len(cands) >= want:
+                    break
+            return cands
+        # through-hole / drilled pads report layers=None (= ALL layers); route the
+        # pad->via track on the bottom (valid for an all-layer pad), else the first
+        # SMD pad's lowest layer. min(None) crashed here on the first TH pad cluster.
+        padlay = next((min(p["layers"]) for p in pads if p["layers"] is not None), self.B_Cu)
+        step = int(0.15 * self.NM)
+        cands = []
+        for ring in range(0, 22):
+            spot = None
+            for ang_deg in range(0, 360, 30):
+                r = ring * step; a = math.radians(ang_deg)
+                vx = int(px + r * math.cos(a)); vy = int(py + r * math.sin(a))
+                # the via spot MUST lie inside the routing grid (board edge - 0.5 mm
+                # margin) or to_cell() maps it out of the blocked_layers bytearray
+                # and the endpoint index access crashes (IndexError on edge pads).
+                vcx, vcy = self.to_cell(vx, vy)
+                if not (0 <= vcx < self.NCOL and 0 <= vcy < self.NROW): continue
+                if not self._via_clear(vx, vy, nc): continue
+                cp = min(pads, key=lambda p: (p["x"] - vx) ** 2 + (p["y"] - vy) ** 2)
+                if self._trk_clear(cp["x"], cp["y"], vx, vy, padlay, nc):
+                    spot = (vx, vy, padlay, cp["x"], cp["y"])
+                    break
+            if spot is None:
+                continue
+            vx, vy, padlay_s, padx, pady = spot
+            cands.append({"x": vx, "y": vy, "needs_via": True, "padlay": padlay_s,
+                          "padx": padx, "pady": pady})
+            if len(cands) >= want:
+                break
+        return cands
 
     def endpoint_commit(self, ep, nc):
         if not ep["needs_via"]: return
@@ -277,6 +433,23 @@ class MazeBridge3D:
                 if p.GetNetCode() == netcode: continue
                 players = tc._pad_layer_set(p)   # None = drilled -> ALL layers
                 if players is not None and layer not in players: continue
+                if (p.GetAttribute() == pcbnew.PAD_ATTRIB_NPTH
+                        and not list(p.GetLayerSet().CuStack())):
+                    # NPTH (hole only): block the true hole+clearance DISC (cell
+                    # centre distance) -- the bounding square over-blocks corner
+                    # cells and can seal a landing spot DRC permits.
+                    dr = p.GetDrillSize()
+                    pos = p.GetPosition()
+                    r = max(dr.x, dr.y) // 2 + 150_000 + self.TRK_W // 2
+                    r2 = r * r
+                    cx0, cy0 = self.to_cell(pos.x - r, pos.y - r)
+                    cx1, cy1 = self.to_cell(pos.x + r, pos.y + r)
+                    for cy in range(max(0, cy0), min(NROW, cy1 + 1)):
+                        for cx in range(max(0, cx0), min(NCOL, cx1 + 1)):
+                            wx, wy = self.to_xy(cx, cy)
+                            if (wx - pos.x) ** 2 + (wy - pos.y) ** 2 <= r2:
+                                blocked[cy * NCOL + cx] = 1
+                    continue
                 pb = p.GetBoundingBox()
                 cx0, cy0 = self.to_cell(pb.GetX() - self.KEEP, pb.GetY() - self.KEEP)
                 cx1, cy1 = self.to_cell(pb.GetX() + pb.GetWidth() + self.KEEP, pb.GetY() + pb.GetHeight() + self.KEEP)
@@ -286,8 +459,13 @@ class MazeBridge3D:
         for t in self.board.GetTracks():
             if t.GetNetCode() == netcode: continue
             if t.GetClass() == "PCB_VIA":
-                pos = t.GetPosition(); top, bot = t.TopLayer(), t.BottomLayer()
-                if not (top <= layer <= bot): continue
+                pos = t.GetPosition()
+                # IsOnLayer(): inner-layer numeric IDs fall outside the
+                # TopLayer()/BottomLayer() span (see _trk_clear) -- a plain
+                # numeric comparison would leave through-vias unblocked on
+                # inner layers and route straight through them.
+                if not t.IsOnLayer(layer):
+                    continue
                 cx, cy = self.to_cell(pos.x, pos.y)
                 block_disc(cx, cy, (track_width_nm(t) / 2 + self.KEEP) / self.CELL)
             else:
@@ -388,31 +566,48 @@ class MazeBridge3D:
                         d = (pa["x"] - pb["x"]) ** 2 + (pa["y"] - pb["y"]) ** 2
                         if best is None or d < best[0]: best = (d, a, bb_)
         _, ca, cb = best
-        e1 = self.endpoint_plan(ca, nc)
-        e2 = self.endpoint_plan(cb, nc)
-        if e1 is None or e2 is None:
+        anchor_b = (sum(p["x"] for p in cb["pads"]) // len(cb["pads"]),
+                    sum(p["y"] for p in cb["pads"]) // len(cb["pads"]))
+        anchor_a = (sum(p["x"] for p in ca["pads"]) // len(ca["pads"]),
+                    sum(p["y"] for p in ca["pads"]) // len(ca["pads"]))
+        e1s = self.endpoint_plan(ca, nc, anchor=anchor_b)
+        e2s = self.endpoint_plan(cb, nc, anchor=anchor_a)
+        if not e1s or not e2s:
             log.append("   SKIP no clear via spot")
             return (nm, None, 0, 0, 0, 0, "no clear via spot"), log
-        eps = [(e1["x"], e1["y"]), (e2["x"], e2["y"])]
-        # build per-layer blocked grids + via-clearable grid
+        eps = [(e["x"], e["y"]) for e in e1s] + [(e["x"], e["y"]) for e in e2s]
+        # build per-layer blocked grids + via-clearable grid ONCE; each attempt
+        # force-opens its own endpoint cells (a cell that will HOST a via is
+        # enterable by definition).
         blocked_layers = [self.build_blocked_layer(nc, L, eps) for L in SIG_LAYERS]
         via_clear = self.build_via_clearable(nc)
         # starts/goals: endpoint cells on EVERY layer (through-hole vias reach all)
-        sc = self.to_cell(e1["x"], e1["y"]); gc_ = self.to_cell(e2["x"], e2["y"])
-        if not (0 <= sc[0] < NCOL and 0 <= sc[1] < NROW and 0 <= gc_[0] < NCOL and 0 <= gc_[1] < NROW):
-            log.append("   SKIP endpoint via spot outside grid")
-            return (nm, None, e1["x"], e1["y"], e2["x"], e2["y"], "endpoint via spot outside grid"), log
-        starts = [(li, sc[0], sc[1]) for li in range(NL)]
-        goals = [(li, gc_[0], gc_[1]) for li in range(NL)]
-        # ensure endpoint cells are open on every layer
-        for li in range(NL):
-            if blocked_layers[li][sc[1] * NCOL + sc[0]]: blocked_layers[li][sc[1] * NCOL + sc[0]] = 0
-            if blocked_layers[li][gc_[1] * NCOL + gc_[0]]: blocked_layers[li][gc_[1] * NCOL + gc_[0]] = 0
-        path = astar3d(blocked_layers, via_clear, starts, goals,
-                       NCOL, NROW, NL, self.VIA_COST)
+        path = None; e1 = e2 = None
+        for a_ep in e1s:
+            for b_ep in e2s:
+                sc = self.to_cell(a_ep["x"], a_ep["y"])
+                gc_ = self.to_cell(b_ep["x"], b_ep["y"])
+                if not (0 <= sc[0] < NCOL and 0 <= sc[1] < NROW
+                        and 0 <= gc_[0] < NCOL and 0 <= gc_[1] < NROW):
+                    continue
+                starts = [(li, sc[0], sc[1]) for li in range(NL)]
+                goals = [(li, gc_[0], gc_[1]) for li in range(NL)]
+                for li in range(NL):
+                    if blocked_layers[li][sc[1] * NCOL + sc[0]]:
+                        blocked_layers[li][sc[1] * NCOL + sc[0]] = 0
+                    if blocked_layers[li][gc_[1] * NCOL + gc_[0]]:
+                        blocked_layers[li][gc_[1] * NCOL + gc_[0]] = 0
+                path = astar3d(blocked_layers, via_clear, starts, goals,
+                               NCOL, NROW, NL, self.VIA_COST)
+                if path:
+                    e1, e2 = a_ep, b_ep
+                    break
+            if path:
+                break
         if not path:
-            log.append("   SKIP no 3D path")
-            return (nm, None, e1["x"], e1["y"], e2["x"], e2["y"], "no 3D path"), log
+            log.append(f"   SKIP no 3D path ({len(e1s)}x{len(e2s)} endpoint pairs)")
+            r1 = e1s[0]; r2 = e2s[0]
+            return (nm, None, r1["x"], r1["y"], r2["x"], r2["y"], "no 3D path"), log
         path = simplify3d(path)
         # VALIDATE every same-layer segment at REAL_CLEAR + every via-transition spot
         segs = []; vias_needed = []; bad = False; fail_info = ""

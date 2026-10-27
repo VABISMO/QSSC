@@ -286,7 +286,11 @@ def _fpga():
                 _FPGA = FPGAConnection(port)
             else:
                 from qssc.simulator import SimulatedFPGA
-                _FPGA = SimulatedFPGA(profile=os.getenv("QSSC_FPGA_PROFILE", "NV"))
+                # Seeded like every other simulated backend (QSSC_SEED, default
+                # 42): an unseeded instance put the tab readouts outside the
+                # reproducibility gate (audit #7b).
+                _FPGA = SimulatedFPGA(profile=os.getenv("QSSC_FPGA_PROFILE", "NV"),
+                                      seed=int(os.getenv("QSSC_SEED", "42")))
         return _FPGA
 
 

@@ -8,9 +8,9 @@ plane-net connectivity skip both hide this; a pad simply left at no-net is not a
 "unconnected item" and a plane net is not graph-checked. This test loads each
 board and asserts the specific pad -> net assignments the datasheet requires for
 every IC's supply, ground, and the few signal pins whose absence breaks the
-part (PLL loop, SPI, reference decoupling). It also locks the Ironwood SBT
-socket footprint facts (4 NPTH mount holes, F.Paste on the 65 solder pads) so a
-future regen cannot silently revert the socket.
+part (PLL loop, SPI, reference decoupling). It also locks the die-socket
+footprint facts (ChipSocket_2.54_EM, 4 NPTH mount holes, no F.Paste --
+through-hole, die removable) so a future regen cannot silently revert them.
 
 Skips where ``pcbnew`` (system KiCad) is not importable (CI / .venv).
 
@@ -113,11 +113,11 @@ def test_adf4351_nc_pads_have_no_rail():
 
 
 def test_main_chip_is_female_header_socket():
-    """Uchip must be the 2.54 mm female-header chip socket (ChipSocket_2.54_EM)
-    the two-board pivot installed in place of the earlier Ironwood SBT / ACF
-    pressure-contact footprints. The socket is a through-hole pin header: 4
-    NPTH mount holes and 65 through-hole solder pads (no F.Paste -- the pins
-    solder through the board, unlike the paste-down Ironwood SBT)."""
+    """Uchip must be the 2.54 mm female-header chip socket (ChipSocket_2.54_EM).
+
+    Through-hole part: 4 NPTH mount holes and 65 solder pads with no F.Paste
+    -- the pins solder through the board, and the die stays removable (ADR-0009).
+    """
     if not MAIN.exists():
         pytest.skip(f"{MAIN} not present")
     fp = _footprint(MAIN, "Uchip")

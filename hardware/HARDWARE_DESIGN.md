@@ -11,15 +11,16 @@ photodiodes;** the detector is the graphene/MoS₂ array. The die has **no
 through-silicon vias (TSVs)**, so each face is contacted by its own PCB:
   - **Main board** (6-layer HDI 150×118 mm) below the die — FPGA + 3× TLC5947
     emitter driver + RF + USB + power + config flash, contacting the die BOTTOM
-    (emitter) face on F.Cu through a soldered **Ironwood SBT spring-pin socket**
-    (F.Cu + F.Paste + F.Mask; die removable).
+    (emitter) face through the **`ChipSocket_2.54_EM` through-hole socket**
+    (65 PTH pads + 4 NPTH mount holes, no paste; die module removable).
   - **Detector head** (6-layer 110×102 mm) above the die — 16× TLV9004 TIA +
-    4× AD7616 ADC, contacting the die TOP (detector) face on B.Cu via ACF
-    pressure contact (B.Cu + B.Mask, no B.Paste).
-    - **Gradient variant** (`qssc-grad.kicad_pcb`, 6-layer 150×118 mm, 134
-      parts) — the main-board stack plus the field-gradient coil driver
-      (MCP4921 DAC → LM358 servo → IRLML2502 → coil); its parts are in
-      `BOM.csv` under `grad`, its datasheets in `DATASHEETS.md`.
+    4× AD7616 ADC, contacting the die TOP (detector) face through the matching
+    **`ChipSocket_2.54_DET` through-hole socket** (65 PTH pads + 4 NPTH, no
+    paste).
+  - A **gradient variant** (main board + field-gradient coil driver: MCP4921
+    DAC → LM358 servo → IRLML2502 → coil) exists as **local work in progress
+    and is not published in this repository** — the two boards above are the
+    design of record; its BOM rows live under `grad` in `BOM.csv`.
   - **J12 board-to-board connector** (2×10, 2.54 mm) joins the two boards and
     carries the 9-wire AD7616 SPI + GND/+3V3/+5V.
 
@@ -85,15 +86,19 @@ Xilinx constraints are [`../fpga/constraints.xdc`](../fpga/constraints.xdc).
 ## 1. System Overview
 
 The design is **two PCBs sandwiching the die**:
-- **Main board** — a **6-layer HDI board** (150 × 118 mm) below the die,
-  carrying the FPGA, the 64-channel emitter driver, the RF chain, power, USB
-  and config flash, and contacting the die BOTTOM (emitter) face on F.Cu through
-  a soldered **Ironwood SBT spring-pin socket** (F.Cu + F.Paste + F.Mask; die
-  removable, emitter-down).
-- **Detector head** — a **6-layer board** (110 × 102 mm) above the die,
-  carrying the 64-channel TIA front-end + 4× AD7616 ADC, and contacting the die
-  TOP (detector) face on B.Cu via ACF pressure contact (no B.Paste). Head
-  origin = main origin + (37, 12) mm.
+  - **Main board** — a **6-layer HDI board** (150 × 118 mm) below the die,
+    carrying the FPGA, the 64-channel emitter driver, the RF chain, power, USB
+    and config flash, and receiving the die BOTTOM (emitter) face through the
+    **`ChipSocket_2.54_EM` through-hole socket** (65 PTH pads, no paste; die
+    module removable, emitter-down).
+  - **Detector head** — a **6-layer board** (110 × 102 mm) above the die,
+    carrying the 64-channel TIA front-end + 4× AD7616 ADC, and receiving the die
+    TOP (detector) face through the matching **`ChipSocket_2.54_DET`**
+    through-hole socket. **Registration caveat (measured, OPEN — F10):** head
+    Uchip (56.23, 83.27) / J12 (47.54, 30.81) do not reproduce main Uchip
+    (80, 55) / J12 (110, 14) — the J12-vs-Uchip geometry differs, so the boards
+    do not mate as-is; `tools/kicad/placement.py` holds the head
+    standalone-correct and requires the main Uchip/J12 to be reconciled to it.
 - **J12** — a 2×10 (2.54 mm) board-to-board connector joining the two boards,
   carrying the 9-wire AD7616 SPI (`adc_convst/sclk/miso/busy/resetn/cs0..3`) +
   GND/+3V3/+5V. Every SPI signal is GND-flanked for a clean return path.
@@ -104,10 +109,11 @@ The design is **two PCBs sandwiching the die**:
   0.8 mm pitch, ~210 user-IO). The hard XADC block is **not used** — readout
   is the 4× AD7616 parallel ADC across J12. VCCINT = +1V0, VCCAUX = +1V8,
   VCCO = +3V3.
-- **U-chip — QSSC_Chip_EM die face** (129 pads, 20 × 20 mm): 64 emitter
-  cathode pads (`emitter_cat{i}`) + 1 `EM_ANODE` pad on the die BOTTOM face,
-  contacted on the main board F.Cu via ACF (no F.Paste — contact interface).
-  Placed at (80, 55).
+  - **U-chip — emitter face in `ChipSocket_2.54_EM`** (130-pad die, 20 × 20 mm):
+    64 emitter cathode pads (`emitter_cat{i}`) + `EM_ANODE` on the die BOTTOM
+    face, received by the main board's through-hole 2.54 mm socket (65 PTH pads,
+    no paste; the P1-style pin-scaffold module plugs in from above, module
+    removable). Socket placed at (80, 55).
 - **J12 — BTB_HOST** 2×10 pin header (the board-to-board connector host side).
 - **64-channel emitter driver (3× TLC5947 constant-current sink):**
   - **3× TLC5947** 24-channel 12-bit PWM constant-current LED driver
@@ -136,9 +142,10 @@ The design is **two PCBs sandwiching the die**:
 
 **On-board active components (detector head):**
 
-- **U-chip — QSSC_Chip_DET die face** (64 pads, 20 × 20 mm): 64 detector pads
-  (`DET_IN{i}`) on the die TOP face, contacted on the head B.Cu + B.Mask via ACF
-  (no B.Paste — contact interface). Placed at (20, 55).
+  - **U-chip — detector face in `ChipSocket_2.54_DET`** (130-pad die, 20 × 20 mm):
+    64 detector pads (`DET_IN{i}`) + `DET_COMMON` on the die TOP face, received
+    by the head board's matching through-hole 2.54 mm socket (65 PTH pads, no
+    paste). Socket placed at (56.23, 83.27) — registration caveat in §1B/F10.
 - **64-channel detector front-end (parallel ADC readout):**
   - **16× TLV9004** quad op-amp (TSSOP-14) — one TIA per detector channel
     (Rf 1 MΩ ‖ Cf 1 pF), 4 channels per chip → 64 channels.
@@ -182,7 +189,7 @@ flowchart TD
         U5 -->|"50Ω"| J3["J3 SMA"]
         U1 -->|"em_sclk/sin/xlat/blank 4-wire"| TLC["3x TLC5947 24-ch 12-bit PWM sink (daisy, 72ch/64used)"]
         J4["J4 Barrel 12V / F2 PTC 1A / C85+C86"] -->|"+12V_EMIT"| ANODE["EM_ANODE common anode pad"]
-        TLC -->|"emitter_cat[63:0] cathode sink"| CHIP_EM["U-chip EM face: 64 CQD emitters (die bottom, F.Cu ACF)"]
+        TLC -->|"emitter_cat[63:0] cathode sink"| CHIP_EM["U-chip EM face: 64 CQD emitters (die bottom, main socket)"]
         ANODE --> CHIP_EM
         U1 -->|"adc_convst/sclk/miso/busy/resetn/cs0..3"| J12H["J12 BTB_HOST 2x10"]
         J12H -->|"+3V3 / +5V / GND"| J12H
@@ -192,7 +199,7 @@ flowchart TD
         J12D -->|"+5V"| FBA["FB_A ferrite -> +5V_A"]
         FBA --> ADC
         ADC -->|"9-wire SPI"| J12D
-        DET["U-chip DET face: 64 detectors (die top, B.Cu ACF)"] -->|"DET_IN[63:0]"| TIA["16x TLV9004 TIA (Rf 1M, Cf 1p)"]
+        DET["U-chip DET face: 64 detectors (die top, head socket)"] -->|"DET_IN[63:0]"| TIA["16x TLV9004 TIA (Rf 1M, Cf 1p)"]
         TIA -->|"DET_TIA[63:0]"| ADC
     end
     J12H -.->|"mates"| J12D
@@ -240,9 +247,10 @@ backend connects.
 
 The die is **sandwiched between two PCBs**. The chip stack (emitter array +
 detectors + diamond host) is bonded onto the **two-faced QSSC
-die**: the die BOTTOM (emitter) face contacts the **main board F.Cu** (above
-the FPGA-side logic) via ACF; the die TOP (detector) face contacts the
-**detector head B.Cu** via ACF. The 64-channel TIA + 4× AD7616 front-end is on
+  die**: the die BOTTOM (emitter) face is plugged into the **main board's
+  `ChipSocket_2.54_EM`** and the die TOP (detector) face into the **head board's
+  `ChipSocket_2.54_DET`** — both through-hole 2.54 mm sockets, no paste. The
+  64-channel TIA + 4× AD7616 front-end is on
 the head board above the die (top detector face); the 3× TLC5947 constant-current
 emitter driver is on the main board below (bottom emitter face). The two boards
 are joined at the edge by the **J12** 2×10 connector (which carries the 9-wire
@@ -264,9 +272,9 @@ flowchart TB
   HOST["CVD diamond NV- host (64 sites)"]:::chip
   EM["64x CQD ASE/LED emitters (BOTTOM face)"]:::chip
   SUB["ITO glass substrate + Cu contacts"]:::chip
-  HEAD["**Detector head** (6-layer) -- 16x TLV9004 TIA + 4x AD7616 ADC (die top on B.Cu ACF)"]:::fe
+  HEAD["**Detector head** (6-layer) -- 16x TLV9004 TIA + 4x AD7616 ADC (die top, head socket)"]:::fe
   DRV["3x TLC5947 24-ch 12-bit PWM constant-current sink (72ch/64used) + Riref 4.87k"]:::fe
-  PCB["**QSSC main board** (6-layer HDI) — Artix-7 CSG324 + ADF4351 + GVA-84+ + FT232 + LDOs + W25Q128 (die bottom on F.Cu ACF)"]:::pcb
+  PCB["**QSSC main board** (6-layer HDI) — Artix-7 CSG324 + ADF4351 + GVA-84+ + FT232 + LDOs + W25Q128 (die bottom, main socket)"]:::pcb
   J12["J12 BTB 2x10 (9-wire SPI + power)"]:::fe
   USB["USB-UART to host PC (FT232RL + USB-C, 115200)"]:::pcb
   SMA["J3 SMA -> MW antenna feed"]:::pcb
@@ -305,7 +313,7 @@ two-board sandwich.
 | №  | Board | Component                        | Ref      | Value / Model                  | Qty | Function                                                       | Footprint                     | Notes |
 |----|------|----------------------------------|----------|--------------------------------|-----|----------------------------------------------------------------|-------------------------------|-------|
 | 1  | main  | Xilinx Artix-7 FPGA              | U1       | XC7A35T-1CSG324C               | 1   | Central control: UART, emitter timing, AD7616 SPI master, PLL SPI | CSG324 BGA 0.8 mm             | 1.0 V core, 1.8 V aux, 3.3 V I/O; **XADC not used** — readout is the external 4× AD7616. footprint `Package_BGA:Xilinx_CSG324` |
-| 2  | both  | Quantum die (two-faced, no TSV)   | U-chip   | QSSC_Chip_EM (main) + QSSC_Chip_DET (head) | 1 die | 64 graphene/MoS₂ detectors (TOP face) + 64 CQD emitters (BOTTOM face); EM face via Ironwood SBT socket (soldered, F.Paste), DET face via ACF (no B.Paste) | 20 × 20 mm, 130 pads (65/face: 64 electrodes + 1 common), 2.5 mm pitch, 1.2 mm pads | EM face on main F.Cu (socket solders via F.Paste), DET face on head B.Cu (ACF, no B.Paste) |
+| 2  | both  | Quantum die (two-faced, no TSV)   | U-chip   | ChipSocket_2.54_EM (main) + ChipSocket_2.54_DET (head) | 1 die | 64 graphene/MoS₂ detectors (TOP face) + 64 CQD emitters (BOTTOM face); both faces through-hole 2.54 mm sockets (no paste, module removable) | 20 × 20 mm, 130 pads (65/face: 64 electrodes + 1 common), 2.5 mm pitch, 1.2 mm pads | EM face in main socket, DET face in head socket (ADR-0009) |
 | 3  | main  | Microwave PLL synthesizer        | U3       | ADF4351BCPZ                    | 1   | RF synthesis 35 MHz–4.4 GHz (2.87/3.46 GHz)                    | LFCSP-32 5×5 mm               | 3.3 V, SPI, REF_IN ≤250 MHz, ~0 dBm out |
 | 4  | head  | TIA (per detector channel)        | UT0–UT15 | TLV9004 (quad op-amp)          | 16  | 64× transimpedance amplifier, Rf 1 MΩ ‖ Cf 1 pF per channel    | TSSOP-14 4.4×5 mm P0.65        | +3V3, 4 channels/chip → 64 channels; converts detector photocurrent → voltage |
 | 5  | head  | Parallel ADC (16-ch per chip)     | UAD0–UAD3 | AD7616 (16-bit simultaneous)   | 4   | 4×16 = 64 ch digitised → 9-wire SPI across J12 to FPGA         | LQFP-80 14×14 mm P0.65         | VCC=+5V_A, VDRIVE=+3V3; replaces old 16× LMV339 + MCP4725 (full waveform, not 1-bit threshold) |
@@ -333,7 +341,7 @@ two-board sandwich.
 | 27 | main  | RF amplifier                     | U5       | GVA-84+ (Mini-Circuits)        | 1   | RF power amplification, DC-7 GHz, +18.4 dB @2 GHz (≈16 dB in-band @2.87/3.46 GHz), self-biased +5V | SOT-89-3                      | +5V_RF via L2 100nH choke |
 | 28 | main  | +5V→+5V_RF filter                | FB1      | Ferrite bead 600Ω@100MHz       | 1   | π-filter (FB1 + C45/C46 + C47/C48) from +5V to +5V_RF          | 0603                          | Replaces old REG4 AMS1117-5.0 (sat in dropout) |
 | 29 | main  | RF amp choke inductor            | L2       | 100 nH ±10%                    | 1   | DC bias choke on RF output                                     | 0603                          | Bias decoupling |
-| 30 | main  | Microwave antenna                | A1       | Loop / CPW resonator (custom)  | 1   | MW delivery to the host                                        | Custom SMD/wire               | 2–3 GHz, 50 Ω |
+| 30 | main  | Microwave antenna                | A1       | Loop / CPW resonator (custom)  | 1   | MW delivery to the host; hand-formed near the host substrate — not a PCB footprint, so it has **no BOM.csv line** | Custom wire / on-substrate | 2–3 GHz, 50 Ω |
 | 31 | on-chip | Long-pass optical filter         | OPT      | 650 nm long-pass               | 1   | Block green CQD pump, pass NV PL (637–800 nm)                  | On-chip / holder              | Non-electronic on-chip part |
 | 32 | main  | ESD protection diodes            | D1–D10   | TVS ESD5V0                     | 10  | ESD on USB/RF/sensitive I/O                                    | SOD-923                       | Clamp 5 V |
 | 33 | main  | LED series resistor              | R70      | 330 Ω ±1%                      | 1   | LED1 current limit                                             | 0603                          | — |
@@ -475,21 +483,42 @@ ASCII. Detector codes are **16-bit ADC samples (0–65535)** of the
 photoluminescence intensity, sent as ASCII decimal, space-separated for
 `READ_DETECTORS` and newline-terminated.
 
-| Command                                                    | Action                                   | Reply |
-|------------------------------------------------------------|------------------------------------------|-------|
-| `DRIVE_EMITTER <index> <duration_ms>\n`                     | Fire emitter `<index>` (0–63) for duration_ms | `OK\n` |
-| `APPLY_PULSE <qubit> <freq_khz> <amp> <duration_ns> <phase>\n` | Program ADF4351 to freq_khz         | `OK\n` |
-| `READ_DETECTOR <site>\n`                                   | Read one detector channel (site 0–63)      | `<16-bit ADC sample>\n` |
-| `READ_DETECTORS\n`                                         | Snapshot all 64 detector channels           | `<sample> <sample> ... \n` (64 samples) |
-| `CALIBRATE\n`                                              | Fire each emitter + read all 64 channels, build emitter→detector LUT | `OK\n` |
-| (unknown / malformed)                                      | —                                        | `ERR\n` |
-
-`freq_khz` is the desired RF output in kHz, e.g. `2870000` for 2.87 GHz (NV⁻) or
-`3460000` for 3.46 GHz (hBN V_B⁻). The `adf4351_ctrl` module computes INT/FRAC/MOD
-and the RF divider so the VCO stays in 2.2–4.4 GHz (see §6). `amp` (0–3) maps to
-the ADF4351 output power index, `duration_ns`/`phase` are parsed and reserved
-for a future RF-gate/phase-register extension. `<index>` and `<site>` are 0–63
-integers (one per channel — parallel, not row/col).
+  All **19 verbs** are implemented in `fpga/rtl/command_parser.v`; an unknown
+  verb, a missing argument or an out-of-range value answers `ERR`. Every reply
+  is one `
+`-terminated ASCII line (except `READ_DETECTORS`/`RUN_ALL_ODMR`,
+  which stream their samples first).
+  
+  | Command | Action | Reply |
+  |---|---|---|
+  | `ID` | board-identity probe (the host sends it on open) | `QSSC v1` |
+  | `STATUS` | rails / PLL / ADC / die-temperature self-status | `PLL_LOCKED … VCC3V3_mv … TEMP_C …` |
+  | `RESET` | soft-reset TLC5947 / ADF4351 / ADC peripheral state | `OK` |
+  | `DRIVE_EMITTER <index> <duration_ms>` | fire emitter `<index>` (0–63) at full grayscale | `OK / ERR` |
+  | `SET_EMITTER <index> <level>` | arm one channel's 12-bit grayscale (0–4095) | `OK / ERR` |
+  | `DRIVE_PATTERN <duration_ms>` | fire **all** armed channels in parallel | `OK / ERR` |
+  | `CLEAR_EMITTERS` | disarm every channel (gs = 0) | `OK` |
+  | `APPLY_PULSE <qubit> <freq_khz> <amp> <duration_ns> <phase_mrad>` | program the ADF4351 carrier **and** gate the MW pulse for `duration_ns` | `OK / ERR` |
+  | `READ_DETECTOR <site>` | digitise one detector channel (site 0–63) | `<0–65535> / ERR` |
+  | `READ_DETECTORS` | snapshot all 64 channels in one parallel frame | `<sample> × 64` |
+  | `CLEAR_DETECTORS` | ADC no-op (no counters to clear) | `OK` |
+  | `CALIBRATE` | fire each emitter + read all channels, build the emitter→detector LUT | `OK / ERR` |
+  | `READ_RNG <n_bytes>` | harvest von-Neumann-debiased AD7616 LSB noise (n = 1–256) | `<hex> <raw> 0 0 / ERR` |
+  | `ODMR_SWEEP <qubit> <f0_khz> <f1_khz> <n>` | sweep the ADF4351 across the resonance, one sample per point | `<n> f0 c0 f1 c1 … / ERR` |
+  | `RUN_ALL_ODMR <f0_khz> <f1_khz> <n>` | 64-parallel sweep: all channels at every point | `n × 64 codes + OK / ERR` |
+  | `RUN_SEQUENCE <site> <kind> <n> <t_step>` | pulse engine (ramsey / hahn / cpmg) → readout codes | `<n> c0 c1 … / ERR` |
+  | `READ_LOCKIN <site> <n_cycles>` | self-timed on/off lock-in accumulation (n = 1–10000) | `<sum_on> <sum_off> <n_on> <n_off> / ERR` |
+  | `READ_LOCKINP <site> <n_samples> <prime_idx>` | prime-period IQ lock-in (prime_idx 0–15 selects p = 2, 3, 5 … 53) | `<I> <Q> <n> / ERR` |
+  | `SET_GRADIENT <code>` | program the gradient-coil DAC (MCP4921, 0–4095) | `OK / ERR` |
+  | (unknown / malformed / out of range) | — | `ERR` |
+  
+  `freq_khz` is the desired RF output in kHz, e.g. `2870000` for 2.87 GHz (NV⁻) or
+  `3460000` for 3.46 GHz (hBN V_B⁻). The `adf4351_ctrl` module computes INT/FRAC/MOD
+  and the RF divider so the VCO stays in 2.2–4.4 GHz (see §6). `amp` (0–3) maps to
+  the ADF4351 output-power index, `phase_mrad` is written to the ADF4351 PHASE
+  register (R1), and `duration_ns` drives the `mw_gate` RF-switch pin — a gate
+  timer counts `duration_ns/10` cycles at 100 MHz. `<index>` and `<site>` are
+  0–63 integers (one per channel — parallel, not row/col).
 
 > **Detector readout is the full 16-bit analog waveform, not a photon count.**
 > The pre-pivot protocol returned 12-bit XADC codes (0–4095) from a serial MUX
@@ -611,7 +640,8 @@ keeping the 12 V switching local and off the FPGA's 3.3 V digital lines.
 
 The die integrates **64 individual graphene/MoS₂ photodetectors**, one per
 qubit site, each on its own TOP-face pad `DET{i}` → net `DET_IN{i}` (contacted
-on the detector head B.Cu via ACF). Readout is fully on-chip and electrical;
+by the head's `ChipSocket_2.54_DET` through-hole socket). Readout is fully
+  on-chip and electrical;
 there is no camera, no lens, no imaging, and **no analog multiplexer** — every
 channel has its own TIA and is digitised **in parallel** by 4× AD7616
 simultaneous-sampling ADCs on the detector head, then streamed to the FPGA over
@@ -791,13 +821,14 @@ two signal layers. The 6-layer stack adds In3.Cu/In4.Cu as pad-free inner
 signal escape layers (commit b41009c) so the die dog-bone fanout and the line
 router have four signal layers to spread the bus; the die's 65 detector pads
 land on **B.Cu** (the head sits above the die, B.Cu faces down to the die top
-face — ACF pressure contact, no B.Paste).
+face — where the `ChipSocket_2.54_DET` through-hole footprint receives them,
+  no paste).
 
 ### 12.0 Main board — 6-layer HDI (qssc.kicad_pcb)
 
 | Layer | KiCad name | Function        | Notes |
 |-------|------------|-----------------|-------|
-| 1     | F.Cu       | Signal + RF     | 50 Ω microstrip RF, component pads, critical signals; 64 EM cathode + EM_ANODE die pads (die bottom face, **Ironwood SBT socket solders here**, F.Cu + F.Paste + F.Mask) + chip dog-bone fanout |
+| 1     | F.Cu       | Signal + RF     | 50 Ω microstrip RF, component pads, critical signals; 64 EM cathode + EM_ANODE die pads (die bottom face, **`ChipSocket_2.54_EM` through-hole socket — 65 PTH pads, no paste**) + chip dog-bone fanout |
 | 2     | In1.Cu     | GND (solid)     | Continuous reference plane for RF and signals; no splits under RF or detector analog |
 | 3     | In2.Cu     | +3V3 (PWR)      | Solid +3V3 plane (the main-board logic rail). Surface +3V3 pads reach it via stitching vias |
 | 4     | In3.Cu     | Signal          | Pad-free inner signal layer — interior BGA ball escape channel (row-parity) |
@@ -831,7 +862,7 @@ expect the solver to land ≈ 0.21–0.24 mm for a true 50 Ω).
 | 3     | In2.Cu     | PWR (+3V3 / +5V_A) | Power plane for the +3V3 (VDRIVE) and +5V_A (AD7616 analog VCC) rails arriving via J12 |
 | 4     | In3.Cu     | Signal          | Pad-free inner signal layer — die-bus escape routing for the 64 DET + 64 EM nets (commit b41009c) |
 | 5     | In4.Cu     | Signal          | Pad-free inner signal layer — die-bus escape routing (companion to In3.Cu) |
-| 6     | B.Cu       | Signal + die contact | 65 DET die pads (64 electrodes + DET_COMMON) (die top face, ACF contact, no B.Paste) + DET_IN dog-bone escape; analog routing |
+| 6     | B.Cu       | Signal + die contact | 65 DET die pads (64 electrodes + DET_COMMON) (die top face, `ChipSocket_2.54_DET`, no paste) + DET_IN dog-bone escape; analog routing |
 
 Adopted 1.6 mm FR4 head stackup (`HEAD_LAYER_STACK` / `HEAD_STACK_UP` in
 `gen_qssc_kicad.py`, copper 0.035 mm outer / 0.0175 mm inner — identical
@@ -910,7 +941,7 @@ toward the die; F.Cu carries the SMD analog.
 | GVA-84+ DC bias (L2 choke → pin 3) | F.Cu | L2 100 nH RFC from +5V_RF to pin 3; rail decoupling is the FB1 π-filter. No VGG. |
 | SPI LE/CLK/DATA          | F.Cu     | ≤50 mm, CLK away from analogue, matched loosely |
 | USB D+/D− (`USB_DP`/`USB_DM`) | F.Cu | 90 Ω diff, length-matched, guard via fence. Skew-tuning serpentine = GUI. |
-| **64× detector analog `DET_IN{i}`** (head: die top face → TIA) | head B.Cu dog-bone → F.Cu escape | 2.5 mm-pitch dog-bone fanout (0.15 mm B.Cu stub + 0.20 mm through-via 1.0 mm out, 0.80 mm neighbour clearance); Chip netclass 0.10 mm clearance; over solid GND, guarded, away from digital + emitter. DET pads on head B.Cu (die top face, ACF contact, no B.Paste) |
+| **64× detector analog `DET_IN{i}`** (head: die top face → TIA) | head B.Cu dog-bone → F.Cu escape | 2.5 mm-pitch dog-bone fanout (0.15 mm B.Cu stub + 0.20 mm through-via 1.0 mm out, 0.80 mm neighbour clearance); Chip netclass 0.10 mm clearance; over solid GND, guarded, away from digital + emitter. DET pads on head B.Cu (die top face, `ChipSocket_2.54_DET`, no paste) |
 | **64× TIA output `DET_TIA{i}`** (head: TIA → AD7616 analog in) | head F.Cu | short, analog, away from `DET_IN{i}` and the SPI/digital; feeds AD7616 Vx{i} (16 ch / ADC, 4 ADCs) |
 | **9-wire ADC SPI `adc_convst/sclk/miso/busy/resetn/cs0..3`** (head ADCs → J12 → main FPGA) | head F.Cu → J12 → main F.Cu/inner sig | LVCMOS SPI; `adc_convst` simultaneously samples all 4 AD7616; `adc_sclk` far above 1 kHz modulation; GND-flanked pins on J12 for return; away from detector analog |
 | `DET_REF` (1.65 V TIA virtual ground) | head F.Cu | clean, well-decoupled (Cref 100 nF), star from the 10 k/10 k divider; head-only |
@@ -929,7 +960,7 @@ toward the die; F.Cu carries the SMD analog.
 
 > **Chip dog-bone fanout (2.5 mm pitch).** The 130 die pads are split across
 > the two boards by face: 64 EM cathodes + EM_ANODE on **main F.Cu** (die bottom
-> face, in the Ironwood SBT socket), 64 DET + DET_COMMON on **head B.Cu** (die
+> face, in the `ChipSocket_2.54_EM` socket), 64 DET + DET_COMMON on **head B.Cu** (die
 > top face). Each face fans out as a dog-bone: a 0.15 mm stub on the pad's own
 > layer → a 0.20 mm through-via placed a **uniform 1.0 mm out** (no even/odd
 > stagger — `STUB = 1.0 mm` in `route_signals._chip_fanout` lands the via
@@ -1084,10 +1115,28 @@ headlessly:
   persist as live stubs).
 - **DRC of the committed board.** `kicad-cli pcb drc` on the committed
   `qssc.kicad_pcb` *in its project* reports **0 violations / 0 unconnected / 0
-  footprint errors**. (Unrouted nets are DRC-green because `unconnected_items`
-  is demoted to `ignore` in the project — partial routing is a documented
-  state, not a hidden failure. Always DRC the board in its project directory,
-  not the `.kicad_pcb` in isolation: DRC'ing it alone uses default severities.)
+  footprint errors** with `unconnected_items` at **`error`** — the severity
+  the project used to demote to `ignore` was promoted (2026-10 audit) and the
+  board now meets it for real: every gap the ignore-era hid (12 on the main
+  board) was closed through the repo's own toolchain (see "Closing the audit
+  gaps" below). Always DRC the board in its project directory, not the
+  `.kicad_pcb` in isolation: DRC'ing it alone uses default severities.
+- **Closing the audit gaps (2026-10-27) — repo toolchain only.** The 12 main
+  gaps (10 shredded-plane islands, `+5V_RF`, `VBUS_USB`) were closed by running
+  the repo chain to completion: `route_qssc_pcb` re-poured with the new
+  `QSSC_ZONE_CLEARANCE_NM` / `QSSC_ZONE_MIN_WIDTH_NM` knobs (0.10/0.10 mm —
+  dense-neck pours that stop the plane shredding) plus the rail tool's new
+  `QSSC_RAIL_MICRO` / `--micro-tie` in-pad microvia fallback (0.20/0.10 F.Cu→In1,
+  the BGA fanout's own via spec), then repeated `close_residuals` passes
+  (zone-aware clustering, via-bridge endpoints). The closer needed four real
+  bug fixes to reach 0 DRC: `IsOnLayer()` instead of the numeric layer-span
+  test (inner-layer tracks never saw through-vias), hole-to-hole spacing for
+  same-net drills, copper-free NPTH pads modelled as holes instead of copper
+  (the USB-C peg sealed corridors DRC allows), and endpoint clamping for
+  board-edge pads (the USB-C SMT row centres outside the routing grid, so
+  every A* touching it silently returned None). FreeRouting remains abandoned
+  for incremental finishing: its DSN model reports ~170 phantom unrouted items
+  on an already-routed board and its re-fanout rewrites everything.
 
 > **Status — what IS done (re-verified 2026-09-04):**
 > - **Schematic:** `kicad-cli sch erc` → **0 errors** (625 warnings: 587
@@ -1151,9 +1200,10 @@ headlessly:
 >   FPGA→TLC5947 ties, the 64 `DET_IN{i}`/`DET_TIA{i}` analog fanout-to-TIA ties,
 >   the 64 `emitter_cat{i}` TLC5947-OUT→die-cathode ties + `EM_ANODE`, the USB
 >   diff pair, the interior BGA signal balls (`SPI_*`, `TCK`, `CONF_*`), and
->   the status/reference lines. They are left **deliberately unrouted**
->   (`unconnected_items` demoted to `ignore`), not force-routed, then closed by
->   FreeRouting (see the FreeRouting pipeline below).
+>   the status/reference lines. They were left **deliberately unrouted** in the
+>   ignore era and were closed later through the repo's own closers (see
+>   "Closing the audit gaps" above); `unconnected_items` is `error` now and the
+>   committed main board passes at 0.
 > - **FreeRouting pipeline (headless, resource-capped):** although `kicad-cli`
 >   has no DSN/SES I/O, the **`pcbnew` Python API** does —
 >   `pcbnew.ExportSpecctraDSN(board, dsn)` + `pcbnew.ImportSpecctraSES(board,
@@ -1170,16 +1220,22 @@ headlessly:
 >   serpentine tuning; RF 50 Ω **impedance verification with a field solver**
 >   (the 0.30 mm width encodes the intent over the 0.15 mm F.Cu→In1.Cu
 >   dielectric, but final verification is interactive); silkscreen/assembly
->   cleanup; the stacking-height / ACF bond force for the two-board sandwich.
-> - **`unconnected_items` is deliberately `ignore` — and why that is deliberate,
->   not a cover.** Promoting it to `error` reports many unconnected items, but
->   those are almost entirely **same-net items joined only through an inner
->   plane** (e.g. two FPGA GND balls 0.8 mm apart on F.Cu, both reaching the
->   In1.Cu GND plane through their in-pad microvias — electrically one node, but
->   KiCad's unconnected-items check flags the missing F.Cu copper between the
->   F.Cu islands). For a plane-based design this is inherent noise, not a real
->   disconnection; the **real connectivity bar is the per-IC power/ground audit
->   above + DRC 0 violations**, both met.
+>   cleanup; the stacking height for the two-board sandwich.
+> - **`unconnected_items` is `error` — promoted from `ignore` in the 2026-10
+>   audit, and both boards are held to it.** The old rationale (plane-joined
+>   same-net items reading as gaps) does not survive the check: with severity
+>   `error` **both committed boards report 0 unconnected / 0 violations** —
+>   the main board's 12 ignore-era gaps and the head's 2 were closed by the
+>   repo chain (see "Closing the audit gaps" above). The head's two `TLV9004`
+>   TIA GND pins `UT12.11`/`UT13.11` — boxed on every layer by the detector bus
+>   (In3 horizontals + In1 verticals + F.Cu `DET_REF` rails, F11b), so no
+>   track or plain via could escape — were completed non-destructively:
+>   `route_qssc_pcb.py --micro-tie` tied them into the In1 pour with in-pad
+>   microvias, the opt-in `QSSC_STITCH_STEP` dense stitch dropped an escape
+>   through-via into the sealed channel (outside the In3 band), and
+>   `close_residuals` routed the channel group out on the signal layers. The
+>   per-IC power/ground audit above remains the complementary bar; DRC 0
+>   violations is met by both boards.
 
 Consistent with the README design-status note, the FPGA RTL and these two PCBs are
 **design artefacts** (synthesised / placed-and-netted, routed first-pass +
@@ -1413,7 +1469,7 @@ configures and shifts in grayscale data. This replaces the old 100 k P-MOS
 gate pull-ups — the constant-current sinks are simply open until enabled, with
 no floating-gate hazard.
 
-### C3. Die size, pad pitch & the Ironwood SBT socket
+### C3. Die size, pad pitch & the through-hole die sockets
 
 The QSSC_Chip die is **20 × 20 mm**, a **two-faced die, no TSVs**: **64
 detector electrodes on the TOP face** + **64 emitter cathodes on the BOTTOM
@@ -1428,27 +1484,23 @@ it is NOT wire-bonded.
 The two faces are contacted by **two different mechanisms** (the die is
 removable):
 
-- **Emitter face (main board, BOTTOM face) — Ironwood SBT open-top spring-pin
-  socket.** The 64 EM cathode pads + EM_ANODE are soldered to a commercial
-  **Ironwood SBT** open-top / clamshell spring-pin socket on the main board
-  **F.Cu + F.Paste + F.Mask** (`qssc:Ironwood_SBT`, footprint `Uchip`). The die
-  sits emitter-down in the socket (spring pins contact the die bottom pads),
-  lid clamps it. Ironwood SBT is **made-to-order**, quoted against the die
-  drawing for the custom **2.5 mm 8×8 array over a 20 mm body** (+2.5 mm/side →
-  25 × 25 mm body, open-top, hardware/screw mount, >100 k insertion cycles,
-  −55…+150 °C, <100 mΩ/pin). Off-the-shelf QFP/BGA sockets do not match a 2.5 mm
-  8×8 grid, so a custom SBT array is quoted; 2.5 mm is routine spring-pin
-  territory (not sub-0.5 mm HDI spring pins), so this is a standard quote, not a
-  research part. The socket adds 4 NPTH M2 mount holes; the die centre stays
-  (80, 55) so the socket body centres on the same origin as the die.
-  MPN = "Ironwood SBT custom (quote)" — a made-to-order mechanical part with
-  no distributor number; BOM.csv leaves Uchip's MPN blank.
-- **Detector face (head board, TOP face) — ACF / pogo pressure contact.** The
-  head board's **B.Cu + B.Mask** contacts the die TOP (detector) face via ACF
-  pressure contact (**no B.Paste** — it is a contact interface, not a solder
-  joint). This face stays ACF because the detector electrodes need the lowest
-  parasitic capacitance directly at the TIA input; a soldered socket there would
-  add pin inductance/capacitance in the photocurrent path.
+- **Emitter face (main board, BOTTOM face) — `ChipSocket_2.54_EM` through-hole
+  socket.** The die sits emitter-down in a standard **2.54 mm female-header
+  socket** (`qssc:ChipSocket_2.54_EM`, footprint `Uchip`): 65 through-hole
+  solder pads + 4 NPTH M2 mount holes, **no F.Paste** (the header pins solder
+  through the board). It is an off-the-shelf 8 × 8 grid at 2.54 mm pitch
+  (17.78 mm span centred on the 20 mm die body); the P1-style pin-scaffold
+  chip module plugs its male emitter pins DOWN into it, so the die module
+  stays removable (ADR-0009 supersedes the quote-only Ironwood design of
+  ADR-0006). The socket body centres on the die origin (80, 55). BOM.csv
+  leaves Uchip's MPN blank — a generic mechanical line, not a made-to-order
+  part.
+- **Detector face (head board, TOP face) — `ChipSocket_2.54_DET` through-hole
+  socket.** The head board carries the matching **2.54 mm female-header
+  socket** (`qssc:ChipSocket_2.54_DET`, footprint `Uchip`) on B.Cu: 65
+  through-hole pads + 4 NPTH mount holes, no paste. The module's
+  detector-side male pins plug UP into it — one module, two matching
+  sockets, both faces removable together.
 
 The 64 EM pads are per-pixel cathodes (`emitter_cat{i}`); EM_ANODE is the
 +12V_EMIT common anode. The 2.5 mm-pitch dog-bone fanout places a 0.20 mm
@@ -1460,13 +1512,12 @@ the Chip netclass (0.10 mm clearance, retained as the HDI floor). The head
 6-layer stack carries the 128-net die bus that a 4-layer stack could not
 escape (commit b41009c).
 
-**z-height note (finalize from the Ironwood quote drawing):** the socket
-raises the die above main F.Cu by the socket body height; the BTB J12 pin
-length must span (socket height + die thickness + head contact gap) for the
-two-board sandwich to mate. The exact socket body height + mount-hole drill
-are finalized from the Ironwood quote drawing; the footprint uses sane
-defaults (±12.5 mm body, ±13.5 mm courtyard, M2 mount holes at ±11.5 mm,
-2.5 mm drill) that keep the board DRC-clean pending the drawing.
+**z-height note:** the socket raises the die module above main F.Cu by the
+header height; the BTB J12 pin length must span (socket height + die-module
+thickness + head socket height) for the two-board sandwich to mate. Body
+height and mount-hole drill come from the catalogue header's datasheet — the
+footprint uses ±12.5 mm body, ±13.5 mm courtyard, M2 mount holes at ±11.5 mm,
+2.5 mm drill, which keep the board DRC-clean.
 
 The board (150 × 118 mm) fits the die + the 64-channel front-end above + the
 64-channel driver below + the FPGA/RF/USB/power with DRC-clean courtyards.
@@ -1486,8 +1537,8 @@ table is the auditable summary.
 | AD7616 ×4 | UAD0-3 | LQFP-80 | 16 analog inputs (VA/VB pins) ← DET_TIA{0..63}; VCC (6/15/30/71) → +5V_A; VDRIVE (49) → +3V3; SER/PAR (40) HIGH → serial; SER1W (45) LOW → 1-wire (SDOA only); SEQEN (37) HIGH → sequencer; REFSEL (35) LOW → internal ref (REFCAP/REFINOUT decoupled C36/Crio); HW_RNGSEL1/0 (38/39) = 1/0 → ±5 V HW mode (pin-strapped, NO register access); CHSEL (64-66), BURST (61), OS (58-60), CRCEN (46) → GND; REFCAP/REFINOUT/REGCAP/REGCAPD (31/33/70/52) decoupled by Cur/Crio/Crgc/Crgd. NC (no_connect): parallel DB bus DB0-3/6-9 (41-44,47,48,53,54), SDI (55, no reg access in HW mode), SDOB (56, unused in 1-wire). SPI: CONVST/SCLK/SDOA/RESET shared + per-chip CS; BUSY (67) only chip0. |
 | TLC5947 ×3 | UE0-2 | HTSSOP-32-1EP | SIN (4): chip0 ← em_sin, chip1/2 ← prior SOUT; SOUT (29): chip0/1 → next SIN, chip2 NC; XLAT (30) → em_xlat; BLANK (2) → em_blank; SCLK (3) → em_sclk; IREF (31) → Riref 4.87k → 10.1 mA/ch; VCC (32) → +3V3 (Cem decoupling); GND (1,33) + EP. OUT0-23 (5-28) → emitter_cat{i}; chip2 uses only OUT0-15. NC (no_connect): chip2 OUT16-23 (21-28) + SOUT (29). |
 | TLV9004 ×16 | UT0-15 | TSSOP-14 | 4 ch each: in- (2/6/9/13) ← DET_IN{i}; in+ (3/5/10/12) → DET_REF 1.65 V; out (1/7/8/14) → DET_TIA{i}; V+ (4) → +3V3; V- (11) → GND; Rf 1 MΩ ‖ Cf 1 pF across in-/out. |
-| Ironwood SBT | Uchip | custom (25×25 mm) | 65 solder pads (64 EM cathodes + EM_ANODE) on F.Cu + F.Paste + F.Mask at 2.5 mm die pitch (1.2 mm pads); 4 NPTH M2 mount holes. EM pads → emitter_cat{i}; EM_ANODE → +12V_EMIT. Die removable, emitter-down. |
-| QSSC_Chip_DET | Uchip (head) | custom | 65 DET pads (64 electrodes + DET_COMMON) on B.Cu + B.Mask (no B.Paste, ACF contact) → DET_IN{i}/DET_REF; dog-bone escapes on F.Cu. |
+| ChipSocket_2.54_EM | Uchip | 2.54 mm female header (through-hole) | 65 PTH pads (64 EM cathodes + EM_ANODE) + 4 NPTH M2 mount holes, no F.Paste. EM pads → emitter_cat{i}; EM_ANODE → +12V_EMIT. Die module removable, emitter-down. |
+| ChipSocket_2.54_DET | Uchip (head) | 2.54 mm female header (through-hole) | 65 PTH pads (64 DET electrodes + DET_COMMON) + 4 NPTH, no paste → DET_IN{i}/DET_REF; dog-bone escapes on F.Cu. |
 
 ---
 
@@ -1498,9 +1549,9 @@ PR #26) registered here so they cannot be lost between the audit and the fab
 date. None requires a board respin, but ordering before the open ones close
 risks re-ordering. Status after this pass:
 
-- **F10 · head-board mechanical registration — DOCUMENTED** (standoff spec +
-  ACF bond-force budget recorded below; gate = Ironwood quote drawing for the
-  stack-height number).
+- **F10 · head-board mechanical registration — OPEN** (measured mismatch: the
+  main board's Uchip/J12 geometry does not reproduce the head's; gate =
+  reconcile the main placement to the head, see F10 below).
 - **F11 · 50 Ω geometry — OPEN** (IPC-2141 closed form gives ≈ 43 Ω at the
   specced 0.30 mm; gate = impedance-solver run on the as-ordered prepreg).
 - **F11b · GND-plane signal-track contamination — DOCUMENTED** (both boards
@@ -1512,31 +1563,29 @@ risks re-ordering. Status after this pass:
 Each is documented with its arithmetic so the close-out is a verification
 step, not a re-derivation.
 
-### F10 · Mechanical registration of the head board — DOCUMENTED (gate: Ironwood drawing)
+### F10 · Mechanical registration of the head board — OPEN (reconcile main to head)
 
-The head board aligns to the main board **only through J12** (2×10, 2.54 mm)
-— no locating standoffs/pins were documented, and the ACF bond-force budget was
-open. The stack height itself is deferred to the Ironwood quote drawing
-(§C3 z-height note: J12 pin length must span socket height + die thickness +
-head contact gap).
+**Measured on the committed boards (pcbnew):** the head's internal Uchip↔J12
+geometry does not reproduce the main board's — main Uchip (80, 55) / J12
+(110, 14) gives J12 − Uchip = (+30, −41) mm, while head Uchip (56.23, 83.27) /
+J12 (47.54, 30.81) gives (−8.69, −52.46) mm. Stacked as-is, the J12 connectors
+and the two die sockets are **not concentric — the boards do not mate**.
 
-- **Decided registration spec (documented here):** ≥ 2 **M2 locating standoffs
-  on diagonal corners** of the 110 × 102 mm head board, on the existing §C3
-  M2 mount-hole pattern so one drill table serves both boards. The standoffs
-  set the head↔main parallelism; J12 sets the in-plane registration; the
-  Ironwood SBT socket's alignment features set the die↔main registration.
-- **ACF bond-force budget (documented here):** the spring-pin socket clamps
-  the emitter face, so the *detector-face* ACF joint is the only face whose
-  contact force is not set by hardware. Required force = (recommended bond
-  pressure from the ACF datasheet, typically 1–3 MPa) × the 20 × 20 mm contact
-  area (400 mm²) ≈ **400–1200 N**, applied through the head-board back-face
-  tooling during the bonding step. Not a sustained service load — only the
-  bond-cycle force.
-- **Still open (the gate):** the stack-height *number* (socket height + die
-  thickness + head contact gap) and the J12 pin length come from the Ironwood
-  quote drawing. Once that drawing is in, mirror the three values into §1B
-  (montaje) / §C3 and order the standoffs + J12.
-- **Gate:** Ironwood quote drawing before the standoff + ACF order.
+- **Ground truth (software):** `tools/kicad/placement.py` states the compressed
+  head placement is standalone-correct (its Uchip/J12 are pinned in `fixed`)
+  and that **the main board's Uchip/J12 must be reconciled to the head's
+  geometry** before the sandwich assembles.
+- **Status: OPEN — placement work, not documentation.** The fix is to move
+  main Uchip/J12 to the head's relative geometry (then re-route the affected
+  nets and re-run the fanout), or the mirror change on the head if the main
+  placement is preferred instead. This document is updated when one of the two
+  lands; until then, neither board should be ordered expecting the sandwich to
+  assemble.
+- **Stack height:** socket height + die-module thickness + head socket height
+  set the J12 pin-length requirement (§C3 z-height note) — from the catalogue
+  header datasheet, no quote drawing involved.
+- **ACF bond force:** void — there is no ACF joint in the design; both faces
+  are through-hole sockets (ADR-0009).
 
 ### F11 — 50 Ω geometry — OPEN
 
@@ -1572,10 +1621,13 @@ close the last splits, so the "solid" GND plane is perforated by non-GND tracks.
 | head  | ~3658 mm                    | 93           | — |
 
 This is a **signal-integrity / return-current quality issue, NOT a
-fabricability blocker** — both boards are DRC-clean (0 errors / 0 unconnected /
-0 shorts) and inside the ALLPCB HDI envelope, so they fab and assemble exactly
-as routed. The cost is return-path inductance on the RF and high-speed SPI nets
-whose reference plane is now slotted.
+fabricability blocker** — both boards are DRC-clean (0 violations / 0 shorts)
+and inside the ALLPCB HDI envelope, so they fab and assemble exactly as
+routed, and both boards are fully connected (0 unconnected): the head's two
+boxed TIA GND pins were closed by the §15 micro-tie/stitch/escape pass even
+though this same bus slotting is what boxed them. The cost is return-path
+inductance on the RF and high-speed SPI nets whose reference plane is now
+slotted.
 
 - **Disposition: document, do not re-route now.** Re-pulling those nets off
   In1.Cu means re-running the router, which risks the current 0-split / 0-DRC
@@ -1598,14 +1650,14 @@ main board, split per the BOM 24/24/16 channels → **0.97–1.94 W (chips 0/1)
 and 0.65–1.29 W (chip 2)**. Against that, the fab protocol §4.4 sizes the
 chip-stabilisation TEC at "**< 5 W**" — a budget chosen for substrate
 temperature *stability*, not for lifting the emitter dissipation through the
-same path — and the heat path (die → Ironwood spring pins → F.Cu copper pour;
-head → ACF, a poor thermal conductor *by design* → J12) was nowhere modelled.
+same path — and the heat path (die → through-hole socket pins → F.Cu copper pour;
+head → its socket pins → J12) was nowhere modelled.
 
 **Per-layer worst-case power budget (now documented):**
 
 | layer | dissipation | path to ambient |
 |-------|-------------|-----------------|
-| die — emitters, full-array | 2.6–5.2 W | die → 65× Ironwood spring pins in parallel (low net Rθ, but the socket body is insulating) → main F.Cu pour → board edge / TEC cold side |
+| die — emitters, full-array | 2.6–5.2 W | die → 65× through-hole socket pins in parallel (low net Rθ; the plastic header body is insulating) → main F.Cu pour → board edge / TEC cold side |
 | main — 3× TLC5947 sinks | 2.6–5.2 W (0.97–1.94 W per chip) | HTSSOP exposed pad + thermal vias → In1.Cu GND plane → board |
 | main — FPGA (corrected) | 0.75–0.95 W | XC7A35T CSG324 junction → EP + thermal vias → In1.Cu; at this dissipation the junction stays within the commercial 85 °C ceiling on a via'd board (confirm against DS182 θJA at P&R) |
 | main — ADF4351 + GVA-84+ | ~0.1 + 0.33 W | local copper pour |

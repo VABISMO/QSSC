@@ -170,11 +170,12 @@ def test_run_circuit_no_fpga_detected_body(monkeypatch):
               "profile": "NV", "temperature_k": 300.0, "seed": 42,
               "noise_mode": "real", "hardware": True},
     )
-    assert r.status_code == 200
+    # a hardware run that could not happen is not a 200: the endpoint answers
+    # 503 with the same error body the dashboard reads
+    assert r.status_code == 503
     body = r.json()
-    result = body["result"]
-    assert result.get("error") == "no-fpga-detected"
-    assert "message" in result
+    assert body.get("error") == "no-fpga-detected"
+    assert "message" in body
 
 
 def test_calibration_no_fpga_detected_body(monkeypatch):
@@ -184,7 +185,7 @@ def test_calibration_no_fpga_detected_body(monkeypatch):
     from fastapi.testclient import TestClient
     client = TestClient(main.app)
     r = client.post("/api/calibration/run?profile=NV&hardware=true")
-    assert r.status_code == 200
+    assert r.status_code == 503
     body = r.json()
     assert body.get("error") == "no-fpga-detected"
 
@@ -356,7 +357,7 @@ def test_api_gyro_hardware_no_board(monkeypatch):
     from fastapi.testclient import TestClient
     client = TestClient(main.app)
     r = client.get("/api/gyro?hardware=true&n_avg=8")
-    assert r.status_code == 200
+    assert r.status_code == 503
     assert r.json().get("error") == "no-fpga-detected"
 
 
@@ -367,7 +368,7 @@ def test_api_signal_hardware_no_board(monkeypatch):
     from fastapi.testclient import TestClient
     client = TestClient(main.app)
     r = client.get("/api/signal?hardware=true&sequence=ramsey&points=16")
-    assert r.status_code == 200
+    assert r.status_code == 503
     assert r.json().get("error") == "no-fpga-detected"
 
 
@@ -393,8 +394,10 @@ def test_api_gyro_hardware_with_board(monkeypatch):
 
 
 @requires_serial
-def test_calibration_hardware_stage4_measured(monkeypatch):
-    """Hardware calibration: stage-4 T2/T2* are measured via RUN_SEQUENCE."""
+def test_calibration_hardware_stage4_says_model_when_the_fit_fails(monkeypatch):
+    """Constant stub codes: every T2 fit falls back to the model, so the
+    stage-4 label must say model -- not "measured" (audit #7b used to pin the
+    lying label here)."""
     monkeypatch.setenv("QSSC_FPGA_PORT", "/dev/ttyFAKE0")
     _patch_cmd_serial(monkeypatch)          # constant codes -> fit falls back to model
     import api.main as main
@@ -406,10 +409,33 @@ def test_calibration_hardware_stage4_measured(monkeypatch):
     assert "error" not in body
     assert body["source"] == "hardware"
     assert body["io"] == "real"
-    assert body["stage4_source"] == "measured (Ramsey/Hahn via RUN_SEQUENCE)"
-    assert body["stages"][3]["source"] == "measured (Ramsey/Hahn via RUN_SEQUENCE)"
+    assert body["stage4_source"] == "model (RUN_SEQUENCE fit unavailable)"
+    assert body["stages"][3]["source"] == "model (RUN_SEQUENCE fit unavailable)"
     assert len(body["per_pin"]) == 4                   # grid=2 -> 4 pins
     assert all("t2_us" in p and "t2_star_us" in p for p in body["per_pin"])
+    assert all(p["t2_source"] == "model (fit fallback)" for p in body["per_pin"])
+
+
+@requires_serial
+def test_calibration_hardware_stage4_measured_when_the_fit_works(monkeypatch):
+    """Decaying Ramsey/Hahn codes fit per pin -> the label is measured."""
+    import math
+    monkeypatch.setenv("QSSC_FPGA_PORT", "/dev/ttyFAKE0")
+    n, t_step = 16, 6250
+    tt = np.arange(n) * t_step * 1e-9
+    omega = 2 * math.pi * 120e3
+    codes = (30000 + 8000 * np.cos(omega * tt) * np.exp(-tt / 40e-6)).round().astype(int)
+    _patch_cmd_serial(monkeypatch, seq_codes=list(codes))
+    import api.main as main
+    from fastapi.testclient import TestClient
+    client = TestClient(main.app)
+    r = client.post("/api/calibration/run?profile=NV&hardware=true&grid=2&points=4")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "error" not in body
+    assert body["stage4_source"] == "measured (Ramsey/Hahn via RUN_SEQUENCE)"
+    assert body["stages"][3]["source"] == "measured (Ramsey/Hahn via RUN_SEQUENCE)"
+    assert all(p["t2_source"] == "measured" for p in body["per_pin"]), body["per_pin"]
 
 
 @requires_serial
@@ -428,3 +454,43 @@ def test_api_signal_hardware_with_board(monkeypatch):
     assert body["source"] == "hardware"
     assert len(body["time_ns"]) == 8 and len(body["signal"]) == 8
     assert all(0.0 <= float(v) <= 1.05 for v in body["signal"])
+
+
+def test_api_signal_model_trace_is_labelled():
+    """The model answer says source=simulated (audit #7b: /api/signal used to
+    return its model traces with no source at all)."""
+    import api.main as main
+    from fastapi.testclient import TestClient
+    client = TestClient(main.app)
+    r = client.get("/api/signal?sequence=pulse&points=16")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["source"] == "simulated", body.get("source")
+
+
+@requires_serial
+def test_api_signal_hardware_odmr_falls_back_labelled(monkeypatch):
+    """hardware+odmr cannot run RUN_SEQUENCE: the board must still answer
+    (503 without one) and the model fallback must say it is a fallback."""
+    monkeypatch.setenv("QSSC_FPGA_PORT", "/dev/ttyFAKE0")
+    _patch_cmd_serial(monkeypatch)
+    import api.main as main
+    from fastapi.testclient import TestClient
+    client = TestClient(main.app)
+    r = client.get("/api/signal?hardware=true&sequence=odmr&points=32")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["source"].startswith("simulated (hardware fallback"), body.get("source")
+
+
+def test_api_signal_hardware_no_board_is_503_for_every_sequence(monkeypatch):
+    """hardware mode with no port answers 503 for ANY sequence -- odmr/pulse
+    used to fall silently to the model trace instead."""
+    monkeypatch.delenv("QSSC_FPGA_PORT", raising=False)
+    import api.main as main
+    from fastapi.testclient import TestClient
+    client = TestClient(main.app)
+    for seq in ("ramsey", "odmr", "pulse"):
+        r = client.get(f"/api/signal?hardware=true&sequence={seq}&points=16")
+        assert r.status_code == 503, (seq, r.status_code)
+        assert r.json().get("error") == "no-fpga-detected"

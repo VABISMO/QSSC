@@ -22,8 +22,18 @@ Run (HARD-capped so it cannot freeze the host):
 """
 from __future__ import annotations
 
+import gc
 import sys
 from pathlib import Path
+
+# KiCad 9's SWIG bindings register no destructors for the C++ proxies
+# (see the "no destructor found" warnings) and gc.collect() while the pair
+# router holds live VECTOR2/track proxies segfaults ("Fatal Python error ...
+# Garbage-collecting" in grid._seg_cells). The cyclic GC buys nothing for
+# this short-lived, reference-counted workload -- disable it for the run.
+# The author's KiCad 10.0.6 does not need this (see HARDWARE_DESIGN gate
+# notes); on 9.x this is what lets the repo autorouter run at all.
+gc.disable()
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 

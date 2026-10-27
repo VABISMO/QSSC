@@ -14,6 +14,7 @@ from typing import Optional
 
 import numpy as np
 from fastapi import APIRouter
+from ._guards import no_fpga_response
 
 logger = logging.getLogger(__name__)
 
@@ -216,14 +217,13 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
     if hardware:
         port = os.getenv("QSSC_FPGA_PORT", "").strip()
         if not port:
-            return {"error": "no-fpga-detected",
-                    "message": "No FPGA detected — connect the board and set "
-                               "QSSC_FPGA_PORT, or switch to Simulator."}
+            return no_fpga_response(
+                "No FPGA detected — connect the board and set QSSC_FPGA_PORT, or switch to Simulator.")
         try:
             fpga = connect_fpga(port=port, profile=profile,
                                 temperature_k=temperature_k, seed=seed)
         except NoFPGADetected as exc:
-            return {"error": "no-fpga-detected", "message": str(exc)}
+            return no_fpga_response(str(exc))
         try:
             em = EmitterController(fpga)
             det = DetectorInterface(fpga)
@@ -407,6 +407,7 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
     # how many NV positions to draw in the representative sweep so decompose_odmr
     # can reach the gradient cap -- NOT the per-pixel qubit count.)
     qubits_per_pixel = []
+    n_pins_measured = 0
     for s in sites:
         measured_hz = s.frequency + float(rng.normal(0, meas_sigma_hz))
         if s.usable:
@@ -424,6 +425,7 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
         if hardware:
             # Measure T2 (Hahn) and T2* (Ramsey) from real ADC codes.
             try:
+                t2_fit = t2_star_fit = float("nan")
                 hahn_codes = fpga.run_sequence(s.qubit_id, 1, n_seq, seq_t_step)
                 ramsey_codes = fpga.run_sequence(s.qubit_id, 0, n_seq, seq_t_step)
                 t2_fit = _fit_t2_from_codes(hahn_codes, seq_t_step)
@@ -438,8 +440,15 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
             t2_star_meas = (t2_star_fit * 1e-6) if math.isfinite(t2_star_fit) else max(
                 (s.t2 / t2_star_ratio) *
                 (1.0 + float(rng.normal(0, 0.10))), 1e-9)
+            t2_source = ("measured" if math.isfinite(t2_fit)
+                         else "model (fit fallback)")
+            t2_star_source = ("measured" if math.isfinite(t2_star_fit)
+                              else "model (fit fallback)")
+            if math.isfinite(t2_fit) and math.isfinite(t2_star_fit):
+                n_pins_measured += 1
         else:
             # Hahn-echo T2 fit: true T2 + ~5% single-pin fit uncertainty.
+            t2_source = t2_star_source = "model (simulated)"
             t2_meas = max(s.t2 * (1.0 + float(rng.normal(0, 0.05))), 1e-9)
             # Ramsey T2* fit: T2/ratio + ~10% fit uncertainty (teaching ratio).
             t2_star_meas = max((s.t2 / t2_star_ratio) *
@@ -457,10 +466,24 @@ def calibration_run(profile: str = "NV", temperature_k: float = 300.0,
             "n_qubits": n_qubits_pixel,
             "resonance_ghz": round(measured_hz / 1e9, 6),
             "detuning_mhz": round((measured_hz - zfs_hz) / 1e6, 4),
+            "t2_source": t2_source,
+            "t2_star_source": t2_star_source,
             "t2_us": round(t2_meas * 1e6, 1),           # measured Hahn-echo T2
             "t2_star_us": round(t2_star_meas * 1e6, 2),  # measured Ramsey T2*
             "usable": bool(s.usable),
         })
+
+    if hardware:
+        # The label must match what ran per pin: a failed/flat fit falls
+        # back to the model above, so "measured" cannot be assumed.
+        if n_pins_measured == len(sites):
+            stage4_source = "measured (Ramsey/Hahn via RUN_SEQUENCE)"
+        elif n_pins_measured == 0:
+            stage4_source = "model (RUN_SEQUENCE fit unavailable)"
+        else:
+            stage4_source = (
+                f"measured ({n_pins_measured}/{len(sites)} pins via "
+                "RUN_SEQUENCE; model fallback elsewhere)")
     dets = [p["detuning_mhz"] for p in per_pin]
     detuning_spread = (max(dets) - min(dets)) if dets else 0.0
     t2_us_vals = [p["t2_us"] for p in per_pin if p["usable"]]

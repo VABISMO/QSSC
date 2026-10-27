@@ -4,10 +4,11 @@ two QSSC sandwich boards (the components emitted by ``gen_qssc_kicad.py``).
 
 The QSSC die is a two-faced (no-TSV) die clamped between TWO PCBs:
   - **main** board: FPGA + 3x TLC5947 emitter + RF + USB + power, die BOTTOM /
-    emitter face held in an **Ironwood SBT** spring-pin socket on F.Cu
-    (soldered, die removable), BTB HOST connector J12.
-  - **head** board: 16x TLV9004 TIA + 4x AD7616 ADC, die TOP / detector face on
-    B.Cu (ACF pressure contact), BTB DAUGHTER connector J12. The 9-wire AD7616
+    emitter face held in a plain **through-hole 2.54 mm die socket**
+    (no paste, die removable), BTB HOST connector J12.
+  - **head** board: 16x TLV9004 TIA + 4x AD7616 ADC, die TOP / detector face in
+    the matching through-hole `ChipSocket_2.54_DET` (no paste), BTB DAUGHTER
+    connector J12. The 9-wire AD7616
     SPI + GND/+3V3/+5V cross the BTB connector; RTL and Qiskit software unchanged.
 
 This builder imports the board generator, populates ``COMPONENTS`` for each
@@ -142,11 +143,6 @@ MPN_MAP: dict[tuple[str, str], tuple[str, str, str]] = {
          "https://www.onsemi.com/pub/Collateral/ESD5V0S3B-U-D.PDF"),
     ("QSSC_Chip_DET", "QSSC_Chip_DET"):
         ("project die", "QSSC-128pad-CQD (detector face)", ""),
-    ("Ironwood_SBT", "Ironwood_SBT"):
-        # Made-to-order spring-pin socket: quoted against the die drawing, NOT a
-        # Digi-Key line item -- tracked here so the mechanical/sourcing is visible.
-        ("Ironwood Electronics", "SBT custom (quote against die drawing)",
-         "https://www.ironwood.com/pqfp-spring-pin-test-sockets/"),
     # Gradient-board parts.  These rows used to exist only as hand-typed lines
     # in BOM.csv, which is why regenerating used to drop their manufacturer /
     # MPN / datasheet URL (issue #162).

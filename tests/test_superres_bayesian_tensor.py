@@ -290,7 +290,7 @@ def test_api_sensor_tensor_endpoint_localizes_dipole():
     # --- real: with no board the endpoint truthfully reports no-fpga-detected
     #     (it must NOT silently run a synthetic sweep labelled "real") ---
     rr = c.get("/api/sensor/tensor", params={"source": "real", **true})
-    assert rr.status_code == 200, rr.text
+    assert rr.status_code == 503, rr.text
     jr = rr.json()
     assert jr.get("error") == "no-fpga-detected", (
         f"real source without a board must return no-fpga-detected, got {jr}")

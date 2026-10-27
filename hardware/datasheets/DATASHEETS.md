@@ -28,9 +28,9 @@ PDFs already fetched locally are in `./pdfs/`.  The BOM is in `BOM.csv`.
 ## Main control board
 
 The main board is a 6-layer HDI 150×118 mm board that sits BELOW the die,
-contacting the die BOTTOM (emitter) face on its F.Cu via an **Ironwood SBT
-spring-pin socket** (soldered down — F.Paste on the 65 pads — NOT ACF pressure
-contact; the detector TOP face on the head board is the ACF/pogo one).  It
+contacting the die BOTTOM (emitter) face through the **`ChipSocket_2.54_EM`
+through-hole socket** (65 PTH pads + 4 NPTH mount holes, no paste; the detector
+TOP face on the head board uses the matching `ChipSocket_2.54_DET`).  It
 carries the FPGA, 3× TLC5947 emitter driver, RF chain, USB, power LDOs, the
 die EM face, and the BTB HOST connector J12.
 
@@ -44,7 +44,7 @@ die EM face, and the BTB HOST connector J12.
   ADC pivot digitises every channel at the AD7616 instead of thresholding.
 - **Package:** BGA-324, CSG324, 0.8 mm pitch (15x15, 324 balls). **No socket**
   — the FPGA is soldered directly to the main board (correct for production;
-  the only socket in the design is the Ironwood SBT for the optical die).
+  the only sockets are the two through-hole die sockets (ADR-0009)).
 - **Datasheet:** https://docs.amd.com/r/en-US/ds181-Artix-7-Data-Sheet
   (package: UG475 — CSG324 ball map).
 - **Local PDF:** not fetched (AMD blocks headless download; 30 MB+).
@@ -214,7 +214,8 @@ die EM face, and the BTB HOST connector J12.
 - **Function:** +5V -> +5V_RF isolation (replaces the old REG4 AMS1117-5.0
   LDO which sat in dropout; the +5V rail is already regulated, so +5V_RF only
   needs a bead + pi filter, not another regulator).
-- **Package:** 0603.  C45/C46 buffer +5V side, C47/C48 buffer +5V_RF side.
+- **Package:** FB1 0603.  Pi-filter caps are mixed on the board: C45/C47 =
+  0805, C46/C48 = 0603 (verified against the committed footprints).
 
 ### UE0 / UE1 / UE2 — TLC5947  (Texas Instruments 24-ch 12-bit PWM constant-current LED driver) x3
 - **Function:** 64-channel parallel CQD emitter driver.  Each CQD emitter
@@ -281,13 +282,15 @@ die EM face, and the BTB HOST connector J12.
 ## Detector head board
 
 The detector head is a 6-layer 110×102 mm board that sits ABOVE the die,
-contacting the die TOP (detector) face on its B.Cu via ACF pressure contact
-(no B.Paste — it is a contact interface, not soldered).  It carries the 64-ch
+contacting the die TOP (detector) face through the **`ChipSocket_2.54_DET`
+through-hole socket** (65 PTH pads + 4 NPTH, no paste).  It carries the 64-ch
 TIA front-end, 4× AD7616 ADCs, and the BTB DAUGHTER connector that returns the
-9-wire SPI + power to the main board.  Head board origin = main board origin
-+ (60, 0) mm, so the head J12 (50,14) == main J12 (110,14) and the head die
-(20,55) == main die (80,55) — the two PCBs sandwich the die with J12 as the
-edge spacer + electrical link.  No FPGA, no RF, no USB, no emitter driver.
+9-wire SPI + power to the main board.  **Registration (measured, OPEN):** the
+head's Uchip (56.23, 83.27) / J12 (47.54, 30.81) do NOT reproduce the main
+board's Uchip (80, 55) / J12 (110, 14) — J12 − Uchip is (−8.69, −52.46) mm on
+the head vs (+30, −41) mm on the main, so the two PCBs do not mate as-is; the
+main placement must be reconciled to the head's (`tools/kicad/placement.py`,
+HARDWARE_DESIGN §15D F10).  No FPGA, no RF, no USB, no emitter driver.
 
 ### UT0..UT15 — TLV9004  (Texas Instruments quad CMOS op-amp) x16
 - **Function:** 64-channel transimpedance front-end for the CQD
@@ -331,8 +334,8 @@ edge spacer + electrical link.  No FPGA, no RF, no USB, no emitter driver.
   the connector-fed rails.
 - **Package:** 2×10 through-hole socket, 2.54 mm pitch, 1.0 mm drill, pads
   on `*.Cu *.Mask`.  MPN Würth 61002021121 (female, daughter).  The long pins
-  of the host header set the stacking height (die thickness + ACF contact
-  pressure).
+  of the host header set the stacking height (die-module thickness + the
+  two socket stack heights).
 - **+5V_A rail:** +5V from J12 -> FB_A (600 Ω ferrite) -> +5V_A -> the 4
   AD7616 analog VCC; C_Abulk 10 µF + C_ahf 100 nF decouple it locally.
 
@@ -355,12 +358,12 @@ bottom/emitter face) and a detector head (above, contacting the top/detector
 face) — joined by the J12 board-to-board connector.  Each face is contacted by
 a different mechanism (the die is **removable**):
 
-- **Emitter face (main board, die BOTTOM) — Ironwood SBT spring-pin socket**
-  (soldered, see `### Uchip — Ironwood_SBT socket` below).  NOT ACF.
-- **Detector face (head board, die TOP) — ACF (anisotropic conductive film)
-  pressure contact**, not solder.
+- **Emitter face (main board, die BOTTOM) — `ChipSocket_2.54_EM`** through-hole
+  2.54 mm socket (no paste; see `### Uchip — through-hole die sockets` below).
+- **Detector face (head board, die TOP) — `ChipSocket_2.54_DET`**, the matching
+  through-hole socket (no paste, mates with the same module).
 
-### Uchip — Ironwood_SBT socket (main board) + QSSC_Chip_DET (head board)
+### Uchip — through-hole die sockets (main `ChipSocket_2.54_EM` + head `ChipSocket_2.54_DET`)
 - **Function:** the project's own fabricated quantum die — 64 top-face
   detector electrodes + 64 bottom-face emitter electrodes, driven and read in
   PARALLEL (no ADG732 MUX, no serial sweep, no XADC).  No commercial
@@ -370,24 +373,20 @@ a different mechanism (the die is **removable**):
 - **Die:** 20 x 20 mm, 130 pads @ 2.5 mm pitch (65 per face): 64 DET pads +
   DET_COMMON on the TOP face, 64 EM cathode pads + EM_ANODE on the BOTTOM
   face (one shared common per face).
-- **Two footprints, one die:** `Ironwood_SBT` places the 64 EM cathodes +
-  EM_ANODE on the **main board F.Cu + F.Paste + F.Mask** — these are the
-  SOLDER pads of a commercial **Ironwood SBT** open-top / clamshell spring-pin
-  socket (the die sits emitter-down in the socket; spring pins contact the die
-  bottom pads; lid clamps it; die is removable).  `QSSC_Chip_DET` places the
-  64 DET pads on the **head board B.Cu + B.Mask** (no B.Paste — ACF contact
-  interface, not soldered).  The two boards' origins are offset by (60, 0) mm
-  so the two die footprints align on the physical die.
-- **Why a socket on the emitter face:** the user required a real **commercial
-  socket that fits the 20×20 mm / 0.30 mm-pitch die**.  No off-the-shelf socket
-  exists at that pitch/size (Yamaichi IC609 caps at 0.40 mm / ≤12 mm, Enplas
-  at 0.50 mm / 4×4 mm).  **Ironwood Electronics SBT** open-top spring-pin
-  sockets are **made-to-order** and explicitly cover 0.30 mm pitch over IC
-  bodies 1–50 mm — quoted against the die drawing.  +2.5 mm/side body →
-  25×25 mm, open-top/clamshell, hardware/screw mount, >100 k insertion cycles,
-  −55…+150 °C, <100 mΩ/pin.  MPN = "SBT custom (quote)" (mechanical, non-Digi-Key
-  BOM line).  The detector face stays ACF (lowest parasitic C at the TIA input;
-  a soldered socket there would add pin parasitics in the photocurrent path).
+- **Two footprints, one module:** `ChipSocket_2.54_EM` places 65 through-hole
+  pads + 4 NPTH mount holes on the **main board** (no F.Paste — the header
+  pins solder through the board) to receive the module's emitter-side pins;
+  `ChipSocket_2.54_DET` is the matching **head board** footprint (65 PTH +
+  4 NPTH, no paste) for the detector-side pins.  Both faces stay removable
+  together (ADR-0009).  NOTE: the two boards' socket and J12 positions are
+  NOT yet concentric — see the registration note in `## Detector head` above.
+- **Why a socket here:** the die module (P1-style pin scaffold, 2.5 mm pad
+  pitch on the 20 mm body) presents **2.54 mm male pins** — an 8×8 grid, a
+  standard 0.1-inch pattern — so both boards take an **off-the-shelf 2.54 mm
+  female header** (17.78 mm span, catalogue part, no made-to-order
+  dependency).  The die module stays removable from both faces, keeping the
+  most expensive part of the stack reworkable.  ADR-0009 records the change
+  and supersedes the earlier Ironwood SBT quote-only design (ADR-0006).
 - **Emitter topology (common-anode, validated against the fab protocol):**
   the 64 EM pads are per-pixel CATHODES (net `emitter_cat{i}`), each sunk by
   one TLC5947 OUTn constant-current channel (3-chip daisy chain, 72 ch, 64
@@ -401,19 +400,24 @@ a different mechanism (the die is **removable**):
   This replaces the old 16× LMV339 photon-counter comparator + MCP4725
   threshold DAC: the AD7616 digitises the full analog waveform per channel,
   not just a threshold crossing.
-- **Netclass:** "Chip" 0.10 mm clearance (the 0.30 mm-pitch dog-bone fanout
-  requires it).  Fanout: 0.15 mm stub on the pad's own layer -> 0.20 mm
-  through-via per pad, staggered even/odd (0.5 / 1.0 mm out), escaped on the
-  opposite layer / inner signal layers.  EM pads escape on B.Cu (main), DET
-  pads escape on F.Cu (head).  The dense 0.30 mm field is beyond the 0.2 mm
-  line-router grid, so the via<->target escapes are routed by FreeRouting;
-  the dog-bone fanout itself (pad -> stub -> via) is DRC-clean and in place.
-- **Datasheet:** Ironwood SBT spring-pin test sockets (made-to-order, quoted
-  against the die drawing): <https://www.ironwood.com/pqfp-spring-pin-test-sockets/>
+- **Netclass:** "Chip" 0.10 mm clearance (the HDI dog-bone fanout requires
+  it).  Fanout: 0.15 mm stub on the pad's own layer -> 0.20 mm through-via per
+  pad at a **uniform 1.0 mm out** (`STUB = 1.0 mm` in `tools/router/fanout.py`;
+  0.80 mm to the neighbour), escaped on the opposite layer / inner signal
+  layers.  EM pads escape on B.Cu (main), DET pads escape on F.Cu (head).  The
+  via<->target escapes are routed by FreeRouting; the dog-bone fanout itself
+  (pad -> stub -> via) is DRC-clean and in place.
+- **Datasheet:** generic 2.54 mm female header (catalogue part; footprints
+  `qssc:ChipSocket_2.54_EM` / `qssc:ChipSocket_2.54_DET`) — no vendor-specific
+  document.  Design history in ADR-0009 (supersedes ADR-0006).
 
 ---
 
 ## qssc-grad extended variant — gradient coil + DAC (Invention 5)
+
+> **Local variant:** the `qssc-grad` board files are work in progress and are
+> **not published in this repository** — only the two sandwich boards above
+> are. Its BOM rows stay under `grad` in `BOM.csv` for local validation.
 
 The `qssc-grad` board is the **main board + an Invention 5 field-gradient
 coil and its current driver** — a separate extended variant generated from

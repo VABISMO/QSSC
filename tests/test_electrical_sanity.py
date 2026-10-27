@@ -65,6 +65,12 @@ BOARDS = {
 GRAD_SCH = PCB_DIR / "qssc-grad.kicad_sch"
 BOM_CSV = REPO / "hardware" / "datasheets" / "BOM.csv"
 
+
+def _need_grad():
+    """The gradient board is local-only: skip its gates when unpublished."""
+    if not (PCB_DIR / "qssc-grad.kicad_pcb").exists() or not GRAD_SCH.exists():
+        pytest.skip("qssc-grad board is local-only (not published here)")
+
 # Exact board inventory as parsed by _board(). If the s-expression layout
 # changes (or this mini-parser rots) the counts below shift and these gates
 # fail instead of silently scanning nothing.
@@ -175,12 +181,14 @@ def test_board_parse_inventory(board: str):
 # Repaired on fix/electrical-repairs: pad 4 = GND, pad 8 = +5V, symbol
 # renamed (issue #168). Gate stays as a regression pin, no xfail.
 def test_lm358_dual_opamp_power_pads():
+    _need_grad()
     pads = _board("grad")["fps"]["Udrv"]["pads"]
     assert pads["4"] == "GND", f"pad 4 (must be V-): {pads.get('4')}"
     assert pads["8"] == "+5V", f"pad 8 (must be V+): {pads.get('8')}"
 
 
 def test_lm358_symbol_pin_numbering():
+    _need_grad()
     pins = _sch_pins("qssc:LM358")
     assert len(pins) == 8, f"LM358 symbol pins parsed: {sorted(pins)}"
     norm = {k: v.upper() for k, v in pins.items()}
@@ -197,6 +205,7 @@ def test_lm358_symbol_pin_numbering():
 # LVCMOS33 SPI master is a level violation
 # --------------------------------------------------------------------------
 def test_mcp4921_symbol_matches_datasheet():
+    _need_grad()
     pins = _sch_pins("qssc:MCP4921")
     assert len(pins) == 8, f"MCP4921 symbol pins parsed: {sorted(pins)}"
     norm = {k: v.upper().lstrip("!") for k, v in pins.items()}
@@ -218,6 +227,7 @@ def test_dac_signal_wiring_frozen():
     violation (issue #168) intentionally re-pins this map -- the freeze is
     what turns "the DAC was quietly rewired" into a suite failure.
     """
+    _need_grad()
     pads = _board("grad")["fps"]["Ugrad"]["pads"]
     assert pads == {
         "1": "+5V",            # VDD (target: +3V3 -- see the xfail below)
@@ -238,6 +248,7 @@ def test_dac_signal_wiring_frozen():
                     "the fix needs level-shifting or a reference redesign "
                     "(issue #168)")
 def test_dac_vdd_compatible_with_lvcmos33():
+    _need_grad()
     pads = _board("grad")["fps"]["Ugrad"]["pads"]
     assert pads["1"] == "+3V3", (
         f"MCP4921 VDD on {pads['1']!r}: VIH = 0.7*VDD (DS22248A) makes a "
@@ -318,7 +329,8 @@ def test_ic_supply_rails(board: str, ref: str, rails: list):
 def test_ic_reference_inventory():
     """Any new U*/Y*/REG* part must be consciously documented in _IC_RAILS --
     an unlisted IC would otherwise ship without this file checking its rails."""
-    for board in ("main", "grad", "head"):
+    for board in [b for b in ("main", "grad", "head")
+                  if b != "grad" or BOARDS["grad"].exists()]:
         b = _board(board)
         refs = {r for r in b["fps"]
                 if r.startswith(("U", "Y")) or re.match(r"^REG\d", r)}
@@ -326,6 +338,8 @@ def test_ic_reference_inventory():
 
     # the documented railless exceptions really are railless
     for board, refs in RAILESS_IC.items():
+        if board == "grad" and not BOARDS["grad"].exists():
+            continue          # local-only gradient board, unpublished
         for ref in refs:
             rails = [n for n in _board(board)["fps"][ref]["pads"].values()
                      if n.startswith("+")]
@@ -505,6 +519,8 @@ def test_rtl_reset_polarity_matches_button_network():
 def _decoupling_params() -> list:
     out = []
     for board in ("main", "grad", "head"):
+        if board == "grad" and not BOARDS["grad"].exists():
+            continue          # local-only gradient board, unpublished
         b = _board(board)
         rail_refs: dict = {}
         for ref, info in b["fps"].items():

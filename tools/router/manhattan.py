@@ -20,6 +20,7 @@ re-pour planes.
 from __future__ import annotations
 
 import math
+import os
 
 import numpy as np
 import pcbnew
@@ -52,7 +53,13 @@ class ResidualCloser:
     SIG_LAYERS = [F_Cu, B_Cu, pcbnew.In3_Cu, pcbnew.In4_Cu]
     LNAME = {F_Cu: "F.Cu", B_Cu: "B.Cu", pcbnew.In3_Cu: "In3", pcbnew.In4_Cu: "In4"}
     TRK_W = int(0.20 * NM)
-    REAL_CLEAR = int(0.17 * NM)
+    # Clearance checked against other-net copper. 0.17 mm is the conservative
+    # default (above every netclass); a dense board whose corridors only pass
+    # at the REAL netclass floor (0.15 mm -- DRC is the judge either way) can
+    # lower it via CLOSE_REAL_CLEAR=0.15, e.g. threading the USB-C escape-via
+    # field (0.96 mm pitch, 0.45 mm barrels: 0.15 passes by 0.005 mm, 0.17
+    # does not).
+    REAL_CLEAR = int(float(os.environ.get("CLOSE_REAL_CLEAR", "0.17")) * NM)
     VIA_DIA = int(0.40 * NM)
     VIA_DRILL = int(0.20 * NM)
     KEEP = REAL_CLEAR + TRK_W // 2
@@ -79,8 +86,13 @@ class ResidualCloser:
                 continue
             if t.GetClass() == "PCB_VIA":
                 pos = t.GetPosition()
-                top, bot = t.TopLayer(), t.BottomLayer()
-                if not (top <= layer <= bot):
+                # IsOnLayer() resolves the span on ANY KiCad layer-ID scheme: a
+                # through via spans F..B in STACK order, but numeric inner-layer
+                # IDs (In3=8 under the F=0/B=2 scheme) fall OUTSIDE
+                # [TopLayer(), BottomLayer()], so the old `top <= layer <= bot`
+                # comparison silently skipped vias for inner-layer tracks --
+                # validation then passed and DRC found the short.
+                if not t.IsOnLayer(layer):
                     continue
                 rr = hw + track_width_nm(t) // 2
                 if _seg_dist2(pos.x, pos.y, x1, y1, x2, y2) < rr * rr:
@@ -105,6 +117,18 @@ class ResidualCloser:
                 players = tc._pad_layer_set(p)
                 if players is not None and layer not in players:
                     continue
+                if (p.GetAttribute() == pcbnew.PAD_ATTRIB_NPTH
+                        and not list(p.GetLayerSet().CuStack())):
+                    # NPTH: there is NO copper -- only the hole constrains, at
+                    # hole_clearance (0.15 mm), not a copper rect + copper gap.
+                    # The rect model sealed corridors DRC actually allows (e.g.
+                    # beside the USB-C alignment peg hole).
+                    dr = p.GetDrillSize()
+                    pos = p.GetPosition()
+                    need = max(dr.x, dr.y) // 2 + 150_000 + self.TRK_W // 2
+                    if _seg_dist2(pos.x, pos.y, x1, y1, x2, y2) < need * need:
+                        return False
+                    continue
                 pb = p.GetBoundingBox()
                 rx0, ry0 = pb.GetX(), pb.GetY()
                 rx1, ry1 = pb.GetX() + pb.GetWidth(), pb.GetY() + pb.GetHeight()
@@ -114,7 +138,12 @@ class ResidualCloser:
 
     def _via_clear(self, x, y, nc):
         """Through via at (x,y) clear of all OTHER-net copper on every layer."""
-        vr = self.VIA_DIA // 2 + self.KEEP; vr2 = vr * vr
+        # vr = via copper radius + REAL_CLEAR. (KEEP already embeds TRK_W/2 for
+        # TRACK-path grids; using it here and adding the track half again on
+        # each check overstated every via requirement by TRK_W/2 -- 0.1 mm --
+        # and rejected spots DRC accepts, e.g. the via 0.427 mm from a 0.15 mm
+        # GND tie (real need 0.400, KEEP-need 0.500).)
+        vr = self.VIA_DIA // 2 + self.REAL_CLEAR; vr2 = vr * vr
         for t in self.board.GetTracks():
             if t.GetNetCode() == nc:
                 continue
@@ -133,6 +162,11 @@ class ResidualCloser:
                 players = tc._pad_layer_set(p)
                 if players is not None and not (self.F_Cu in players or self.B_Cu in players):
                     continue
+                if (p.GetAttribute() == pcbnew.PAD_ATTRIB_NPTH
+                        and not list(p.GetLayerSet().CuStack())):
+                    # NPTH has no copper: the hole-to-hole loop below already
+                    # enforces spacing to its drill; there is no copper rect.
+                    continue
                 pb = p.GetBoundingBox()
                 if (pb.GetX() - vr) <= x <= (pb.GetX() + pb.GetWidth() + vr) and \
                    (pb.GetY() - vr) <= y <= (pb.GetY() + pb.GetHeight() + vr):
@@ -141,6 +175,30 @@ class ResidualCloser:
                     ddx = max(cx0 - x, 0, x - cx1); ddy = max(cy0 - y, 0, y - cy1)
                     if ddx * ddx + ddy * ddy < vr2:
                         return False
+        # hole-to-hole: DRC's min_hole_to_hole applies between ANY two drills --
+        # same net included. The copper loops above skip same-net items, so
+        # without this check a new via can land on an existing same-net drill
+        # (hole_to_hole, actual 0.0 mm). Centre distance floor = new drill/2 +
+        # existing drill/2 + 0.21 mm (board min_hole_to_hole 0.2, +10 um over
+        # the 0.1995 mm threshold KiCad reports).
+        r_new = self.VIA_DRILL // 2
+        gap = 210_000
+        for t in self.board.GetTracks():
+            if t.GetClass() != "PCB_VIA":
+                continue
+            pos = t.GetPosition()
+            rr = r_new + t.GetDrillValue() // 2 + gap
+            if (pos.x - x) ** 2 + (pos.y - y) ** 2 < rr * rr:
+                return False
+        for fp in self.board.GetFootprints():
+            for p in fp.Pads():
+                dr = p.GetDrillSize()
+                if dr.x <= 0 and dr.y <= 0:
+                    continue
+                pos = p.GetPosition()
+                rr = r_new + max(dr.x, dr.y) // 2 + gap
+                if (pos.x - x) ** 2 + (pos.y - y) ** 2 < rr * rr:
+                    return False
         return True
 
     def _in_board(self, x, y, marg=None):
@@ -171,7 +229,86 @@ class ResidualCloser:
                 s = t.GetStart(); e = t.GetEnd()
                 items.append(("trk", {"kind": "trk", "ax": s.x, "ay": s.y, "bx": e.x, "by": e.y,
                     "hw": track_width_nm(t) // 2, "layers": {t.GetLayer()}, "it": t}))
-        n = len(items); uf = tc._UF(n)
+        n = len(items)
+
+        # ---- zone fragments as copper nodes (zone-aware clustering) ----
+        # A poured plane's filled regions are copper too: an item whose copper
+        # overlaps a filled region belongs to that region's component. Without
+        # these nodes a poured plane shreds into hundreds of false splits (every
+        # rail-pad tie group looks isolated), so the closer would bridge pairs
+        # the pour already connects while the genuinely stranded fragments --
+        # the DRC unconnected Zone/Zone pairs -- stay dark. Nets with filled
+        # zones gain fragment nodes; nets without zones cluster exactly as
+        # before (zero extra nodes), so signal-net behavior is unchanged.
+        frags = []  # (layer, polyset, outline idx, outline pts, bbox)
+        for z in self.board.Zones():
+            if z.GetNetCode() != nc:
+                continue
+            for lyr in z.GetLayerSet().CuStack():
+                poly = z.GetFilledPolysList(lyr)
+                for fi in range(poly.OutlineCount()):
+                    o = poly.Outline(fi)
+                    bb = o.BBox()
+                    pts = [(o.CPoint(k).x, o.CPoint(k).y)
+                           for k in range(o.PointCount())]
+                    if len(pts) < 3:
+                        continue
+                    frags.append((lyr, poly, fi, pts,
+                                  (bb.GetX(), bb.GetY(),
+                                   bb.GetX() + bb.GetWidth(),
+                                   bb.GetY() + bb.GetHeight())))
+        uf = tc._UF(n + len(frags))
+
+        def _edge2(ax, ay, bx, by, pts):
+            """Min SQUARED distance between segment a-b and the closed outline."""
+            m = None
+            for k in range(len(pts)):
+                x1, y1 = pts[k]; x2, y2 = pts[(k + 1) % len(pts)]
+                d = tc._seg_seg_dist2(ax, ay, bx, by, x1, y1, x2, y2)
+                if m is None or d < m:
+                    m = d
+            return m
+
+        def _pt_edge2(px, py, pts):
+            """Min SQUARED distance from a point to the closed outline."""
+            m = None
+            for k in range(len(pts)):
+                x1, y1 = pts[k]; x2, y2 = pts[(k + 1) % len(pts)]
+                d = tc._seg_point_dist2(x1, y1, x2, y2, px, py)
+                if m is None or d < m:
+                    m = d
+            return m
+
+        # item <-> fragment: same-layer copper overlap = the item sits inside
+        # the fill or reaches it within its own half-width/centre radius.
+        for i, (kind, g) in enumerate(items):
+            gl = g.get("layers")
+            for fi, (lyr, poly, fidx, pts, fbb) in enumerate(frags):
+                if kind == "trk":
+                    if lyr not in gl:
+                        continue
+                    lo_x = min(g["ax"], g["bx"]) - g["hw"]
+                    hi_x = max(g["ax"], g["bx"]) + g["hw"]
+                    lo_y = min(g["ay"], g["by"]) - g["hw"]
+                    hi_y = max(g["ay"], g["by"]) + g["hw"]
+                    if hi_x < fbb[0] or lo_x > fbb[2] or hi_y < fbb[1] or lo_y > fbb[3]:
+                        continue
+                    hit = (poly.Contains(pcbnew.VECTOR2I(int(g["ax"]), int(g["ay"])), fidx)
+                           or poly.Contains(pcbnew.VECTOR2I(int(g["bx"]), int(g["by"])), fidx)
+                           or (_edge2(g["ax"], g["ay"], g["bx"], g["by"], pts) or 0)
+                           <= g["hw"] * g["hw"])
+                else:
+                    if gl is not None and lyr not in gl:
+                        continue
+                    px, py, reach = g["x"], g["y"], g["r"]
+                    if (px < fbb[0] - reach or px > fbb[2] + reach
+                            or py < fbb[1] - reach or py > fbb[3] + reach):
+                        continue
+                    hit = (poly.Contains(pcbnew.VECTOR2I(int(px), int(py)), fidx)
+                           or (_pt_edge2(px, py, pts) or 0) <= reach * reach)
+                if hit:
+                    uf.union(i, n + fi)
+
         for i in range(n):
             for j in range(i + 1, n):
                 if tc._layers_share(items[i][1].get("layers"), items[j][1].get("layers")) \
@@ -181,7 +318,12 @@ class ResidualCloser:
         for i, (kind, g) in enumerate(items):
             cl.setdefault(uf.find(i), {"pads": [], "vias": [], "trks": []})
             cl[uf.find(i)]["pads" if kind == "pad" else "vias" if kind == "via" else "trks"].append(g)
-        return [c for c in cl.values() if c["pads"]]
+        # Keep pad-less clusters that hold VIAS: a stranded via (or a via inside
+        # a stranded pour fragment) is a perfectly routable endpoint -- a track
+        # may legally end on it -- and DRC reports these as unconnected groups
+        # (Zone||Via / Via||Via). Dropping them left exactly those pairs
+        # unclosable.
+        return [c for c in cl.values() if c["pads"] or c["vias"]]
 
     # ---- commit primitives ----
     def _add_trk(self, x1, y1, x2, y2, layer, nc):
@@ -213,14 +355,36 @@ class ResidualCloser:
                 players = tc._pad_layer_set(p)
                 if players is not None and layer not in players:
                     continue
+                if (p.GetAttribute() == pcbnew.PAD_ATTRIB_NPTH
+                        and not list(p.GetLayerSet().CuStack())):
+                    # NPTH (hole only): block the true hole+clearance DISC (cell
+                    # centre distance), not the bounding square -- the square
+                    # over-blocks the corner cells and sealed the landing spot
+                    # beside the USB-C peg that DRC actually permits.
+                    dr = p.GetDrillSize()
+                    pos = p.GetPosition()
+                    r = max(dr.x, dr.y) // 2 + 150_000 + self.TRK_W // 2
+                    r2 = r * r
+                    cx0, cy0 = self.grid.to_cell(pos.x - r, pos.y - r)
+                    cx1, cy1 = self.grid.to_cell(pos.x + r, pos.y + r)
+                    for gy in range(max(0, cy0), min(self.grid.nrow, cy1 + 1)):
+                        for gx in range(max(0, cx0), min(self.grid.ncol, cx1 + 1)):
+                            wx, wy = self.grid.to_xy(gx, gy)
+                            if (wx - pos.x) ** 2 + (wy - pos.y) ** 2 <= r2:
+                                grid[gy, gx] = 1
+                    continue
                 i0, i1, j0, j1 = self.grid.pad_slice(p.GetBoundingBox(), keep)
                 if i1 >= i0 and j1 >= j0:
                     grid[i0:i1 + 1, j0:j1 + 1] = 1
         for t in self.board.GetTracks():
             if t.GetClass() == "PCB_VIA":
                 pos = t.GetPosition()
-                top, bot = t.TopLayer(), t.BottomLayer()
-                if not (top <= layer <= bot):
+                # IsOnLayer(): inner-layer numeric IDs (In3=8 under F=0/B=2)
+                # fall outside [TopLayer(), BottomLayer()] -- a numeric span
+                # comparison leaves through-vias unblocked on inner layers and
+                # A* walks straight through them (the final _trk_clear then
+                # rejects the whole path).
+                if not t.IsOnLayer(layer):
                     continue
                 self.grid.mark_disc_np(grid, pos.x, pos.y, keep + track_width_nm(t) // 2)
             elif t.GetLayer() == layer:
@@ -248,8 +412,10 @@ class ResidualCloser:
                 continue
             if t.GetClass() == "PCB_VIA":
                 pos = t.GetPosition()
-                top, bot = t.TopLayer(), t.BottomLayer()
-                if not (top <= layer <= bot):
+                # IsOnLayer(): same layer-ID scheme caveat as _build_*_2d --
+                # otherwise the net's OWN inner-layer vias never get unblocked
+                # and the route cannot reach out from them.
+                if not t.IsOnLayer(layer):
                     continue
                 rad = keep + track_width_nm(t) // 2
                 j0 = max(0, int((pos.x - rad - g.gx0) // g.cell)); j1 = min(g.ncol - 1, int((pos.x + rad - g.gx0) // g.cell))
@@ -342,9 +508,25 @@ class ResidualCloser:
         """2D A* on `layer` from pad a to pad b. Returns list of segs (x1,y1,x2,y2,layer)."""
         blocked = self._get_blocked(layer, nc)
         sc = self.grid.to_cell(ax, ay); gc_ = self.grid.to_cell(bx, by)
-        if not (0 <= sc[0] < self.grid.ncol and 0 <= sc[1] < self.grid.nrow and
-                0 <= gc_[0] < self.grid.ncol and 0 <= gc_[1] < self.grid.nrow):
-            return None
+        # A pad at the board-edge strip (the USB-C SMT row) centres OUTSIDE the
+        # routing grid (which stops KEEP mm from the bbox edge). Snap the
+        # endpoint to the nearest in-grid cell -- it still lies INSIDE the pad's
+        # copper, so the route reaches the pad; the real-clearance validation
+        # below rules the committed path as always. Without this every A* whose
+        # endpoint is an edge pad silently returns None.
+        sc = (min(max(sc[0], 0), self.grid.ncol - 1),
+              min(max(sc[1], 0), self.grid.nrow - 1))
+        gc_ = (min(max(gc_[0], 0), self.grid.ncol - 1),
+               min(max(gc_[1], 0), self.grid.nrow - 1))
+        # Force-open the endpoint cells: the caller already validated them (a
+        # pad's own centre, or a _via_clear via spot), yet the grid can still
+        # mark them -- e.g. a via spot beside an NPTH hole whose hole-to-track
+        # disc covers the very cell the via occupies. An A* whose start or goal
+        # cell is blocked dies instantly (maze's bridge force-opens both for
+        # the same reason). The real _trk_clear validation below still rules
+        # the committed path, so this only opens the endpoint, never the route.
+        blocked[sc[1] * self.grid.ncol + sc[0]] = 0
+        blocked[gc_[1] * self.grid.ncol + gc_[0]] = 0
         path = self.grid.astar2d(blocked, sc, gc_)
         if not path:
             return None
@@ -397,8 +579,13 @@ class ResidualCloser:
 
     def _find_via_spot(self, near_x, near_y, nc):
         """Spiral search for a through-via spot clear of copper + inside the board."""
+        # Spiral out far enough to escape a dense BGA/via field: the original
+        # 15 x 0.15 mm (2.25 mm) cap found no legal site inside the U1 fanout
+        # (every ring failed copper or hole-to-hole), stranding the pair. 60
+        # rings = 9 mm reach; the search stays DRC-checked at every candidate
+        # (copper + hole-to-hole), so a wide detour can only be legal, not wrong.
         step = int(0.15 * self.NM)
-        for ring in range(1, 16):
+        for ring in range(1, 61):
             for ang_deg in range(0, 360, 30):
                 r = ring * step; a = math.radians(ang_deg)
                 vx = int(near_x + r * math.cos(a)); vy = int(near_y + r * math.sin(a))
@@ -411,29 +598,66 @@ class ResidualCloser:
     def _try_via_bridge(self, ax, ay, bx, by, alay, blay, nc):
         """a(on alay)->via_a->straight on an inner layer->via_b->b(on blay)."""
         inner_choices = [L for L in self.SIG_LAYERS if L not in (alay, blay)] or [pcbnew.In3_Cu]
-        va = self._find_via_spot(ax, ay, nc)
+
+        def _own_via(x, y):
+            """Reuse a same-net via AT this endpoint (a cluster's own via): its
+            lands on every layer already connect there, so no new via and no
+            stub are needed -- crucial in a pocket where a second via cannot
+            physically fit (0.56 mm channel; hole-to-hole), and it lets a
+            stranded group route FROM its existing escape point."""
+            for t in self.board.GetTracks():
+                if t.GetClass() != "PCB_VIA" or t.GetNetCode() != nc:
+                    continue
+                p = t.GetPosition()
+                if (p.x - x) ** 2 + (p.y - y) ** 2 <= 50_000 ** 2:
+                    return (p.x, p.y)
+            return None
+        ea = _own_via(ax, ay)
+        eb = _own_via(bx, by)
+        va = ea if ea else self._find_via_spot(ax, ay, nc)
         if va is None:
             return None
-        vb = self._find_via_spot(bx, by, nc)
+        vb = eb if eb else self._find_via_spot(bx, by, nc)
         if vb is None:
             return None
-        segs = []; vias = [va, vb]
-        # a pad -> via_a on the pad's own layer
-        s0 = (ax, ay, va[0], va[1], alay)
-        if not self._trk_clear(*s0, nc):
-            return None
-        segs.append(s0)
+        segs = []; vias = ([] if ea else [va]) + ([] if eb else [vb])
+        # a pad -> via_a on the pad's own layer. A straight stub can cross a
+        # neighbouring pin's escape track even when a weaving path exists, so
+        # fall back to the same 2-D A* the flat attempts use.
+        if not ea:
+            s0 = (ax, ay, va[0], va[1], alay)
+            if self._trk_clear(*s0, nc):
+                segs.append(s0)
+            else:
+                p0 = self._try_astar2d(ax, ay, va[0], va[1], alay, nc)
+                if not p0:
+                    return None
+                segs.extend(p0)
         for inner in inner_choices:
             s1 = (va[0], va[1], vb[0], vb[1], inner)
             if self._trk_clear(*s1, nc):
                 segs.append(s1)
                 break
         else:
-            return None
-        s2 = (vb[0], vb[1], bx, by, blay)
-        if not self._trk_clear(*s2, nc):
-            return None
-        segs.append(s2)
+            # A straight inner leg can be walled by escape vias/tracks even
+            # when a weaving path exists: fall back to the same 2-D A* the flat
+            # attempts use (its per-layer grids block vias correctly now).
+            for inner in inner_choices:
+                p = self._try_astar2d(va[0], va[1], vb[0], vb[1], inner, nc)
+                if p:
+                    segs.extend(p)
+                    break
+            else:
+                return None
+        if not eb:
+            s2 = (vb[0], vb[1], bx, by, blay)
+            if self._trk_clear(*s2, nc):
+                segs.append(s2)
+            else:
+                p2 = self._try_astar2d(vb[0], vb[1], bx, by, blay, nc)
+                if not p2:
+                    return None
+                segs.extend(p2)
         return (segs, vias)
 
     def _shared_signal_layers(self, la, lb):
@@ -449,13 +673,25 @@ class ResidualCloser:
                 order.append(L)
         return order
 
-    def _closest_pad_pair(self, clA, clB):
+    def _closest_pad_pair(self, clA, clB, failed=None):
+        # Endpoints = pads + vias of each cluster: a stranded pad-less group
+        # (a via in a severed pour fragment) still routes to the other side's
+        # pads/vias -- a track ending on a via connects.
+        ends_a = clA["pads"] + clA["vias"]
+        ends_b = clB["pads"] + clB["vias"]
         best = None
-        for pa in clA["pads"]:
+        for pa in ends_a:
             la = pa.get("layers")
-            for pb in clB["pads"]:
+            for pb in ends_b:
                 lb = pb.get("layers")
                 if not tc._layers_share(la, lb):
+                    continue
+                # skip endpoint pairs whose attempts already failed: the merge
+                # loop must see the NEXT-closest pair of these two clusters (a
+                # walled-in nearest neighbour must not hide a reachable one
+                # 2 mm farther out).
+                if failed and tuple(sorted([(pa["x"], pa["y"]),
+                                            (pb["x"], pb["y"])])) in failed:
                     continue
                 d = (pa["x"] - pb["x"]) ** 2 + (pa["y"] - pb["y"]) ** 2
                 if best is None or d < best[0]:
@@ -466,24 +702,33 @@ class ResidualCloser:
         """Greedily connect all clusters of net nc. Returns (added_segs, added_vias, log)."""
         log = []
         added_segs = 0; added_vias = 0
+        # pad-pair keys (by coordinates) whose L/Z/A* + via-bridge attempts all
+        # failed: skip them so one unroutable pair no longer aborts the whole
+        # net -- the loop keeps merging every OTHER pair it can find.
+        failed = set()
         for _ in range(64):  # bounded merge loop
             clusters = self._cluster(nc)
             if len(clusters) <= 1:
                 break
-            # closest pair of clusters
+            # closest pair of clusters that has not failed before
             best = None
             for i in range(len(clusters)):
                 for j in range(i + 1, len(clusters)):
-                    cp = self._closest_pad_pair(clusters[i], clusters[j])
+                    cp = self._closest_pad_pair(clusters[i], clusters[j], failed)
                     if cp is None:
+                        continue
+                    if tuple(sorted([(cp[1]["x"], cp[1]["y"]),
+                                     (cp[2]["x"], cp[2]["y"])])) in failed:
                         continue
                     if best is None or cp[0] < best[0]:
                         best = (cp[0], cp[1], cp[2])
             if best is None:
-                log.append(f"  {nm}: no share-layer pad pair between {len(clusters)} clusters")
+                log.append(f"  {nm}: no routable pad pair left between "
+                           f"{len(clusters)} cluster(s) ({len(failed)} pair(s) tried)")
                 break
             _, pa, pb = best
             ax, ay, bx, by = pa["x"], pa["y"], pb["x"], pb["y"]
+            key = tuple(sorted([(ax, ay), (bx, by)]))
             layers = self._shared_signal_layers(pa.get("layers"), pb.get("layers"))
             done = None
             used = "Manhattan"
@@ -522,7 +767,11 @@ class ResidualCloser:
                 log.append(f"  {nm}: via-bridge {len(segs)} segs+{len(vias)} vias "
                            f"({ax/self.NM:.1f},{ay/self.NM:.1f})->({bx/self.NM:.1f},{by/self.NM:.1f})")
                 continue
+            # Record the pair as uncloseable and carry on with the NEXT closest
+            # pair -- a single dense spot (e.g. a BGA escape with no legal via
+            # site) must not abandon the net's other splits.
+            failed.add(key)
             log.append(f"  {nm}: SKIP no clear path "
                        f"({ax/self.NM:.1f},{ay/self.NM:.1f})->({bx/self.NM:.1f},{by/self.NM:.1f})")
-            break
+            continue
         return added_segs, added_vias, log

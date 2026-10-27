@@ -54,7 +54,7 @@ def test_fpga_cache_lock_serializes_creation(monkeypatch):
     lock = threading.Lock()
 
     class _SlowSim:
-        def __init__(self, profile="NV"):
+        def __init__(self, profile="NV", seed=None):
             with lock:
                 created["n"] += 1
             time.sleep(0.05)            # widen the race window

@@ -173,8 +173,9 @@ proxy), see `qubits_per_pixel` in the calibration response.
 - **Tests** — `tests/test_field_gradient_register.py` (8 tests incl.
   measured-line override of width + grid, per-pixel qubit array, and the
   no-gradient predicted-1 / array-consistency case).
-- **HW-fits (qssc-grad variant)** ✅ — the **gradient coil + DAC now exist**
-  on the `qssc-grad` extended variant (a 1.5 mm PCB copper trace coil +
+  - **HW-fits (qssc-grad variant)** ✅ — the **gradient coil + DAC exist**
+    on the `qssc-grad` extended variant, which is **local work in progress and
+    not published in this repository** (a 1.5 mm PCB copper trace coil +
   MCP4921 12-bit SPI DAC + LM358 servo + IRLML2502 MOSFET + Rsense,
   fully routed, DRC 0/0/0; `tools/gen_qssc_kicad.py build_gradient_board()`).
   The `SET_GRADIENT <code>` RTL verb (`fpga/rtl/command_parser.v` CMD_GRADIENT
@@ -549,8 +550,9 @@ the measured frequency grid (`register_line_freqs_hz`), not a hardcoded 10. A
 bulk microdiamond collapses to one line → ensemble mode is recommended; a
 resolved multi-line ODMR → register mode. `qubit = address not NV count`. The
 field gradient that spreads the lines (Invention 5) is **not** a panel mode —
-it is a hardware add-on built on the opt-in `qssc-grad` board variant (coil +
-DAC + `SET_GRADIENT` verb), not the base board.
+  it is a hardware add-on built on the opt-in `qssc-grad` board variant (coil +
+  DAC + `SET_GRADIENT` verb), not the base board — the variant's board files are
+  local-only and not published in this repository.
 
 
 ## What to touch on the PCB for the needs-HW inventions

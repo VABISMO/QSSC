@@ -21,9 +21,9 @@ flowchart LR
         FT["FT232RL USB-UART"]
         ADF["ADF4351 PLL + GVA-84+\n→ 2.87 / 3.46 GHz"]
         TLC["3× TLC5947\n64 emitter ch"]
-        SOC["Ironwood SBT socket"]
+        SOC["Die socket\n(2.54 mm through-hole)"]
     end
-    subgraph HB["Detector head (4-layer, above die)"]
+    subgraph HB["Detector head (6-layer, above die)"]
         TIA["16× TLV9004 TIA\nRf 1M · Cf 1p"]
         ADC["4× AD7616\n16-ch 16-bit"]
     end

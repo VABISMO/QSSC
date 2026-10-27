@@ -35,14 +35,23 @@ REPO = Path(__file__).resolve().parent.parent
 PCB_DIR = REPO / "hardware" / "pcb"
 BOM = REPO / "hardware" / "datasheets" / "BOM.csv"
 
+def _need_grad():
+    """The gradient board is local-only: skip its gates when unpublished."""
+    if "grad" not in BOARDS:
+        pytest.skip("qssc-grad board is local-only (not published here)")
+
+
 BOARDS = {
     "main": ("hardware/pcb/qssc.kicad_sch", "hardware/pcb/qssc.kicad_pcb"),
-    "grad": ("hardware/pcb/qssc-grad.kicad_sch", "hardware/pcb/qssc-grad.kicad_pcb"),
     "head": (
         "hardware/pcb/chip_module.kicad_sch",
         "hardware/pcb/chip_module.kicad_pcb",
     ),
 }
+if (REPO / "hardware/pcb/qssc-grad.kicad_pcb").exists() and \
+   (REPO / "hardware/pcb/qssc-grad.kicad_sch").exists():
+    BOARDS["grad"] = ("hardware/pcb/qssc-grad.kicad_sch",
+                      "hardware/pcb/qssc-grad.kicad_pcb")
 
 BASELINE = "811d8c4"
 
@@ -523,6 +532,7 @@ def test_sbu_pins_not_nc_marked(name):
 
 
 def test_reserved_labels_scope():
+    _need_grad()
     main_s = _strip_lib_symbols(_text(BOARDS["main"][0]))
     grad_s = _strip_lib_symbols(_text(BOARDS["grad"][0]))
     head_s = _strip_lib_symbols(_text(BOARDS["head"][0]))
@@ -605,6 +615,7 @@ def test_bom_rows_unique_and_plausible():
 
 
 def test_bom_grad_refs_are_grad_board_refs():
+    _need_grad()
     grad_board = {f[0] for f in _board_footprints("grad")}
     _, rows = _bom_rows()
     grad_refs = {

@@ -107,9 +107,16 @@ def test_seed_reproducibility():
     assert a["fired"] == b["fired"]
 
 
-def test_hardware_without_board_reports_no_fpga():
-    r = _run(hardware=True)
-    assert r["error"] == "no-fpga-detected"
+def test_hardware_without_board_reports_no_fpga(monkeypatch):
+    """Hardware mode with no board answers 503 + the no-fpga body (HTTP)."""
+    monkeypatch.delenv("QSSC_FPGA_PORT", raising=False)
+    from fastapi.testclient import TestClient
+    from api.main import app
+    r = TestClient(app).get(
+        "/api/signal/array", params={"profile": "NV", "sequence": "ramsey",
+                                     "points": 16, "hardware": True})
+    assert r.status_code == 503, r.text
+    assert r.json().get("error") == "no-fpga-detected"
 
 
 def test_per_pixel_nv_uses_calibrated_ceiling_model():

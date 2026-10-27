@@ -234,7 +234,7 @@ TOOLS_BROAD_SILENT_ALLOW = {
     ("tools/copy_zones.py", 41),
     ("tools/copy_zones.py", 45),
     ("tools/widen_tracks.py", 37),
-    ("tools/router/planes.py", 78),
+    ("tools/router/planes.py", 80),
 }
 
 
@@ -369,8 +369,8 @@ def test_subprocess_timeout():
         f"without timeout -- route them through subprocess.run(+timeout) or "
         f"consciously re-pin: {sorted(tools_extra)}")
     want = {
-        ("tools/freeroute.py", 351),
-        ("tools/route_qssc_pcb.py", 173),
+        ("tools/freeroute.py", 358),
+        ("tools/route_qssc_pcb.py", 176),
     }
     assert tools_got == want, (
         f"tools/ subprocess.run-without-timeout drifted -- new (review: a "
