@@ -75,8 +75,48 @@ class ResidualCloser:
         self.grid = Grid2D.from_rect(self.bx0, self.by0, self.bx1, self.by1,
                                      self.CELL, self.MARG)
         self._all_blocked_cache = {}
+        self._shape_cache = None
 
     # ---- clearance checks (other-net copper only) ----
+    def _cu_shapes(self, layer=None):
+        """Cached copper GRAPHIC shapes as (layer, x0, y0, x1, y1, net) rows.
+
+        The gradient coil is a copper polygon inside the Lgrad footprint with
+        no net: any foreign track/via touching it is a DRC short, but the
+        obstacle sweeps below only knew tracks + pads, so a GND route was laid
+        straight across the coil.  Board-level copper shapes count too.  The
+        bounding box is conservative (a spiral's bbox over-blocks its inner
+        gaps) -- DRC is the judge, never a short."""
+        if self._shape_cache is None:
+            rows = []
+
+            def _grab(sh):
+                try:
+                    if not pcbnew.IsCopperLayer(sh.GetLayer()):
+                        return
+                except Exception:
+                    return
+                bb = sh.GetBoundingBox()
+                try:
+                    net = sh.GetNetCode()
+                except Exception:
+                    net = 0
+                rows.append((sh.GetLayer(), bb.GetX(), bb.GetY(),
+                             bb.GetX() + bb.GetWidth(),
+                             bb.GetY() + bb.GetHeight(), net))
+
+            for fp in self.board.GetFootprints():
+                for it in fp.GraphicalItems():
+                    if it.GetClass() in ("PCB_SHAPE", "FP_SHAPE", "MGRAPHIC"):
+                        _grab(it)
+            for d in self.board.Drawings():
+                if d.GetClass() == "PCB_SHAPE":
+                    _grab(d)
+            self._shape_cache = rows
+        if layer is None:
+            return self._shape_cache
+        return [r for r in self._shape_cache if r[0] == layer]
+
     def _trk_clear(self, x1, y1, x2, y2, layer, nc):
         """Track on `layer` clear of all OTHER-net copper on that layer (0.17 mm)."""
         hw = self.TRK_W // 2 + self.REAL_CLEAR; hw2 = hw * hw
@@ -134,6 +174,14 @@ class ResidualCloser:
                 rx1, ry1 = pb.GetX() + pb.GetWidth(), pb.GetY() + pb.GetHeight()
                 if _seg_rect_dist2(x1, y1, x2, y2, rx0, ry0, rx1, ry1) < hw2:
                     return False
+        # copper graphic shapes (Lgrad coil polygon, board copper art): a
+        # foreign or unnetted shape is copper too -- touching it shorts nets
+        # per DRC, so it must fence routes exactly like a pad does.
+        for _lyr, rx0, ry0, rx1, ry1, snet in self._cu_shapes(layer):
+            if snet == nc:
+                continue
+            if _seg_rect_dist2(x1, y1, x2, y2, rx0, ry0, rx1, ry1) < hw2:
+                return False
         return True
 
     def _via_clear(self, x, y, nc):
@@ -175,6 +223,14 @@ class ResidualCloser:
                     ddx = max(cx0 - x, 0, x - cx1); ddy = max(cy0 - y, 0, y - cy1)
                     if ddx * ddx + ddy * ddy < vr2:
                         return False
+        # copper graphic shapes on ANY layer (a through via pierces them all):
+        # landing on/beside the coil polygon would short it.
+        for _lyr, rx0, ry0, rx1, ry1, snet in self._cu_shapes():
+            if snet == nc:
+                continue
+            ddx = max(rx0 - x, 0, x - rx1); ddy = max(ry0 - y, 0, y - ry1)
+            if ddx * ddx + ddy * ddy < vr2:
+                return False
         # hole-to-hole: DRC's min_hole_to_hole applies between ANY two drills --
         # same net included. The copper loops above skip same-net items, so
         # without this check a new via can land on an existing same-net drill
@@ -332,6 +388,25 @@ class ResidualCloser:
         t.SetEnd(pcbnew.VECTOR2I(int(x2), int(y2)))
         t.SetWidth(self.TRK_W); t.SetLayer(layer); t.SetNetCode(nc); self.board.Add(t); return t
 
+    def _seg_exists(self, x1, y1, x2, y2, layer, nc):
+        """True when an identical same-net track is already on the board.
+
+        Feeding the merge loop a path that is entirely copper already is a
+        no-progress attempt: without this check the via-bridge re-added the
+        same dead segment once per iteration (stacking 64 copies of one
+        blind-via bridge) because the clusters never merged."""
+        a = (int(x1), int(y1)); b = (int(x2), int(y2))
+        lo, hi = (a, b) if a <= b else (b, a)
+        for t in self.board.GetTracks():
+            if (t.GetClass() == "PCB_VIA" or t.GetNetCode() != nc
+                    or t.GetLayer() != layer):
+                continue
+            s = (t.GetStart().x, t.GetStart().y)
+            e = (t.GetEnd().x, t.GetEnd().y)
+            if (min(s, e), max(s, e)) == (lo, hi):
+                return True
+        return False
+
     def _add_via(self, x, y, nc):
         v = pcbnew.PCB_VIA(self.board)
         v.SetPosition(pcbnew.VECTOR2I(int(x), int(y)))
@@ -376,6 +451,15 @@ class ResidualCloser:
                 i0, i1, j0, j1 = self.grid.pad_slice(p.GetBoundingBox(), keep)
                 if i1 >= i0 and j1 >= j0:
                     grid[i0:i1 + 1, j0:j1 + 1] = 1
+        # copper graphic shapes block every net (the Lgrad coil polygon is
+        # unnetted and has no pad, yet touching it is a DRC short).
+        for _lyr, rx0, ry0, rx1, ry1, snet in self._cu_shapes(layer):
+            cx0, cy0 = self.grid.to_cell(rx0 - keep, ry0 - keep)
+            cx1, cy1 = self.grid.to_cell(rx1 + keep, ry1 + keep)
+            r0, r1 = max(0, cy0), min(self.grid.nrow - 1, cy1)
+            c0, c1 = max(0, cx0), min(self.grid.ncol - 1, cx1)
+            if r1 >= r0 and c1 >= c0:
+                grid[r0:r1 + 1, c0:c1 + 1] = 1
         for t in self.board.GetTracks():
             if t.GetClass() == "PCB_VIA":
                 pos = t.GetPosition()
@@ -600,31 +684,57 @@ class ResidualCloser:
         inner_choices = [L for L in self.SIG_LAYERS if L not in (alay, blay)] or [pcbnew.In3_Cu]
 
         def _own_via(x, y):
-            """Reuse a same-net via AT this endpoint (a cluster's own via): its
-            lands on every layer already connect there, so no new via and no
-            stub are needed -- crucial in a pocket where a second via cannot
-            physically fit (0.56 mm channel; hole-to-hole), and it lets a
-            stranded group route FROM its existing escape point."""
+            """The same-net via sitting AT this endpoint (a cluster's own via),
+            or None.  Reusing it means no new via and no stub are needed --
+            crucial in a pocket where a second via cannot physically fit
+            (0.56 mm channel; hole-to-hole), and it lets a stranded group
+            route FROM its existing escape point.  The OBJECT is returned
+            (not just its position) so the caller can check which layers the
+            via actually reaches: a blind F->In1 via anchors nothing on
+            B.Cu/In3/In4, and a leg there would add dead copper that never
+            merges the clusters (the merge loop then re-added it forever)."""
             for t in self.board.GetTracks():
                 if t.GetClass() != "PCB_VIA" or t.GetNetCode() != nc:
                     continue
                 p = t.GetPosition()
                 if (p.x - x) ** 2 + (p.y - y) ** 2 <= 50_000 ** 2:
-                    return (p.x, p.y)
+                    return t
             return None
+
+        def _span(via):
+            """Layers an endpoint via reaches; None = every layer (through
+            via, or a brand-new via this call is about to place)."""
+            if via is None:
+                return None
+            if via.GetViaType() == pcbnew.VIATYPE_THROUGH:
+                return None
+            return set(via.GetLayerSet().CuStack())
+
         ea = _own_via(ax, ay)
         eb = _own_via(bx, by)
-        va = ea if ea else self._find_via_spot(ax, ay, nc)
+        va = ((ea.GetPosition().x, ea.GetPosition().y) if ea is not None
+              else self._find_via_spot(ax, ay, nc))
         if va is None:
             return None
-        vb = eb if eb else self._find_via_spot(bx, by, nc)
+        vb = ((eb.GetPosition().x, eb.GetPosition().y) if eb is not None
+              else self._find_via_spot(bx, by, nc))
         if vb is None:
             return None
-        segs = []; vias = ([] if ea else [va]) + ([] if eb else [vb])
+        # The inner leg may only run on layers BOTH endpoint vias reach.
+        sa, sb = _span(ea), _span(eb)
+        shared = sa if sb is None else (sb if sa is None else sa & sb)
+        if shared is not None:
+            inner_choices = [L for L in inner_choices if L in shared]
+            # blind pairs share only their plane/stub layers (F is the stub
+            # layer, In1 the GND plane): the leg must run there instead of on
+            # SIG_LAYERS, which by design never route on the planes.
+            inner_choices += [L for L in sorted(shared)
+                              if L not in inner_choices]
+        segs = []; vias = ([va] if ea is None else []) + ([vb] if eb is None else [])
         # a pad -> via_a on the pad's own layer. A straight stub can cross a
         # neighbouring pin's escape track even when a weaving path exists, so
         # fall back to the same 2-D A* the flat attempts use.
-        if not ea:
+        if ea is None:
             s0 = (ax, ay, va[0], va[1], alay)
             if self._trk_clear(*s0, nc):
                 segs.append(s0)
@@ -649,7 +759,7 @@ class ResidualCloser:
                     break
             else:
                 return None
-        if not eb:
+        if eb is None:
             s2 = (vb[0], vb[1], bx, by, blay)
             if self._trk_clear(*s2, nc):
                 segs.append(s2)
@@ -706,6 +816,7 @@ class ResidualCloser:
         # failed: skip them so one unroutable pair no longer aborts the whole
         # net -- the loop keeps merging every OTHER pair it can find.
         failed = set()
+        last_key = None; last_n = -1
         for _ in range(64):  # bounded merge loop
             clusters = self._cluster(nc)
             if len(clusters) <= 1:
@@ -729,6 +840,18 @@ class ResidualCloser:
             _, pa, pb = best
             ax, ay, bx, by = pa["x"], pa["y"], pb["x"], pb["y"]
             key = tuple(sorted([(ax, ay), (bx, by)]))
+            # No-progress guard: the SAME pair coming back with the cluster
+            # count unchanged means the previous attempt's copper merged
+            # nothing (dead segments -- e.g. a leg on a layer the endpoint
+            # blind vias do not reach).  Mark it uncloseable instead of
+            # stacking another identical copy every iteration.
+            if key == last_key and len(clusters) == last_n:
+                failed.add(key)
+                log.append(f"  {nm}: SKIP no progress "
+                           f"({ax/self.NM:.1f},{ay/self.NM:.1f})->"
+                           f"({bx/self.NM:.1f},{by/self.NM:.1f})")
+                continue
+            last_key, last_n = key, len(clusters)
             layers = self._shared_signal_layers(pa.get("layers"), pb.get("layers"))
             done = None
             used = "Manhattan"
@@ -746,10 +869,19 @@ class ResidualCloser:
                     used = "A*2D"
                     break
             if done:
-                for s in done:
+                fresh = [s for s in done if not self._seg_exists(*s, nc)]
+                if not fresh:
+                    # the whole path is already copper and the clusters are
+                    # still split: re-adding it cannot merge anything
+                    failed.add(key)
+                    log.append(f"  {nm}: SKIP path already exists "
+                               f"({ax/self.NM:.1f},{ay/self.NM:.1f})->"
+                               f"({bx/self.NM:.1f},{by/self.NM:.1f})")
+                    continue
+                for s in fresh:
                     self._add_trk(*s, nc)
-                added_segs += len(done)
-                log.append(f"  {nm}: {len(done)}-seg {used} on {self.LNAME[L]} "
+                added_segs += len(fresh)
+                log.append(f"  {nm}: {len(fresh)}-seg {used} on {self.LNAME[L]} "
                            f"({ax/self.NM:.1f},{ay/self.NM:.1f})->({bx/self.NM:.1f},{by/self.NM:.1f})")
                 continue
             # via-bridge fallback: use the two pads' own layers
@@ -759,12 +891,19 @@ class ResidualCloser:
             vb = self._try_via_bridge(ax, ay, bx, by, aL, bL, nc)
             if vb:
                 segs, vias = vb
-                for s in segs:
+                fresh = [s for s in segs if not self._seg_exists(*s, nc)]
+                if not fresh and not vias:
+                    failed.add(key)
+                    log.append(f"  {nm}: SKIP via-bridge already exists "
+                               f"({ax/self.NM:.1f},{ay/self.NM:.1f})->"
+                               f"({bx/self.NM:.1f},{by/self.NM:.1f})")
+                    continue
+                for s in fresh:
                     self._add_trk(*s, nc)
                 for (vx, vy) in vias:
                     self._add_via(vx, vy, nc)
-                added_segs += len(segs); added_vias += len(vias)
-                log.append(f"  {nm}: via-bridge {len(segs)} segs+{len(vias)} vias "
+                added_segs += len(fresh); added_vias += len(vias)
+                log.append(f"  {nm}: via-bridge {len(fresh)} segs+{len(vias)} vias "
                            f"({ax/self.NM:.1f},{ay/self.NM:.1f})->({bx/self.NM:.1f},{by/self.NM:.1f})")
                 continue
             # Record the pair as uncloseable and carry on with the NEXT closest

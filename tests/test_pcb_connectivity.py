@@ -252,8 +252,13 @@ def _touch(a, b) -> bool:
         reach = a["hw"] + b["hw"] + EPS_NM
         return d2 <= reach * reach
     if ta == "via" and tb == "via":
+        # KiCad's connectivity is anchor-based: two vias are one group only
+        # when a centre lies inside the other's barrel copper.  Copper-tangent
+        # vias (d == rA + rB) read as connected under the naive copper-overlap
+        # test, but DRC reports them unconnected -- the closer then skipped
+        # such pairs forever (e.g. the two 0.6 mm edge vias at 0.6 mm pitch).
         d2 = (a["x"] - b["x"]) ** 2 + (a["y"] - b["y"]) ** 2
-        reach = a["r"] + b["r"] + EPS_NM
+        reach = max(a["r"], b["r"]) + EPS_NM
         return d2 <= reach * reach
     if ta == "via" and tb == "trk":
         return _via_trk(a, b)

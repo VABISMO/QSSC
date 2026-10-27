@@ -398,7 +398,7 @@ def calibrate_array(profile: DefectProfile | str = "NV",
 
     Parameters mirror the backend's gradient knobs. ``gradient_mhz_per_um`` is
     the Invention-5 field gradient (the hardware that produces it is the
-    ``qssc-grad`` PCB variant); 0 gives one ensemble qubit per pixel.
+    gradient block on the main PCB); 0 gives one ensemble qubit per pixel.
 
     ``integration_shots``: N-shot lock-in averaging raises per-line
     SNR by sqrt(N), so dimmer lone-NV bins clear the ``min_snr`` bar and the

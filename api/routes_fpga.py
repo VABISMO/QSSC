@@ -89,7 +89,9 @@ _FPGA_PROTOCOL = [
              "pixel; the host runs decompose_odmr per column to count each "
              "pixel's resolved lines = its calibrated register width"},
     {"cmd": "READ_COMPASS", "args": "[n_avg]", "reply": "<B_nT> <heading°> <elev°> <sens_µT> <axes> / ERR",
-     "desc": "4-axis ODMR doublet fit → ambient B-vector + heading (compass_measure)"},
+     "desc": "4-axis ODMR doublet fit → ambient B-vector + heading (compass_measure; "
+             "sim/host-only verb — no RTL verb and no hardware wire form, /api/compass "
+             "runs compass_measure host-side in both modes)"},
     {"cmd": "READ_GYRO", "args": "T_ns", "reply": "<rate_dps> <noise_dps> <t2_µs> <grade> / ERR",
      "desc": "Ramsey π/2–T–π/2 → rotation rate (sim convenience verb; hardware = RUN_SEQUENCE + on-host fit, no RTL gyro verb)"},
     {"cmd": "READ_LOCKIN", "args": "ref_khz n_cycles",
@@ -102,6 +104,16 @@ _FPGA_PROTOCOL = [
      "desc": "board self-status: PLL lock, ADC busy, rail voltages, die temperature"},
     {"cmd": "RESET", "args": "—", "reply": "OK",
      "desc": "soft reset of the TLC5947 / ADF4351 / ADC peripheral state"},
+    {"cmd": "READ_LOCKINP", "args": "site n_samples prime_idx",
+     "reply": "<I> <Q> <n> / ERR",
+     "desc": "prime-period IQ lock-in (prime_idx 0–15 selects p = 2, 3, 5 … 53); "
+             "identical wire form in sim and hardware (RTL CMD_LOCKINP)"},
+    {"cmd": "SET_GRADIENT", "args": "code(0..4095)",
+     "reply": "OK / ERR",
+     "desc": "program the gradient-coil DAC (MCP4921); hardware sends "
+             "SET_GRADIENT <code>, sim mode feeds gradient_mhz_per_um into the "
+             "ODMR model (mode-branched in routes_calibration, never sent as a "
+             "string to the sim)"},
 ]
 _FPGA_VERBS = {p["cmd"] for p in _FPGA_PROTOCOL}
 

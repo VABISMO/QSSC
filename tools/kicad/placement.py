@@ -598,7 +598,7 @@ def build_emitter_driver():
 
 
 def build_gradient_board():
-    """EXTENDED MAIN board (qssc-grad): the base main board PLUS the field-gradient coil + DAC current driver.  Calls build_main_board() first so
+    """The published MAIN board (qssc): the base main board PLUS the field-gradient coil + DAC current driver.  Calls build_main_board() first so
     every base component (FPGA, emitter driver, RF, USB, power, die emitter face,
     BTB host) is present unchanged, then adds the 7 gradient parts in a free
     schematic block.  PCB placement is set in assign_pcb_positions_gradient().
@@ -878,7 +878,7 @@ def assign_pcb_positions():
 
 
 def assign_pcb_positions_gradient():
-    """PCB placement for the EXTENDED main board (qssc-grad): run the base main-
+    """PCB placement for the complete main board (base + gradient): run the base main-
     board placement first (so FPGA/die/emitter/RF/USB/power/BTB all land exactly
     as on the base board), then place the 7 gradient parts in free areas.
 

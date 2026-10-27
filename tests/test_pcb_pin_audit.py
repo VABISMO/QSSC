@@ -21,6 +21,8 @@ test encodes that. See ``memory/netlist-verified-per-datasheet``.
 """
 from __future__ import annotations
 
+import subprocess
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
@@ -110,6 +112,90 @@ def test_adf4351_nc_pads_have_no_rail():
     for n in ADF4351_NC:
         assert nets.get(n, "") not in rails, (
             f"ADF4351 pin {n} is on rail {nets.get(n)} -- unused diff out, should be NC")
+
+
+# ---- gradient (SET_GRADIENT) hardware, on the PUBLISHED main board ----------
+# The main board IS the extended build: MCP4921 DAC (Ugrad) driven by the
+# FPGA's 3-wire SPI from the south-row balls, LM358 servo (Udrv), MOSFET
+# (Qgrad) + sense (Rsense) into the Lgrad coil trace.  This is the exact gap
+# issue #172 covered: every verb the software exposes must have its hardware
+# on one of the two published boards.
+GRAD_PAD_NETS: dict[str, dict[str, str]] = {
+    # FPGA SPI balls (grad_en V7 deliberately absent: spare STATUS ball, NC)
+    "U1": {"V6": "grad_cs", "V9": "grad_sclk", "V12": "grad_mosi", "V7": ""},
+    # MCP4921: VDD(1,6)=+5V VREF(6), AVSS(5,7)=GND, SPI(2-4), VOUTA(8)
+    "Ugrad": {"1": "+5V", "2": "grad_cs", "3": "grad_sclk", "4": "grad_mosi",
+              "5": "GND", "6": "+5V", "7": "GND", "8": "GRAD_DAC_OUT"},
+    # LM358: amp A servo INA+/INA-/OUTA, amp B parked (INB+=GND, INB-=OUTB),
+    # V-(4)=GND V+(8)=+5V
+    "Udrv": {"1": "GRAD_GATE", "2": "GRAD_SENSE", "3": "GRAD_DAC_OUT",
+             "4": "GND", "5": "GND", "6": "GRAD_NFB", "7": "GRAD_NFB",
+             "8": "+5V"},
+    "Qgrad": {"1": "GRAD_GATE", "2": "GRAD_SENSE", "3": "GRAD_COIL_N"},
+    "Rgrad_feed": {"1": "+5V", "2": "GRAD_COIL_P"},
+    "Lgrad": {"1": "GRAD_COIL_P", "2": "GRAD_COIL_N"},
+    "Rsense": {"1": "GRAD_SENSE", "2": "GND"},
+    "C_grad1": {"1": "+5V", "2": "GND"},
+    "C_grad2": {"1": "+5V", "2": "GND"},
+}
+
+
+def test_main_gradient_pad_nets():
+    """Every gradient pad on the published main must carry its design net
+    (pad-level wiring; DRC alone cannot catch a pad left at no-net)."""
+    if not MAIN.exists():
+        pytest.skip(f"{MAIN} not present")
+    for ref, expected in GRAD_PAD_NETS.items():
+        nets = _pad_nets(MAIN, ref)
+        assert nets, f"{ref} (gradient block) not found on main board"
+        bad = {n: nets.get(n, "<missing>") for n, want in expected.items()
+               if nets.get(n) != want}
+        assert not bad, f"main {ref} gradient pin-net mismatches: {bad}"
+
+
+# Exact schematic node sets for the gradient chain (netlist export names the
+# sheet-local nets with a leading "/").
+GRAD_SCH_NETS: dict[str, set[tuple[str, str]]] = {
+    "/grad_cs": {("U1", "V6"), ("Ugrad", "2")},
+    "/grad_sclk": {("U1", "V9"), ("Ugrad", "3")},
+    "/grad_mosi": {("U1", "V12"), ("Ugrad", "4")},
+    "/GRAD_DAC_OUT": {("Ugrad", "8"), ("Udrv", "3")},
+    "/GRAD_GATE": {("Udrv", "1"), ("Qgrad", "1")},
+    "/GRAD_SENSE": {("Udrv", "2"), ("Qgrad", "2"), ("Rsense", "1")},
+    "/GRAD_NFB": {("Udrv", "6"), ("Udrv", "7")},
+    "/GRAD_COIL_P": {("Rgrad_feed", "2"), ("Lgrad", "1")},
+    "/GRAD_COIL_N": {("Lgrad", "2"), ("Qgrad", "3")},
+}
+
+
+def test_main_gradient_sch_netlist(tmp_path):
+    """Schematic source of truth: each gradient net joins EXACTLY its design
+    nodes (FPGA ball -> DAC -> servo -> coil).  The pad audit above proves
+    the shipped PCB; this proves the sheet the next regen regenerates from --
+    the original defect was single-node nets (Ugrad pins labelled, FPGA balls
+    not), which DRC never flags because a one-pad net has nothing to connect."""
+    sch = MAIN.with_suffix(".kicad_sch")
+    if not sch.exists():
+        pytest.skip(f"{sch} not present")
+    out = tmp_path / "grad_netlist.xml"
+    res = subprocess.run(
+        ["kicad-cli", "sch", "export", "netlist", "--format", "kicadxml",
+         "-o", str(out), str(sch)],
+        capture_output=True, text=True, check=False, timeout=600,
+    )
+    assert res.returncode == 0, f"kicad-cli netlist export failed:\n{res.stderr}"
+    root = ET.parse(out).getroot()
+    nets: dict[str, set[tuple[str, str]]] = {}
+    for n in root.find("nets"):
+        nets[n.get("name")] = {(x.get("ref"), x.get("pin"))
+                               for x in n.findall("node")}
+    for name, want in GRAD_SCH_NETS.items():
+        got = nets.get(name)
+        assert got == want, (
+            f"sch net {name}: {sorted(got or [])} != {sorted(want)}"
+        )
+    grad_en = sorted(nm for nm in nets if "grad_en" in nm.lower())
+    assert not grad_en, f"grad_en must stay NC (no net), found: {grad_en}"
 
 
 def test_main_chip_is_female_header_socket():

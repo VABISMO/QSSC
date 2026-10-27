@@ -168,7 +168,7 @@ def fpga_net_map(grad=False):
     nets ~204 of the 324 CSG324 pads -- all the ones that matter for power
     integrity, config boot, and the board's I/O.
 
-    grad=True (extended qssc-grad board only) also nets the 4 gradient-coil DAC pins (grad_cs/sclk/mosi/en) so they connect to Ugrad.
+    grad=True (the published main -- the complete board) also nets the gradient-coil DAC pins (grad_cs/sclk/mosi; grad_en stays a spare NC ball) so they connect to Ugrad.
     On the base board (grad=False) these stay spare/NC -> the base qssc.*
     files are byte-identical whether or not the gradient variant is built."""
     m = {}
@@ -185,6 +185,12 @@ def fpga_net_map(grad=False):
     }
     _GRAD_SIGS = {"grad_cs", "grad_sclk", "grad_mosi", "grad_en"}
     for net, ball in s["signals"].items():
+        if net == "grad_en":
+            # Spare STATUS ball: NC on EVERY board.  The schematic leaves the
+            # pin unlabelled, so naming the pad would create a phantom
+            # pad-only net (no copper anywhere) that the connectivity gate
+            # rightly reports as dangling -- KiCad's own sync would clear it.
+            continue
         if net in _GRAD_SIGS and not grad:
             continue                   # base board: grad pins stay spare/NC
         m[ball] = NET_ALIAS.get(net, net)
@@ -211,8 +217,8 @@ def fpga_pin_list(grad=False):
     grad=False builds the base symbol (qssc:XC7A35T_CSG324) used by the base
     board -- no gradient pins, byte-identical to the pre-variant generator
     output.  grad=True builds the extended symbol (qssc:XC7A35T_CSG324_GRAD)
-    used only by the qssc-grad board, adding the 4 gradient-coil
-    DAC pins (grad_cs/sclk/mosi/en) so the FPGA ball labels connect to Ugrad.
+    used by the published main, adding the gradient-coil
+    DAC pins (grad_cs/sclk/mosi; grad_en stays NC) so the FPGA ball labels connect to Ugrad.
     Both symbols share the same Xilinx_CSG324 footprint."""
     nm = fpga_net_map(grad=grad)
     left, right, top, bot = [], [], [], []
@@ -703,9 +709,10 @@ def authored_symbols():
     # (+ other inputs), the right the 4 em_SPI + control, so the body is tall.
     syms.append(custom_symbol_def("qssc", "XC7A35T_CSG324", "U", fpga_pin_list(),
                                   (-50.8, -55.0, 50.8, 55.0), value="XC7A35T-1CSG324C"))
-    # Extended qssc-grad variant: same FPGA, same footprint, PLUS the 4 gradient-coil DAC pins (grad_cs/sclk/mosi/en) drawn on the right column so
-    # the grad board's FPGA ball labels connect to Ugrad.  The base symbol above
-    # is unchanged (no grad pins) -> base qssc.* stays byte-identical.
+    # Extended variant (the published main board): same FPGA, same footprint,
+    # PLUS the gradient-coil DAC pins (grad_cs/sclk/mosi) drawn on the right
+    # column so the main's FPGA ball labels connect to Ugrad.  The base symbol
+    # above is unchanged (no grad pins) for callers that build the base variant.
     syms.append(custom_symbol_def("qssc", "XC7A35T_CSG324_GRAD", "U",
                                   fpga_pin_list(grad=True),
                                   (-50.8, -55.0, 50.8, 55.0), value="XC7A35T-1CSG324C"))

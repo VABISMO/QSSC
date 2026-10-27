@@ -17,10 +17,11 @@ through-silicon vias (TSVs)**, so each face is contacted by its own PCB:
     4× AD7616 ADC, contacting the die TOP (detector) face through the matching
     **`ChipSocket_2.54_DET` through-hole socket** (65 PTH pads + 4 NPTH, no
     paste).
-  - A **gradient variant** (main board + field-gradient coil driver: MCP4921
-    DAC → LM358 servo → IRLML2502 → coil) exists as **local work in progress
-    and is not published in this repository** — the two boards above are the
-    design of record; its BOM rows live under `grad` in `BOM.csv`.
+  - The **field-gradient coil driver** (MCP4921 DAC → LM358 servo → IRLML2502
+    → coil trace) is **part of the main board above** — the published main IS
+    the extended build (gradient block onboard, no third board), so every
+    `SET_GRADIENT` command has its hardware on a published board; its BOM rows
+    live under `grad` in `BOM.csv`.
   - **J12 board-to-board connector** (2×10, 2.54 mm) joins the two boards and
     carries the 9-wire AD7616 SPI + GND/+3V3/+5V.
 
@@ -485,20 +486,21 @@ photoluminescence intensity, sent as ASCII decimal, space-separated for
 
   All **19 verbs** are implemented in `fpga/rtl/command_parser.v`; an unknown
   verb, a missing argument or an out-of-range value answers `ERR`. Every reply
-  is one `
-`-terminated ASCII line (except `READ_DETECTORS`/`RUN_ALL_ODMR`,
-  which stream their samples first).
+  is one `\n`-terminated ASCII line (except `READ_DETECTORS`/`RUN_ALL_ODMR`,
+  which stream their samples first). Two further **sim/host convenience verbs**
+  (`READ_COMPASS`, `READ_GYRO`) have no RTL wire form; they are listed at the
+  end of the table and pinned by `tests/test_fpga_protocol_parity.py`.
   
   | Command | Action | Reply |
   |---|---|---|
   | `ID` | board-identity probe (the host sends it on open) | `QSSC v1` |
-  | `STATUS` | rails / PLL / ADC / die-temperature self-status | `PLL_LOCKED … VCC3V3_mv … TEMP_C …` |
+  | `STATUS` | PLL lock + ADC-busy flags, rail/temp report | `PLL_LOCKED <n> ADC_BUSY <0/1> VCC3V3_mv 3300 VCC5V_mv 4980 VCC12V_mv 12050 TEMP_C 25` — only `PLL_LOCKED` is **measured** (real ADF4351 readback); `VCC*_mv` are **nominal constants** (no rail-monitor ADC fitted) and `TEMP_C` is a **25 °C placeholder** (no XADC in this build) |
   | `RESET` | soft-reset TLC5947 / ADF4351 / ADC peripheral state | `OK` |
   | `DRIVE_EMITTER <index> <duration_ms>` | fire emitter `<index>` (0–63) at full grayscale | `OK / ERR` |
   | `SET_EMITTER <index> <level>` | arm one channel's 12-bit grayscale (0–4095) | `OK / ERR` |
   | `DRIVE_PATTERN <duration_ms>` | fire **all** armed channels in parallel | `OK / ERR` |
   | `CLEAR_EMITTERS` | disarm every channel (gs = 0) | `OK` |
-  | `APPLY_PULSE <qubit> <freq_khz> <amp> <duration_ns> <phase_mrad>` | program the ADF4351 carrier **and** gate the MW pulse for `duration_ns` | `OK / ERR` |
+  | `APPLY_PULSE <qubit> <freq_khz> <amp> <duration_ns> <phase_mrad>` | program the ADF4351 carrier **and** gate the MW pulse for `duration_ns` | `OK / ERR` | |
   | `READ_DETECTOR <site>` | digitise one detector channel (site 0–63) | `<0–65535> / ERR` |
   | `READ_DETECTORS` | snapshot all 64 channels in one parallel frame | `<sample> × 64` |
   | `CLEAR_DETECTORS` | ADC no-op (no counters to clear) | `OK` |
@@ -510,8 +512,20 @@ photoluminescence intensity, sent as ASCII decimal, space-separated for
   | `READ_LOCKIN <site> <n_cycles>` | self-timed on/off lock-in accumulation (n = 1–10000) | `<sum_on> <sum_off> <n_on> <n_off> / ERR` |
   | `READ_LOCKINP <site> <n_samples> <prime_idx>` | prime-period IQ lock-in (prime_idx 0–15 selects p = 2, 3, 5 … 53) | `<I> <Q> <n> / ERR` |
   | `SET_GRADIENT <code>` | program the gradient-coil DAC (MCP4921, 0–4095) | `OK / ERR` |
+  | `READ_COMPASS [n_avg]` | **sim/host only** — 4-axis ODMR doublet fit → ambient B-vector + heading (host `compass_measure`; no RTL verb, no wire form) | `<B_nT> …` / ERR |
+  | `READ_GYRO <T_ns>` | **sim/host only** — Ramsey π/2–T–π/2 → rotation rate (host fit; hardware composes `RUN_SEQUENCE` + on-host fit — no RTL gyro verb) | `<rate_dps> …` / ERR |
   | (unknown / malformed / out of range) | — | `ERR` |
-  
+
+  > **Sim-vs-FPGA reply difference on `APPLY_PULSE` (pinned by
+  > `tests/test_fpga_protocol_parity.py`).** The simulator rejects a drive
+  > farther than one ODMR linewidth from the site's resonance (`ERR`, plus its
+  > amp-range check); the FPGA is a dumb tuner — for in-range arguments it
+  > programs the ADF4351 anywhere in 2.2–4.4 GHz and answers `OK` regardless of
+  > resonance. The same call therefore differs *only* for off-resonance
+  > frequencies; every in-band sweep (`ODMR_SWEEP`, `RUN_ALL_ODMR`,
+  > `routes_calibration`) sends identical frequencies in both modes and is
+  > unaffected. Raw-UART users see each mode's documented behavior as-is.
+
   `freq_khz` is the desired RF output in kHz, e.g. `2870000` for 2.87 GHz (NV⁻) or
   `3460000` for 3.46 GHz (hBN V_B⁻). The `adf4351_ctrl` module computes INT/FRAC/MOD
   and the RF divider so the VCO stays in 2.2–4.4 GHz (see §6). `amp` (0–3) maps to
