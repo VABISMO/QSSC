@@ -13,6 +13,8 @@ whole ``router`` package imports from).
 """
 from __future__ import annotations
 
+import os
+
 import pcbnew
 
 from geom import (
@@ -23,6 +25,7 @@ from route_qssc_pcb import (  # noqa: F401 (some used only in RailTieMixin)
     RAIL_VIA_OFFSET_NM, RAIL_TRACK_NM, RAIL_TRACK_THIN_NM, RAIL_TRACK_THIN_MAX,
     DRILL_MIN_CENTER_NM, GRID_STEP_NM,
 )
+from .config import BGA_VIA_DIAM_NM, BGA_VIA_DRILL_NM
 
 # Geometry helpers under the names the original monolith used.
 _seg_dist2 = seg_dist2
@@ -201,7 +204,7 @@ class RailTieMixin:
     ``via_centers`` / ``tie_segs`` / ``straggler_obs``) that ``PlaneBuilder.run``
     populates before any board mutation."""
 
-    def _add_rail_pad_vias(self, netcode, rail_pads=None):
+    def _add_rail_pad_vias(self, netcode, rail_pads=None, micro_only=False):
         """For every SMD pad on this rail net (GND or +3V3) that is NOT on the BGA
         (the FPGA -- its plane balls get via-in-pad from route_signals._bga_fanout)
         and not a PTH pin, place one through-via so the surface pad reaches the
@@ -241,6 +244,7 @@ class RailTieMixin:
         sig_circles = self.sig_circles
         sig_segs = self.sig_segs
         sig_segs_fcu = self.sig_segs_fcu
+        sig_segs_in1 = self.sig_segs_in1
         via_centers = self.via_centers
         tie_segs = self.tie_segs
         via_r = VIA_DIAM_NM / 2
@@ -354,13 +358,211 @@ class RailTieMixin:
                     return False
             return True
 
+        def _micro_clears(vx, vy):
+            """Microvia at the BGA spec (0.20 mm / 0.10 mm laser drill,
+            F.Cu->In1) clear of copper on the ONLY two layers it spans: F.Cu
+            (pads / F tracks / other barrels) and In1 (the plane layer --
+            detector-bus tracks that ride the pour + barrels + holes). The
+            In3/In4/B.Cu signal-layer cage is irrelevant here: a single-
+            dielectric micro never touches those layers, which is exactly why
+            it is the only via type that can tie a plane pad walled in by the
+            detector bus."""
+            mr = BGA_VIA_DIAM_NM // 2
+            for ox, oy, hw, hh, onc, opth in pads:
+                if onc == netcode:
+                    continue
+                if _rect_dist2(vx, vy, ox, oy, hw, hh) < (mr + gap) ** 2:
+                    return False
+            for x1s, y1s, x2s, y2s, hw in sig_segs_fcu:
+                if _seg_dist2(vx, vy, x1s, y1s, x2s, y2s) < (mr + hw + gap) ** 2:
+                    return False
+            for x1s, y1s, x2s, y2s, hw in sig_segs_in1:
+                if _seg_dist2(vx, vy, x1s, y1s, x2s, y2s) < (mr + hw + gap) ** 2:
+                    return False
+            for cx, cy, cr in sig_circles:
+                if (vx - cx) ** 2 + (vy - cy) ** 2 < (mr + cr + gap) ** 2:
+                    return False
+            for hx, hy, hnc in via_centers:
+                if (vx - hx) ** 2 + (vy - hy) ** 2 < drill_min2:
+                    return False
+            return True
+
         dirs = ((1, 0), (-1, 0), (0, 1), (0, -1),
                 (1, 1), (1, -1), (-1, 1), (-1, -1))
         radii = (RAIL_VIA_OFFSET_NM, 800_000, 1_000_000, 1_200_000,
                  1_600_000, 2_000_000, 2_500_000, 3_000_000)
+
+        _fill_cache = {}
+        _clr_cache = {}
+
+        def _plane_fill(nc):
+            """The poured fill of nc's plane zone (None when absent/unfilled/
+            after the zone proxies degraded -- see the AttributeError guard).
+            Also caches the zone's local clearance for _pour_clear."""
+            if nc in _fill_cache:
+                return _fill_cache[nc]
+            fp = None
+            zclr = COPPER_GAP_NM
+            try:
+                zone = next((z for z in board.Zones()
+                             if z.GetNetCode() == nc), None)
+                if zone is not None:
+                    fp = zone.GetFilledPolysList(zone.GetFirstLayer())
+                    if fp is not None and fp.OutlineCount() == 0:
+                        fp = None
+                    try:
+                        zclr = int(zone.GetLocalClearance())
+                    except (AttributeError, TypeError, RuntimeError):
+                        zclr = COPPER_GAP_NM
+            except AttributeError:
+                fp = None
+            _fill_cache[nc] = fp
+            _clr_cache[nc] = zclr
+            return fp
+
+        def _pour_clear(nc, vx, vy):
+            """Would the plane pour produce copper at THIS spot (checked at
+            the zone's own clearance, i.e. the pour's fill model)? Used when
+            the spot has no fill polygon yet -- typically an island-removed
+            pocket (a fragment with no GND item gets dropped on every refill):
+            the moment the micro lands, island removal keeps the region (it
+            now contains a via) and the pour ties it. Only In1-side copper
+            constrains the pour: In1 tracks, barrel lands, drilled pads."""
+            zclr = _clr_cache.get(nc, COPPER_GAP_NM)
+            mr = BGA_VIA_DIAM_NM // 2
+            for ox, oy, hw, hh, onc, opth in pads:
+                if onc == nc:
+                    continue
+                if _rect_dist2(vx, vy, ox, oy, hw, hh) < (mr + zclr) ** 2:
+                    return False
+            for x1s, y1s, x2s, y2s, hw in sig_segs_in1:
+                if _seg_dist2(vx, vy, x1s, y1s, x2s, y2s) < (mr + hw + zclr) ** 2:
+                    return False
+            for cx, cy, cr in sig_circles:
+                if (vx - cx) ** 2 + (vy - cy) ** 2 < (mr + cr + zclr) ** 2:
+                    return False
+            return True
+
+        def _already_tied(px, py, psz_x, psz_y):
+            """A previous run's tie already serves this pad: the pad sits in
+            the plane fill, a same-net via lands on/next to it, or a same-net
+            trace ends inside it. Used by --micro-tie to leave finished work
+            untouched (it must never re-tie or duplicate)."""
+            fpolys = _plane_fill(netcode)
+            if fpolys is not None and fpolys.Contains(
+                    pcbnew.VECTOR2I(int(px), int(py))):
+                return True
+            hx = psz_x // 2 + 350_000
+            hy = psz_y // 2 + 350_000
+            for t in board.Tracks():
+                if t.GetNetCode() != netcode:
+                    continue
+                if t.GetClass() == "PCB_VIA":
+                    p = t.GetPosition()
+                    if abs(p.x - px) <= hx and abs(p.y - py) <= hy:
+                        return True
+                else:
+                    for e in (t.GetStart(), t.GetEnd()):
+                        if (abs(e.x - px) <= psz_x // 2
+                                and abs(e.y - py) <= psz_y // 2):
+                            return True
+            return False
+
+        def _micro_tie(px, py, psz_x, psz_y):
+            """Tie one plane pad with a microvia: in-pad positions first, then
+            OFFSET spots along the through-spiral's own radii/dirs (with an
+            F.Cu tie trace) -- an offset is what saves a caged TSSOP lead whose
+            plane fill does not reach under the pad itself. Every candidate
+            must clear F.Cu + In1 copper at the project gap and (when a pour
+            is loaded) land INSIDE the fill, so the tie is real rather than
+            merely dangling-clean. Returns True if a micro was placed."""
+            mi_r = BGA_VIA_DIAM_NM // 2
+            fpolys = _plane_fill(netcode)
+            has_fill = fpolys is not None
+            inset_x = max(0, psz_x // 2 - mi_r - 50_000)
+            inset_y = max(0, psz_y // 2 - mi_r - 50_000)
+            offs = [(0, 0)]
+            for k in range(1, int(inset_x // 30_000) + 1):
+                offs += [(k * 30_000, 0), (-k * 30_000, 0)]
+            for k in range(1, int(inset_y // 30_000) + 1):
+                offs += [(0, k * 30_000), (0, -k * 30_000)]
+            cands = [(px + dx, py + dy, False) for dx, dy in offs
+                     if abs(dx) <= inset_x and abs(dy) <= inset_y]
+            # fine 0.1 mm steps along the 8 dirs: the In1 vertical carves
+            # leave ~0.3-0.5 mm slivers of pour between them and the coarse
+            # through-spiral radii (0.4+ mm jumps) step right over them.
+            fine = [RAIL_VIA_OFFSET_NM + k * 100_000 for k in range(0, 25)]
+            for r in fine:
+                for dxn, dyn in dirs:
+                    cands.append((px + int(dxn * r), py + int(dyn * r), True))
+            # Rank landings: inside the MAIN fill fragment first (a micro in a
+            # stranded sliver would tie the pad to an island -- its pour region
+            # has no onward path -- which is exactly the failure this ordering
+            # exists to beat), then any already-poured spot, then not-yet-poured
+            # spots the pour would still reach (island-removed pockets that
+            # become connected the moment the micro anchors them).
+            main_idx = -1
+            if has_fill:
+                best_a = -1
+                for i in range(fpolys.OutlineCount()):
+                    a = abs(fpolys.Outline(i).Area())
+                    if a > best_a:
+                        best_a, main_idx = a, i
+
+            def _frag_of(x_, y_):
+                if not has_fill:
+                    return -2
+                v_ = pcbnew.VECTOR2I(int(x_), int(y_))
+                if not fpolys.Contains(v_):
+                    return -1
+                for i in range(fpolys.OutlineCount()):
+                    if fpolys.Contains(v_, i):
+                        return i
+                return -1
+
+            scored = []
+            for vx_, vy_, nt_ in cands:
+                fr = _frag_of(vx_, vy_)
+                rank = (0 if fr == main_idx and main_idx >= 0
+                        else 1 if fr >= 0 else 2)
+                scored.append((rank, vx_, vy_, nt_, fr))
+            scored.sort(key=lambda s: s[0])
+            for _rank, vx, vy, needs_trace, fr in scored:
+                if not _micro_clears(vx, vy):
+                    continue
+                if has_fill and fr == -1 and not _pour_clear(netcode, vx, vy):
+                    continue
+                if needs_trace and not _trace_clears(px, py, vx, vy, px, py):
+                    continue
+                v = pcbnew.PCB_VIA(board)
+                v.SetPosition(pcbnew.VECTOR2I(int(vx), int(vy)))
+                v.SetNetCode(netcode)
+                v.SetViaType(pcbnew.VIATYPE_MICROVIA)
+                v.SetDrill(BGA_VIA_DRILL_NM)
+                v.SetWidth(BGA_VIA_DIAM_NM)
+                ls = pcbnew.LSET()
+                ls.AddLayer(pcbnew.F_Cu)
+                ls.AddLayer(pcbnew.In1_Cu)
+                v.SetLayerSet(ls)
+                board.Add(v)
+                vias.append(v)
+                via_centers.append((vx, vy, netcode))
+                if needs_trace:
+                    t = pcbnew.PCB_TRACK(board)
+                    t.SetStart(pcbnew.VECTOR2I(int(px), int(py)))
+                    t.SetEnd(pcbnew.VECTOR2I(int(vx), int(vy)))
+                    t.SetLayer(pcbnew.F_Cu)
+                    t.SetWidth(this_trk_w)
+                    t.SetNetCode(netcode)
+                    board.Add(t)
+                    tie_segs.append((px, py, vx, vy, netcode, track_hw))
+                return True
+            return False
+
         vias = []
         skipped = 0
         vip = 0
+        micro = 0
         for (px, py, attrib, psz_x, psz_y) in rail_pads.get(netcode, []):
             if attrib == pcbnew.PAD_ATTRIB_PTH:
                 continue
@@ -378,6 +580,17 @@ class RailTieMixin:
             else:
                 track_hw = RAIL_TRACK_NM / 2
                 this_trk_w = RAIL_TRACK_NM
+            if micro_only:
+                # --micro-tie completion mode: non-destructive -- a pad an
+                # existing tie already serves is left alone; only loose pads
+                # get the micro fallback (which may need this_trk_w for the
+                # offset tie, hence the width selection above). No through
+                # candidates, no stripping, no zone rebuild in this mode.
+                if _already_tied(px, py, psz_x, psz_y):
+                    continue
+                if _micro_tie(px, py, psz_x, psz_y):
+                    micro += 1
+                continue
             placed = False
             # Via-in-pad for a large pad (centre exposed-pad / big connector
             # lug): a 0.6 mm via centred in a >= VIP_MIN_NM pad clears its own
@@ -436,12 +649,27 @@ class RailTieMixin:
                         break
                     if placed:
                         break
+            if not placed and netcode == self.gnd and (
+                    micro_only or os.environ.get("QSSC_RAIL_MICRO")):
+                # HDI microvia fallback (see _micro_tie): in-pad first, then
+                # offset-with-tie along the through-spiral radii. Saves a plane
+                # pad caged so tightly no THROUGH site exists within 3 mm (a
+                # TIA TSSOP GND lead walled by the detector bus: the In3 bands
+                # make every through via in the whole field illegal) -- a micro
+                # spans only F.Cu..In1, so the signal-layer cage cannot block
+                # it. Landing gated on the poured fill when one is loaded.
+                if _micro_tie(px, py, psz_x, psz_y):
+                    placed = True
+                    micro += 1
             if not placed:
                 skipped += 1
         if skipped:
             print(f"  rail-pad via: {len(vias)} placed ({vip} via-in-pad), "
                   f"{skipped} SMD pads could not be tied "
                   f"(no clear via site within 3 mm)")
+        if micro:
+            print(f"  rail-pad microvia-in-pad: {micro} placed "
+                  f"(F.Cu->In1 0.20/0.10, QSSC_RAIL_MICRO fallback)")
         return vias
 
     def _add_stitching_vias(self):

@@ -1115,10 +1115,28 @@ headlessly:
   persist as live stubs).
 - **DRC of the committed board.** `kicad-cli pcb drc` on the committed
   `qssc.kicad_pcb` *in its project* reports **0 violations / 0 unconnected / 0
-  footprint errors**. (Unrouted nets are DRC-green because `unconnected_items`
-  is demoted to `ignore` in the project — partial routing is a documented
-  state, not a hidden failure. Always DRC the board in its project directory,
-  not the `.kicad_pcb` in isolation: DRC'ing it alone uses default severities.)
+  footprint errors** with `unconnected_items` at **`error`** — the severity
+  the project used to demote to `ignore` was promoted (2026-10 audit) and the
+  board now meets it for real: every gap the ignore-era hid (12 on the main
+  board) was closed through the repo's own toolchain (see "Closing the audit
+  gaps" below). Always DRC the board in its project directory, not the
+  `.kicad_pcb` in isolation: DRC'ing it alone uses default severities.
+- **Closing the audit gaps (2026-10-27) — repo toolchain only.** The 12 main
+  gaps (10 shredded-plane islands, `+5V_RF`, `VBUS_USB`) were closed by running
+  the repo chain to completion: `route_qssc_pcb` re-poured with the new
+  `QSSC_ZONE_CLEARANCE_NM` / `QSSC_ZONE_MIN_WIDTH_NM` knobs (0.10/0.10 mm —
+  dense-neck pours that stop the plane shredding) plus the rail tool's new
+  `QSSC_RAIL_MICRO` / `--micro-tie` in-pad microvia fallback (0.20/0.10 F.Cu→In1,
+  the BGA fanout's own via spec), then repeated `close_residuals` passes
+  (zone-aware clustering, via-bridge endpoints). The closer needed four real
+  bug fixes to reach 0 DRC: `IsOnLayer()` instead of the numeric layer-span
+  test (inner-layer tracks never saw through-vias), hole-to-hole spacing for
+  same-net drills, copper-free NPTH pads modelled as holes instead of copper
+  (the USB-C peg sealed corridors DRC allows), and endpoint clamping for
+  board-edge pads (the USB-C SMT row centres outside the routing grid, so
+  every A* touching it silently returned None). FreeRouting remains abandoned
+  for incremental finishing: its DSN model reports ~170 phantom unrouted items
+  on an already-routed board and its re-fanout rewrites everything.
 
 > **Status — what IS done (re-verified 2026-09-04):**
 > - **Schematic:** `kicad-cli sch erc` → **0 errors** (625 warnings: 587
@@ -1182,9 +1200,10 @@ headlessly:
 >   FPGA→TLC5947 ties, the 64 `DET_IN{i}`/`DET_TIA{i}` analog fanout-to-TIA ties,
 >   the 64 `emitter_cat{i}` TLC5947-OUT→die-cathode ties + `EM_ANODE`, the USB
 >   diff pair, the interior BGA signal balls (`SPI_*`, `TCK`, `CONF_*`), and
->   the status/reference lines. They are left **deliberately unrouted**
->   (`unconnected_items` demoted to `ignore`), not force-routed, then closed by
->   FreeRouting (see the FreeRouting pipeline below).
+>   the status/reference lines. They were left **deliberately unrouted** in the
+>   ignore era and were closed later through the repo's own closers (see
+>   "Closing the audit gaps" above); `unconnected_items` is `error` now and the
+>   committed main board passes at 0.
 > - **FreeRouting pipeline (headless, resource-capped):** although `kicad-cli`
 >   has no DSN/SES I/O, the **`pcbnew` Python API** does —
 >   `pcbnew.ExportSpecctraDSN(board, dsn)` + `pcbnew.ImportSpecctraSES(board,
@@ -1202,15 +1221,18 @@ headlessly:
 >   (the 0.30 mm width encodes the intent over the 0.15 mm F.Cu→In1.Cu
 >   dielectric, but final verification is interactive); silkscreen/assembly
 >   cleanup; the stacking height for the two-board sandwich.
-> - **`unconnected_items` is deliberately `ignore` — and why that is deliberate,
->   not a cover.** Promoting it to `error` reports many unconnected items, but
->   those are almost entirely **same-net items joined only through an inner
->   plane** (e.g. two FPGA GND balls 0.8 mm apart on F.Cu, both reaching the
->   In1.Cu GND plane through their in-pad microvias — electrically one node, but
->   KiCad's unconnected-items check flags the missing F.Cu copper between the
->   F.Cu islands). For a plane-based design this is inherent noise, not a real
->   disconnection; the **real connectivity bar is the per-IC power/ground audit
->   above + DRC 0 violations**, both met.
+> - **`unconnected_items` is `error` — promoted from `ignore` in the 2026-10
+>   audit, and both boards are held to it.** The old rationale (plane-joined
+>   same-net items reading as gaps) does not survive the check: with severity
+>   `error` the committed **main board reports 0 unconnected / 0 violations**
+>   (all 12 ignore-era gaps closed by the repo chain — see "Closing the audit
+>   gaps" above), and the **head reports 0 violations / 2 unconnected**: the
+>   two `TLV9004` TIA GND pins `UT12.11`/`UT13.11`, boxed on every layer by the
+>   detector bus (In3 horizontals + In1 verticals + F.Cu `DET_REF` rails, F11b)
+>   so no track or via in the toolchain's vocabulary escapes them — closing
+>   those two needs the sanctioned bus/placement reorder, not more routing.
+>   The per-IC power/ground audit above remains the complementary bar; DRC 0
+>   violations is met by both boards.
 
 Consistent with the README design-status note, the FPGA RTL and these two PCBs are
 **design artefacts** (synthesised / placed-and-netted, routed first-pass +
@@ -1596,9 +1618,11 @@ close the last splits, so the "solid" GND plane is perforated by non-GND tracks.
 | head  | ~3658 mm                    | 93           | — |
 
 This is a **signal-integrity / return-current quality issue, NOT a
-fabricability blocker** — both boards are DRC-clean (0 errors / 0 unconnected /
-0 shorts) and inside the ALLPCB HDI envelope, so they fab and assemble exactly
-as routed. The cost is return-path inductance on the RF and high-speed SPI nets
+fabricability blocker** — both boards are DRC-clean (0 violations / 0 shorts)
+and inside the ALLPCB HDI envelope, so they fab and assemble exactly as
+routed; the main board is fully connected (0 unconnected) and the head has 2
+unconnected (the boxed TIA GND pins — this same bus slotting is what boxes
+them). The cost is return-path inductance on the RF and high-speed SPI nets
 whose reference plane is now slotted.
 
 - **Disposition: document, do not re-route now.** Re-pulling those nets off

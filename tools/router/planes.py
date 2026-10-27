@@ -15,6 +15,8 @@ imports from), preserving the existing import direction and avoiding a cycle.
 """
 from __future__ import annotations
 
+import os
+
 import pcbnew
 
 from route_qssc_pcb import IN1_CU, track_width_nm, VIP_MAX_NM
@@ -123,7 +125,16 @@ def _add_gnd_or_pwr_zone(board, layer, netcode, bbox):
     # dense via fields -- two routing vias <0.35 mm apart can't keep a 0.5 mm
     # pullback on both sides, so the plane edges trip clearance DRC). 0.20 mm is
     # twice the 0.10 mm board min_clearance and pours cleanly around 0.20 mm vias.
-    z.SetLocalClearance(200000)
+    # QSSC_ZONE_CLEARANCE_NM / QSSC_ZONE_MIN_WIDTH_NM: pour overrides for dense
+    # boards (defaults keep the 0.20 mm above and KiCad's 0.25 mm min width).
+    # A 0.15 mm clearance (>= every netclass on both boards) plus a 0.10 mm min
+    # width lets 0.10 mm necks survive between dense via fields, so the plane
+    # stops shredding into stranded fragments (DRC unconnected Zone/Zone pairs).
+    # DRC (unconnected=error) remains the judge.
+    z.SetLocalClearance(int(os.environ.get("QSSC_ZONE_CLEARANCE_NM", 200000)))
+    _minw = os.environ.get("QSSC_ZONE_MIN_WIDTH_NM")
+    if _minw:
+        z.SetMinThickness(int(_minw))
     # solid (full) pad connection -- these are plane/flood pours, so we want a
     # direct copper connection, not thermal-relief spokes that can starve at
     # edge/adjacent pads and trip the starved_thermal DRC rule.
@@ -184,10 +195,15 @@ def _signal_obstacles(board):
     layers, so the via check must see inner-layer tracks too). ``segs_fcu`` is
     the F.Cu-only subset: the F.Cu tie trace only touches F.Cu, so checking it
     against an In3.Cu track it physically cannot reach would falsely block it --
-    the trace check uses segs_fcu, the via check uses segs."""
+    the trace check uses segs_fcu, the via check uses segs. ``segs_in1`` is the
+    In1.Cu-only subset: the GND plane's own layer -- a microvia-in-pad fallback
+    landing on In1 must clear detector-bus tracks riding the plane layer, while
+    In3/In4/B.Cu tracks (which a F.Cu->In1 micro never touches) must NOT block
+    it."""
     circles = []
     segs = []
     segs_fcu = []
+    segs_in1 = []
     for t in board.Tracks():
         nm = t.GetNetname()
         # Skip GND AND +3V3: both are this router's domain (the two planes it
@@ -210,7 +226,9 @@ def _signal_obstacles(board):
             segs.append(seg)
             if t.GetLayer() == pcbnew.F_Cu:
                 segs_fcu.append(seg)
-    return circles, segs, segs_fcu
+            if t.GetLayer() == pcbnew.In1_Cu:
+                segs_in1.append(seg)
+    return circles, segs, segs_fcu, segs_in1
 
 
 def _surviving_via_centers(board):
@@ -256,6 +274,7 @@ class PlaneBuilder(RailTieMixin):
         self.sig_circles = []
         self.sig_segs = []
         self.sig_segs_fcu = []
+        self.sig_segs_in1 = []
         self.bga_xy = set()
         self.rail_pads = {}
         # Mutable lists threaded through every via-placement pass: each pass
@@ -279,7 +298,8 @@ class PlaneBuilder(RailTieMixin):
         # _clear_routed, so the via grids + rail-pad vias must be built from
         # obstacles snapshotted up front. _clear_routed keeps signal copper and
         # the small BGA VIPs (only removes zones + its own wide GND/+3V3 vias).
-        self.sig_circles, self.sig_segs, self.sig_segs_fcu = _signal_obstacles(board)
+        (self.sig_circles, self.sig_segs,
+         self.sig_segs_fcu, self.sig_segs_in1) = _signal_obstacles(board)
         self.bga_xy, self.rail_pads = _capture_rail_pads(board)
         # Surviving via centres (BGA VIPs + signal routing vias) snapshotted
         # BEFORE _clear_routed -- used for drill-to-drill spacing. Mutable list

@@ -96,6 +96,12 @@ if not dsn.exists():
 # import only adds signal tracks and never touches plane connectivity. This is
 # the standard Specctra flow -- power/ground are poured, never autorouted.
 PLANE_NETS = {"GND", "+3V3"}
+# FR_KEEP_PINS: comma/space list of plane-net pin refs (REF-PAD, e.g.
+# "UAD0-27 UT13-4") that must NOT be truncated out of the DSN. These are the
+# stranded plane-net pads DRC still reports: keeping exactly their pins gives
+# the autorouter a tiny requirement set (pad -> the net's existing copper)
+# instead of the ~400 pin-pairs the truncation exists to avoid.
+FR_KEEP_PINS = {s for s in os.environ.get("FR_KEEP_PINS", "").replace(",", " ").split() if s}
 
 def _truncate_plane_net_pins(dsn_path, plane_nets):
     """For each poured-plane net, keep its (net NAME ...) block (so pre-routed
@@ -158,11 +164,12 @@ def _truncate_plane_net_pins(dsn_path, plane_nets):
                 mp += 1
             pins_block = block[ip:mp]              # "(pins C58-1 U3-4 ... )"
             pins = re.findall(r"\b[A-Za-z0-9_.@+-]+-[A-Za-z0-9@]+\b", pins_block)
-            if len(pins) <= 1:
+            keep = [pins[0]] + [p for p in pins[1:] if p in FR_KEEP_PINS]
+            if len(keep) >= len(pins):
                 k = net_section.find(pat, k + 1)
                 continue
-            new_pins = f"(pins {pins[0]})"
-            dropped += len(pins) - 1
+            new_pins = f"(pins {' '.join(keep)})"
+            dropped += len(pins) - len(keep)
             new_block = block[:ip] + new_pins + block[mp:]
             net_section = net_section[:k] + new_block + net_section[m:]
             k = net_section.find(pat, k + len(new_block))
