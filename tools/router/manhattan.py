@@ -598,24 +598,41 @@ class ResidualCloser:
     def _try_via_bridge(self, ax, ay, bx, by, alay, blay, nc):
         """a(on alay)->via_a->straight on an inner layer->via_b->b(on blay)."""
         inner_choices = [L for L in self.SIG_LAYERS if L not in (alay, blay)] or [pcbnew.In3_Cu]
-        va = self._find_via_spot(ax, ay, nc)
+
+        def _own_via(x, y):
+            """Reuse a same-net via AT this endpoint (a cluster's own via): its
+            lands on every layer already connect there, so no new via and no
+            stub are needed -- crucial in a pocket where a second via cannot
+            physically fit (0.56 mm channel; hole-to-hole), and it lets a
+            stranded group route FROM its existing escape point."""
+            for t in self.board.GetTracks():
+                if t.GetClass() != "PCB_VIA" or t.GetNetCode() != nc:
+                    continue
+                p = t.GetPosition()
+                if (p.x - x) ** 2 + (p.y - y) ** 2 <= 50_000 ** 2:
+                    return (p.x, p.y)
+            return None
+        ea = _own_via(ax, ay)
+        eb = _own_via(bx, by)
+        va = ea if ea else self._find_via_spot(ax, ay, nc)
         if va is None:
             return None
-        vb = self._find_via_spot(bx, by, nc)
+        vb = eb if eb else self._find_via_spot(bx, by, nc)
         if vb is None:
             return None
-        segs = []; vias = [va, vb]
+        segs = []; vias = ([] if ea else [va]) + ([] if eb else [vb])
         # a pad -> via_a on the pad's own layer. A straight stub can cross a
         # neighbouring pin's escape track even when a weaving path exists, so
         # fall back to the same 2-D A* the flat attempts use.
-        s0 = (ax, ay, va[0], va[1], alay)
-        if self._trk_clear(*s0, nc):
-            segs.append(s0)
-        else:
-            p0 = self._try_astar2d(ax, ay, va[0], va[1], alay, nc)
-            if not p0:
-                return None
-            segs.extend(p0)
+        if not ea:
+            s0 = (ax, ay, va[0], va[1], alay)
+            if self._trk_clear(*s0, nc):
+                segs.append(s0)
+            else:
+                p0 = self._try_astar2d(ax, ay, va[0], va[1], alay, nc)
+                if not p0:
+                    return None
+                segs.extend(p0)
         for inner in inner_choices:
             s1 = (va[0], va[1], vb[0], vb[1], inner)
             if self._trk_clear(*s1, nc):
@@ -632,14 +649,15 @@ class ResidualCloser:
                     break
             else:
                 return None
-        s2 = (vb[0], vb[1], bx, by, blay)
-        if self._trk_clear(*s2, nc):
-            segs.append(s2)
-        else:
-            p2 = self._try_astar2d(vb[0], vb[1], bx, by, blay, nc)
-            if not p2:
-                return None
-            segs.extend(p2)
+        if not eb:
+            s2 = (vb[0], vb[1], bx, by, blay)
+            if self._trk_clear(*s2, nc):
+                segs.append(s2)
+            else:
+                p2 = self._try_astar2d(vb[0], vb[1], bx, by, blay, nc)
+                if not p2:
+                    return None
+                segs.extend(p2)
         return (segs, vias)
 
     def _shared_signal_layers(self, la, lb):

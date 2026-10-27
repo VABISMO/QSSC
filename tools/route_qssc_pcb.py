@@ -261,10 +261,30 @@ def _micro_tie_only(pcb_path) -> int:
     (pb.sig_circles, pb.sig_segs,
      pb.sig_segs_fcu, pb.sig_segs_in1) = _signal_obstacles(board)
     pb.bga_xy, pb.rail_pads = _capture_rail_pads(board)
-    pb.via_centers = _surviving_via_centers(board)
+    # Non-destructive mode: NOTHING is stripped here, so every via on the
+    # board -- including the wide GND/+3V3 rail/stitch vias that
+    # _surviving_via_centers excludes (it assumes _clear_routed removes them)
+    # -- is live copper the spacing checks must see. Blindness to them let the
+    # dense stitch land 0.14 mm from +3V3 rail vias; KiCad's save-time net
+    # propagation then re-netted the contact to +3V3 (hole_to_hole /
+    # clearance violations on phantom nets).
+    pb.via_centers = [(t.GetPosition().x, t.GetPosition().y, t.GetNetCode())
+                      for t in board.Tracks()
+                      if isinstance(t, pcbnew.PCB_VIA)]
     pb.tie_segs = []
     placed = pb._add_rail_pad_vias(gnd, rail_pads=pb.rail_pads,
                                    micro_only=True)
+    stitch = []
+    if os.environ.get("QSSC_STITCH_STEP"):
+        # Opt-in dense stitching in the same non-destructive pass: each via
+        # anchors its pour region against island removal on the next refill --
+        # empty pockets the detector bus chopped off are deleted without a GND
+        # item in them, and a pocket that survives can chain onward to the main
+        # flood. The grid reuses the full clearance/hole checks against the
+        # copper already on the board.
+        stitch = pb._add_stitching_vias()
+        print(f"  micro-tie stitching: {len(stitch)} via(s) placed "
+              f"(QSSC_STITCH_STEP={os.environ['QSSC_STITCH_STEP']})")
     print(f"  micro-tie: {len(placed)} microvia(s) placed "
           f"(F.Cu->In1 0.20/0.10, non-destructive)")
     board.SetModified()

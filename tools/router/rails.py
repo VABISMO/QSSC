@@ -259,9 +259,15 @@ class RailTieMixin:
         #   via vs pad rect  : via_r + gap            (rect already is the copper edge)
         #   via vs signal via: via_r + cr + gap       (both lands)
         #   via vs signal trk: via_r + hw + gap
-        #   via vs diff via  : 2*via_r + gap          (centre-to-centre)
+        #   via vs diff via  : via_r + 0.3 + gap      (centre-to-centre; the
+        #                       other via may be the 0.6 mm rail via -- via
+        #                       centres carry no radius, so assume the board's
+        #                       largest via. At the default 0.6 mm via this is
+        #                       exactly the old 2*via_r + gap, so default
+        #                       placement is unchanged; only an env-densed smaller
+        #                       via stops under-spacing against 0.6 mm vias)
         via_pad2 = (via_r + gap) ** 2
-        via_via2 = (2 * via_r + gap) ** 2
+        via_via2 = (via_r + 300_000 + gap) ** 2
         track_hw = RAIL_TRACK_NM / 2
         # via_centers is the shared, mutable via-spacing list threaded through
         # run(): it starts with the surviving (pre-_clear_routed) via centres and
@@ -698,9 +704,80 @@ class RailTieMixin:
         via_r = VIA_DIAM_NM / 2
         gap = COPPER_GAP_NM
         via_pad2 = (via_r + gap) ** 2
-        via_via2 = (2 * via_r + gap) ** 2  # 0.76 mm: diff-net copper clearance
+        # diff-net via copper: assume the other via is the 0.6 mm rail via
+        # (via_centers carry no radius; equals the old 2*via_r+gap at the
+        # default 0.6 mm size, so the default grid is unchanged).
+        via_via2 = (via_r + 300_000 + gap) ** 2
         drill_min2 = DRILL_MIN_CENTER_NM ** 2
         margin = 2_000_000  # 2 mm in from the board edge
+        # QSSC_STITCH_STEP: stitching grid pitch (default 10 mm, unchanged). A
+        # finer pitch anchors pour pockets the island-removal rule would
+        # otherwise delete on refill -- the mechanism that reconnects a plane
+        # shredded by the detector bus: an empty fill region with no GND item
+        # is dropped, so every pocket a via lands in survives and can chain
+        # onward to the main flood.
+        step = int(os.environ.get("QSSC_STITCH_STEP", GRID_STEP_NM))
+        dense = bool(os.environ.get("QSSC_STITCH_STEP"))
+        _fpolys = _zclr = None
+        _main_idx = -1
+        if dense:
+            # Dense-mode gate (the default 10 mm grid is untouched): only anchor
+            # pockets the POUR would actually reach. A spot the pour can never
+            # reach would dangle (and, being in a copper-crowded area, invites
+            # the hole/clearance conflicts the first dense run showed); a spot
+            # the fill already covers needs no anchor at all. The gate is what
+            # makes a fine grid pick the island-removal victims -- empty but
+            # pourable pockets -- instead of every clear-looking point.
+            try:
+                _z = next((zz for zz in board.Zones()
+                           if zz.GetNetCode() == netcode), None)
+                if _z is not None:
+                    _fpolys = _z.GetFilledPolysList(_z.GetFirstLayer())
+                    if _fpolys is not None and _fpolys.OutlineCount() == 0:
+                        _fpolys = None
+                    if _fpolys is not None:
+                        _best = -1
+                        for _i in range(_fpolys.OutlineCount()):
+                            _a = abs(_fpolys.Outline(_i).Area())
+                            if _a > _best:
+                                _best, _main_idx = _a, _i
+                    try:
+                        _zclr = int(_z.GetLocalClearance())
+                    except (AttributeError, TypeError, RuntimeError):
+                        _zclr = gap
+            except AttributeError:
+                _fpolys = None
+
+        def _pour_reaches(vx, vy):
+            """Dense-mode placement gate. Three cases:
+            - fill in the MAIN fragment -> skip (an anchor there is redundant);
+            - fill in a NON-MAIN (stranded) fragment -> PLACE: a through via
+              is exactly what that boxed group lacks -- it escapes the plane
+              cage onto the signal layers the closer can then route out;
+            - no fill yet -> place only if the pour would reach (island-removal
+              victims are pourable-but-empty; copper-crowded spots are not)."""
+            if _fpolys is not None:
+                v = pcbnew.VECTOR2I(int(vx), int(vy))
+                if _fpolys.Contains(v):
+                    if _main_idx >= 0 and any(
+                            _fpolys.Contains(v, i) and i != _main_idx
+                            for i in range(_fpolys.OutlineCount())):
+                        return True          # stranded fragment: escape via wanted
+                    return False             # main flood: already served
+            zclr = _zclr if _zclr is not None else gap
+            mr = VIA_DIAM_NM // 2
+            for x1s, y1s, x2s, y2s, hw in self.sig_segs_in1:
+                if _seg_dist2(vx, vy, x1s, y1s, x2s, y2s) < (mr + hw + zclr) ** 2:
+                    return False
+            for cx, cy, cr in sig_circles:
+                if (vx - cx) ** 2 + (vy - cy) ** 2 < (mr + cr + zclr) ** 2:
+                    return False
+            for ox, oy, hw, hh, onc, opth in pads:
+                if onc == netcode or not opth:
+                    continue        # same net is welcome; SMD pads miss In1
+                if _rect_dist2(vx, vy, ox, oy, hw, hh) < (mr + zclr) ** 2:
+                    return False
+            return True
         x0 = bbox.GetX() + margin
         y0 = bbox.GetY() + margin
         x1 = bbox.GetX() + bbox.GetWidth() - margin
@@ -763,6 +840,8 @@ class RailTieMixin:
                         elif d2 < via_via2:                   # diff net: copper
                             clear = False
                             break
+                if clear and dense and not _pour_reaches(x, y):
+                    clear = False
                 if clear:
                     v = pcbnew.PCB_VIA(board)
                     v.SetPosition(pcbnew.VECTOR2I(int(x), int(y)))
@@ -773,8 +852,8 @@ class RailTieMixin:
                     board.Add(v)
                     vias.append(v)
                     all_via_centers.append((x, y, netcode))
-                y += GRID_STEP_NM
-            x += GRID_STEP_NM
+                y += step
+            x += step
         return vias
 
     def _tie_stragglers_to_rail(self, netcode, via_positions, placed_vias=None):

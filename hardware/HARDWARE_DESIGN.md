@@ -1224,14 +1224,17 @@ headlessly:
 > - **`unconnected_items` is `error` — promoted from `ignore` in the 2026-10
 >   audit, and both boards are held to it.** The old rationale (plane-joined
 >   same-net items reading as gaps) does not survive the check: with severity
->   `error` the committed **main board reports 0 unconnected / 0 violations**
->   (all 12 ignore-era gaps closed by the repo chain — see "Closing the audit
->   gaps" above), and the **head reports 0 violations / 2 unconnected**: the
->   two `TLV9004` TIA GND pins `UT12.11`/`UT13.11`, boxed on every layer by the
->   detector bus (In3 horizontals + In1 verticals + F.Cu `DET_REF` rails, F11b)
->   so no track or via in the toolchain's vocabulary escapes them — closing
->   those two needs the sanctioned bus/placement reorder, not more routing.
->   The per-IC power/ground audit above remains the complementary bar; DRC 0
+>   `error` **both committed boards report 0 unconnected / 0 violations** —
+>   the main board's 12 ignore-era gaps and the head's 2 were closed by the
+>   repo chain (see "Closing the audit gaps" above). The head's two `TLV9004`
+>   TIA GND pins `UT12.11`/`UT13.11` — boxed on every layer by the detector bus
+>   (In3 horizontals + In1 verticals + F.Cu `DET_REF` rails, F11b), so no
+>   track or plain via could escape — were completed non-destructively:
+>   `route_qssc_pcb.py --micro-tie` tied them into the In1 pour with in-pad
+>   microvias, the opt-in `QSSC_STITCH_STEP` dense stitch dropped an escape
+>   through-via into the sealed channel (outside the In3 band), and
+>   `close_residuals` routed the channel group out on the signal layers. The
+>   per-IC power/ground audit above remains the complementary bar; DRC 0
 >   violations is met by both boards.
 
 Consistent with the README design-status note, the FPGA RTL and these two PCBs are
@@ -1620,10 +1623,11 @@ close the last splits, so the "solid" GND plane is perforated by non-GND tracks.
 This is a **signal-integrity / return-current quality issue, NOT a
 fabricability blocker** — both boards are DRC-clean (0 violations / 0 shorts)
 and inside the ALLPCB HDI envelope, so they fab and assemble exactly as
-routed; the main board is fully connected (0 unconnected) and the head has 2
-unconnected (the boxed TIA GND pins — this same bus slotting is what boxes
-them). The cost is return-path inductance on the RF and high-speed SPI nets
-whose reference plane is now slotted.
+routed, and both boards are fully connected (0 unconnected): the head's two
+boxed TIA GND pins were closed by the §15 micro-tie/stitch/escape pass even
+though this same bus slotting is what boxed them. The cost is return-path
+inductance on the RF and high-speed SPI nets whose reference plane is now
+slotted.
 
 - **Disposition: document, do not re-route now.** Re-pulling those nets off
   In1.Cu means re-running the router, which risks the current 0-split / 0-DRC
