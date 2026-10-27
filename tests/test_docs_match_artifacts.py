@@ -109,7 +109,7 @@ def test_die_sockets_match_the_docs():
                  if p.GetLayerSet().Contains(pcbnew.F_Paste)
                  or p.GetLayerSet().Contains(pcbnew.B_Paste)]
         assert not paste, f"{rel}: the socket must carry no paste ({len(paste)} do)"
-    hd = HARDWARE_DESIGN_TEXT = HARDWARE_MD.read_text(encoding="utf-8")
+    hd = HARDWARE_MD.read_text(encoding="utf-8")
     ds = DATASHEETS_MD.read_text(encoding="utf-8")
     for doc, name in ((hd, "ChipSocket_2.54_EM"), (ds, "ChipSocket_2.54_EM"),
                       (hd, "ChipSocket_2.54_DET"), (ds, "ChipSocket_2.54_DET")):

@@ -246,7 +246,7 @@ def _micro_tie_only(pcb_path) -> int:
     """
     from router.planes import (
         _find_netcode, _pad_obstacle, _signal_obstacles,
-        _capture_rail_pads, _surviving_via_centers, PlaneBuilder,
+        _capture_rail_pads, PlaneBuilder,
     )
     board = pcbnew.LoadBoard(str(pcb_path))
     gnd = _find_netcode(board, "GND")
