@@ -173,20 +173,20 @@ proxy), see `qubits_per_pixel` in the calibration response.
 - **Tests** — `tests/test_field_gradient_register.py` (8 tests incl.
   measured-line override of width + grid, per-pixel qubit array, and the
   no-gradient predicted-1 / array-consistency case).
-  - **HW-fits (qssc-grad variant)** ✅ — the **gradient coil + DAC exist**
-    on the `qssc-grad` extended variant, which is **local work in progress and
-    not published in this repository** (a 1.5 mm PCB copper trace coil +
+  - **HW-fits (on the published main board)** ✅ — the **gradient coil + DAC
+    exist on the main board itself** (the published main IS the extended
+    build — gradient block onboard, no third board: a 1.5 mm PCB copper trace coil +
   MCP4921 12-bit SPI DAC + LM358 servo + IRLML2502 MOSFET + Rsense,
-  fully routed, DRC 0/0/0; `tools/gen_qssc_kicad.py build_gradient_board()`).
+  fully routed, DRC 0/0/0; `tools/gen_qssc_kicad.py build_gradient_board()`
+  emits this complete board as `qssc.*`).
   The `SET_GRADIENT <code>` RTL verb (`fpga/rtl/command_parser.v` CMD_GRADIENT
   → `dac_ctrl` SPI master) programs the coil current; `ODMR_SWEEP` then
   counts the resolved lines = the register width at that gradient. **RESET
   clears `grad_dac_value` to 0** (G1 fix): the load pulse is deferred to the
   `rst_hold==0` cycle so `dac_ctrl` (synchronously reset by `peri_rst`)
   actually latches the zero — verified by iverilog testbench scenario 20.
-  The base `qssc.*` board has no gradient coil; the variant is opt-in.
-- **needs-HW** — none on the `qssc-grad` variant (coil + DAC + verb all
-  present). The base board remains without a coil.
+- **needs-HW** — none: coil + DAC + verb are all present on the published
+  main board.
   counts the resolved lines = the register width at that gradient. This
   is the single biggest 300 K qubit-count lever (0.5 → 2.0 MHz/µm
   lifts a pixel from ~19 to ~55 measured qubits; see Invention 13/14
@@ -550,9 +550,8 @@ the measured frequency grid (`register_line_freqs_hz`), not a hardcoded 10. A
 bulk microdiamond collapses to one line → ensemble mode is recommended; a
 resolved multi-line ODMR → register mode. `qubit = address not NV count`. The
 field gradient that spreads the lines (Invention 5) is **not** a panel mode —
-  it is a hardware add-on built on the opt-in `qssc-grad` board variant (coil +
-  DAC + `SET_GRADIENT` verb), not the base board — the variant's board files are
-  local-only and not published in this repository.
+  it is hardware on the published main board (coil + DAC +
+  `SET_GRADIENT` verb, gradient block onboard — no third board).
 
 
 ## What to touch on the PCB for the needs-HW inventions
@@ -563,9 +562,10 @@ field gradient that spreads the lines (Invention 5) is **not** a panel mode —
    (MW+RF SWAP timing) in `fpga/rtl/command_parser.v`. The same RF channel
    addresses the ¹³C cluster (Inv 10), the nitrogen nuclear spin (Inv 11),
    and the QEC ancilla (Inv 18).
-2. **Gradient coil (invention 5):** ✅ **DONE** — on the PCB (`qssc-grad`,
-   merged PR #79 `d422a2b`). `dac_ctrl.v` + the `SET_GRADIENT` verb drive the
-   coil; `ODMR_SWEEP` measures the per-pixel line count = the register width.
+2. **Gradient coil (invention 5):** ✅ **DONE** — on the published main PCB
+   (gradient block onboard: MCP4921 + servo + coil trace). `dac_ctrl.v` +
+   the `SET_GRADIENT` verb drive the coil; `ODMR_SWEEP` measures the
+   per-pixel line count = the register width.
    Also enables Invention 19 (tensor-gradient imaging).
 3. **Per-pixel MW (invention 4, independent circuits):** either fast
    ADF4351 hopping for frequency-multiplexed per-pixel gates, or 64 small
@@ -582,10 +582,10 @@ field gradient that spreads the lines (Invention 5) is **not** a panel mode —
    and the biggest single-shot readout-fidelity lever.
 
 Of the three, only inventions 3 (RF ¹³C channel, #75) and 4's independent-circuit
-per-pixel MW (#77) still need a PCB addition; the gradient coil (5) is built on
-the `qssc-grad` variant (#76 resolved). The simulator carries the physics for
+per-pixel MW (#77) still need a PCB addition; the gradient coil (5) is built
+into the published main board (#76 resolved). The simulator carries the physics for
 the remaining two. The field gradient is **not** a `pixel_mode` panel switch —
-it is a hardware add-on on the opt-in variant board, not the base board.
+it is hardware on the main board itself.
 Inventions 7, 9, 13, 14, 15, 16, 19 need **no PCB respin** — they are host-side
 or use hardware already on the board (the Inv 5 gradient coil, the existing
 `RUN_ALL_ODMR` / `RUN_SEQUENCE` verbs). Inventions 8 and 17 are cryo-only.

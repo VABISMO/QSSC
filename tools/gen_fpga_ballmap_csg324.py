@@ -258,7 +258,7 @@ def main() -> None:
     # (I2C_SDA/I2C_SCL are GONE: the MCP4725 threshold DAC was removed with the
     # comparator/photon-counter chain -- the AD7616 range is HW-pin-strapped.)
     # The gradient variant adds 4 gradient-coil DAC pins (grad_cs/sclk/mosi/en) for the
-    # MCP4921 field-gradient current driver on the extended qssc-grad board.
+    # MCP4921 field-gradient current driver on the main board (gradient block).
     # The 3 SPI balls + grad_en are pinned to the FPGA SOUTH edge (row V, the
     # 0.8 mm-pitch BGA's bottom row) -- clear of the base board's SPI/adc
     # inner-layer escape band (y 56-60, x 99-138) which boxed in the earlier

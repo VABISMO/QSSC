@@ -22,6 +22,7 @@ them deliberately, on plain parsed artifacts (no kicad-cli, no pcbnew needed):
 """
 
 import csv
+import hashlib
 import re
 import subprocess
 from functools import cache
@@ -473,9 +474,23 @@ def test_critical_nets_present(name):
 
 @pytest.mark.parametrize("name", ["head", "main"])
 def test_no_grad_nets_off_grad_board(name):
+    """The gradient block lives ON the published main board (the main IS the
+    extended build -- there is no third board), so main must carry every
+    design gradient net while the head stays grad-free.  grad_en is the spare
+    STATUS ball: NC by design (no net, netless pad), hence excluded from the
+    required set."""
     have = {n for _, n in _board_nets(name) if n}
-    leaked = sorted(n for n in have if "grad" in n.lower())
-    assert not leaked, f"{name} must not carry gradient-board nets: {leaked}"
+    grad_found = {n for n in have if "grad" in n.lower()}
+    if name == "head":
+        assert not grad_found, (
+            f"head must not carry gradient-board nets: {sorted(grad_found)}"
+        )
+        return
+    required = GRAD_NETS - {"grad_en"}
+    missing = sorted(required - have)
+    assert not missing, f"main must carry the gradient nets: {missing}"
+    unexpected = sorted(grad_found - required)
+    assert not unexpected, f"main carries unexpected grad nets: {unexpected}"
 
 
 @pytest.mark.parametrize("name", sorted(BOARDS))
@@ -660,14 +675,74 @@ def test_bom_crlf_consistent():
 # ------------------------------------------------- historical preservation
 
 
+# ---- main sheet, post-gradient-merge contract -------------------------------
+# The published main board IS the extended build now (gradient block onboard,
+# no third board).  That merge re-baselined hardware/pcb/qssc.kicad_sch: the
+# USB-C-repair baseline at BASELINE no longer describes it byte-for-byte, and
+# the generator recreates every node with a fresh uuid4, so the uuid-preservation
+# contract below cannot hold for main either.  The replacement contract keeps
+# the same strictness:
+#   * the sheet content is frozen by digest (any edit must consciously
+#     re-pin MAIN_SHEET_SHA256 here -- same contract style as the ERC counts);
+#   * every symbol present at the repair baseline still exists;
+#   * exactly the 8 gradient parts were added, nothing removed;
+#   * no shared symbol drifted, except U1's documented swap to the _GRAD
+#     symbol variant (it gains the grad_cs/sclk/mosi balls).
+MAIN_SHEET_SHA256 = (
+    "f993c4007de5e455e5c8c12a085207b1818c8a3332fc9ab8321d9caa761641b6"
+)
+MAIN_GRAD_REFS = {"Ugrad", "Udrv", "Qgrad", "Rgrad_feed", "Lgrad", "Rsense",
+                  "C_grad1", "C_grad2"}
+
+
+def _main_sheet_contract():
+    """Digest + merge-delta guarantees for the re-baselined main sheet."""
+    digest = hashlib.sha256(_raw(BOARDS["main"][0])).hexdigest()
+    assert digest == MAIN_SHEET_SHA256, (
+        "main sheet changed without re-pinning MAIN_SHEET_SHA256 "
+        f"(pinned {MAIN_SHEET_SHA256[:12]}..., now {digest[:12]}...)"
+    )
+    before = _baseline_instances("main")
+    after = _sheet_instances("main")
+    refs_before = {i["ref"] for i in before}
+    refs_after = {i["ref"] for i in after}
+    gone = sorted(refs_before - refs_after)
+    assert not gone, f"main: baseline symbols disappeared: {gone}"
+    added = refs_after - refs_before
+    assert added == MAIN_GRAD_REFS, (
+        f"main: expected exactly the 8 gradient parts added, got {sorted(added)}"
+    )
+    by_ref_b = {i["ref"]: i for i in before}
+    by_ref_a = {i["ref"]: i for i in after}
+    drifted = []
+    for r in sorted(refs_before):
+        b, a = by_ref_b[r], by_ref_a[r]
+        same_geom = all(b[k] == a[k] for k in ("x", "y", "value", "footprint"))
+        if (b["lib_id"], b["x"], b["y"], b["value"], b["footprint"]) == (
+            a["lib_id"], a["x"], a["y"], a["value"], a["footprint"]
+        ):
+            continue
+        if (r == "U1" and same_geom and b["lib_id"] == "qssc:XC7A35T_CSG324"
+                and a["lib_id"] == "qssc:XC7A35T_CSG324_GRAD"):
+            continue        # documented: U1 gains the gradient signal balls
+        drifted.append(r)
+    assert not drifted, f"main: symbols drifted vs baseline: {drifted}"
+
+
 @pytest.mark.skipif(
     _baseline_blob("hardware/pcb/qssc.kicad_sch") is None,
     reason=f"baseline {BASELINE} not present in this clone",
 )
-@pytest.mark.parametrize("name", ["main", "grad"])
+@pytest.mark.parametrize(
+    "name", ["main"] + (["grad"] if "grad" in BOARDS else [])
+)
 def test_repair_preserved_symbols(name):
     """Everything about every symbol except the 8 added no_connect markers
-    must be byte-for-byte identical to the baseline."""
+    must be byte-for-byte identical to the baseline.  main was re-baselined
+    by the gradient merge -- see MAIN_SHEET_SHA256 / _main_sheet_contract."""
+    if name == "main":
+        _main_sheet_contract()
+        return
     before = _baseline_instances(name)
     after = _sheet_instances(name)
     refs_before = sorted(i["ref"] for i in before)

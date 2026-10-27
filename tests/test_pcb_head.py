@@ -238,9 +238,19 @@ def test_head_drc_zero_violations(tmp_path):
     shutil.copy(PRO, dst_pro)
 
     out = tmp_path / "drc.json"
+    # --refill-zones only exists on newer kicad-cli builds; on KiCad 9 the
+    # flag is rejected outright and DRC judges the stored fill instead --
+    # which is exactly what every other PCB gate in this repo does (the
+    # shipped fill is part of the artifact under test).
+    help_text = subprocess.run(
+        ["kicad-cli", "pcb", "drc", "--help"],
+        capture_output=True, text=True, check=False,
+    ).stdout
+    drc_cmd = ["kicad-cli", "pcb", "drc"]
+    if "--refill-zones" in help_text:
+        drc_cmd.append("--refill-zones")
     res = subprocess.run(
-        ["kicad-cli", "pcb", "drc", "--refill-zones", "--format", "json",
-         "--output", str(out), str(dst_pcb)],
+        drc_cmd + ["--format", "json", "--output", str(out), str(dst_pcb)],
         capture_output=True, text=True, check=False,
     )
     assert res.returncode == 0, f"kicad-cli pcb drc failed:\n{res.stderr}"

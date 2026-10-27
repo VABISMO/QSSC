@@ -490,9 +490,11 @@ MAIN_CFG = dict(out_stem="qssc", title="QSSC Main Control Board", project="qssc"
                 # enough to clear the 0.15 mm board-default netclass, so it keeps
                 # the 0.15 mm design-intent value (netclass > 0.10 mm board min).
                 analog_clearance=0.15)
-# Extended main board (qssc-grad): identical outline / layer stack to MAIN, plus
-# the gradient coil + DAC driver.  The coil trace + 7 SMD parts fit
-# inside the existing 150x118 outline (left of the die socket), so no resize.
+# Legacy extended-main config: the separate qssc-grad board is NO LONGER
+# emitted (the published main IS the extended build -- build_gradient_board()
+# emits with MAIN_CFG); kept only because the legacy shim re-exports EXT_CFG.
+# Outline/layer stack were always identical to MAIN (the coil trace + gradient
+# SMD parts fit inside the 150x118 outline), so no geometry is lost.
 EXT_CFG = dict(out_stem="qssc-grad", title="QSSC Main Control Board + Gradient",
                project="qssc-grad", board_w=150, board_h=118,
                layer_stack=LAYER_STACK, stack_up=STACK_UP,

@@ -210,6 +210,22 @@ class SimulatedFPGA:
         parts = command.split()
         head = parts[0]
         try:
+            if head == "ID":
+                # Board-identity probe (the host sends it on open): answer the
+                # same line as the RTL so a string-level client works unchanged
+                # against either mode.
+                return "QSSC v1"
+            if head == "SET_GRADIENT":
+                # SET_GRADIENT <code>: reply parity with the RTL (0..4095 -> OK).
+                # The sim's gradient physics is fed by routes_calibration
+                # directly (mode-branched), so here we only record the code.
+                if len(parts) < 2:
+                    return "ERR"
+                code = int(parts[1])
+                if not 0 <= code <= 4095:
+                    return "ERR"
+                self.last_gradient_code = code
+                return "OK"
             if head == "DRIVE_EMITTER":
                 # DRIVE_EMITTER <index> <duration_ms>: pump ONE emitter at full
                 # (gs=4095) for duration_ms. Matches the firmware emitter_array

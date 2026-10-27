@@ -302,7 +302,7 @@ class QSSCBackend(BackendV2):
           N = len(register_line_freqs_hz) and the NVs sit on that measured
           frequency grid; otherwise N defaults to ``n_nv_per_pixel`` on the
           synthetic 6 MHz grid (a sim-only fallback, not a physics assertion).
-          A field gradient (HW-fits on the qssc-grad variant) caps
+          A field gradient (HW-fits: gradient block on the main board) caps
           N at the resolvable count (Case D: separation > linewidth).
         * ``"ensemble"``: the 64 chip pixels ARE the circuit qubits (one
           ensemble qubit per pixel -- the bulk-microdiamond collapse to a single

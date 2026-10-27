@@ -119,7 +119,7 @@ def assign_sch_positions():
                   for p in ("UT", "UAD", "Cua", "CuaB", "Cud", "Cur", "Crio",
                             "Crgc", "Crgd", "Rf", "Cf", "Cut",
                             "UE", "Riref", "Cem"))]
-    # Gradient parts (qssc-grad board only): gridded into the same
+    # Gradient parts (the complete main board): gridded into the same
     # x>=420 free area so they cannot collide with the x<410 RF/USB/FPGA content.
     grad_refs = ("Ugrad", "Udrv", "Qgrad", "Rsense", "Rgrad_feed", "Lgrad",
                  "C_grad1", "C_grad2")

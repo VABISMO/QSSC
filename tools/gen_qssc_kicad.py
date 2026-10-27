@@ -4,9 +4,9 @@
 Outputs (relative to repo root):
   hardware/pcb/qssc.kicad_sch   - ERC-clean flat schematic (nets by label + power syms)
   hardware/pcb/qssc.kicad_pcb   - DRC-clean, placed + netted 6-layer board
+                                 (complete main: base + field-gradient coil + DAC)
   hardware/pcb/qssc-lib.kicad_sym - custom symbol library (FPGA, GVA-84, AMS1117, +5V_RF)
   hardware/pcb/qssc.kicad_pro   - project with net classes + design rules
-  hardware/pcb/qssc-grad.*      - extended main board (+ field-gradient coil + DAC)
   hardware/pcb/chip_module.*    - detector head board (TIA + AD7616 + die detector face)
 
 KiCad 8 ``kicad-cli`` cannot export Specctra DSN or import SES (GUI-only), so

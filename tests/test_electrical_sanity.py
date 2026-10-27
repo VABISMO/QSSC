@@ -75,7 +75,10 @@ def _need_grad():
 # changes (or this mini-parser rots) the counts below shift and these gates
 # fail instead of silently scanning nothing.
 BOARD_INVENTORY = {
-    "main": {"nets": 137, "fps": 126, "pads": 1019},
+    # main = base board + the gradient block (the published main IS the
+    # extended build): 134 fps / 1048 pads matches the reviewed grad board,
+    # minus the phantom grad_en net (spare ball, netless pad -- pruned on save).
+    "main": {"nets": 146, "fps": 134, "pads": 1048},
     "grad": {"nets": 147, "fps": 134, "pads": 1048},
     "head": {"nets": 159, "fps": 201, "pads": 991},
 }
@@ -280,6 +283,8 @@ _IC_RAILS: dict = {
         "REG1": {"+5V", "+3V3"},                 # AMS1117-3.3
         "REG2": {"+5V", "+1V8"},                 # AMS1117-1.8
         "REG3": {"+5V", "+1V0"},                 # AP2127K-1.0
+        "Ugrad": {"+5V"},                        # MCP4921 (+ VREF on +5V)
+        "Udrv": {"+5V"},                         # LM358 (pad 4, swapped pad)
     },
     "grad": {
         "U1": {"+3V3", "+1V8", "+1V0"},
@@ -306,7 +311,7 @@ RAILESS_IC = {"main": ("U5",), "grad": ("U5",), "head": ()}
 
 EXPECTED_IC_REFS = {
     "main": {"U1", "U3", "U5", "U8", "UE0", "UE1", "UE2", "Uchip", "Y1",
-             "REG1", "REG2", "REG3"},
+             "REG1", "REG2", "REG3", "Ugrad", "Udrv"},
     "grad": {"U1", "U3", "U5", "U8", "UE0", "UE1", "UE2", "Uchip", "Y1",
              "REG1", "REG2", "REG3", "Ugrad", "Udrv"},
     "head": {"Uchip"} | {f"UT{i}" for i in range(16)}
@@ -429,7 +434,8 @@ _PWR_CHAINS = {
     "main": {"F1": {"+5V_IN", "+5V"},                # fuse
              "F2": {"+12V_EMIT_IN", "+12V_EMIT"},     # 1A PTC
              "FB1": {"+5V", "+5V_RF"},               # ferrite into RF rail
-             "L2": {"+5V_RF", "RF_AMP_OUT"}},        # MMIC bias-tee
+             "L2": {"+5V_RF", "RF_AMP_OUT"},         # MMIC bias-tee
+             "Lgrad": {"GRAD_COIL_P", "GRAD_COIL_N"}},   # gradient coil trace
     "grad": {"F1": {"+5V_IN", "+5V"}, "F2": {"+12V_EMIT_IN", "+12V_EMIT"},
              "FB1": {"+5V", "+5V_RF"}, "L2": {"+5V_RF", "RF_AMP_OUT"},
              "Lgrad": {"GRAD_COIL_P", "GRAD_COIL_N"}},

@@ -75,6 +75,15 @@ SCHEMATICS = {
 ENV_COSMETIC_CLASSES = {"footprint_link_issues", "endpoint_off_grid"}
 SEMANTIC_CLASSES = {"isolated_pin_label", "pin_to_pin"}
 
+# KiCad 9 reports the single-connection-label class as `label_dangling`;
+# KiCad 10.0.6 (the version SEMANTIC_WARNING_COUNTS was pinned on) calls it
+# `isolated_pin_label`.  Same violation -- a label whose net carries exactly
+# one connection (mod_sync's single-ball export on main, the two spare labels
+# on the legacy grad sheet) -- different wire name.  Normalise before the
+# unknown-class check so the gate judges sheet content, not the installed
+# KiCad's vocabulary; on KiCad 10+ the alias never matches (no-op).
+KICAD9_CLASS_ALIASES = {"label_dangling": "isolated_pin_label"}
+
 # Exact per-class warning counts for the semantic classes, measured at
 # gate-creation time (KiCad 10.0.6) and re-measured after the branch's
 # schematic repair (8 NC markers on J10's unused USB-C SuperSpeed pins moved
@@ -122,6 +131,10 @@ def test_sch_erc_gate(name: str, path: Path, tmp_path):
     )
 
     by_class = Counter(v.get("type") for v in violations)
+    normalised = Counter()
+    for cls, n in by_class.items():
+        normalised[KICAD9_CLASS_ALIASES.get(cls, cls)] += n
+    by_class = normalised
     allowed = ENV_COSMETIC_CLASSES | SEMANTIC_CLASSES
     unknown = {t: n for t, n in by_class.items() if t not in allowed}
     assert not unknown, (

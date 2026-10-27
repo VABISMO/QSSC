@@ -3405,7 +3405,7 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 13.97 180)
+				(at 50.8 13.34 180)
 				(length 2.54)
 				(name "refclk_25m"
 					(effects
@@ -3423,7 +3423,7 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 12.7 180)
+				(at 50.8 12.07 180)
 				(length 2.54)
 				(name "UART_TX"
 					(effects
@@ -3441,7 +3441,7 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 11.43 180)
+				(at 50.8 10.8 180)
 				(length 2.54)
 				(name "SPI_CLK"
 					(effects
@@ -3459,7 +3459,7 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 10.16 180)
+				(at 50.8 9.53 180)
 				(length 2.54)
 				(name "TDO"
 					(effects
@@ -3477,7 +3477,7 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 8.89 180)
+				(at 50.8 8.26 180)
 				(length 2.54)
 				(name "SPI_CCLK"
 					(effects
@@ -3495,7 +3495,7 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 7.62 180)
+				(at 50.8 6.99 180)
 				(length 2.54)
 				(name "SPI_DATA"
 					(effects
@@ -3513,7 +3513,7 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 6.35 180)
+				(at 50.8 5.72 180)
 				(length 2.54)
 				(name "SPI_LE"
 					(effects
@@ -3531,7 +3531,7 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 5.08 180)
+				(at 50.8 4.45 180)
 				(length 2.54)
 				(name "mod_sync"
 					(effects
@@ -3549,7 +3549,7 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 3.81 180)
+				(at 50.8 3.18 180)
 				(length 2.54)
 				(name "SPI_D0"
 					(effects
@@ -3567,7 +3567,7 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 2.54 180)
+				(at 50.8 1.91 180)
 				(length 2.54)
 				(name "SPI_D1"
 					(effects
@@ -3585,7 +3585,7 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 1.27 180)
+				(at 50.8 0.64 180)
 				(length 2.54)
 				(name "mw_gate"
 					(effects
@@ -3603,7 +3603,7 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 0.0 180)
+				(at 50.8 -0.63 180)
 				(length 2.54)
 				(name "SPI_CS"
 					(effects
@@ -3621,7 +3621,7 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -1.27 180)
+				(at 50.8 -1.9 180)
 				(length 2.54)
 				(name "SPI_D2"
 					(effects
@@ -3639,25 +3639,7 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -2.54 180)
-				(length 2.54)
-				(name "grad_cs"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "M1"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin bidirectional line
-				(at 50.8 -3.81 180)
+				(at 50.8 -3.18 180)
 				(length 2.54)
 				(name "SPI_D3"
 					(effects
@@ -3675,25 +3657,7 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -5.08 180)
-				(length 2.54)
-				(name "grad_sclk"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "N1"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin bidirectional line
-				(at 50.8 -6.35 180)
+				(at 50.8 -4.45 180)
 				(length 2.54)
 				(name "CONF_DONE"
 					(effects
@@ -3711,43 +3675,7 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -7.62 180)
-				(length 2.54)
-				(name "grad_mosi"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "R1"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin bidirectional line
-				(at 50.8 -8.89 180)
-				(length 2.54)
-				(name "grad_en"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(number "T1"
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-			)
-			(pin bidirectional line
-				(at 50.8 -10.16 180)
+				(at 50.8 -5.71 180)
 				(length 2.54)
 				(name "em_sclk"
 					(effects
@@ -3765,7 +3693,25 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -11.43 180)
+				(at 50.8 -6.98 180)
+				(length 2.54)
+				(name "grad_mosi"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "V12"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -8.25 180)
 				(length 2.54)
 				(name "em_sin"
 					(effects
@@ -3783,7 +3729,7 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -12.7 180)
+				(at 50.8 -9.52 180)
 				(length 2.54)
 				(name "em_xlat"
 					(effects
@@ -3801,7 +3747,7 @@
 				)
 			)
 			(pin bidirectional line
-				(at 50.8 -13.97 180)
+				(at 50.8 -10.79 180)
 				(length 2.54)
 				(name "em_blank"
 					(effects
@@ -3811,6 +3757,42 @@
 					)
 				)
 				(number "V5"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -12.06 180)
+				(length 2.54)
+				(name "grad_cs"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "V6"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+			)
+			(pin bidirectional line
+				(at 50.8 -13.34 180)
+				(length 2.54)
+				(name "grad_sclk"
+					(effects
+						(font
+							(size 1.27 1.27)
+						)
+					)
+				)
+				(number "V9"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -13641,7 +13623,7 @@
 			(pin power_in line
 				(at 0 -7.62 90)
 				(length 2.54)
-				(name "V-"
+				(name "VCC"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -13713,7 +13695,7 @@
 			(pin power_in line
 				(at 0 7.62 270)
 				(length 2.54)
-				(name "V+"
+				(name "GND"
 					(effects
 						(font
 							(size 1.27 1.27)

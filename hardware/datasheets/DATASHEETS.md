@@ -413,17 +413,17 @@ a different mechanism (the die is **removable**):
 
 ---
 
-## qssc-grad extended variant — gradient coil + DAC (Invention 5)
+## Gradient coil + DAC on the main board — Invention 5
 
-> **Local variant:** the `qssc-grad` board files are work in progress and are
-> **not published in this repository** — only the two sandwich boards above
-> are. Its BOM rows stay under `grad` in `BOM.csv` for local validation.
+> **On the published main board:** the field-gradient block ships as part of
+> `qssc.kicad_*` itself (the main IS the extended build — no third board);
+> its BOM rows stay under `grad` in `BOM.csv`.
 
-The `qssc-grad` board is the **main board + an Invention 5 field-gradient
-coil and its current driver** — a separate extended variant generated from
+The gradient block is the **main board + an Invention 5 field-gradient
+coil and its current driver** — generated from
 the same `tools/gen_qssc_kicad.py` (`build_gradient_board()` calls
-`build_main_board(grad=True)` then adds the 7 parts below).  The base
-`qssc.*` board is unchanged (0 grad nets, ERC/DRC identical).  The gradient
+`build_main_board(grad=True)` then adds the 7 parts below; it emits the
+complete main).  The gradient
 is the **gate** that makes per-NV frequency addressing work at 300 K: the
 design target is one datasheet linewidth (5 MHz) of separation per addressable
 NV across the 200 µm pixel, so an N-line register needs ~N·5 MHz = N·0.18 mT
