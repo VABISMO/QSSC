@@ -27,6 +27,7 @@ RTL = ROOT / "fpga" / "rtl" / "command_parser.v"
 HARDWARE_MD = ROOT / "hardware" / "HARDWARE_DESIGN.md"
 ROUTES_FPGA = ROOT / "api" / "routes_fpga.py"
 SIMULATOR = ROOT / "qssc" / "simulator.py"
+FRONTEND_PROTOCOL = ROOT / "frontend" / "src" / "constants.js"
 
 SIM_ONLY = {"READ_COMPASS", "READ_GYRO"}
 
@@ -108,6 +109,28 @@ def test_api_protocol_table_is_docs_plus_sim_verbs():
     assert api == wire | SIM_ONLY, (
         f"API table mismatch: missing={sorted((wire | SIM_ONLY) - api)}, "
         f"unexpected={sorted(api - (wire | SIM_ONLY))}")
+
+
+def _frontend_verbs() -> set[str]:
+    """The `cmd:` entries of the UI's FALLBACK_PROTOCOL (constants.js)."""
+    src = FRONTEND_PROTOCOL.read_text(encoding="utf-8")
+    return set(re.findall(r"cmd: '([A-Z_0-9]+)'", src))
+
+
+def test_frontend_fallback_protocol_matches_api_table():
+    """The UI's FALLBACK_PROTOCOL is a hand copy of the served API table.
+
+    It is what the FPGA tab shows when /api/fpga/info is down or stale (the
+    live list only wins on length), and it had already drifted: ID,
+    READ_LOCKINP, RUN_ALL_ODMR and SET_GRADIENT were missing -- so degraded
+    mode hid exactly the newer verbs, including the gradient command this
+    repository's hardware work is about. The copy stays pinned both ways.
+    """
+    front = _frontend_verbs()
+    api = _api_verbs()
+    assert front == api, (
+        f"frontend FALLBACK_PROTOCOL missing: {sorted(api - front)}; "
+        f"unexpected: {sorted(front - api)}")
 
 
 def test_sim_send_command_surface_matches_api_table():

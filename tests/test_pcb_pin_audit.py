@@ -271,3 +271,68 @@ def test_head_tlv9004_supply_ground():
         assert nets, f"UT{j} not found on head board"
         assert nets.get("4") == "+3V3", f"UT{j} V+ (pin4) -> {nets.get('4')}"
         assert nets.get("11") == "GND", f"UT{j} V- (pin11) -> {nets.get('11')}"
+
+
+# ---------------------------------------------------------------------------
+# FULL schematic <-> board net sync.
+# The other gates pin refdes sets and a few hand-chosen nets, but nothing
+# asserted that EVERY exported netlist node lands on a board pad carrying the
+# SAME net (and vice versa) -- a pad bound to the wrong net, consistently
+# enough to dodge DRC's short/unconnected checks, was invisible. Audited
+# clean by hand during the round-2 audit (2026-10); this pins it forever.
+def test_sch_pcb_net_sync(tmp_path):
+    if not MAIN.exists():
+        pytest.skip(f"{MAIN} not present")
+    sch = MAIN.with_suffix(".kicad_sch")
+    out = tmp_path / "sync_netlist.xml"
+    res = subprocess.run(
+        ["kicad-cli", "sch", "export", "netlist", "--format", "kicadxml",
+         "-o", str(out), str(sch)],
+        capture_output=True, text=True, check=False, timeout=600,
+    )
+    assert res.returncode == 0, f"kicad-cli netlist export failed:\n{res.stderr}"
+
+    # (ref, pin) -> net. KiCad's synthetic `unconnected-(...)` names mean the
+    # sheet deliberately leaves the pin floating -> normalise to "" (a netless
+    # board pad, which is what the pcb carries for those).
+    sch_map: dict[tuple[str, str], str] = {}
+    for n in ET.parse(out).getroot().find("nets"):
+        name = (n.get("name") or "").lstrip("/")
+        if name.startswith("unconnected-("):
+            name = ""
+        for x in n.findall("node"):
+            sch_map[(x.get("ref"), x.get("pin"))] = name
+
+    board = pcbnew.LoadBoard(str(MAIN))
+    pcb_map: dict[tuple[str, str], str] = {}
+    for fp in board.GetFootprints():
+        for p in fp.Pads():
+            pcb_map[(fp.GetReference(), p.GetNumber())] = p.GetNetname()
+
+    sch_refs = {k[0] for k in sch_map}
+    pcb_refs = {k[0] for k in pcb_map}
+    assert sch_refs == pcb_refs, (
+        f"refdes drift sch vs pcb: only-sch={sorted(sch_refs - pcb_refs)}, "
+        f"only-pcb={sorted(pcb_refs - sch_refs)}")
+
+    # sheet -> board: every REAL net node sits on a same-net pad
+    wrong = []
+    for (ref, pin), snet in sorted(sch_map.items()):
+        if not snet or ref.startswith("#") or ref not in pcb_refs:
+            continue                     # floating pins / PWR_FLAG markers
+        pnet = pcb_map.get((ref, pin), "<no pad>")
+        if pnet != snet:
+            wrong.append((ref, pin, snet, pnet))
+    assert not wrong, (
+        f"sch->pcb net mismatches ({len(wrong)}): {wrong[:12]}")
+
+    # board -> sheet: every netted pad is declared on the sheet, same net
+    missing = []
+    for (ref, pin), pnet in sorted(pcb_map.items()):
+        if not pnet or ref.startswith("#") or ref not in sch_refs:
+            continue                     # netless pads / footprint-only items
+        snet = sch_map.get((ref, pin))
+        if snet != pnet:
+            missing.append((ref, pin, pnet, snet))
+    assert not missing, (
+        f"pcb->sch net mismatches ({len(missing)}): {missing[:12]}")

@@ -28,6 +28,10 @@ export const FALLBACK_PROTOCOL = [
   { cmd: 'RUN_SEQUENCE', args: 'kind n_windows', reply: '<n> c0 c1 … / ERR', desc: 'pulse-sequence engine: ramsey / hahn / cpmg → n readout codes (sim form; hardware RUN_SEQUENCE <site> <kind> <n> <t_step>)' },
   { cmd: 'STATUS', args: '—', reply: 'PLL_LOCKED … VCC3V3_mv … TEMP_C …', desc: 'board self-status: PLL lock, ADC busy, rail voltages, die temperature' },
   { cmd: 'RESET', args: '—', reply: 'OK', desc: 'soft reset of the TLC5947 / ADF4351 / ADC peripheral state' },
+  { cmd: 'ID', args: '—', reply: 'QSSC v1', desc: 'board-present/identity probe — a flashed QSSC board replies QSSC v1 (the host sends it on open to detect a live board)' },
+  { cmd: 'RUN_ALL_ODMR', args: 'f_start_khz f_stop_khz n_points', reply: 'n × (64 × 0..65535) + OK / ERR', desc: '64-parallel calibration sweep: ADF4351 sweep + all 64 AD7616 channels per point → one ODMR spectrum per pixel (register width per column)' },
+  { cmd: 'READ_LOCKINP', args: 'site n_samples prime_idx', reply: '<I> <Q> <n> / ERR', desc: 'prime-period IQ lock-in (prime_idx 0–15 selects p = 2, 3, 5 … 53); identical wire form in sim and hardware' },
+  { cmd: 'SET_GRADIENT', args: 'code(0..4095)', reply: 'OK / ERR', desc: 'program the gradient-coil DAC (MCP4921) — 0..4095 code space, 3.3 V full scale (issue #168-C)' },
 ]
 
 export const PROFILES = [
