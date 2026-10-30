@@ -15,7 +15,9 @@ At gate creation the five defects below were frozen as
 repaired, until the mark is removed and the green state re-pinned (that is
 the re-classification alarm). Defects 1, 2, 4 and 5 are repaired on
 ``fix/electrical-repairs``: markers dropped, gates re-pinned green.
-Defect 3 is still open:
+Defect 3 — the last one open at file time — is repaired too (issue #168-C:
+VDD and VREF moved to +3V3 together; its xfail is dropped and the pad map
+re-pinned, see ``test_dac_vdd_compatible_with_lvcmos33``):
 
   1. LM358 power pads swapped, netlist (grad/Udrv): pad 4 sits on +5V and
      pad 8 on GND. The true LM358 dual opamp is 4 = V-, 8 = V+; the
@@ -33,9 +35,14 @@ Defect 3 is still open:
      LVCMOS33: Microchip DS22248A datasheet VIH = 0.7 * VDD, so 3.5 V is
      required and a 3.3 V master is out of spec. Note the coupled
      constraint: DS22248A absolute maximum is "all inputs and outputs
-     w.r.t. VSS -0.3V to VDD +0.3V", and VREF (pad 6) is tied to +5V, so
-     VDD can NOT simply drop to 3V3 -- the reference path must change with
-     it (level shifter, DAC swap, or reference redesign; issue #168).
+     w.r.t. VSS -0.3V to VDD +0.3V", and VREF (pad 6) was tied to +5V,
+     so VDD could NOT simply drop to 3V3 -- the reference path had to
+     change with it (level shifter, DAC swap, or reference redesign;
+     issue #168). Resolution (#168-C): VDD AND VREF moved to +3V3
+     together -- no new part, and the 3.3 V full scale still spans past
+     the 2.24 A ceiling of the 1 ohm / 5 W Rsense (no usable drive range
+     lost) -- plus dac_ctrl CLK_DIV 4->8 so SCLK stays inside the
+     datasheet conditions at VDD = 3.3 V.
   4. J9 (main): Würth 61300411121 -- digits 5-6 encode FOUR contacts --
      on a 2x05 / 10-pad JTAG footprint (issue #169).
   5. Udrv BOM row (grad): TI part "LM358P" -- the -P suffix is PDIP-8 --
@@ -248,7 +255,8 @@ def test_lm358_library_source_pin_naming():
 
 # --------------------------------------------------------------------------
 # known defect 3: MCP4921 symbol is DS22248A-correct, but VDD=+5V vs
-# LVCMOS33 SPI master is a level violation
+# LVCMOS33 SPI master is a level violation -- REPAIRED (#168-C, VDD/VREF
+# on +3V3); the gate below flipped from strict xfail to green pin.
 # --------------------------------------------------------------------------
 def test_mcp4921_symbol_matches_datasheet():
     pins = _sch_pins("qssc:MCP4921")
@@ -268,32 +276,33 @@ def test_mcp4921_symbol_matches_datasheet():
 def test_dac_signal_wiring_frozen():
     """Signal wiring of the gradient DAC is correct today and frozen pad-exact.
 
-    Pads 1 (VDD) and 6 (VREF) sit on +5V TODAY (on the published main board
-    since the gradient merge). Any repair of the level violation (issue #168
-    defect C) intentionally re-pins this map -- the freeze is what turns
-    "the DAC was quietly rewired" into a suite failure.
+    Pads 1 (VDD) and 6 (VREF) sit on +3V3 since the issue #168-C repair (the
+    level-compatible rail; the freeze keeps "the DAC was quietly rewired"
+    a suite failure -- including a silent move back to +5V, which would
+    re-open the VIH violation).
     """
     pads = _board("main")["fps"]["Ugrad"]["pads"]
     assert pads == {
-        "1": "+5V",            # VDD (target: +3V3 -- see the xfail below)
+        "1": "+3V3",           # VDD (#168-C: VIH = 0.7*VDD <= 2.31 V < 3.3 VOH)
         "2": "grad_cs",        # !CS  (LDAC held low: transparent updates)
         "3": "grad_sclk",
         "4": "grad_mosi",
         "5": "GND",            # !LDAC low -> latch transparent
-        "6": "+5V",            # VREF (5 V full scale by design)
+        "6": "+3V3",           # VREF (3.3 V full scale, tied to VDD)
         "7": "GND",            # VSS
         "8": "GRAD_DAC_OUT",
     }
 
 
-@pytest.mark.xfail(strict=True, reason="Ugrad MCP4921 VDD=+5V while the SPI "
-                    "master is LVCMOS33: DS22248A VIH = 0.7*VDD -> 3.5V "
-                    "required > 3.3V VOH. Coupled constraint: VREF=+5V (pad 6) "
-                    "forces VDD>=5V via the abs-max VDD+0.3V input limit, so "
-                    "the fix needs level-shifting or a reference redesign "
-                    "(issue #168 defect C; Ugrad ships on the published main "
-                    "board since the gradient merge)")
 def test_dac_vdd_compatible_with_lvcmos33():
+    """Issue #168 defect C, REPAIRED: VDD is on +3V3 now.
+
+    Was a strict xfail while Ugrad ran at +5V (DS22248A VIH = 0.7*VDD ->
+    3.5 V required > 3.3 V VOH, with VREF=+5V blocking a simple drop via
+    the abs-max VDD+0.3V input limit). The coordinated fix moved VDD AND
+    VREF to +3V3 together; this is a green regression pin now -- a move
+    back to +5V fails it directly.
+    """
     pads = _board("main")["fps"]["Ugrad"]["pads"]
     assert pads["1"] == "+3V3", (
         f"MCP4921 VDD on {pads['1']!r}: VIH = 0.7*VDD (DS22248A) makes a "
@@ -325,7 +334,7 @@ _IC_RAILS: dict = {
         "REG1": {"+5V", "+3V3"},                 # AMS1117-3.3
         "REG2": {"+5V", "+1V8"},                 # AMS1117-1.8
         "REG3": {"+5V", "+1V0"},                 # AP2127K-1.0
-        "Ugrad": {"+5V"},                        # MCP4921 (+ VREF on +5V)
+        "Ugrad": {"+3V3"},                       # MCP4921 (VDD+VREF on +3V3, #168-C)
         "Udrv": {"+5V"},                         # LM358 (pad 4, swapped pad)
     },
     "grad": {

@@ -689,11 +689,12 @@ def test_bom_crlf_consistent():
 #   * exactly the 8 gradient parts were added, nothing removed;
 #   * no shared symbol drifted, except U1's documented swap to the _GRAD
 #     symbol variant (it gains the grad_cs/sclk/mosi balls).
-# Re-pinned once more when the LM358 symbol names were repaired back to
-# V-/V+ (issue #168 defect B had silently returned via regeneration --
-# only the two name lines in the embedded cache changed).
+# Re-pinned twice after the merge: first for the LM358 name re-fix (#168
+# defect B had silently returned via regeneration -- two name lines), now
+# for the #168-C level repair (Ugrad VDD/VREF + C_grad1/2 decoupling moved
+# from +5V to +3V3: four labels change on the sheet).
 MAIN_SHEET_SHA256 = (
-    "92d669ce0a008ebe4c9d516a83b4ad05bddeeffea6d66cf71727cd60168192c2"
+    "cc88b83d952942dc07faeebebf83c07cf0d138f87c63ff8f53e93d30ee7cf053"
 )
 MAIN_GRAD_REFS = {"Ugrad", "Udrv", "Qgrad", "Rgrad_feed", "Lgrad", "Rsense",
                   "C_grad1", "C_grad2"}

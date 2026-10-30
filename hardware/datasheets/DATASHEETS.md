@@ -442,20 +442,23 @@ schematic + netlist + placement are DRC 0/0/0.
 
 ### Ugrad — MCP4921  (Microchip, 12-bit SPI DAC, 8-pin SOIC)
 - **Function:** sets the gradient-coil current.  12-bit voltage-output DAC,
-  VOUTA = VREF · code/4096 (1× gain).  VREF tied to +5V (VDD) → 0..5 V out →
-  0..5 A through the 1 Ω sense resistor (sized for the ~2.2 A clean-addressing
-  current; the ~0.56 A resolvable-measurement current is mid-range).
+  VOUTA = VREF · code/4096 (1× gain).  VREF tied to +3V3 (= VDD, issue
+  #168-C: VIH = 0.7·VDD must stay under the LVCMOS33 master's 3.3 V VOH) →
+  0..3.3 V out → 0..3.3 A through the 1 Ω sense resistor — still past the
+  ~2.2 A clean-addressing current (the 5 W Rsense ceiling), so no usable
+  drive range is lost; the ~0.56 A resolvable-measurement current stays
+  mid-range (code ~693); full-scale code 4095 → 1.47 MHz/µm of line spread.
 - **Verified pinout (8-pin SOIC/PDIP/MSOP, DS22248A / DS21897B — confirmed
   against the downloaded `pdfs/MCP4921.pdf`):**
 
   | pin | name  | type    | net            | note                                    |
   |-----|-------|---------|----------------|-----------------------------------------|
-  | 1   | VDD   | power   | +5V            |                                         |
+  | 1   | VDD   | power   | +3V3           | #168-C: level-compatible with the SPI master |
   | 2   | !CS   | input   | grad_cs        | FPGA SPI CS (idle high, go-low-then-latch)|
   | 3   | SCK   | input   | grad_sclk      | FPGA SPI clock                          |
   | 4   | SDI   | input   | grad_mosi      | FPGA SPI data                           |
   | 5   | !LDAC | input   | GND            | tied low = transparent (update on CS↑)  |
-  | 6   | VREF  | input   | +5V            | tied to VDD for rail-to-rail Vout       |
+  | 6   | VREF  | input   | +3V3           | tied to VDD (full scale 3.3 V, #168-C)   |
   | 7   | AVSS  | power   | GND            |                                         |
   | 8   | VOUTA | output  | GRAD_DAC_OUT   | → LM358 non-inverting input             |
 
@@ -517,7 +520,8 @@ schematic + netlist + placement are DRC 0/0/0.
   confirmed at procurement.
 
 ### C_grad1 / C_grad2 — 100 nF DAC VDD decoupling (0603)
-- **Function:** HF + bulk-bypass on the +5V rail at Ugrad.  Pin 1 = +5V,
+- **Function:** HF + bulk-bypass on the +3V3 rail at Ugrad (VDD/VREF moved
+  to +3V3 with #168-C).  Pin 1 = +3V3,
   pin 2 = GND.
 
 ### BOM cost (gradient add-on, single qty)

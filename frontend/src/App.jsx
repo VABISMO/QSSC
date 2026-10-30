@@ -332,9 +332,11 @@ export default function App() {
   // card — now placed in the Circuit Runner + Spectroscopy slots — stay in
   // sync: the run body carries gradient/pixel-size, and useCalib gates the run
   // on the cached calibration).
-  // 1.75 MHz/µm → ≈70 addressable lines/pixel at 200 µm (within the on-board
-  // coil's 2.23 MHz/µm full-scale; the gradient is the lever for per-pixel N).
-  const [parGrad, setParGrad] = useState(1.75)
+  // 1.15 MHz/µm → ≈46 addressable lines/pixel at 200 µm — the same ~78% of
+  // full scale the old 1.75 default held under the 5 V DAC. The rail is
+  // 3.3 V now (issue #168-C): coil full-scale is 1.47 MHz/µm and the API
+  // rejects anything above it, so the default must stay under the cap.
+  const [parGrad, setParGrad] = useState(1.15)
   const [parPixelSize, setParPixelSize] = useState(200)
   const [parNPixels, setParNPixels] = useState(64)
   const [parUseCalib, setParUseCalib] = useState(true)

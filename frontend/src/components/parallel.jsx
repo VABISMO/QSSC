@@ -29,13 +29,15 @@ export function ParallelCalibCard({
   const [antiNoisePreset, setAntiNoisePreset] = useState('off')     // anti-noise filter stack preset
   const [maxNv, setMaxNv] = useState(300)                           // NVs per microdiamond
   const [nPoints, setNPoints] = useState(400)                       // sweep points (real path)
-  // On-board gradient coil: MCP4921 12-bit DAC, I_coil = 5 V * code/4096 / 1 Ω,
-  // gradient = (I/2.2 A) * 0.98 MHz/µm. Full-scale code 4095 → 2.23 MHz/µm.
-  const GRAD_COIL_MAX = 2.23
+  // On-board gradient coil: MCP4921 12-bit DAC, I_coil = 3.3 V * code/4096 / 1 Ω,
+  // gradient = (I/2.2 A) * 0.98 MHz/µm. Full-scale code 4095 → 1.47 MHz/µm
+  // (VDD/VREF = +3V3 since issue #168-C: VIH = 0.7·VDD must stay under the
+  // LVCMOS33 master's 3.3 V VOH). Mirrors api._guards.GRAD_COIL_MAX_MHZ_PER_UM.
+  const GRAD_COIL_MAX = 1.47
   const LW_MHZ = 5                       // NV ODMR linewidth (intrinsic)
   // Physically-possible input limits (mirror qssc/array_calibration.py so the
   // UI can never offer a value the hardware/physics cannot deliver):
-  //   gradient ≤ coil max (2.23 MHz/µm)
+  //   gradient ≤ coil max (1.47 MHz/µm)
   //   microdiamond 10–1000 µm (must fit the 2.5 mm die pixel pitch)
   //   NV count ≤ volume ceiling (300 NV @ 200 µm, scales as size³)
   const PIXEL_SIZE_MIN = 10
@@ -45,14 +47,14 @@ export function ParallelCalibCard({
   const nvCeiling = (d) => Math.max(1, Math.round(NV_ANCHOR_COUNT * Math.pow(Math.max(1, d) / NV_ANCHOR_SIZE, 3)))
   const resolvableCap = Math.max(1, Math.floor(grad * pixelSize / LW_MHZ))
   const achievableCap = Math.min(resolvableCap, maxNv)   // what the calibration can actually reach
-  const dacCode = Math.min(4095, Math.round(grad * 1838))
+  const dacCode = Math.min(4095, Math.round(grad / GRAD_COIL_MAX * 4095))
   // One-click qubit presets: fill every parameter to a physically-possible,
   // sensible combination so a user who doesn't know the limits can just pick a
   // target. Inputs stay editable afterwards.
   const QUBIT_PRESETS = {
     low:    { grad: 0.5,  pixelSize: 100, maxNv: 38,  shots: 1,  sr: false, label: 'Low · ≈ 8 qubits/pixel' },
     medium: { grad: 1.0,  pixelSize: 200, maxNv: 300, shots: 16, sr: false, label: 'Medium · ≈ 30 qubits/pixel' },
-    high:   { grad: 2.23, pixelSize: 200, maxNv: 300, shots: 64, sr: true,  label: 'High · ≈ 70 qubits/pixel (coil max)' },
+    high:   { grad: 1.47, pixelSize: 200, maxNv: 300, shots: 64, sr: true,  label: 'High · ≈ 58 qubits/pixel (coil max)' },
   }
   const applyPreset = (p) => {
     setGrad(p.grad); setPixelSize(p.pixelSize); setMaxNv(p.maxNv)

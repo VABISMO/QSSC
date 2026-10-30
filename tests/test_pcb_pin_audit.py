@@ -123,9 +123,10 @@ def test_adf4351_nc_pads_have_no_rail():
 GRAD_PAD_NETS: dict[str, dict[str, str]] = {
     # FPGA SPI balls (grad_en V7 deliberately absent: spare STATUS ball, NC)
     "U1": {"V6": "grad_cs", "V9": "grad_sclk", "V12": "grad_mosi", "V7": ""},
-    # MCP4921: VDD(1,6)=+5V VREF(6), AVSS(5,7)=GND, SPI(2-4), VOUTA(8)
-    "Ugrad": {"1": "+5V", "2": "grad_cs", "3": "grad_sclk", "4": "grad_mosi",
-              "5": "GND", "6": "+5V", "7": "GND", "8": "GRAD_DAC_OUT"},
+    # MCP4921: VDD(1,6)=+3V3 (VREF(6) tied to VDD -- #168-C level repair),
+    # AVSS(5,7)=GND, SPI(2-4), VOUTA(8)
+    "Ugrad": {"1": "+3V3", "2": "grad_cs", "3": "grad_sclk", "4": "grad_mosi",
+              "5": "GND", "6": "+3V3", "7": "GND", "8": "GRAD_DAC_OUT"},
     # LM358: amp A servo INA+/INA-/OUTA, amp B parked (INB+=GND, INB-=OUTB),
     # V-(4)=GND V+(8)=+5V
     "Udrv": {"1": "GRAD_GATE", "2": "GRAD_SENSE", "3": "GRAD_DAC_OUT",
@@ -135,8 +136,8 @@ GRAD_PAD_NETS: dict[str, dict[str, str]] = {
     "Rgrad_feed": {"1": "+5V", "2": "GRAD_COIL_P"},
     "Lgrad": {"1": "GRAD_COIL_P", "2": "GRAD_COIL_N"},
     "Rsense": {"1": "GRAD_SENSE", "2": "GND"},
-    "C_grad1": {"1": "+5V", "2": "GND"},
-    "C_grad2": {"1": "+5V", "2": "GND"},
+    "C_grad1": {"1": "+3V3", "2": "GND"},
+    "C_grad2": {"1": "+3V3", "2": "GND"},
 }
 
 

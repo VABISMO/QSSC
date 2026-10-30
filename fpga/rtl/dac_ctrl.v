@@ -13,11 +13,16 @@
 // on `start`, drive CS_n low, shift 16 bits MSB-first (data set up during the
 // SCLK low half and sampled by the MCP4921 on the SCLK rising edge, then held
 // through the high half), then raise CS_n to latch. One transaction per start. `done` pulses for one clock when complete.
-// CLK_DIV sets the SCLK half-period (default 4 -> 40 ns high / 40 ns low =
-// 12.5 MHz SCLK from 100 MHz; the MCP4921 supports 20 MHz at Vdd >= 4.5 V).
+// CLK_DIV sets the SCLK half-period (default 8 -> 80 ns high / 80 ns low =
+// 6.25 MHz SCLK from 100 MHz). The MCP4921's 20 MHz spec is guaranteed at
+// Vdd >= 4.5 V; Ugrad now runs at VDD = +3V3 (issue #168-C: VIH = 0.7*VDD
+// must stay below the LVCMOS33 master's 3.3 V VOH), so the clock is halved
+// to stay inside the datasheet conditions. SET_GRADIENT is a set-and-forget
+// command (one transaction per gradient setting), so the slower shifter
+// costs nothing on the data path. Was CLK_DIV = 4 -> 12.5 MHz at Vdd = 5 V.
 //============================================================================
 module dac_ctrl #(
-    parameter CLK_DIV = 4
+    parameter CLK_DIV = 8
 ) (
     input            clk,
     input            reset,
