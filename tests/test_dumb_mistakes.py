@@ -645,10 +645,14 @@ def test_bom_grad_refs_are_placed_on_main():
     assert not ghost, f"grad BOM refs not placed on main: {ghost}"
 
 
-def test_bom_main_deficit_is_exactly_c87():
-    """C87 is the one known, documented BOM↔board deficit (1206 47uF listed,
-    not placed). If anything else goes missing, this fails — that is the
-    sabotage grade this test exists for. See PR/issue notes on C87.
+def test_bom_main_deficit_is_empty():
+    """EVERY non-annotation BOM row must be placed on the main board.
+
+    The last pending placement -- C87, the 47 uF VCCINT bulk (audit #99 /
+    issue #169 item 3) -- graduated onto the board at a clearance-verified
+    site north of U1's ball field, so a BOM row without a footprint is now
+    always a defect: any new gap fails here. That is the sabotage grade
+    this test exists for.
 
     '#' refs are gen_bom.py's PWR_FLAG annotation rows; the board never
     places them as footprints, so they are excluded like on the sheets."""
@@ -662,8 +666,8 @@ def test_bom_main_deficit_is_exactly_c87():
         if not d.strip().startswith("#")
     }
     deficit = sorted(main_refs - main_board)
-    assert deficit == ["C87"], (
-        f"main BOM↔board deficit changed (expected exactly ['C87']): {deficit}"
+    assert deficit == [], (
+        f"main BOM↔board deficit (must be empty): {deficit}"
     )
 
 
@@ -686,18 +690,20 @@ def test_bom_crlf_consistent():
 #   * the sheet content is frozen by digest (any edit must consciously
 #     re-pin MAIN_SHEET_SHA256 here -- same contract style as the ERC counts);
 #   * every symbol present at the repair baseline still exists;
-#   * exactly the 8 gradient parts were added, nothing removed;
+#   * exactly the reviewed additions exist, nothing removed: the 8 gradient
+#     parts (gradient merge) + C87 (issue #169: graduated from BOM-only to
+#     a placed component);
 #   * no shared symbol drifted, except U1's documented swap to the _GRAD
 #     symbol variant (it gains the grad_cs/sclk/mosi balls).
-# Re-pinned twice after the merge: first for the LM358 name re-fix (#168
-# defect B had silently returned via regeneration -- two name lines), now
-# for the #168-C level repair (Ugrad VDD/VREF + C_grad1/2 decoupling moved
-# from +5V to +3V3: four labels change on the sheet).
+# Re-pinned three times after the merge: the LM358 name re-fix (#168-B had
+# silently returned via regeneration), the #168-C level repair (four labels
+# move to +3V3), and C87 joining the model for #169 (the VCCINT bulk cap
+# graduated from BOM-only to a placed, netted component).
 MAIN_SHEET_SHA256 = (
-    "cc88b83d952942dc07faeebebf83c07cf0d138f87c63ff8f53e93d30ee7cf053"
+    "405e131e4e2885366cd1d559c9bba7a523ba6656529554a7bf3b26e8a76f9e1a"
 )
-MAIN_GRAD_REFS = {"Ugrad", "Udrv", "Qgrad", "Rgrad_feed", "Lgrad", "Rsense",
-                  "C_grad1", "C_grad2"}
+MAIN_ADDED_REFS = {"Ugrad", "Udrv", "Qgrad", "Rgrad_feed", "Lgrad", "Rsense",
+                   "C_grad1", "C_grad2", "C87"}
 
 
 def _main_sheet_contract():
@@ -714,8 +720,9 @@ def _main_sheet_contract():
     gone = sorted(refs_before - refs_after)
     assert not gone, f"main: baseline symbols disappeared: {gone}"
     added = refs_after - refs_before
-    assert added == MAIN_GRAD_REFS, (
-        f"main: expected exactly the 8 gradient parts added, got {sorted(added)}"
+    assert added == MAIN_ADDED_REFS, (
+        f"main: expected exactly the reviewed additions (8 gradient parts + "
+        f"C87), got {sorted(added)}"
     )
     by_ref_b = {i["ref"]: i for i in before}
     by_ref_a = {i["ref"]: i for i in after}
@@ -815,6 +822,8 @@ def test_bom_delta_is_exactly_rgrad_feed():
         (ADF4351BCPZ, Abracon ASE-100MHz, CUI PJ-102AH) -- their MPN_MAP keys
         matched no row, so main and grad both shipped blank (issue #169)
       + Rgrad_feed (grad coil 0R feed)
+      + grad,C87 twin (issue #169 item 3: C87 graduated from BOM-only to a
+        placed component, so it gains the standard main+grad row pair)
       - the two #FLG*/PWR_FLAG phantom rows (issue #167: not purchasable
         parts, never become a footprint)
       - the six hand-typed grad rows, replaced by the full gradient section
@@ -855,6 +864,7 @@ def test_bom_delta_is_exactly_rgrad_feed():
             'grad,"Riref0, Riref1, Riref2",3,4.87k,Resistor_SMD:R_0603_1608Metric,,,',
             'grad,"UE0, UE1, UE2",3,TLC5947,Package_SO:HTSSOP-32-1EP_6.1x11mm_P0.65mm_EP5.2x11mm_Mask4.11x4.36mm_ThermalVias,Texas Instruments,TLC5947,https://www.ti.com/lit/ds/symlink/tlc5947.pdf',
             'grad,C32,1,10n,Capacitor_SMD:C_0603_1608Metric,,,',
+            'grad,C87,1,47uF,Capacitor_SMD:C_1206_3216Metric,,,',
             'grad,D_USB,1,SS14 Schottky,Diode_SMD:D_SMA,,,',
             'grad,F1,1,2A PTC,Fuse:Fuse_1206_3216Metric,Littelfuse,nanoSMDC020F,https://www.littelfuse.com/media?resourcetype=datasheets&value=0810070',
             'grad,F2,1,1A PTC,Fuse:Fuse_1206_3216Metric,,,',

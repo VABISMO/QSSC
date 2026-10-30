@@ -7,11 +7,12 @@ import { QubitFrequencyTable } from './quantum.jsx'
 
 
 export function CalibrationPanel({ run, running }) {
-  // MCP4921 DAC code (0..4095); 1803 ≈ 2.2 A addressing gradient
-  const [gradCode, setGradCode] = useState(1803)
+  // MCP4921 DAC code (0..4095); 2731 ≈ 2.2 A addressing gradient
+  // (VDD/VREF = +3V3 since issue #168-C; 1803 was the 5 V-rail equivalent)
+  const [gradCode, setGradCode] = useState(2731)
   const gradOn = gradCode > 0
-  // DAC code -> coil current (I = 5V * code/4096 / 1Ω) and spread (0.98 MHz/µm at 2.2 A)
-  const coilA = gradOn ? (5.0 * gradCode / 4096) : 0
+  // DAC code -> coil current (I = 3.3V * code/4096 / 1Ω) and spread (0.98 MHz/µm at 2.2 A)
+  const coilA = gradOn ? (3.3 * gradCode / 4096) : 0
   const spreadMhz = gradOn ? (coilA / 2.2) * 0.98 * 200 : 0
   return (
     <div>
