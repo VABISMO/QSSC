@@ -321,7 +321,10 @@ class SimulatedFPGA:
                 qubit = int(parts[1])
                 f_start = int(parts[2]); f_stop = int(parts[3])
                 n_points = int(parts[4])
-                if not (0 <= qubit < self.N_SITES) or n_points <= 0 or n_points > 4096:
+                # n_points 1..256 mirrors command_parser's CMD_SWEEP validation
+                # (was 4096: accepted-here / rejected-on-hardware -- round-5
+                # audit, the same class as the READ_RNG fix).
+                if not (0 <= qubit < self.N_SITES) or n_points <= 0 or n_points > 256:
                     return "ERR"
                 return self._odmr_sweep(qubit, f_start, f_stop, n_points)
             if head == "RUN_ALL_ODMR":
@@ -335,7 +338,11 @@ class SimulatedFPGA:
                 # lines = its calibrated register width).
                 f_start = int(parts[1]); f_stop = int(parts[2])
                 n_points = int(parts[3])
-                if n_points <= 0 or n_points > 4096:
+                # n_points 1..256 mirrors command_parser's CMD_ALL_SWEEP
+                # validation (was 4096 -- round-5 audit; the HTTP runner and
+                # the sensor path already clamp to 256, this closes the raw
+                # send_command surface).
+                if n_points <= 0 or n_points > 256:
                     return "ERR"
                 return self._run_all_odmr(f_start, f_stop, n_points)
             if head == "READ_COMPASS":

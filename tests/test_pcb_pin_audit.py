@@ -17,7 +17,8 @@ Skips where ``pcbnew`` (system KiCad) is not importable (CI / .venv).
 The expected nets come from the datasheets in ``hardware/datasheets/`` cross-
 checked against the generator's pin dicts; where the two disagreed (FT232 pins
 23/24, ADF4351 VCOM) the datasheet + generator-comment rationale wins and this
-test encodes that. See ``memory/netlist-verified-per-datasheet``.
+test encodes that. See ``hardware/datasheets/DATASHEETS.md`` for the
+per-datasheet pinout record.
 """
 from __future__ import annotations
 

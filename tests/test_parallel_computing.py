@@ -396,33 +396,67 @@ def test_calibration_odmr_lines_length_equals_register_width():
             assert 2.0 < f < 4.0
 
 
-def test_run_parallel_use_calibration_feeds_measured_frequencies():
+def test_run_parallel_use_calibration_feeds_measured_frequencies(tmp_path,
+                                                                 monkeypatch):
     """Closing the calibration -> circuit loop: with use_calibration=true,
     run_parallel loads the cached per-pixel odmr_lines and the result's
     per_pixel_odmr_lines matches the calibration exactly -- the qubits per
     pixel sit on the MEASURED frequency grid, not auto_align's synthetic 6 MHz
     grid. This is the 'qubits por pixel y sus frecuencias' the frontend modal
     shows."""
+    import api.runner as _runner
     from qssc.array_calibration import calibrate_array
-    from api.runner import run_parallel, _CALIB_FILE
-    import os
-    cal = calibrate_array(profile="NV", gradient_mhz_per_um=2.0,
+    from api.runner import run_parallel
+    # NEVER touch the user's real calibration file: the previous version
+    # wrote AND unlinked hardware/calibration/array_calibration.json,
+    # destroying any calibration the user had saved on every suite run
+    # (round-5 audit). Point the runner's loader/persister at a per-test
+    # temporary path instead.
+    cal_file = tmp_path / "array_calibration.json"
+    monkeypatch.setattr(_runner, "_CALIB_FILE", cal_file)
+    cal = calibrate_array(profile="NV", gradient_mhz_per_um=1.4,
                           pixel_size_um=200.0, seed=42,
                           max_nv_per_microdiamond=12)
-    os.makedirs(_CALIB_FILE.parent, exist_ok=True)
-    cal.to_json(_CALIB_FILE)
-    try:
-        res = run_parallel({"mode": "sample", "n_pixels": 4, "num_qubits": 2,
-                            "shots": 64, "noise_mode": "ideal", "seed": 42,
-                            "use_calibration": True})
-        assert res["calibrated"] is True
-        got = res["per_pixel_odmr_lines"]
-        assert len(got) == 4
-        for i in range(4):
-            assert got[i] is not None, f"pixel {i} had no measured lines"
-            assert got[i] == cal.pixels[i].odmr_lines, (
-                f"pixel {i}: run_parallel freqs != calibration freqs")
-            assert len(got[i]) == res["per_pixel_widths"][i]
-    finally:
-        if _CALIB_FILE.exists():
-            _CALIB_FILE.unlink()
+    cal.to_json(cal_file)
+    res = run_parallel({"mode": "sample", "n_pixels": 4, "num_qubits": 2,
+                        "shots": 64, "noise_mode": "ideal", "seed": 42,
+                        "use_calibration": True})
+    assert res["calibrated"] is True
+    got = res["per_pixel_odmr_lines"]
+    assert len(got) == 4
+    for i in range(4):
+        assert got[i] is not None, f"pixel {i} had no measured lines"
+        assert got[i] == cal.pixels[i].odmr_lines, (
+            f"pixel {i}: run_parallel freqs != calibration freqs")
+        assert len(got[i]) == res["per_pixel_widths"][i]
+
+
+def test_gradient_cap_pinned_end_to_end():
+    """The coil full-scale cap (issue #168-C: MCP4921 VDD/VREF = +3V3 ->
+    1.47 MHz/um) must agree in every place that mirrors it, and the API must
+    REJECT an over-cap request with 422 instead of silently clamping --
+    before round 5 no test asserted the value itself anywhere."""
+    from pathlib import Path
+    from fastapi.testclient import TestClient
+    from api.main import app
+    from api._guards import GRAD_COIL_MAX_MHZ_PER_UM, GRAD_COIL_VDD
+    from qssc.array_calibration import GRAD_COIL_MAX_MHZ_PER_UM as QMAX
+
+    root = Path(__file__).resolve().parents[1]
+    assert GRAD_COIL_VDD == 3.3
+    assert GRAD_COIL_MAX_MHZ_PER_UM == QMAX == 1.47
+    # frontend mirrors (slider max + the high preset) and the README figure
+    parallel_jsx = (root / "frontend" / "src" / "components"
+                    / "parallel.jsx").read_text(encoding="utf-8")
+    assert "const GRAD_COIL_MAX = 1.47" in parallel_jsx
+    assert "grad: 1.47" in parallel_jsx
+    assert "1.47" in (root / "README.md").read_text(encoding="utf-8")
+    # the pydantic le= bound rejects: 1.6 > 1.47 -> 422
+    c = TestClient(app)
+    r = c.post("/api/circuit/run-parallel?sync=true", json={
+        "profile": "NV", "seed": 42, "shots": 1,
+        "gradient_mhz_per_um": 1.6, "n_pixels": 2,
+    })
+    assert r.status_code == 422, (
+        f"gradient 1.6 MHz/um (over the 1.47 coil cap) returned "
+        f"{r.status_code}, expected 422 from the le= bound")

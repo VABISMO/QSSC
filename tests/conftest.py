@@ -46,6 +46,35 @@ def _reset_rate_limit_buckets():
         pass
 
 
+@pytest.fixture(autouse=True)
+def _redirect_calibration_file(tmp_path_factory):
+    """Tests must never read or write the user's real calibration file.
+
+    ``api.runner._CALIB_FILE`` points at
+    ``hardware/calibration/array_calibration.json`` (gitignored runtime
+    state). Several tests close the calibration loop -- the use_calibration
+    test used to write AND unlink it outright (destroying whatever the user
+    had saved), and the calibrate-array endpoint persists through
+    ``run_calibrate_array`` (runner:903) leaving synthetic test data behind,
+    which the app would then load as if it were real. Round-5 audit: redirect
+    the loader/persister to a per-test temporary path for the whole session;
+    production code never imports this file, so the redirection cannot leak.
+    The import is guarded: system-python environments (the PCB gate runs,
+    no qiskit installed) have no api tests to redirect.
+    """
+    try:
+        import api.runner as _runner
+    except Exception:  # noqa: BLE001 -- environment without the api deps
+        yield
+        return
+
+    real = _runner._CALIB_FILE
+    _runner._CALIB_FILE = (tmp_path_factory.mktemp("calibration")
+                           / "array_calibration.json")
+    yield
+    _runner._CALIB_FILE = real
+
+
 def pytest_collection_modifyitems(config, items):
     """Skip tests parametrised for the local-only gradient board when absent.
 
