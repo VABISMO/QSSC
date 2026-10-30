@@ -179,6 +179,23 @@ def test_library_symbols_match_schematic_cache():
             f"sheet cache for {len(drifted)} symbol(s): {detail}")
 
 
+def _copy_gen_inputs(tmp: Path, with_pro: bool = True) -> None:
+    """Copy the minimal generator inputs (tools/ + the two pinned .tmpwork
+    snapshots) into tmp. ``with_pro`` also copies the shipped main project
+    (only the board generator's emit_pro needs it as its template)."""
+    import shutil
+
+    (tmp / ".tmpwork").mkdir(parents=True, exist_ok=True)
+    (tmp / "hardware" / "pcb").mkdir(parents=True, exist_ok=True)
+    shutil.copytree(REPO / "tools", tmp / "tools",
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    rels = [".tmpwork/pins.json", ".tmpwork/fpga_csg324_map.json"]
+    if with_pro:
+        rels.append("hardware/pcb/qssc.kicad_pro")
+    for rel in rels:
+        shutil.copy2(REPO / rel, tmp / rel)
+
+
 def _run_generator(tmp: Path) -> None:
     """Copy the minimal generator inputs into tmp and run the REAL generator
     there (round-9 capstone).
@@ -191,17 +208,10 @@ def _run_generator(tmp: Path) -> None:
     footprint library is READ (not copied), hence the skip guard below.
     """
     import os
-    import shutil
     import subprocess
     import sys
 
-    (tmp / ".tmpwork").mkdir(parents=True, exist_ok=True)
-    (tmp / "hardware" / "pcb").mkdir(parents=True, exist_ok=True)
-    shutil.copytree(REPO / "tools", tmp / "tools",
-                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    for rel in (".tmpwork/pins.json", ".tmpwork/fpga_csg324_map.json",
-                "hardware/pcb/qssc.kicad_pro"):
-        shutil.copy2(REPO / rel, tmp / rel)
+    _copy_gen_inputs(tmp, with_pro=True)
 
     res = subprocess.run(
         [sys.executable, str(tmp / "tools" / "gen_qssc_kicad.py")],
@@ -318,3 +328,38 @@ def test_committed_sch_and_pcb_match_generator(tmp_path):
         cp, cnets = _pcb_surface(comm_pcb)
         assert fp_ == cp, f"{stem}.kicad_pcb placement: {_first_diff(fp_, cp)}"
         assert fnets == cnets, f"{stem}.kicad_pcb pad nets: {_first_diff(fnets, cnets)}"
+
+
+def test_committed_bom_matches_generator(tmp_path):
+    """hardware/datasheets/BOM.csv must be exactly what tools/gen_bom.py
+    emits from the committed generator inputs (round-10 gate).
+
+    gen_bom drives the SAME build_* model functions the boards do (pure
+    Python, no kicad-cli/system lib), so a BOM the generator would not
+    produce -- a hand-added row, a stale value/footprint, a changed MPN map
+    that was never regenerated -- fails here instead of drifting until an
+    audit finds it. Reproducibility was proven by hand in round 2; this
+    makes it permanent, mirroring the sch/pcb capstone above.
+    """
+    import os
+    import subprocess
+    import sys
+
+    _copy_gen_inputs(tmp_path, with_pro=False)
+    res = subprocess.run(
+        [sys.executable, str(tmp_path / "tools" / "gen_bom.py")],
+        cwd=tmp_path, capture_output=True, text=True, timeout=300,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    assert res.returncode == 0, (
+        f"gen_bom.py failed on a clean copy of the committed inputs:\n"
+        f"stdout tail: {res.stdout[-1200:]}\nstderr tail: {res.stderr[-1200:]}")
+
+    fresh = (tmp_path / "hardware" / "datasheets" / "BOM.csv").read_text(
+        encoding="utf-8")
+    committed = (REPO / "hardware" / "datasheets" / "BOM.csv").read_text(
+        encoding="utf-8")
+    assert fresh == committed, (
+        "hardware/datasheets/BOM.csv no longer equals gen_bom.py's output; "
+        f"first difference at line "
+        f"{next((i + 1 for i, (a, b) in enumerate(zip(fresh.splitlines(), committed.splitlines())) if a != b), 'length/EOF')}")

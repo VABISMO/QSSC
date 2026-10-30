@@ -197,3 +197,41 @@ def test_readme_firmware_verbs_exist_in_the_parser():
         assert f'"{verb}"' in parser or verb in parser, (
             f"README claims firmware verb {verb} but command_parser.v "
             f"never mentions it")
+
+
+# --------------------------------------------------------------------------
+# Every env knob the code reads must be documented somewhere the user looks
+# (README, docs/, hardware/, or the deploy manifests). Guards finding B of
+# the round-10 audit: eleven runtime/security knobs shipped undocumented.
+# --------------------------------------------------------------------------
+def test_every_env_knob_is_documented():
+    import re as _re
+
+    code_roots = [REPO / "api", REPO / "qssc", REPO / "tools", REPO / "fpga"]
+    knobs = set()
+    for root in code_roots:
+        for f in root.rglob("*.py"):
+            if "__pycache__" in f.parts:
+                continue
+            knobs.update(_re.findall(
+                r"QSSC_[A-Z0-9_]+", f.read_text(encoding="utf-8", errors="ignore")))
+
+    doc_files = [REPO / "README.md", REPO / "Dockerfile", REPO / "render.yaml"]
+    for d in ("docs", "hardware", ".github"):
+        p = REPO / d
+        if p.exists():
+            doc_files.extend(p.rglob("*"))
+    documented = set()
+    for f in doc_files:
+        if f.is_file() and f.suffix in (".md", ".yaml", ".yml", ".txt", ""):
+            try:
+                documented.update(_re.findall(
+                    r"QSSC_[A-Z0-9_]+", f.read_text(encoding="utf-8", errors="ignore")))
+            except OSError:
+                continue
+
+    undocumented = sorted(k for k in knobs if k not in documented)
+    assert not undocumented, (
+        f"env knobs read in code but never documented in README/docs/deploy: "
+        f"{undocumented} — add them to the README 'Environment variables' "
+        f"table (or the router doc for dev-only knobs)")
