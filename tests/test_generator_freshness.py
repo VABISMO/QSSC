@@ -99,3 +99,23 @@ def test_committed_pro_matches_generator(stem, path):
     assert fresh.get("meta") == shipped.get("meta"), (
         f"{rel}: meta drifted -- fresh={fresh.get('meta')} "
         f"shipped={shipped.get('meta')}")
+
+
+def test_committed_xdc_matches_generator():
+    """fpga/constraints.xdc must be byte-identical to tools.gen_xdc.emit().
+
+    The audit-#109 timing section (false paths for the asynchronous inputs
+    rx/adc_busy/spi_pins[3], the refclk_25m generated clock, and the gated-
+    strobe notes -- 32 lines) was hand-added to the committed XDC and never
+    taught to the emitter: one regeneration silently deleted all of it
+    (round-8 audit), which would drop real Vivado timing constraints. The
+    gradient-block header comment had drifted the same way.
+    """
+    from tools.gen_xdc import emit
+
+    committed = (REPO / "fpga" / "constraints.xdc").read_text(encoding="utf-8")
+    fresh = emit()
+    assert fresh == committed, (
+        "fpga/constraints.xdc no longer equals its generator output; "
+        f"first difference at line "
+        f"{next((i + 1 for i, (a, b) in enumerate(zip(fresh.splitlines(), committed.splitlines())) if a != b), 'length/EOF')}")
