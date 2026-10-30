@@ -21,7 +21,8 @@ through-silicon vias (TSVs)**, so each face is contacted by its own PCB:
     → coil trace) is **part of the main board above** — the published main IS
     the extended build (gradient block onboard, no third board), so every
     `SET_GRADIENT` command has its hardware on a published board; its BOM rows
-    live under `grad` in `BOM.csv`.
+    are part of the complete `main` section in `BOM.csv` (round-12: no
+    separate `grad` column).
   - **J12 board-to-board connector** (2×10, 2.54 mm) joins the two boards and
     carries the 9-wire AD7616 SPI + GND/+3V3/+5V.
 

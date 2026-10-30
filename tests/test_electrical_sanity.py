@@ -427,8 +427,11 @@ def test_wuerth_mpn_matches_pad_count(board: str, ref: str):
 
 
 def test_lm358p_package_matches_footprint():
-    """Udrv BOM repaired to LM358DR (SOIC-8, issue #169); gate stays as a pin."""
-    row = _bom_row("grad", "Udrv")
+    """Udrv BOM repaired to LM358DR (SOIC-8, issue #169); gate stays as a pin.
+
+    Round-12: Udrv lives under the single complete 'main' board (gen_bom no
+    longer emits a separate 'grad' column)."""
+    row = _bom_row("main", "Udrv")
     mpn, fp = row["MPN"].strip().upper(), row["Footprint"]
     assert not (re.search(r"\bSOIC\b", fp) and mpn.endswith("P")), (
         f"'{mpn}' is a PDIP order for footprint '{fp}'")
@@ -666,11 +669,9 @@ KNOWN_NO_MPN = {
     # genuinely generic or project-specific.
     ("main", "F2"), ("main", "LED1"), ("main", "D_USB"), ("main", "Uchip"),
     ("head", "Uchip"),
-    # The gradient board carries the same power/RF/connector parts as the main
-    # board (build_gradient_board reuses build_main_board(grad=True)), so each
-    # of them has a grad twin -- gen_bom emits the full grad section now
-    # (issue #162) instead of six hand-typed rows.
-    ("grad", "F2"), ("grad", "LED1"), ("grad", "D_USB"), ("grad", "Uchip"),
+    # Round-12: gen_bom now emits exactly the two published boards (main =
+    # build_gradient_board, the complete board WITH the gradient block), so
+    # the former "grad twin" rows (F2/LED1/D_USB/Uchip) are simply main rows.
 }
 # rows whose designator MUST carry an MPN (active parts, connectors, fuses)
 _NEEDS_MPN = re.compile(r"^(U|Y|J|D|R?EG\d|F|Q|LED)")
