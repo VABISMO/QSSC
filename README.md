@@ -238,11 +238,13 @@ what the code falls back to when the variable is unset.
 | `QSSC_FPGA_PROFILE` | `NV` | Simulation profile for the fallback `SimulatedFPGA` when no board is present. |
 | `QSSC_SEED` | `42` | Seed for the simulated-FPGA RNG (reproducible sim runs). |
 
-> The PCB-generation knobs (`QSSC_ZONE_CLEARANCE_NM`, `QSSC_ZONE_MIN_WIDTH_NM`,
-> `QSSC_VIA_DIAM_NM`, `QSSC_VIA_DRILL_NM`, `QSSC_COPPER_GAP_NM`,
-> `QSSC_ROUTE_DEBUG`, `QSSC_RAIL_MICRO`, `QSSC_STITCH_STEP`, `QSSC_PCB_PATH`)
-> are development-time router settings, documented in
-> [`docs/agents/project-specs.md`](docs/agents/project-specs.md).
+> The PCB-generation overrides — `QSSC_ZONE_CLEARANCE_NM`,
+> `QSSC_ZONE_MIN_WIDTH_NM`, `QSSC_VIA_DIAM_NM`, `QSSC_VIA_DRILL_NM`,
+> `QSSC_COPPER_GAP_NM`, `QSSC_ROUTE_DEBUG`, `QSSC_RAIL_MICRO`,
+> `QSSC_STITCH_STEP`, `QSSC_PCB_PATH` — are development-time router settings
+> read by `tools/route_qssc_pcb.py` and `tools/router/*` (the pour and rail
+> overrides are described in
+> [`hardware/HARDWARE_DESIGN.md`](hardware/HARDWARE_DESIGN.md)).
 
 ## FPGA control stack
 
