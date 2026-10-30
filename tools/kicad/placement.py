@@ -344,6 +344,13 @@ def build_main_board(grad=False):
         342, 256, pins={"1": "+1V8", "2": "GND"})
     add("C54", "qssc:C", "4.7uF", "Capacitor_SMD:C_0805_2012Metric",
         354, 256, pins={"1": "+3V3", "2": "GND"})
+    # C87: the 47 uF VCCINT core bulk audit #99 required (22-47 uF near the
+    # BGA; only 4.7 uF existed). PCB site sits NORTH of U1's ball field,
+    # x-aligned with the +1V0 escape vias at (126.8/128.4, 52.2), clear of
+    # the J3_SIG corridor at y47.38 -- previously a BOM-only row whose
+    # placement was deferred (issue #169 item 3).
+    add("C87", "qssc:C", "47uF", "Capacitor_SMD:C_1206_3216Metric",
+        366, 256, pins={"1": "+1V0", "2": "GND"})
     # FT232 decoupling: 3V3OUT (pin17) needs 100nF per datasheet (was missing); VCC
     # (pin20) local 100nF; 4.7uF rail bulk.
     add("C55", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
@@ -776,6 +783,13 @@ def assign_pcb_positions():
         # FPGA CSG324 (~17 mm BGA, courtyard x[119.5,136.5] y[46.5,63.5]) right of
         # the die; ~29 mm gap for the 64 DET_DIG routes (Phase 4). XO above the die.
         "U1": (128, 55, 0), "Y1": (70, 25, 0),
+        # C87 VCCINT bulk (47 uF): NORTH of the ball field, x-aligned with the
+        # +1V0 escape vias at (126.8/128.4, 52.2). Site verified by an EXACT
+        # clearance scan (segment-rect geometry -- a sampled first attempt
+        # missed the J3_SIG diagonal): courtyard (y +-1.2) stays north of
+        # U1's F.CrtYd [y46.5..], pads keep 0.15 mm from every F.Cu track/pad/
+        # via and hole. Issue #169 item 3.
+        "C87": (128, 45.25, 0),
         # config flash W25Q128 + pull-ups in the die<->FPGA gap (x106-118); C40
         # VREFP decoupling just below-left of the FPGA.
         "U8": (106, 58, 0), "R75": (114, 54, 0), "R76": (114, 58, 0),

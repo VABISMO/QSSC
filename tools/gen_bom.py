@@ -36,20 +36,11 @@ import gen_qssc_kicad as g  # noqa: E402
 
 OUT = ROOT / "hardware" / "datasheets" / "BOM.csv"
 
-# Components that belong in the BOM but are deliberately NOT yet placed on
-# their board.  They must be emitted here, otherwise regenerating BOM.csv
-# silently drops a real hardware requirement and the file stops being
-# reproducible from its generator.
-#
-#   C87 -- 47 uF VCCINT bulk near the BGA.  audit #99 / commit 06add88 added
-#          the row to satisfy the 22-47 uF the design doc calls for (only
-#          4.7 uF was present); PCB placement near the VCCINT balls was
-#          explicitly deferred "to avoid re-running the router over committed
-#          boards".  Still a real TODO (issue #169 item 3).
-BOM_ONLY: dict[str, list[dict]] = {
-    "main": [{"ref": "C87", "value": "47uF",
-              "fp": "Capacitor_SMD:C_1206_3216Metric"}],
-}
+# NOTE: the BOM-only escape hatch (components in the BOM but deliberately not
+# placed) was removed once C87 -- its only user, from audit #99 / issue #169
+# item 3 -- graduated into build_main_board with a real PCB site. A BOM row
+# without a footprint is now always a defect the BOM<->board deficit gates
+# catch, never a pinned state.
 
 # Curated manufacturer/MPN/URL for the ICs + connectors (verified pinouts in
 # DATASHEETS.md). Keyed by (value, footprint-basename) so it is robust to the
@@ -201,7 +192,7 @@ def main() -> None:
     # Group by (Board, value, footprint) -> list of refs.
     groups: dict[tuple[str, str, str], list[str]] = {}
     for label, comps in board_comps:
-        for c in list(comps) + BOM_ONLY.get(label, []):
+        for c in comps:
             # Skip KiCad schematic-only markers (#FLG*/PWR_FLAG): they are
             # power flags, not purchasable parts, and never become a footprint
             # (issue #167).

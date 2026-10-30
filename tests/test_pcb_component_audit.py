@@ -114,15 +114,10 @@ SCHEMATIC_ONLY_RE = re.compile(r"^#")
 # the board. Kept out of the assertion so CI reflects reality without hiding
 # the gap: deleting them from the BOM would make the test pass by discarding
 # a real, documented hardware requirement.
-PENDING_PLACEMENT = {
-    # 47 uF VCCINT bulk near the BGA -- audit #99, commit 06add88: BOM updated
-    # to satisfy the 22-47 uF the design doc requires (only 4.7 uF was there);
-    # PCB placement near the VCCINT balls was explicitly deferred "to avoid
-    # re-running the router over committed boards". Still a real TODO
-    # (issue #169 item 3), and now reproduced by gen_bom via its BOM_ONLY
-    # table so a regeneration cannot drop the row.
-    "C87",
-}
+# Empty since C87 (the only entry -- audit #99 / issue #169 item 3, the
+# 47 uF VCCINT bulk) graduated into the build with a real PCB site; a
+# BOM-only row is now always a defect, never a pinned state.
+PENDING_PLACEMENT: set = set()
 
 
 # --------------------------------------------------------------------------

@@ -82,9 +82,10 @@ BOM_CSV = REPO / "hardware" / "datasheets" / "BOM.csv"
 # fail instead of silently scanning nothing.
 BOARD_INVENTORY = {
     # main = base board + the gradient block (the published main IS the
-    # extended build): 134 fps / 1048 pads matches the reviewed grad board,
-    # minus the phantom grad_en net (spare ball, netless pad -- pruned on save).
-    "main": {"nets": 146, "fps": 134, "pads": 1048},
+    # extended build): 135 fps / 1050 pads matches the reviewed grad board
+    # (134) plus C87, the VCCINT bulk placed for issue #169 -- minus the
+    # phantom grad_en net (spare ball, netless pad -- pruned on save).
+    "main": {"nets": 146, "fps": 135, "pads": 1050},
     "grad": {"nets": 147, "fps": 134, "pads": 1048},
     "head": {"nets": 159, "fps": 201, "pads": 991},
 }

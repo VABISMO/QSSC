@@ -28,6 +28,7 @@ grad,"R73, R75, R76, R77, R80, R81, R82",7,4.7k,Resistor_SMD:R_0603_1608Metric,,
 main,"C52, C53, C54, C57, C84",5,4.7uF,Capacitor_SMD:C_0805_2012Metric,,,
 grad,"C52, C53, C54, C57, C84",5,4.7uF,Capacitor_SMD:C_0805_2012Metric,,,
 main,C87,1,47uF,Capacitor_SMD:C_1206_3216Metric,,,
+grad,C87,1,47uF,Capacitor_SMD:C_1206_3216Metric,,,
 main,"R71, R72",2,5.1k,Resistor_SMD:R_0603_1608Metric,,,
 grad,"R71, R72",2,5.1k,Resistor_SMD:R_0603_1608Metric,,,
 main,"D1, D2, D3, D4, D5, D6, D7, D8, D9, D10",10,ESD5V0,Diode_SMD:D_SOD-923,ON Semi,ESD5V0S3B-U,https://www.onsemi.com/pub/Collateral/ESD5V0S3B-U-D.PDF

@@ -429,7 +429,9 @@ sequence on this board is:
 within 3 mm. Bulk 10 µF (C21–C30) sits at each regulator output and at the FPGA
 VCCINT/VCCAUX/VCCO banks. The 1.0 V rail to the FPGA core additionally gets a
 22 µF–47 µF tantalum/ceramic near the BGA for transient supply — **C87, 47 µF
-X7R 1206, placed under the BGA at the VCCINT balls** (required: the AP2127K-1.0
+X7R 1206, placed north of U1's ball field at the VCCINT escape (128, 45.25;
+the BGA interior is pad field, so "near the balls" means just outside it,
+x-aligned with the +1V0 escape vias at (126.8/128.4, 52.2))** (required: the AP2127K-1.0
 600 mA LDO has marginal headroom at the real 56% LUT / 93% CARRY4 utilization;
 the 4.7 µF C54 alone is not enough bulk for core transients during config /
 64-channel switching). Each of the 32
