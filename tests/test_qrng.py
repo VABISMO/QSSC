@@ -93,8 +93,13 @@ def test_fpga_read_rng_seed_reproducible():
 
 
 def test_fpga_read_rng_bounds():
+    """READ_RNG bounds mirror the wire spec: command_parser.v validates
+    n_bytes as 1..256, so the sim must ERR above 256 (it used to accept
+    4096 -- accepted-here/rejected-on-hardware, round-4 audit)."""
     assert SimulatedFPGA("NV", seed=1).send_command("READ_RNG 0") == "ERR"
+    assert SimulatedFPGA("NV", seed=1).send_command("READ_RNG 257") == "ERR"
     assert SimulatedFPGA("NV", seed=1).send_command("READ_RNG 4097") == "ERR"
+    assert SimulatedFPGA("NV", seed=1).send_command("READ_RNG 256") != "ERR"
 
 
 # -- qrand endpoint logic ----------------------------------------------------

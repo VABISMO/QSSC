@@ -304,8 +304,13 @@ class SimulatedFPGA:
                 # no photocurrent, hence no shot noise) so the extractor's work
                 # shows up in the returned stats. Reply:
                 # "<hex> <raw_bits> <kept> <extract_rate>".
+                # Argument range mirrors the wire spec: command_parser.v
+                # documents READ_RNG n_bytes as 1..256 (validated there), so
+                # the sim must ERR at 257+ instead of accepting up to 4096 --
+                # an accepted-here/rejected-on-hardware divergence (round-4
+                # audit) of the same class the parity gate exists for.
                 n_bytes = int(parts[1]) if len(parts) > 1 else 32
-                if n_bytes <= 0 or n_bytes > 4096:
+                if n_bytes <= 0 or n_bytes > 256:
                     return "ERR"
                 return self._harvest_entropy(n_bytes)
             if head == "ODMR_SWEEP":
