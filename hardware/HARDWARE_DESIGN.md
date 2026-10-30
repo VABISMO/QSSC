@@ -1165,16 +1165,20 @@ headlessly:
   for incremental finishing: its DSN model reports ~170 phantom unrouted items
   on an already-routed board and its re-fanout rewrites everything.
 
-> **Status — what IS done (re-verified 2026-09-04):**
-> - **Schematic:** `kicad-cli sch erc` → **0 errors** (625 warnings: 587
->   `endpoint_off_grid` because the 256 front-end passives are placed at
->   sub-grid coordinates; 27 `pin_not_connected` / 8 `pin_not_driven` on
->   intentional unused pins — FT232 control signals, USB-C second-lane SuperSpeed
->   pairs, ADF4351 unused RF outputs / LD / SW / TEMP; 2 `pin_to_pin` and 1
->   `label_dangling` (`mod_sync`) — all benign. `kicad-cli sch export netlist`
->   succeeds.)
-> - **PCB:** all BOM footprints placed on a **150 × 118 mm 6-layer** FR4 board
->   (581 footprints, 113 active ICs/connectors), full netlist assigned to pads,
+> **Status — what IS done (re-verified 2026-10-30):**
+> - **Schematic:** `kicad-cli sch erc --severity-all` over both published
+>   sheets → **0 errors** (353 warnings: 345 `endpoint_off_grid` because the
+>   256 front-end passives are placed at sub-grid coordinates; 5
+>   `footprint_link_issues` — the virtual `qssc` footprint library, whose
+>   footprints are authored in `component_lib.py` and embedded in the boards;
+>   2 `pin_to_pin` and 1 `label_dangling` (`mod_sync`) — all benign. The
+>   intentional unused pins — FT232 control signals, USB-C second-lane
+>   SuperSpeed pairs, ADF4351 unused RF outputs / LD / SW / TEMP — are
+>   NC-flagged, so `pin_not_connected` / `pin_not_driven` are **0**.
+>   `kicad-cli sch export netlist` succeeds.)
+> - **PCB:** the two published boards — main **150 × 118 mm 6-layer** (135
+>   footprints, 27 active ICs/connectors) and head **110 × 102 mm** (201
+>   footprints, 23 active) — carry the full netlist assigned to pads,
 >   correct 6-layer stackup (F.Cu signal / In1.Cu GND plane / In2.Cu +3V3 PWR
 >   plane / In3.Cu signal / In4.Cu signal / B.Cu signal — verified
 >   `GetCopperLayerCount()==6`), net classes (Default / RF / Power / USB / Analog
