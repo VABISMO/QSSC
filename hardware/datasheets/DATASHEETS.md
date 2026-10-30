@@ -417,7 +417,9 @@ a different mechanism (the die is **removable**):
 
 > **On the published main board:** the field-gradient block ships as part of
 > `qssc.kicad_*` itself (the main IS the extended build — no third board);
-> its BOM rows stay under `grad` in `BOM.csv`.
+> its BOM rows are `main` rows in `BOM.csv` (round-12: `gen_bom` emits exactly
+> the two published boards, so the gradient parts sit under the single
+> complete `main` section — there is no separate `grad` column).
 
 The gradient block is the **main board + an Invention 5 field-gradient
 coil and its current driver** — generated from

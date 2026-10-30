@@ -177,13 +177,17 @@ def main() -> None:
     g.build_pincoords()
 
     board_comps: list[tuple[str, list[dict]]] = []
-    # Three boards: the two sandwich boards plus the gradient variant.  The
-    # grad section used to be hand-maintained in BOM.csv because this loop
-    # never asked the generator for it, so `gen_bom` could not reproduce the
-    # committed file (issue #162).
-    for label, build_fn in (("main", g.build_main_board),
-                            ("head", g.build_detector_head),
-                            ("grad", g.build_gradient_board)):
+    # Exactly the two published boards (matching the two tracked .kicad_pcb
+    # files). The main board IS the extended build: build_gradient_board()
+    # (base main + the field-gradient block) is what gen_qssc_kicad emits as
+    # qssc.kicad_pcb (__main__.py emits it via build_gradient_board), so the
+    # main board ALWAYS carries the gradient. Emitting the base
+    # build_main_board() as a separate 'main' produced a phantom gradient-less
+    # board, and labelling the real build a separate 'grad' duplicated every
+    # main row under two labels (round-12 fix: main = the complete published
+    # board, no third/grad column).
+    for label, build_fn in (("main", g.build_gradient_board),
+                            ("head", g.build_detector_head)):
         g.COMPONENTS.clear()
         build_fn()
         board_comps.append((label, list(g.COMPONENTS)))
