@@ -14,11 +14,14 @@ DRC is run IN-PLACE on the committed board (board + sibling ``.kicad_pro``) so
 the project's netclasses (Default/Analog/Chip/Power/RF/USB) load with their real
 clearance/track/via values. A copy to a temp dir falls back to KiCad's default
 netclasses and silently passes/wrong-fails. ``--severity-all`` forces every
-rule to be reported even where the project masks it: ``unconnected_items`` is
-set to "ignore" in the project (so the GUI does not flag same-net-through-plane
-members the headless router cannot dog-bone out of the 0.8 mm-pitch CSG324
-field), but with ``--severity-all`` the unconnected count is authoritative, so
-``unconnected_items == []`` is a REAL assertion here, not a vacuous one.
+rule to be reported: ``violations`` and ``unconnected_items`` are both
+authoritative here, not vacuous. The projects themselves carry
+``unconnected_items = "error"`` (the real-DRC-gate setting both shipped
+boards ship with -- a fresh generator emit used to revert it to "ignore",
+now pinned by tests/test_generator_freshness), so the GUI and a plain CLI
+run report every split as well; same-net-through-plane members stay safe
+because KiCad's connectivity joins them through the zone fill, so nothing
+valid is flagged by the error severity.
 
 The MEANINGFUL end-to-end connectivity bar is ``test_pcb_connectivity.py``
 (a layer-aware copper-graph union-find that handles poured planes); the two

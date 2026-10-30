@@ -233,6 +233,11 @@ def emit_pro(cfg=None):
     analog_clearance = (cfg or {}).get("analog_clearance", 0.15)
     if PRO_TEMPLATE is not None:
         proj = _j.loads(PRO_TEMPLATE)
+        # meta.filename must follow THIS board's stem: the template is the
+        # shipped main project, so a head emit would otherwise stamp
+        # "qssc.kicad_pro" into chip_module.kicad_pro (round-7 audit).
+        if cfg and cfg.get("out_stem"):
+            proj.setdefault("meta", {})["filename"] = f"{cfg['out_stem']}.kicad_pro"
     else:
         # Minimal fallback so a pristine tree can still emit a .kicad_pro.
         proj = {
@@ -256,7 +261,13 @@ def emit_pro(cfg=None):
     rs["endpoint_off_grid"] = "warning"
     rs["lib_symbol_issues"] = "ignore"
     ds = proj["board"]["design_settings"]
-    ds["rule_severities"]["unconnected_items"] = "ignore"
+    # unconnected_items = error: BOTH committed projects carry the
+    # real-DRC-gate setting (every split reported by the GUI and by a plain
+    # kicad-cli run, not only under --severity-all), so a regeneration must
+    # reproduce it. The old "ignore" here silently reverted that hand-applied
+    # gate on every fresh emit -- the same artifact-vs-generator class as
+    # issue #168-B (round-7 audit; pinned by tests/test_generator_freshness).
+    ds["rule_severities"]["unconnected_items"] = "error"
     # via_dangling / track_dangling fire on the partially-routed design-artifact
     # board's unrouted and partially-routed nets: an orphan via layer (e.g. a
     # BGA via-in-pad on a net that never escaped, or a power ball whose plane
