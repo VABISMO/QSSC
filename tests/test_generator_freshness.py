@@ -22,6 +22,7 @@ generator run.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -119,3 +120,201 @@ def test_committed_xdc_matches_generator():
         "fpga/constraints.xdc no longer equals its generator output; "
         f"first difference at line "
         f"{next((i + 1 for i, (a, b) in enumerate(zip(fresh.splitlines(), committed.splitlines())) if a != b), 'length/EOF')}")
+
+
+def _symbol_pinmaps(text: str) -> dict[str, dict[str, str]]:
+    """{symbol_name: {pin_number: pin_name}} for TOP-LEVEL symbols of a
+    KiCad symbol file (works for both qssc-lib.kicad_sym and the schematic's
+    embedded lib_symbols cache).
+
+    Top-level blocks are the ``(symbol "X" ...)`` openers whose name does NOT
+    end in ``_<digits>_<digits>`` (those are unit/style sub-symbols, whose
+    pins belong to the enclosing symbol); each block runs to the next
+    top-level opener. Symbol *instances* in a schematic use
+    ``(symbol (lib_id ...)`` (no quoted name) and never match.
+    """
+    openers = [(m.start(), m.group(1)) for m in re.finditer(r'\(symbol "([^"]+)"', text)
+               if not re.search(r"_\d+_\d+$", m.group(1))]
+    out: dict[str, dict[str, str]] = {}
+    for i, (start, name) in enumerate(openers):
+        end = openers[i + 1][0] if i + 1 < len(openers) else len(text)
+        block = text[start:end]
+        pins = {m.group(2): m.group(1) for m in re.finditer(
+            r'\(\s*name\s+"([^"]*)"[\s\S]{0,400}?\(number\s+"(\d+)"', block)}
+        out[name] = pins
+    return out
+
+
+def test_library_symbols_match_schematic_cache():
+    """qssc-lib.kicad_sym must agree PIN-FOR-PIN with the lib_symbols caches
+    embedded in BOTH committed sheets (issue #168-B generalized).
+
+    The #168-B regression was exactly this class: the library said
+    VCC/GND while the sheet cache said V-/V+ (and vice versa after a
+    one-sided fix), so "Update Symbols from Library" or the next
+    regeneration reverted whichever side was hand-repaired. The existing
+    gates only cover LM358 by name; this compares EVERY embedded symbol
+    on every committed sheet.
+    """
+    lib = _symbol_pinmaps(
+        (REPO / "hardware/pcb/qssc-lib.kicad_sym").read_text(encoding="utf-8"))
+    for sch_name in ("qssc.kicad_sch", "chip_module.kicad_sch"):
+        sch = _symbol_pinmaps(
+            (REPO / "hardware" / "pcb" / sch_name).read_text(encoding="utf-8"))
+        assert sch, f"{sch_name}: no symbols parsed -- parser broken?"
+
+        missing = sorted(n for n in sch if n not in lib)
+        assert not missing, (
+            f"{sch_name}: symbols embedded but absent from qssc-lib.kicad_sym: "
+            f"{missing}")
+
+        drifted = sorted(n for n in sch if lib.get(n) != sch[n])
+        detail = []
+        for n in drifted[:4]:
+            only_lib = {k: v for k, v in lib[n].items() if sch[n].get(k) != v}
+            only_sch = {k: v for k, v in sch[n].items() if lib[n].get(k) != v}
+            detail.append(f"{n}: lib-only/differing={only_lib} sheet-only/differing={only_sch}")
+        assert not drifted, (
+            f"{sch_name}: pin maps differ between qssc-lib.kicad_sym and the "
+            f"sheet cache for {len(drifted)} symbol(s): {detail}")
+
+
+def _run_generator(tmp: Path) -> None:
+    """Copy the minimal generator inputs into tmp and run the REAL generator
+    there (round-9 capstone).
+
+    ROOT inside tools derives from the script's own location, so everything
+    the generator writes lands inside the copy -- the working tree is never
+    touched. Inputs: tools/, the two pinned .tmpwork snapshots (pins.json +
+    fpga_csg324_map.json, the fresh-clone contract of issue #166), and the
+    shipped main project (emit_pro uses it as its template). The system
+    footprint library is READ (not copied), hence the skip guard below.
+    """
+    import os
+    import shutil
+    import subprocess
+    import sys
+
+    (tmp / ".tmpwork").mkdir(parents=True, exist_ok=True)
+    (tmp / "hardware" / "pcb").mkdir(parents=True, exist_ok=True)
+    shutil.copytree(REPO / "tools", tmp / "tools",
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    for rel in (".tmpwork/pins.json", ".tmpwork/fpga_csg324_map.json",
+                "hardware/pcb/qssc.kicad_pro"):
+        shutil.copy2(REPO / rel, tmp / rel)
+
+    res = subprocess.run(
+        [sys.executable, str(tmp / "tools" / "gen_qssc_kicad.py")],
+        cwd=tmp, capture_output=True, text=True, timeout=600,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    assert res.returncode == 0, (
+        f"the generator failed on a clean copy of the committed inputs "
+        f"(fresh-clone contract):\nstdout tail: {res.stdout[-1500:]}\n"
+        f"stderr tail: {res.stderr[-1500:]}")
+
+
+def _sch_surface(path: Path):
+    """(sorted instance tuples, sorted label tuples) of a schematic.
+
+    Instances: (ref, lib_id, x, y, rot, value, footprint) -- the window after
+    each (lib_id ...) starts with the INSTANCE's own (at ...), all properties
+    precede the per-pin uuid list. Labels: (name, x, y) multiset. Coordinates
+    compare as floats so formatting cannot cause false drift.
+    """
+    txt = path.read_text(encoding="utf-8")
+    inst = []
+    for m in re.finditer(r'\(lib_id "([^"]+)"\)', txt):
+        win = txt[m.end():m.end() + 4000]
+        at = re.search(r'\(at ([\d.eE+-]+) ([\d.eE+-]+)(?: ([\d.eE+-]+))?\)', win)
+        ref = re.search(r'\(property "Reference" "([^"]*)"', win)
+        if not (at and ref):
+            continue
+        val = re.search(r'\(property "Value" "([^"]*)"', win)
+        fpp = re.search(r'\(property "Footprint" "([^"]*)"', win)
+        inst.append((ref.group(1), m.group(1),
+                     round(float(at.group(1)), 4), round(float(at.group(2)), 4),
+                     round(float(at.group(3) or 0) % 360, 3),
+                     val.group(1) if val else "", fpp.group(1) if fpp else ""))
+    labels = sorted(
+        (n, round(float(x), 4), round(float(y), 4), round(float(r or 0) % 360, 3))
+        for n, x, y, r in re.findall(
+            r'\(label "([^"]+)"\s*\(at ([\d.eE+-]+) ([\d.eE+-]+)(?: ([\d.eE+-]+))?\)',
+            txt))
+    ncs = sorted((round(float(x), 4), round(float(y), 4))
+                 for x, y in re.findall(r'\(no_connect\s*\(at ([\d.eE+-]+) ([\d.eE+-]+)\)', txt))
+    return sorted(inst), labels, ncs
+
+
+def _pcb_surface(path: Path):
+    """(sorted (ref, x, y, rot) tuples, sorted (ref, pad, net) tuples) of a
+    board file, parsed from TEXT so the freshly emitted file (generator
+    formatting) and the committed one (pcbnew round-trip) compare on content:
+    footprints are sliced by line-start openers (no fixed window -- U1 spans
+    ~30k chars), rotations normalised mod 360, coordinates as floats.
+    """
+    txt = path.read_text(encoding="utf-8")
+    starts = [m.start() for m in re.finditer(r'^[ \t]*\(footprint "', txt, re.M)]
+    place, padnets = [], []
+    for i, s in enumerate(starts):
+        block = txt[s: starts[i + 1] if i + 1 < len(starts) else len(txt)]
+        lib = re.match(r'[ \t]*\(footprint "([^"]+)"', block).group(1)
+        at = re.search(r'\(at ([\d.eE+-]+) ([\d.eE+-]+)(?: ([\d.eE+-]+))?\)', block)
+        ref = re.search(r'\(property "Reference" "([^"]*)"', block)
+        if not (at and ref):
+            continue
+        place.append((ref.group(1),
+                      round(float(at.group(1)), 4), round(float(at.group(2)), 4),
+                      round(float(at.group(3) or 0) % 360, 3), lib))
+        # pads: split on the pad openers, take the first (net ...) of each
+        pads = re.split(r'(?=\(pad ")', block)[1:]
+        for chunk in pads:
+            num = re.match(r'\(pad "([^"]*)"', chunk).group(1)
+            net = re.search(r'\(net \d+ "([^"]*)"\)', chunk)
+            padnets.append((ref.group(1), num, net.group(1) if net else ""))
+    return sorted(place), sorted(padnets)
+
+
+def _first_diff(a: list, b: list) -> str:
+    for i, (x, y) in enumerate(zip(a, b)):
+        if x != y:
+            return f"first difference at index {i}: fresh={x!r} committed={y!r}"
+    return f"length differs: fresh={len(a)} committed={len(b)}"
+
+
+def test_committed_sch_and_pcb_match_generator(tmp_path):
+    """Round-9 capstone: the committed schematics AND boards must be what the
+    generator produces from the committed inputs.
+
+    Covers, without kicad-cli/pcbnew (pure text, so CI can run it when the
+    system footprint library exists): schematic instances (symbol/position/
+    value/footprint), label positions, no-connect markers, board placement
+    and -- the netlist axis proved by hand in round 6 -- every pad's net, for
+    BOTH boards. A hand edit to a committed sch/pcb that the generator does
+    not know about (or a generator change that was never regenerated) fails
+    here instead of drifting until an audit finds it.
+    """
+    import pytest
+
+    from tools.kicad._paths import FP_LIB
+
+    if not Path(FP_LIB, "Capacitor_SMD.pretty").exists():
+        pytest.skip("system KiCad footprint libraries not installed")
+
+    _run_generator(tmp_path)
+
+    for stem in ("qssc", "chip_module"):
+        fresh_sch = tmp_path / "hardware" / "pcb" / f"{stem}.kicad_sch"
+        comm_sch = REPO / "hardware" / "pcb" / f"{stem}.kicad_sch"
+        fi, fl, fn = _sch_surface(fresh_sch)
+        ci, cl, cn = _sch_surface(comm_sch)
+        assert fi == ci, f"{stem}.kicad_sch instances: {_first_diff(fi, ci)}"
+        assert fl == cl, f"{stem}.kicad_sch labels: {_first_diff(fl, cl)}"
+        assert fn == cn, f"{stem}.kicad_sch no_connects: {_first_diff(fn, cn)}"
+
+        fresh_pcb = tmp_path / "hardware" / "pcb" / f"{stem}.kicad_pcb"
+        comm_pcb = REPO / "hardware" / "pcb" / f"{stem}.kicad_pcb"
+        fp_, fnets = _pcb_surface(fresh_pcb)
+        cp, cnets = _pcb_surface(comm_pcb)
+        assert fp_ == cp, f"{stem}.kicad_pcb placement: {_first_diff(fp_, cp)}"
+        assert fnets == cnets, f"{stem}.kicad_pcb pad nets: {_first_diff(fnets, cnets)}"

@@ -18888,7 +18888,7 @@
 		)
 		(embedded_fonts no)
 	)
-	(footprint "Capacitor_SMD:C_1206_3216Metric"
+	(footprint "C_1206_3216Metric"
 		(layer "F.Cu")
 		(uuid "a0ca3818-4328-402d-8da7-ad8f9370e3a0")
 		(at 128 45.25)
