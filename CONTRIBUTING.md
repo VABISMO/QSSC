@@ -23,7 +23,7 @@ mutually consistent.
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[api,dev,hw]"
 
-python -m pytest -rs          # baseline: 1097 passed, 42 skipped
+python -m pytest -rs          # baseline: 1104 passed, 43 skipped
 ruff check --select=E9,F63,F7,F82,F401,F841 .   # the CI lint set (ci.yml)
 ```
 
