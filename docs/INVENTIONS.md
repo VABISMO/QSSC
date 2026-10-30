@@ -67,7 +67,7 @@ in-band noise inside a prime channel's linewidth still passes).
   `prime_decompose`, `prime_denoise`, `prime_noise_rejection`,
   `cross_talk_residual`). Grounded in the NV profile (T2 = 1.8 ms,
   linewidth = 5 MHz): a channel is usable iff `1/linewidth < p·tau < T2`.
-- **Tests** — `tests/test_prime_readout.py` (12 tests incl.
+- **Tests** — `tests/test_prime_readout.py` (16 tests incl.
   `test_16_symbols_are_channels_not_qudit_states` pinning that 16 prime
   symbols = 16 ADDRESS CHANNELS = 16 NVs, NOT a 16-state qudit — a 10-NV
   pixel is `2^10`, not `16^10`).
@@ -127,7 +127,7 @@ per pixel and aggregates.
 - **SIM ✅** — `qssc/backend.py` `QSSCBackend.run_array(circuits, shots,
   max_pixels=64)`; `api/runner.py` `run_parallel` (shor / sample / custom);
   `api/main.py` `POST /api/circuit/run-parallel`.
-- **Tests** — `tests/test_parallel_computing.py` (8 tests).
+- **Tests** — `tests/test_parallel_computing.py` (19 tests).
 - **HW-fits (readout DONE)** — the 64 detectors + 4× AD7616 read all 64
   pixels in parallel. The **existing `READ_DETECTORS` verb**
   (`CMD_READ_ALL`, already in the firmware) already sweeps all 64

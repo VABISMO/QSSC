@@ -219,6 +219,31 @@ ready-made Bell / GHZ / QFT / QASM examples.
 > multi-tenant service. The sandbox is a restricted namespace, not a hardened
 > isolation boundary.
 
+### Environment variables
+
+Operator-facing knobs read by the REST backend and its guards. Defaults are
+what the code falls back to when the variable is unset.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `QSSC_API_PORT` | `8011` | Port for `uvicorn` when running `python -m api.main` directly (the Dockerfile uses `PORT`, default 8000). |
+| `QSSC_RATE_LIMIT_PER_MIN` | `20` | Per-IP request budget per minute; over-budget callers get 429. |
+| `QSSC_ALLOW_SYNC` | *(off)* | Set `1`/`true` to allow `?sync=true` from non-localhost. Off by default: a synchronous run blocks the single uvicorn worker (DoS vector). |
+| `QSSC_TRUSTED_PROXY_CIDR` | *(empty)* | If set (e.g. `10.0.0.0/8`), the immediate peer is treated as a reverse proxy and the client IP is taken from `X-Forwarded-For`. Empty = every request is judged by its TCP peer only. |
+| `QSSC_CORS_ORIGINS` | `*` | Allowed CORS origins (comma-separated for multiple). |
+| `QSSC_ENABLE_CUSTOM_CIRCUIT` | `1` | `0` disables the user-supplied Qiskit-circuit endpoint (503). |
+| `QSSC_CUSTOM_API_KEY` | *(empty)* | When set, `POST /api/circuit/custom` requires a matching `X-API-Key` header (401 otherwise); empty = open. |
+| `QSSC_TESTING` | *(unset)* | Set to `1` by the test suite so the `TestClient` pseudo-peer counts as localhost; **leave unset in production.** |
+| `QSSC_FPGA_PORT` | *(unset)* | UART device for the real board (e.g. `/dev/ttyUSB0`); unset = the stack falls back to the simulator. |
+| `QSSC_FPGA_PROFILE` | `NV` | Simulation profile for the fallback `SimulatedFPGA` when no board is present. |
+| `QSSC_SEED` | `42` | Seed for the simulated-FPGA RNG (reproducible sim runs). |
+
+> The PCB-generation knobs (`QSSC_ZONE_CLEARANCE_NM`, `QSSC_ZONE_MIN_WIDTH_NM`,
+> `QSSC_VIA_DIAM_NM`, `QSSC_VIA_DRILL_NM`, `QSSC_COPPER_GAP_NM`,
+> `QSSC_ROUTE_DEBUG`, `QSSC_RAIL_MICRO`, `QSSC_STITCH_STEP`, `QSSC_PCB_PATH`)
+> are development-time router settings, documented in
+> [`docs/agents/project-specs.md`](docs/agents/project-specs.md).
+
 ## FPGA control stack
 
 A single **Artix-7 XC7A35T-1CSG324C** orchestrates **64 individual on-chip CQD
