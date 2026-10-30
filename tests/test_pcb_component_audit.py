@@ -87,14 +87,15 @@ NO_POWER_CHECK_REF = {"Uchip"}
 NO_POWER_CHECK_FP = ("SOT-89",)
 
 # Non-plane nets that are intentionally single-pad on a given board (a reserved
-# / future-route net, verified in the per-datasheet netlist audit -- see
-# memory/netlist-verified-per-datasheet). ``mod_sync`` is the FPGA's emitter/
+# / future-route net, verified by the per-datasheet pin audit --
+# tests/test_pcb_pin_audit.py). ``mod_sync`` is the FPGA's emitter/
 # detector sync output, held as a single pad on the main board pending a
 # future board-to-board route; not a dangling mistake.
-# ``grad_en`` exists only on the gradient board: the FPGA ball is pinned
+# ``grad_en`` exists only on the legacy local gradient board (kept outside this
+# repo -- see tests/conftest.py): the FPGA ball is pinned
 # (gen_fpga_ballmap_csg324: ball V7) as a spare STATUS output, documented NC on
-# the PCB -- tools/route_grad_nets.py: "grad_en is a 1-pad FPGA STATUS output,
-# NC on the PCB -- left unrouted."
+# that PCB -- tools/route_grad_nets.py: "grad_en is a 1-pad FPGA STATUS output,
+# NC on the PCB -- left unrouted." The published main carries that ball netless.
 RESERVED_NETS = {"mod_sync", "grad_en"}
 
 # Parts on the board but intentionally NOT in the BOM: mechanical mounting

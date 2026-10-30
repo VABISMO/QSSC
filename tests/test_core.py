@@ -257,6 +257,11 @@ def test_simulated_fpga_sensing_commands():
     # arg validation -> ERR
     assert fpga.send_command("READ_GYRO -1") == "ERR"
     assert fpga.send_command("ODMR_SWEEP 0 1 2 0") == "ERR"
+    # both sweeps are n 1..256 on the wire (command_parser validates it);
+    # the sim must reject 257 identically instead of accepting up to 4096
+    # (accepted-here / rejected-on-hardware parity, round-5 audit).
+    assert fpga.send_command("ODMR_SWEEP 0 2860000 2880000 257") == "ERR"
+    assert fpga.send_command("RUN_ALL_ODMR 2860000 2880000 257") == "ERR"
     assert fpga.send_command("READ_LOCKIN 1 0") == "ERR"
 
 
