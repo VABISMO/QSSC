@@ -319,7 +319,11 @@ module top_level (
     wire        grad_sclk_int;
     wire        grad_mosi_int;
 
-    dac_ctrl #(.CLK_DIV(4)) dac_inst (
+    // CLK_DIV 8 -> 6.25 MHz SCLK: Ugrad's MCP4921 runs at VDD/VREF = +3V3
+    // (issue #168-C) and its 20 MHz spec is a Vdd >= 4.5 V number, so the
+    // system-level shifter is halved from the old 12.5 MHz (was an explicit
+    // #(.CLK_DIV(4)) override that silently outvoted the module default).
+    dac_ctrl #(.CLK_DIV(8)) dac_inst (
         .clk     (clk_100mhz),
         .reset   (peri_rst),
         .start   (grad_dac_load_w),
