@@ -480,3 +480,107 @@ def test_send_command_serializes_concurrent_io(monkeypatch):
 
     assert not errors, f"interleaving corrupted replies: {errors[:5]}"
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Security-guard coverage (round-9 audit): the locality / sync / circuit
+# gates are peer- and env-driven branches that no test ever entered (the
+# suite runs local by design), so their behavior could drift silently.
+# ---------------------------------------------------------------------------
+
+
+def test_is_local_is_peer_based_only(monkeypatch):
+    """_is_local must key on the CONNECTION PEER only (never on headers):
+    loopback is local, any public peer is not, and the TestClient pseudo-peer
+    counts local only while QSSC_TESTING is set (a deploy behind a proxy must
+    never treat a spoofed header as local)."""
+    from api._guards import _is_local
+
+    assert _is_local(_FakeRequest("127.0.0.1")) is True
+    assert _is_local(_FakeRequest("::1")) is True
+    assert _is_local(_FakeRequest("8.8.8.8")) is False
+    # a forged XFF must not flip locality (peer stays the decider)
+    assert _is_local(_FakeRequest("8.8.8.8", xff="127.0.0.1")) is False
+    monkeypatch.setenv("QSSC_TESTING", "1")
+    assert _is_local(_FakeRequest("testclient")) is True
+    monkeypatch.delenv("QSSC_TESTING", raising=False)
+    assert _is_local(_FakeRequest("testclient")) is False
+
+
+def test_fpga_command_guards_locality(monkeypatch):
+    """The raw-UART endpoint promises localhost-only: a non-local peer gets
+    403 BEFORE any serial/sim access; a local peer passes the guard (its next
+    failure mode is the missing board -> 503, or the sim fallback answers)."""
+    import pytest  # noqa: F811
+    from fastapi import HTTPException
+    from api.models import FpgaCommandRequest
+    from api.routes_fpga import fpga_command
+
+    monkeypatch.setenv("QSSC_TESTING", "0")
+    with pytest.raises(HTTPException) as exc:
+        fpga_command(FpgaCommandRequest(command="ID"), _FakeRequest("8.8.8.8"))
+    assert exc.value.status_code == 403, (
+        f"non-local peer must be refused with 403, got {exc.value.status_code}")
+
+    monkeypatch.setenv("QSSC_TESTING", "1")
+    try:
+        out = fpga_command(FpgaCommandRequest(command="ID"),
+                           _FakeRequest("127.0.0.1"))
+    except HTTPException as exc_local:
+        # allowed past the guard; only the missing hardware may fail it
+        assert exc_local.status_code == 503, (
+            f"local peer failed with {exc_local.status_code}, expected 503 "
+            "(no board) or a normal reply")
+    else:
+        assert out.get("reply") in ("QSSC v1",), out
+
+
+def test_check_sync_blocks_remote_unless_allowed(monkeypatch):
+    """?sync=true runs in-request and blocks the single uvicorn worker (DoS
+    vector): a remote peer gets 403 unless QSSC_ALLOW_SYNC opts in; the
+    async job path (sync=false) stays the designed remote entry."""
+    import pytest  # noqa: F811
+    from fastapi import HTTPException
+    from api import main as _m
+    from api._guards import _check_sync
+
+    monkeypatch.setattr(_m, "ALLOW_SYNC_REMOTE", False)
+    with pytest.raises(HTTPException) as exc:
+        _check_sync(_FakeRequest("8.8.8.8"), sync=True)
+    assert exc.value.status_code == 403
+    _check_sync(_FakeRequest("8.8.8.8"), sync=False)   # async: no guard
+    _check_sync(None, sync=True)                        # programmatic caller
+    monkeypatch.setattr(_m, "ALLOW_SYNC_REMOTE", True)
+    _check_sync(_FakeRequest("8.8.8.8"), sync=True)    # explicit opt-in
+
+
+def test_check_custom_circuit_gate(monkeypatch):
+    """The custom-circuit endpoint truth table: disabled -> 503; enabled
+    without a key -> open; enabled with a key -> X-API-Key required
+    (401 on absent/wrong key, pass on the right one)."""
+    import pytest  # noqa: F811
+    from fastapi import HTTPException
+    from api import main as _m
+    from api._guards import _check_custom_circuit
+
+    monkeypatch.setattr(_m, "CUSTOM_CIRCUIT_ENABLED", False)
+    with pytest.raises(HTTPException) as exc:
+        _check_custom_circuit(_FakeRequest())
+    assert exc.value.status_code == 503
+
+    monkeypatch.setattr(_m, "CUSTOM_CIRCUIT_ENABLED", True)
+    monkeypatch.setattr(_m, "CUSTOM_CIRCUIT_API_KEY", "")
+    _check_custom_circuit(_FakeRequest())              # no key configured: open
+
+    monkeypatch.setattr(_m, "CUSTOM_CIRCUIT_API_KEY", "sekret")
+    with pytest.raises(HTTPException) as exc2:
+        _check_custom_circuit(_FakeRequest())          # header missing
+    assert exc2.value.status_code == 401
+    with pytest.raises(HTTPException) as exc3:
+        wrong = _FakeRequest()
+        wrong.headers["x-api-key"] = "nope"
+        _check_custom_circuit(wrong)
+    assert exc3.value.status_code == 401
+    good = _FakeRequest()
+    good.headers["x-api-key"] = "sekret"
+    _check_custom_circuit(good)                        # right key: pass

@@ -704,6 +704,12 @@ MAIN_SHEET_SHA256 = (
 )
 MAIN_ADDED_REFS = {"Ugrad", "Udrv", "Qgrad", "Rgrad_feed", "Lgrad", "Rsense",
                    "C_grad1", "C_grad2", "C87"}
+# The head sheet was re-baselined by the removable-die socket adoption
+# (Uchip qssc:QSSC_Chip_DET -> qssc:ChipSocket_2.54_DET, round-9): it had
+# been frozen byte-for-byte to the repair baseline, which hid the drift.
+HEAD_SHEET_SHA256 = (
+    "6a983c16ebdf6f9ebd1743320ea6d23d87a11de8cf263df599bb985e0bb701bf"
+)
 
 
 def _main_sheet_contract():
@@ -800,12 +806,49 @@ def test_repair_preserved_symbols(name):
     _baseline_blob("hardware/pcb/chip_module.kicad_sch") is None,
     reason=f"baseline {BASELINE} not present in this clone",
 )
-def test_head_sheet_byte_identical():
-    before = _baseline_blob("hardware/pcb/chip_module.kicad_sch")
-    assert before == _raw("hardware/pcb/chip_module.kicad_sch"), (
-        "chip_module.kicad_sch changed vs baseline — the repair must not "
-        "touch the head board"
-    )
+def test_head_sheet_matches_the_socket_design():
+    """The head sheet is re-baselined by the removable-die socket adoption.
+
+    The sheet was frozen byte-for-byte to the repair-era baseline ("the
+    repair must not touch the head board") -- and that freeze is exactly
+    what hid a later drift: the head PCB, the generator model and the docs
+    all adopted the ADR-0009 through-hole socket (qssc:ChipSocket_2.54_DET)
+    while the sheet still described the directly-soldered die
+    (qssc:QSSC_Chip_DET, footprint property pointing at the DIE footprint --
+    so "Update PCB from Schematic" would have swapped the socket out).
+    The round-9 generator capstone caught it; the sheet now carries the
+    socket and the contract mirrors the main sheet's digest one: content
+    frozen by digest, refdes set unchanged vs the baseline, and the only
+    drifted symbol is Uchip (lib_id+value+footprint swap together, same
+    position).
+    """
+    digest = hashlib.sha256(_raw(BOARDS["head"][0])).hexdigest()
+    assert digest == HEAD_SHEET_SHA256, (
+        "head sheet changed without re-pinning HEAD_SHEET_SHA256 "
+        f"(pinned {HEAD_SHEET_SHA256[:12]}..., now {digest[:12]}...)")
+
+    before = _baseline_instances("head")
+    after = _sheet_instances("head")
+    refs_before = {i["ref"] for i in before}
+    refs_after = {i["ref"] for i in after}
+    assert refs_before == refs_after, (
+        f"head refdes set changed vs baseline: "
+        f"-{sorted(refs_before - refs_after)} +{sorted(refs_after - refs_before)}")
+
+    by_b = {i["ref"]: i for i in before}
+    by_a = {i["ref"]: i for i in after}
+    drifted = []
+    for r in sorted(refs_before):
+        b, a = by_b[r], by_a[r]
+        if all(b[k] == a[k] for k in ("lib_id", "x", "y", "value", "footprint")):
+            continue
+        if (r == "Uchip"
+                and b["lib_id"] == "qssc:QSSC_Chip_DET"
+                and a["lib_id"] == "qssc:ChipSocket_2.54_DET"
+                and b["x"] == a["x"] and b["y"] == a["y"]):
+            continue  # documented: socket adoption (ADR-0009), position kept
+        drifted.append(r)
+    assert not drifted, f"head symbols drifted vs baseline: {drifted}"
 
 
 @pytest.mark.skipif(

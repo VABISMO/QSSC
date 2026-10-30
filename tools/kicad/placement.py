@@ -166,12 +166,13 @@ def build_main_board(grad=False):
                         "31": "GND", "32": "+3V3", "33": "GND", "8": "GND",
                         "19": "ADF_TEMP",
                         # The QFN-32-1EP footprint models the 3.45x3.45 mm exposed
-                        # pad as ONE named pad "33" (netted GND above) PLUS a 3x3
-                        # grid of 9 numberless "" sub-pads (paste/copper apertures
-                        # under the EP). Per ADF4351 datasheet the EP MUST be tied to
-                        # GND (thermal + electrical return); net the sub-pads GND too
-                        # so none of the EP copper floats. fp_net_pads matches "".
-                        "": "GND"},
+                        # pad as ONE named pad "33" (netted GND above, the actual
+                        # EP COPPER -- that is what must not float). The 3x3 grid
+                        # of numberless "" sub-pads is F.Paste only (no copper):
+                        # KiCad discards any net on them at load, so the board
+                        # ships them netless and the generator must match that
+                        # (round-9 gate: model-vs-board drift class).
+                        },
         nc_pins=["5", "13", "14", "15", "25"])
     # ADF4351 pin-tie rationale (verified vs ADI ADF4351 datasheet, 32-lead LFCSP):
     #   pin 20 VTUNE  -> LF_OUT  (loop-filter output drives the VCO tuning input;
@@ -573,11 +574,13 @@ def build_emitter_driver():
         pins = {"1": "GND", "2": "em_blank", "3": "em_sclk",
                 "30": "em_xlat", "31": f"em_iref{j}", "32": "+3V3", "33": "GND",
                 # The HTSSOP-32-1EP_ThermalVias footprint models the EP as 38
-                # plated-thermal-via pads named "33" (netted GND above) PLUS 13
-                # numberless "" EP copper sub-pads. Per TLC5947 datasheet the EP
-                # (DAP) MUST be tied to GND (thermal + electrical); net the
-                # sub-pads GND so no EP copper floats. fp_net_pads matches "".
-                "": "GND"}
+                # plated-thermal-via pads named "33" (netted GND above -- the
+                # actual DAP copper and heat vias, per the TLC5947 datasheet).
+                # The 13 numberless "" sub-pads are F.Paste/F.Mask apertures
+                # (no copper): KiCad discards any net on them at load, so the
+                # board ships them netless and the generator must match
+                # (round-9 gate: model-vs-board drift class).
+                }
         # SIN: chip0 takes em_sin from the FPGA; chip1/2 take the prior chip SOUT.
         pins["4"] = "em_sin" if j == 0 else f"em_sout{j-1}"
         # SOUT: chip0/1 cascade to the next chip's SIN; chip2 SOUT left NC.
