@@ -22,7 +22,7 @@ export const FALLBACK_PROTOCOL = [
   { cmd: 'CALIBRATE', args: '—', reply: 'OK', desc: 'emitter→site→detector sweep, builds the readout LUT' },
   { cmd: 'READ_RNG', args: 'n_bytes', reply: '<hex> <raw> <kept> <rate> / ERR', desc: 'harvest n_bytes of von-Neumann-debiased AD7616 LSB-noise entropy (qrng_entropy.v)' },
   { cmd: 'ODMR_SWEEP', args: 'qubit f_start_khz f_stop_khz n_points', reply: '<n> f0 c0 f1 c1 … / ERR', desc: 'sweep the ADF4351 across the NV resonance, one AD7616 sample per point' },
-  { cmd: 'READ_COMPASS', args: '[n_avg]', reply: '<B_nT> <heading°> <elev°> <sens_µT> <axes> / ERR', desc: '4-axis ODMR doublet fit → ambient B-vector + heading (compass_measure)' },
+  { cmd: 'READ_COMPASS', args: '[n_avg]', reply: '<B_nT> <heading°> <elev°> <sens_µT> <axes> / ERR', desc: '4-axis ODMR doublet fit → ambient B-vector + heading (sim verb; no RTL — hardware mode runs host-side via /api/compass)' },
   { cmd: 'READ_GYRO', args: 'T_ns', reply: '<rate_dps> <noise_dps> <t2_µs> <grade> / ERR', desc: 'Ramsey π/2–T–π/2 → rotation rate (sim convenience verb; hardware runs RUN_SEQUENCE + on-host fit)' },
   { cmd: 'READ_LOCKIN', args: 'ref_khz n_cycles', reply: '<diff> <sigma> <snr1> <snrN> / ERR', desc: 'lock-in accumulator: on-minus-off differential over n cycles (sim; hardware READ_LOCKIN <site> <n> → raw on/off sums, host computes SNR)' },
   { cmd: 'RUN_SEQUENCE', args: 'kind n_windows', reply: '<n> c0 c1 … / ERR', desc: 'pulse-sequence engine: ramsey / hahn / cpmg → n readout codes (sim form; hardware RUN_SEQUENCE <site> <kind> <n> <t_step>)' },
