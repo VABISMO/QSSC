@@ -433,10 +433,12 @@ entanglement (one big register instead of 64 independent pixels).
 **Qubit-count picture:** 64 pixels × one compute microdiamond (≤300 NVs) each.
 The per-pixel width is `min(resolvable lines, NVs present)`, measured by counting
 ODMR lines that clear SNR=4. With the on-board gradient (Inv 5) + the anti-noise
-stack (Inv 7+9) the measured width peaks at **~70 qubits/pixel** (gradient
-2–3 MHz/µm); the theoretical cap is **300 qubits/microdiamond** (one per NV,
+stack (Inv 7+9) the measured width peaks at **~58 qubits/pixel** — the resolvable
+ceiling at the coil's **1.47 MHz/µm full scale** (the MCP4921 runs at
+VDD/VREF = +3V3 so its VIH stays under the LVCMOS33 SPI master's levels,
+issue #168); the theoretical cap is **300 qubits/microdiamond** (one per NV,
 needs gradient ≥ 7.5 MHz/µm), today noise-bound. Inventions 13 (sparse
-super-res) + 14 (Bayesian readout) close that 70 → 300 gap by recovering dim
+super-res) + 14 (Bayesian readout) close that 58 → 300 gap by recovering dim
 lone-NV lines from the noise — the Bayesian detector alone roughly doubles the
 measured width on the same spectrum. Cross-pixel entanglement (Inv 8, cryo) is
 the only way to pool pixels into one register.

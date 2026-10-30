@@ -99,8 +99,10 @@ MAX_MICRODIAMONDS_PER_PIXEL = 1
 # value in the first place).
 #
 # Gradient: the on-board MCP4921 coil driver tops out at GRAD_COIL_MAX_MHZ_PER_UM
-# (full-scale DAC code 4095 -> 2.23 MHz/um). Above this the coil cannot follow.
-GRAD_COIL_MAX_MHZ_PER_UM = 2.23
+# (full-scale DAC code 4095 -> 1.47 MHz/um at the 3.3 V VDD/VREF rail --
+# issue #168-C; mirrors api._guards.GRAD_COIL_MAX_MHZ_PER_UM). Above this the
+# coil cannot follow.
+GRAD_COIL_MAX_MHZ_PER_UM = 1.47
 
 
 def gradient_dac_code_from_mhz(grad_mhz_per_um: float) -> int:

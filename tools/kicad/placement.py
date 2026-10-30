@@ -624,15 +624,20 @@ def build_gradient_board():
     # has NO !SHDN pin -- shutdown is SPI write-word bit 12, which dac_ctrl.v
     # keeps =1 (active) in its {4'b0011, code} framing, so the coil is cut by
     # writing code 0 -> VOUTA=0 -> op-amp -> MOSFET off (clean zero-current cut).
-    # VREF(pin6) tied to +5V (VDD) for rail-to-rail Vout = 5V*code/4096 (1x gain);
+    # VREF(pin6) tied to +3V3 (= VDD): DS22248A VIH = 0.7*VDD, so at +5V the
+    # inputs demanded 3.5 V while the FPGA bank drives LVCMOS33 (issue #168
+    # defect C). At VDD = +3V3 VIH = 2.31 V < 3.3 V VOH -- in spec.
+    # Vout = 3.3V*code/4096 (1x gain): the 3.3 V full scale still spans past
+    # the 2.24 A ceiling of the 1 ohm / 5 W Rsense (Vdac <= 2.24 V), so no
+    # usable coil current is lost and the LSB improves (0.81 mV / 0.81 mA).
     # !LDAC(pin5) tied to GND (transparent: output updates on CS rising edge);
-    # AVSS(pin7)=GND; VOUTA(pin8)->GRAD_DAC_OUT -> op-amp servo.
+    # AVSS(pin7)=GND; VOUTA(pin8)->GRAD_DAC_OUT -> op-amp servo (stays on +5V).
     # grad_en (FPGA ball) is kept as a spare STATUS output only -- it no longer
     # wires to any DAC pin (there is no !SHDN to drive). The FPGA ball stays NC
     # on the PCB (a free spare for future high-side enable / status readback).
     add("Ugrad", "qssc:MCP4921", "MCP4921", "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm",
-        360, 150, pins={"1": "+5V", "2": "grad_cs", "3": "grad_sclk",
-                        "4": "grad_mosi", "5": "GND", "6": "+5V",
+        360, 150, pins={"1": "+3V3", "2": "grad_cs", "3": "grad_sclk",
+                        "4": "grad_mosi", "5": "GND", "6": "+3V3",
                         "7": "GND", "8": "GRAD_DAC_OUT"})
     # Udrv: LM358 dual op-amp (SOIC-8). Amp A servo: INA+=DAC, INA-=sense,
     # OUTA=gate. Amp B parked: INB+=GND, INB-=OUTB (GRAD_NFB feedback wire).
@@ -663,11 +668,12 @@ def build_gradient_board():
     # 2.2 A clean-addressing current I^2*R = 4.84 W -> use a 5 W thick-film part).
     add("Rsense", "qssc:R", "1", "Resistor_SMD:R_2512_6332Metric",
         405, 175, pins={"1": "GRAD_SENSE", "2": "GND"})
-    # DAC Vdd decoupling: 2x 100 nF (HF + bulk-by) on the +5V rail at Ugrad.
+    # DAC Vdd decoupling: 2x 100 nF (HF + bypass) on the +3V3 rail at Ugrad
+    # (Ugrad VDD/VREF moved to +3V3 with the #168-C level repair).
     add("C_grad1", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
-        348, 138, pins={"1": "+5V", "2": "GND"})
+        348, 138, pins={"1": "+3V3", "2": "GND"})
     add("C_grad2", "qssc:C", "100nF", "Capacitor_SMD:C_0603_1608Metric",
-        360, 138, pins={"1": "+5V", "2": "GND"})
+        360, 138, pins={"1": "+3V3", "2": "GND"})
 
 
 def build_detector_head():

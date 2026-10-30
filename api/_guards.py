@@ -30,24 +30,29 @@ from qssc import (
 # Field-gradient coil driver (MCP4921 DAC -> coil current)
 # ---------------------------------------------------------------------------
 # The gradient-coil current is set by a 12-bit MCP4921 SPI DAC. Vout = Vdd *
-# code/4096 with Vdd = +5V; the LM358 + IRLML2502 servo drives I_coil = Vdac /
-# Rsense with Rsense = 1 ohm, so I_coil[A] = 5.0 * code/4096. The field gradient
-# across the pixel is anchored at the verified addressing point: I = 2.2 A ->
-# 7 mT across 200 um. NV gyromagnetic ratio gamma = 28 MHz/mT, so 7 mT/200 um
-# -> 0.98 MHz/um of line spread. The gradient scales linearly with the current:
+# code/4096 with Vdd = Vref = +3V3 (issue #168-C: VIH = 0.7*VDD must stay
+# below the LVCMOS33 master's 3.3 V VOH, so VDD moved off +5V); the LM358 +
+# IRLML2502 servo drives I_coil = Vdac / Rsense with Rsense = 1 ohm, so
+# I_coil[A] = 3.3 * code/4096. The field gradient across the pixel is
+# anchored at the verified addressing point: I = 2.2 A -> 7 mT across 200 um
+# (unchanged: the per-amp field is geometry, not the rail). NV gyromagnetic
+# ratio gamma = 28 MHz/mT, so 7 mT/200 um -> 0.98 MHz/um of line spread.
+# The gradient scales linearly with the current:
 #   gradient_mhz_per_um = (I_coil / 2.2) * 0.98
 # At code 0 the gradient is off (ensemble collapses to one line); at the
-# addressing code (~1803, I=2.2A) the spread is ~196 MHz; at full code 4095 the
-# spread is ~445 MHz (the DAC range exceeds the addressing gradient by design).
-GRAD_COIL_VDD = 5.0          # MCP4921 Vdd / Vref [V] (board rail)
+# addressing code (~2730, I=2.2A) the spread is ~196 MHz; at full code 4095
+# the spread is ~294 MHz (the DAC range still exceeds the addressing
+# gradient by design; the 3.3 V full scale spans past the 2.2 A / 5 W
+# Rsense ceiling, so no usable coil current is lost).
+GRAD_COIL_VDD = 3.3          # MCP4921 Vdd / Vref [V] (board rail, #168-C)
 GRAD_SENSE_OHM = 1.0         # Rsense [ohm] (board)
 GRAD_ADDRESSING_A = 2.2      # I_coil for the 7 mT addressing gradient [A]
 GRAD_ADDRESSING_MHZ_PER_UM = 0.98  # 7 mT/200um * 28 MHz/mT [MHz/um]
 GRAD_PIXEL_UM = 200.0        # pixel size [um]
 ODMR_LINEWIDTH_MHZ = 5.0     # intrinsic single-line ODMR linewidth (simulate_odmr)
-# Full-scale coil gradient (DAC code 4095): 5 V * 4095/4096 / 2.2 A * 0.98 MHz/µm.
+# Full-scale coil gradient (DAC code 4095): 3.3 V * 4095/4096 / 2.2 A * 0.98 MHz/µm.
 # The on-board MCP4921 + gradient coil cannot exceed this, so the API caps the
-# requested gradient here — the per-pixel register width tops out at ~89 lines
+# requested gradient here — the per-pixel register width tops out at ~58 lines
 # (gradient × pixel ÷ linewidth) at full coil current.
 GRAD_COIL_MAX_MHZ_PER_UM = round(
     GRAD_COIL_VDD * (4095 / 4096.0) / GRAD_ADDRESSING_A * GRAD_ADDRESSING_MHZ_PER_UM, 2)

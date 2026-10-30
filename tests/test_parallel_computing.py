@@ -201,7 +201,9 @@ def test_calibrate_array_endpoint_integration_raises_width():
     from api.main import app
     c = TestClient(app)
     base = {
-        "gradient_mhz_per_um": 2.0, "seed": 42, "source": "sim",
+        #1.4 ≤ the coil's 1.47 MHz/µm full scale (issue #168-C: the DAC rail
+        # dropped to3.3 V, so2.0 would now be rejected by the le= cap)
+        "gradient_mhz_per_um": 1.4, "seed": 42, "source": "sim",
     }
     r1 = c.post("/api/circuit/calibrate-array?sync=true", json={**base, "integration_shots": 1})
     r16 = c.post("/api/circuit/calibrate-array?sync=true", json={**base, "integration_shots": 16})
@@ -330,7 +332,7 @@ def test_calibrate_array_real_path_sends_set_gradient():
     api_runner._make_fpga = lambda *a, **k: spy
     try:
         c = TestClient(app)
-        # derived code: gradient_mhz_per_um=1.0 -> code = round(1.0/2.23*4095)
+        # derived code: gradient_mhz_per_um=1.0 -> code = round(1.0/1.47*4095)
         r = c.post("/api/circuit/calibrate-array?sync=true", json={
             "source": "real", "integration_shots": 1, "seed": 42,
             "gradient_mhz_per_um": 1.0, "n_points": 32,

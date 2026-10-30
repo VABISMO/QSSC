@@ -167,7 +167,11 @@ class CalibrateArrayRequest(BaseModel):
     ``hardware/calibration/array_calibration.json`` so subsequent
     ``run-parallel`` calls run each pixel at its own calibrated width."""
     profile: str = "NV"
-    gradient_mhz_per_um: float = Field(1.75, ge=0.0, le=GRAD_COIL_MAX_MHZ_PER_UM)
+    # Default scaled with the #168-C DAC repair: the coil's full scale is now
+    # 1.47 MHz/µm (VDD/VREF = +3V3), so the previous 1.75 default would be
+    # rejected by the le= cap below; 1.15 keeps the same ~78% of full scale
+    # the old default held under the 5 V rail (1.75/2.23).
+    gradient_mhz_per_um: float = Field(1.15, ge=0.0, le=GRAD_COIL_MAX_MHZ_PER_UM)
     # Optional explicit MCP4921 DAC code (0..4095) for the real path's
     # SET_GRADIENT write. When None (default) the code is derived from
     # gradient_mhz_per_um via gradient_dac_code_from_mhz; supplying it lets an
