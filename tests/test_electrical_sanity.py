@@ -21,10 +21,14 @@ Defect 3 is still open:
      pad 8 on GND. The true LM358 dual opamp is 4 = V-, 8 = V+; the
      symbol carries the QUAD-opamp convention (4 = V+, 11 = V-, as the head
      board's TLV9004 quads correctly use) copied into a dual part.
-  2. LM358 power pins swapped, lib-symbol (qssc-grad.kicad_sch):
-     ``qssc:LM358`` names pin number 4 "VCC" (power_in) and pin number 8
-     "GND" (power_in) -- the source of defect 1 (regenerating the netlist
-     from this symbol does NOT fix the board).
+  2. LM358 power pins swapped, lib-symbol: ``qssc:LM358`` names pin
+     number 4 "VCC" (power_in) and pin number 8 "GND" (power_in) -- the
+     source of defect 1 (regenerating the netlist from this symbol does
+     NOT fix the board). Full arc: #171/#174 hand-fixed the generated
+     caches but never the generator's ``lm358_pin_list``, so the next
+     regeneration copied VCC/GND back into library and sheet alike;
+     repaired at the source and pinned directly against
+     ``qssc-lib.kicad_sym`` (test_lm358_library_source_pin_naming).
   3. MCP4921 (grad/Ugrad) runs at VDD = +5V while the SPI master is
      LVCMOS33: Microchip DS22248A datasheet VIH = 0.7 * VDD, so 3.5 V is
      required and a 3.3 V master is out of spec. Note the coupled
@@ -62,14 +66,9 @@ BOARDS = {
     "grad": PCB_DIR / "qssc-grad.kicad_pcb",
     "head": PCB_DIR / "chip_module.kicad_pcb",
 }
-GRAD_SCH = PCB_DIR / "qssc-grad.kicad_sch"
+MAIN_SCH = PCB_DIR / "qssc.kicad_sch"
+LIB = PCB_DIR / "qssc-lib.kicad_sym"
 BOM_CSV = REPO / "hardware" / "datasheets" / "BOM.csv"
-
-
-def _need_grad():
-    """The gradient board is local-only: skip its gates when unpublished."""
-    if not (PCB_DIR / "qssc-grad.kicad_pcb").exists() or not GRAD_SCH.exists():
-        pytest.skip("qssc-grad board is local-only (not published here)")
 
 # Exact board inventory as parsed by _board(). If the s-expression layout
 # changes (or this mini-parser rots) the counts below shift and these gates
@@ -116,7 +115,11 @@ def _board(board: str) -> dict:
 
 @cache
 def _sch_pins(symbol: str) -> dict:
-    """{pin number: pin name} for one lib-symbol in the grad schematic.
+    """{pin number: pin name} for one lib-symbol in the MAIN schematic.
+
+    Since the gradient merge every part whose pin naming is gated (LM358,
+    MCP4921) ships on the published main board, so the sheet cache is read
+    from ``qssc.kicad_sch``; the local-only grad sheet moved out of the repo.
 
     The window runs from the symbol header to the next TOP-LEVEL library
     symbol: KiCad emits per-URL unit sub-symbols BEFORE that
@@ -127,7 +130,24 @@ def _sch_pins(symbol: str) -> dict:
     is paired with the next ``(number "...")`` -- in KiCad lib symbols the
     name precedes the number inside a pin definition.
     """
-    txt = GRAD_SCH.read_text(encoding="utf-8")
+    return _pins_from_text(MAIN_SCH.read_text(encoding="utf-8"), symbol)
+
+
+@cache
+def _lib_pins(symbol: str) -> dict:
+    """{pin number: pin name} for one symbol in the SOURCE library
+    ``qssc-lib.kicad_sym``.
+
+    Issue #168 defect B blind spot, flagged on the issue itself: the
+    sheet-cache gate above stays green while the library rots, and a
+    regeneration or "Update Symbols from Library" then carries the bad
+    names into the sheet -- which is exactly how VCC/GND outlived the
+    hand fix and returned with the next regeneration.
+    """
+    return _pins_from_text(LIB.read_text(encoding="utf-8"), symbol)
+
+
+def _pins_from_text(txt: str, symbol: str) -> dict:
     i = txt.index(f'(symbol "{symbol}"')
     j = i + 1
     while True:
@@ -179,19 +199,22 @@ def test_board_parse_inventory(board: str):
 
 
 # --------------------------------------------------------------------------
-# known defect 1+2: LM358 dual-opamp power pins (grad board + lib symbol)
+# known defect 1+2: LM358 dual-opamp power pins (gradient block, now on the
+# published main board + lib symbol)
 # --------------------------------------------------------------------------
 # Repaired on fix/electrical-repairs: pad 4 = GND, pad 8 = +5V, symbol
-# renamed (issue #168). Gate stays as a regression pin, no xfail.
+# renamed (issue #168). Gate stays as a regression pin, no xfail; re-pointed
+# to main when the gradient block merged onto the published board.
 def test_lm358_dual_opamp_power_pads():
-    _need_grad()
-    pads = _board("grad")["fps"]["Udrv"]["pads"]
+    # The gradient block ships on the PUBLISHED main board since the merge,
+    # so the repair pin now reads main's Udrv (the legacy grad file lives
+    # outside the repo).
+    pads = _board("main")["fps"]["Udrv"]["pads"]
     assert pads["4"] == "GND", f"pad 4 (must be V-): {pads.get('4')}"
     assert pads["8"] == "+5V", f"pad 8 (must be V+): {pads.get('8')}"
 
 
 def test_lm358_symbol_pin_numbering():
-    _need_grad()
     pins = _sch_pins("qssc:LM358")
     assert len(pins) == 8, f"LM358 symbol pins parsed: {sorted(pins)}"
     norm = {k: v.upper() for k, v in pins.items()}
@@ -203,12 +226,31 @@ def test_lm358_symbol_pin_numbering():
         f"LM358 pin 8 = {pins['8']!r} (must be the positive supply)"
 
 
+def test_lm358_library_source_pin_naming():
+    """The SOURCE library must carry the same V-/V+ naming as the sheet.
+
+    Flagged on issue #168 itself: the sheet-cache gate above parses the
+    EMBEDDED symbol, so it stayed green while ``qssc-lib.kicad_sym`` still
+    said VCC/GND -- and the next regeneration (whose lm358_pin_list nobody
+    fixed) copied the bad names straight back into both artifacts.
+    """
+    pins = _lib_pins("qssc:LM358")
+    assert len(pins) == 8, f"LM358 library pins parsed: {sorted(pins)}"
+    norm = {k: v.upper() for k, v in pins.items()}
+    # Same acceptance set as the sheet-cache gate (single-supply symbols may
+    # name pin 4 "GND"); the historical defect (4=VCC, 8=GND -- the quad
+    # convention mirrored onto the dual part) fails both assertions.
+    assert norm["4"] in {"V-", "VEE", "VS-", "-V", "VNEG", "GND", "VSS"}, \
+        f"library LM358 pin 4 = {pins['4']!r} (must be the negative supply)"
+    assert norm["8"] in {"V+", "VCC", "VS+", "+V", "VPOS", "VDD", "+VS"}, \
+        f"library LM358 pin 8 = {pins['8']!r} (must be the positive supply)"
+
+
 # --------------------------------------------------------------------------
 # known defect 3: MCP4921 symbol is DS22248A-correct, but VDD=+5V vs
 # LVCMOS33 SPI master is a level violation
 # --------------------------------------------------------------------------
 def test_mcp4921_symbol_matches_datasheet():
-    _need_grad()
     pins = _sch_pins("qssc:MCP4921")
     assert len(pins) == 8, f"MCP4921 symbol pins parsed: {sorted(pins)}"
     norm = {k: v.upper().lstrip("!") for k, v in pins.items()}
@@ -224,14 +266,14 @@ def test_mcp4921_symbol_matches_datasheet():
 
 
 def test_dac_signal_wiring_frozen():
-    """Signal wiring of the grad DAC is correct today and frozen pad-exact.
+    """Signal wiring of the gradient DAC is correct today and frozen pad-exact.
 
-    Pads 1 (VDD) and 6 (VREF) sit on +5V TODAY. Any repair of the level
-    violation (issue #168) intentionally re-pins this map -- the freeze is
-    what turns "the DAC was quietly rewired" into a suite failure.
+    Pads 1 (VDD) and 6 (VREF) sit on +5V TODAY (on the published main board
+    since the gradient merge). Any repair of the level violation (issue #168
+    defect C) intentionally re-pins this map -- the freeze is what turns
+    "the DAC was quietly rewired" into a suite failure.
     """
-    _need_grad()
-    pads = _board("grad")["fps"]["Ugrad"]["pads"]
+    pads = _board("main")["fps"]["Ugrad"]["pads"]
     assert pads == {
         "1": "+5V",            # VDD (target: +3V3 -- see the xfail below)
         "2": "grad_cs",        # !CS  (LDAC held low: transparent updates)
@@ -249,10 +291,10 @@ def test_dac_signal_wiring_frozen():
                     "required > 3.3V VOH. Coupled constraint: VREF=+5V (pad 6) "
                     "forces VDD>=5V via the abs-max VDD+0.3V input limit, so "
                     "the fix needs level-shifting or a reference redesign "
-                    "(issue #168)")
+                    "(issue #168 defect C; Ugrad ships on the published main "
+                    "board since the gradient merge)")
 def test_dac_vdd_compatible_with_lvcmos33():
-    _need_grad()
-    pads = _board("grad")["fps"]["Ugrad"]["pads"]
+    pads = _board("main")["fps"]["Ugrad"]["pads"]
     assert pads["1"] == "+3V3", (
         f"MCP4921 VDD on {pads['1']!r}: VIH = 0.7*VDD (DS22248A) makes a "
         "5 V VDD incompatible with a 3.3 V SPI master")
