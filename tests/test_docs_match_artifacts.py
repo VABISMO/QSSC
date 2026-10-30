@@ -154,8 +154,13 @@ def test_readme_count_lines_agree():
     badge = re.search(r"tests-(\d+)%20passed", readme)
     assert badge, "README badge lost"
     badge_n = badge.group(1)
-    assert f"{badge_n} passed, 5 skipped, 1 xfailed" in readme
-    assert f"{badge_n} passed, 5 skipped, 1 xfailed" in contributing
+    # The badge number and the headline pass count must agree across README
+    # and CONTRIBUTING. Cross-check only (this test does not run the suite):
+    # the skip count tracks the env-dependent guards (qssc-grad local-only,
+    # gcode, pcbnew) and there is no xfail anymore (#168 fixes flipped the
+    # strict xfails to green), so the pinned breakdown is "N passed, M skipped".
+    assert f"{badge_n} passed, 42 skipped" in readme
+    assert f"{badge_n} passed, 42 skipped" in contributing
     ci = re.search(r"(\d+) tests, no KiCad required", readme)
     total = re.search(r"python -m pytest\s+# (\d+) collected", readme)
     assert ci and total, "README CI/collected lines lost"
