@@ -1,5 +1,5 @@
-# QSSC — Quantum Solid State Chip (room temperature)
-
+# QSSC — Quantum Solid State Chip 
+## Open Source Quantum Computer
 [![CI](https://github.com/VABISMO/QSSC/actions/workflows/ci.yml/badge.svg)](https://github.com/VABISMO/QSSC/actions/workflows/ci.yml)
 [![License: Apache-2.0 (non-commercial)](https://img.shields.io/badge/license-Apache--2.0%20NC-lightgrey.svg)](LICENSE)
 [![Python 3.10–3.12](https://img.shields.io/badge/python-3.10–3.12-blue.svg)](https://www.python.org)
@@ -14,9 +14,9 @@ dipole and driven by microwaves. The device operates at **~300 K** with
 benchtop electronics: zero-field splitting D ≈ 2.87 GHz, ODMR readout,
 64 parallel emitter and detector channels on a 20×20 mm die.
 
-<img width="1751" height="977" alt="image" src="https://github.com/user-attachments/assets/8506774f-5f71-4088-ba79-f775bb8d93b8" />
+<img width="1751" height="977" alt="image" src="https://github.com/user-attachments/assets/d5d57bc2-5a8c-45e5-b614-dc6dcff500f1" />
 
-<img width="1115" height="852" alt="image" src="https://github.com/user-attachments/assets/562a85f8-6aa8-4ff6-8e8c-3bbf2898d7cb" />
+<img width="1115" height="852" alt="image" src="https://github.com/user-attachments/assets/18963af7-5541-48bd-ad9a-d0aaa98b9540" />
 
 
 > Solid-state spin defects (NV-diamond, hBN V_B⁻, SiC V_Si) keep quantum
