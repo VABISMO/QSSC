@@ -528,6 +528,16 @@ photoluminescence intensity, sent as ASCII decimal, space-separated for
   > `routes_calibration`) sends identical frequencies in both modes and is
   > unaffected. Raw-UART users see each mode's documented behavior as-is.
 
+  > **Sim-vs-FPGA reply values on `STATUS` (pinned by
+  > `tests/test_fpga_protocol_parity.py`).** The reply *shape* is identical;
+  > the *values* are mode-dependent. The simulator reports modelled rails
+  > (`VCC3V3_mv` ≈ 3300 ± 8, `VCC5V_mv` ≈ 4980 ± 12, `VCC12V_mv` ≈ 12050 ± 25)
+  > and a plausible die temperature (`TEMP_C` ≈ 42 ± 1), while the RTL returns
+  > flat nominal constants (3300 / 4980 / 12050 and `TEMP_C` = 25 — a
+  > placeholder: there is no XADC in this build, see the STATUS row above).
+  > `PLL_LOCKED` is the only field measured in both modes (real ADF4351 lock
+  > detect on hardware, the simulator's ADF model in sim).
+
   `freq_khz` is the desired RF output in kHz, e.g. `2870000` for 2.87 GHz (NV⁻) or
   `3460000` for 3.46 GHz (hBN V_B⁻). The `adf4351_ctrl` module computes INT/FRAC/MOD
   and the RF divider so the VCO stays in 2.2–4.4 GHz (see §6). `amp` (0–3) maps to

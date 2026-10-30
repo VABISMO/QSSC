@@ -219,7 +219,7 @@ def test_method_shapes_identical_in_both_modes():
 
 
 def test_apply_pulse_divergence_is_documented():
-    """The one documented reply-level divergence (sim enforces the resonance
+    """The reply-level divergence on APPLY_PULSE (sim enforces the resonance
     linewidth, the FPGA tunes anywhere) must stay written down in §5 and in
     the API row -- if someone changes one side, this forces the docs to
     follow."""
@@ -233,3 +233,14 @@ def test_apply_pulse_divergence_is_documented():
     comp_row = re.search(r'\{"cmd": "READ_COMPASS".*?\},', src, re.S)
     assert comp_row and "sim/host-only" in comp_row.group(0), (
         "READ_COMPASS row lost its sim/host-only annotation")
+
+
+def test_status_value_divergence_is_documented():
+    """STATUS reply VALUES are mode-dependent (round-3 audit finding): the
+    simulator reports modelled noisy rails and a plausible ~42 C die
+    temperature; the RTL returns flat nominal constants with TEMP_C = 25
+    (placeholder, no XADC). Reply SHAPE parity is asserted elsewhere -- this
+    pins the §5 notice so the value-level difference stays written down."""
+    hd = HARDWARE_MD.read_text(encoding="utf-8")
+    assert "Sim-vs-FPGA reply values on `STATUS`" in hd, (
+        "§5 lost the STATUS sim-vs-FPGA value-divergence note")
