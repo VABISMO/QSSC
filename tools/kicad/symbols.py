@@ -473,20 +473,23 @@ def mcp4921_pin_list():
 
 
 def lm358_pin_list():
-    """LM358 dual op-amp, SOIC-8 (TI). 1=OUTA 2=INA- 3=INA+ 4=VCC 5=INB+
-    6=INB- 7=OUTB 8=GND(V-). Used as the gradient-coil current servo: INA+
+    """LM358 dual op-amp, SOIC-8 (TI). 1=OUTA 2=INA- 3=INA+ 4=V- 5=INB+
+    6=INB- 7=OUTB 8=V+. Used as the gradient-coil current servo: INA+
     = DAC VOUT (GRAD_DAC_OUT), INA- = MOSFET source sense (GRAD_SENSE), OUTA
     = MOSFET gate (GRAD_GATE); the loop holds V_sense = V_dac -> I_coil =
     Vdac/Rsense. Amp B is parked as a unity follower (INB+ = GND, INB- = OUTB)
-    so the unused half does not oscillate."""
+    so the unused half does not oscillate.  Pin 4 is the NEGATIVE supply (V-,
+    tied to GND here) and pin 8 the POSITIVE one -- the quad-opamp convention
+    (4=VCC, 8=GND) was copied onto this dual part once (issue #168 defect B);
+    the generator source, the library and the sheet caches all carry V-/V+ now."""
     return [dict(number="1", name="OUTA", etype="output", x=-7.62, y=5.08, rot=0, length=2.54),
             dict(number="2", name="INA-", etype="input", x=-7.62, y=2.54, rot=0, length=2.54),
             dict(number="3", name="INA+", etype="input", x=-7.62, y=0, rot=0, length=2.54),
-            dict(number="4", name="VCC", etype="power_in", x=0, y=-7.62, rot=90, length=2.54),
+            dict(number="4", name="V-", etype="power_in", x=0, y=-7.62, rot=90, length=2.54),
             dict(number="5", name="INB+", etype="input", x=7.62, y=0, rot=180, length=2.54),
             dict(number="6", name="INB-", etype="input", x=7.62, y=2.54, rot=180, length=2.54),
             dict(number="7", name="OUTB", etype="output", x=7.62, y=5.08, rot=180, length=2.54),
-            dict(number="8", name="GND", etype="power_in", x=0, y=7.62, rot=270, length=2.54)]
+            dict(number="8", name="V+", etype="power_in", x=0, y=7.62, rot=270, length=2.54)]
 
 
 def irlml2502_pin_list():

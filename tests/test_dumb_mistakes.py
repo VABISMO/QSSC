@@ -36,11 +36,6 @@ REPO = Path(__file__).resolve().parent.parent
 PCB_DIR = REPO / "hardware" / "pcb"
 BOM = REPO / "hardware" / "datasheets" / "BOM.csv"
 
-def _need_grad():
-    """The gradient board is local-only: skip its gates when unpublished."""
-    if "grad" not in BOARDS:
-        pytest.skip("qssc-grad board is local-only (not published here)")
-
 
 BOARDS = {
     "main": ("hardware/pcb/qssc.kicad_sch", "hardware/pcb/qssc.kicad_pcb"),
@@ -547,13 +542,13 @@ def test_sbu_pins_not_nc_marked(name):
 
 
 def test_reserved_labels_scope():
-    _need_grad()
+    # The legacy grad sheet moved outside the repo; its scope is asserted by
+    # the main-sheet side of the design now: the published main carries the
+    # gradient SPI labels but MUST NOT label the spare grad_en ball (NC by
+    # design, no net -- issue #168 era contract kept).
     main_s = _strip_lib_symbols(_text(BOARDS["main"][0]))
-    grad_s = _strip_lib_symbols(_text(BOARDS["grad"][0]))
     head_s = _strip_lib_symbols(_text(BOARDS["head"][0]))
-    for sheet, label in ((main_s, "main"), (grad_s, "grad")):
-        assert '(label "mod_sync"' in sheet, f"{label}: mod_sync label lost"
-    assert '(label "grad_en"' in grad_s, "grad: grad_en label lost"
+    assert '(label "mod_sync"' in main_s, "main: mod_sync label lost"
     assert '(label "grad_en"' not in main_s, "main: grad_en label leaked in"
     assert '(label "grad_en"' not in head_s, "head: grad_en label leaked in"
 
@@ -629,9 +624,15 @@ def test_bom_rows_unique_and_plausible():
         assert not dup_refs, f"{sec}: refdes claimed by two rows: {sorted(dup_refs)}"
 
 
-def test_bom_grad_refs_are_grad_board_refs():
-    _need_grad()
-    grad_board = {f[0] for f in _board_footprints("grad")}
+def test_bom_grad_refs_are_placed_on_main():
+    """Gradient BOM rows must be placed on the PUBLISHED main board.
+
+    These designators used to be verified against the local-only grad board;
+    since the gradient merge the main IS the extended build, so a grad-row
+    ref missing from qssc.kicad_pcb is a real hole -- and there is no grad
+    board left in the repo to hide behind (the legacy files moved out).
+    """
+    main_board = {f[0] for f in _board_footprints("main")}
     _, rows = _bom_rows()
     grad_refs = {
         d.strip()
@@ -640,8 +641,8 @@ def test_bom_grad_refs_are_grad_board_refs():
         for d in r[1].split(",")
         if not d.strip().startswith("#")
     }
-    ghost = sorted(grad_refs - grad_board)
-    assert not ghost, f"grad BOM refs not placed on qssc-grad: {ghost}"
+    ghost = sorted(grad_refs - main_board)
+    assert not ghost, f"grad BOM refs not placed on main: {ghost}"
 
 
 def test_bom_main_deficit_is_exactly_c87():
@@ -688,8 +689,11 @@ def test_bom_crlf_consistent():
 #   * exactly the 8 gradient parts were added, nothing removed;
 #   * no shared symbol drifted, except U1's documented swap to the _GRAD
 #     symbol variant (it gains the grad_cs/sclk/mosi balls).
+# Re-pinned once more when the LM358 symbol names were repaired back to
+# V-/V+ (issue #168 defect B had silently returned via regeneration --
+# only the two name lines in the embedded cache changed).
 MAIN_SHEET_SHA256 = (
-    "f993c4007de5e455e5c8c12a085207b1818c8a3332fc9ab8321d9caa761641b6"
+    "92d669ce0a008ebe4c9d516a83b4ad05bddeeffea6d66cf71727cd60168192c2"
 )
 MAIN_GRAD_REFS = {"Ugrad", "Udrv", "Qgrad", "Rgrad_feed", "Lgrad", "Rsense",
                   "C_grad1", "C_grad2"}
