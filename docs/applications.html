@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>QSSC — Possible Applications (Sensing &amp; Quantum Computation)</title>
+<link rel="icon" href="../frontend/public/favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+:root{
+  --bg:#0b1020;--bg2:#121931;--panel:#141c38;--panel2:#1a2444;
+  --border:#263056;--text:#e6ecff;--muted:#94a3c4;--dim:#6b78a0;
+  --brand:#22d3ee;--accent:#f472b6;--ok:#34d399;--warn:#fbbf24;
+  --head:"Space Grotesk",system-ui,sans-serif;
+  --body:"Inter",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:
+  radial-gradient(1200px 600px at 85% -10%,rgba(99,102,241,.16),transparent 60%),
+  radial-gradient(900px 520px at 0% 0%,rgba(34,211,238,.10),transparent 55%),
+  var(--bg);
+  color:var(--text);font-family:var(--body);font-size:15.5px;line-height:1.66;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:900px;margin:0 auto;padding:0 44px 90px}
+
+/* ---------- corporate header ---------- */
+header.brand{display:flex;align-items:center;gap:16px;padding:36px 0 20px;
+  border-bottom:1px solid #16203f;margin-bottom:6px}
+header.brand .t h1{font-family:var(--head);font-weight:600;font-size:26px;margin:0;letter-spacing:-.01em}
+header.brand .t h1 .grad{background:linear-gradient(90deg,#67e8f9,#818cf8);-webkit-background-clip:text;background-clip:text;color:transparent}
+header.brand .t .sub{color:var(--muted);font-size:13px;margin-top:4px}
+header.brand .meta{margin-left:auto;text-align:right;font-family:var(--mono);font-size:11.5px;color:var(--dim);line-height:1.6}
+
+/* hero banner (corporate image strip) */
+.hero{position:relative;margin:26px 0 8px;border:1px solid var(--border);border-radius:16px;overflow:hidden;
+  background:linear-gradient(120deg,#0e1530 0%,#141c38 55%,#1a1140 100%)}
+.hero .glow{position:absolute;inset:0;background:
+  radial-gradient(420px 180px at 18% 30%,rgba(34,211,238,.20),transparent 60%),
+  radial-gradient(420px 200px at 82% 70%,rgba(99,102,241,.22),transparent 60%),
+  radial-gradient(240px 140px at 62% 24%,rgba(244,114,182,.14),transparent 60%)}
+.hero .inner{position:relative;display:flex;align-items:center;gap:26px;padding:30px 34px}
+.hero .lattice{flex:0 0 auto}
+.hero .h-txt h2{font-family:var(--head);font-size:30px;margin:0 0 8px;letter-spacing:-.02em;line-height:1.15}
+.hero .h-txt h2 .grad{background:linear-gradient(90deg,#67e8f9,#a78bfa,#f472b6);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero .h-txt p{margin:0;color:var(--muted);font-size:14.5px;max-width:56ch}
+.hero .stats{display:flex;gap:26px;margin-top:16px;flex-wrap:wrap}
+.hero .stat b{display:block;font-family:var(--head);font-size:22px;color:#fff}
+.hero .stat span{font-size:11.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em}
+
+/* ---------- structure ---------- */
+h1,h2,h3,h4{font-family:var(--head);font-weight:600;letter-spacing:-.01em;scroll-margin-top:20px}
+h2{font-size:23px;margin:46px 0 14px;padding-bottom:8px;border-bottom:1px solid #1a2444}
+h2 .num{color:var(--dim);font-family:var(--mono);font-size:15px;margin-right:10px}
+h3{font-size:17.5px;margin:28px 0 10px;color:#cfe0ff}
+h4{font-size:14.5px;margin:16px 0 6px;color:var(--brand)}
+p{margin:10px 0}
+a{color:var(--brand)}
+strong{color:#fff}
+code{font-family:var(--mono);font-size:13px;background:#0a1128;border:1px solid var(--border);
+  border-radius:5px;padding:1px 6px;color:#9be7f9}
+blockquote{margin:16px 0;padding:12px 16px;border-left:3px solid var(--accent);
+  background:rgba(244,114,182,.07);border-radius:0 9px 9px 0;color:var(--muted);font-size:14.5px}
+blockquote strong{color:#fff}
+ul,ol{padding-left:1.3em}
+li{margin:5px 0}
+hr{border:none;border-top:1px solid #1a2444;margin:30px 0}
+table{width:100%;border-collapse:collapse;font-size:13.5px;margin:14px 0}
+th,td{padding:9px 12px;text-align:left;border-bottom:1px solid #1a2444;vertical-align:top}
+th{color:var(--muted);font-weight:500;font-size:12px;text-transform:uppercase;letter-spacing:.05em;background:var(--panel)}
+td code{font-size:12px}
+
+/* badges */
+.badge{display:inline-block;font-family:var(--mono);font-size:10.5px;font-weight:500;
+  padding:2px 8px;border-radius:99px;border:1px solid;letter-spacing:.03em;white-space:nowrap}
+.b-sim{color:#34d399;border-color:rgba(52,211,153,.4);background:rgba(52,211,153,.10)}
+.b-hw{color:#fbbf24;border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.10)}
+.b-cry{color:#f472b6;border-color:rgba(244,114,182,.4);background:rgba(244,114,182,.10)}
+.b-host{color:#67e8f9;border-color:rgba(103,232,249,.4);background:rgba(103,232,249,.10)}
+
+/* application cards */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(258px,1fr));gap:16px;margin:18px 0}
+.card{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--border);
+  border-radius:14px;padding:16px 18px}
+.card h4{margin:0 0 6px;font-size:15px;color:#e6ecff}
+.card p{margin:0;font-size:13.5px;color:var(--muted)}
+.card .dom{margin-top:10px;font-size:11.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
+.card .badge{margin-bottom:8px}
+
+/* toc */
+.toc{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--border);
+  border-radius:14px;padding:18px 22px;margin:24px 0}
+.toc h2{border:none;margin:0 0 10px;font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.toc ul{list-style:none;padding-left:0;margin:0}
+.toc li{margin:5px 0}
+.toc a{font-size:14px}
+.toc ul ul{padding-left:18px;margin-top:4px}
+.toc ul ul a{font-size:13px;color:var(--dim)}
+
+.foot{margin-top:44px;padding-top:18px;border-top:1px solid #16203f;color:var(--dim);
+  font-size:12px;text-align:center}
+
+@media print{
+  @page{margin:0}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  html,body{background:var(--bg);color:var(--text);font-size:11pt}
+  .wrap{max-width:none;padding:0 56px}
+  header.brand,.hero{break-after:avoid}
+  h2,h3,h4{break-after:avoid}
+  .card,table,blockquote,.toc,header.brand{break-inside:avoid}
+  .toc{break-before:avoid}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ============ corporate header ============ -->
+  <header class="brand">
+    <svg viewBox="0 0 64 64" width="56" height="56" xmlns="http://www.w3.org/2000/svg" aria-label="QSSC">
+      <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#6366f1"/></linearGradient></defs>
+      <rect width="64" height="64" rx="14" fill="#0b1020"/>
+      <g stroke="url(#lg)" stroke-width="2.4" fill="none" stroke-linejoin="round">
+        <polygon points="32,8 52,20 52,44 32,56 12,44 12,20"/></g>
+      <g fill="url(#lg)">
+        <circle cx="32" cy="8" r="3.2"/><circle cx="52" cy="20" r="3.2"/><circle cx="52" cy="44" r="3.2"/>
+        <circle cx="32" cy="56" r="3.2"/><circle cx="12" cy="44" r="3.2"/><circle cx="12" cy="20" r="3.2"/></g>
+      <circle cx="32" cy="32" r="9" fill="none" stroke="#e0e7ff" stroke-width="1.4" opacity=".7"/>
+      <circle cx="32" cy="32" r="4" fill="#f472b6"/>
+    </svg>
+    <div class="t">
+      <h1><span class="grad">QSSC</span> — Possible Applications</h1>
+      <div class="sub">Quantum Solid State Chip · open-source · sensing &amp; quantum computation</div>
+    </div>
+    <div class="meta">
+      v1.0 · application outlook<br/>
+      English · <code>docs/applications.html</code>
+    </div>
+  </header>
+
+  <!-- ============ corporate hero image ============ -->
+  <section class="hero">
+    <div class="glow"></div>
+    <div class="inner">
+      <svg class="lattice" viewBox="0 0 220 180" width="220" height="180" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          <linearGradient id="lg2" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#818cf8"/></linearGradient>
+          <radialGradient id="spin" cx=".5" cy=".5" r=".5">
+            <stop offset="0" stop-color="#f472b6"/><stop offset="1" stop-color="#f472b6" stop-opacity="0"/></radialGradient>
+        </defs>
+        <!-- 64-pixel NV array suggestion: hex lattice -->
+        <g stroke="url(#lg2)" stroke-width="1.6" fill="none" opacity=".85" stroke-linejoin="round">
+          <polygon points="110,20 150,43 150,89 110,112 70,89 70,43"/>
+          <polygon points="110,66 150,89 150,135 110,158 70,135 70,89"/>
+          <polygon points="30,43 70,66 70,112 30,135 -10,112 -10,66" transform="translate(20,0)"/>
+          <polygon points="190,43 230,66 230,112 190,135 150,112 150,66" transform="translate(-20,0)"/>
+        </g>
+        <g fill="url(#lg2)">
+          <circle cx="110" cy="20" r="4"/><circle cx="150" cy="43" r="4"/><circle cx="150" cy="89" r="4"/>
+          <circle cx="110" cy="112" r="4"/><circle cx="70" cy="89" r="4"/><circle cx="70" cy="43" r="4"/>
+          <circle cx="110" cy="66" r="4"/><circle cx="150" cy="89" r="4"/><circle cx="150" cy="135" r="4"/>
+          <circle cx="110" cy="158" r="4"/><circle cx="70" cy="135" r="4"/><circle cx="70" cy="89" r="4"/>
+        </g>
+        <!-- spin defect + orbit -->
+        <circle cx="110" cy="89" r="26" fill="none" stroke="#e0e7ff" stroke-width="1.2" opacity=".55"/>
+        <circle cx="110" cy="89" r="30" fill="url(#spin)" opacity=".5"/>
+        <circle cx="110" cy="89" r="7" fill="#f472b6"/>
+        <circle cx="136" cy="89" r="3" fill="#67e8f9"/>
+      </svg>
+      <div class="h-txt">
+        <h2>Room-temperature <span class="grad">quantum sensing</span><br/>&amp; <span class="grad">computation</span> on a chip</h2>
+        <p>An open-source sandwich of two PCBs around a two-faced NV-center die: 64 addressable
+           emitter/detector pixels driven by a single Artix-7 FPGA — no cryogenics, no dilution
+           refrigerator, no clean-room-only control rack.</p>
+        <div class="stats">
+          <div class="stat"><b>64</b><span>addressable pixels</span></div>
+          <div class="stat"><b>300 K</b><span>operating temp</span></div>
+          <div class="stat"><b>2</b><span>published PCBs</span></div>
+          <div class="stat"><b>19</b><span>firmware verbs</span></div>
+          <div class="stat"><b>19</b><span>inventions</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ intro ============ -->
+  <p style="margin-top:26px">This document outlines where the QSSC platform can be applied, split into its two
+  complementary halves: <strong>on-chip quantum sensing</strong> (using the NV spin ensemble as a
+  field/temperature/rotation probe) and <strong>quantum computation</strong> (using the same spins as
+  addressable qubits driven through a Qiskit-compatible control stack). Each capability below is tagged
+  with its real status from the project record — <span class="badge b-sim">SIM ✅</span> implemented in
+  the simulator + API, <span class="badge b-hw">needs-HW</span> requires additional hardware on the PCB,
+  <span class="badge b-cry">needs-cryo</span> only works cold, and <span class="badge b-host">host-side</span>
+  runs in the host control layer.</p>
+
+  <div class="toc">
+    <h2>Contents</h2>
+    <ul>
+      <li><a href="#sensing">Part I — Quantum sensing applications</a>
+        <ul>
+          <li><a href="#magnetometry">Vector magnetometry &amp; field imaging</a></li>
+          <li><a href="#tensor">Tensor-gradient magnetic imaging</a></li>
+          <li><a href="#nav">Navigation &amp; geomagnetic sensing</a></li>
+          <li><a href="#rotation">Rotation / gyro sensing</a></li>
+          <li><a href="#thermal">Thermal &amp; current sensing</a></li>
+          <li><a href="#superres">Super-resolution &amp; sub-pixel readout</a></li>
+        </ul>
+      </li>
+      <li><a href="#computation">Part II — Quantum computation applications</a>
+        <ul>
+          <li><a href="#circuits">Quantum circuit execution (Qiskit)</a></li>
+          <li><a href="#parallel">64-parallel distributed computing</a></li>
+          <li><a href="#crypto">Quantum RNG &amp; QKD</a></li>
+          <li><a href="#memory">Qubit resources: registers &amp; memory</a></li>
+          <li><a href="#hybrid">Hybrid algorithms &amp; QEC (candidates)</a></li>
+        </ul>
+      </li>
+      <li><a href="#matrix">Capability → application matrix</a></li>
+      <li><a href="#platform">Platform advantages</a></li>
+    </ul>
+  </div>
+
+  <!-- ===================================================================== -->
+  <h2 id="sensing"><span class="num">PART I</span>Quantum sensing applications</h2>
+
+  <p>The sensing half exploits the NV centre's optically-detected magnetic resonance (ODMR): an applied
+  magnetic field shifts the NV spin resonance, and the shift is read out optically through the 64-channel
+  detector array. Because the same die both <em>drives</em> (emitters) and <em>reads</em> (detectors), the
+  chip functions as a self-contained, array-parallel quantum probe.</p>
+
+  <h3 id="magnetometry">1. Vector magnetometry &amp; magnetic-field imaging</h3>
+  <span class="badge b-sim">SIM ✅</span>
+  <p><strong>What it does.</strong> The 64-pixel <em>vector magnetometer</em> (Invention 1) uses a
+  4-axis NV⟨111⟩ doublet split to extract a full <strong>B-vector per pixel</strong>, with gradiometric
+  sign-locking to reject common-mode drift. Readout is array-parallel across all 64 channels.</p>
+  <div class="grid">
+    <div class="card"><h4>Geology &amp; archaeology</h4><p>Locate buried structures, ore bodies and
+      demagnetised artefacts from their weak ambient field anomalies.</p><div class="dom">Passive magnetic survey</div></div>
+    <div class="card"><h4>Non-destructive testing</h4><p>Map crack-induced flux leakage and weld
+      integrity in pipelines, airframes and pressure vessels.</p><div class="dom">Industrial inspection</div></div>
+    <div class="card"><h4>Biomedical imaging</h4><p>Detect magnetised cell labels and neural/ cardiac
+      field signatures with a room-temperature, array-sized aperture.</p><div class="dom">Life sciences</div></div>
+    <div class="card"><h4>Materials characterisation</h4><p>Resolve domain structure and permeability
+      maps in soft magnets, thin films and 2-D materials.</p><div class="dom">Condensed matter</div></div>
+  </div>
+
+  <h3 id="tensor">2. Tensor-gradient magnetic imaging &amp; dipole localisation</h3>
+  <span class="badge b-sim">SIM ✅</span>
+  <p><strong>What it does.</strong> Invention 19 combines the 4-axis readout with the <strong>on-board
+  field-gradient coil</strong> (now a real PCB feature) to measure the <em>per-pixel B-gradient tensor</em>,
+  then inverts it to localise a magnetic dipole source in <strong>3-D position</strong>. The gradient — the
+  same mechanism that tunes the register width — is repurposed as a spatial-encoding tool.</p>
+  <ul>
+    <li><strong>Source localisation:</strong> pin-point the depth and lateral position of a buried or
+        embedded dipole (unexploded ordnance, structural rebar, current-carrying traces).</li>
+    <li><strong>Tensor gradiometry:</strong> reject distant background by measuring the field gradient
+        rather than the field itself — the standard trick for working near magnetic clutter.</li>
+    <li><strong>Cross-correlated with the 64 pixels:</strong> one acquisition yields a tensor image, not
+        a single scalar.</li>
+  </ul>
+
+  <h3 id="nav">3. Navigation &amp; geomagnetic sensing</h3>
+  <span class="badge b-sim">SIM ✅</span>
+  <p><strong>What it does.</strong> The <em>compass</em> endpoint fits the ODMR doublet to return an
+  ambient <strong>B-vector, heading, elevation and sensitivity in µT</strong>; the <em>nav</em> endpoint
+  turns ferromagnetic/geomagnetic signatures into a navigation aid. Because the sensor is a chip, it can
+  be embedded where a bulky magnetometer cannot.</p>
+  <ul>
+    <li><strong>Denied-environment navigation:</strong> GPS-independent heading from the Earth's field.</li>
+    <li><strong>Geomagnetic anomaly navigation:</strong> match local field features against a reference map.</li>
+    <li><strong>Current-direction sensing:</strong> infer conductor orientation from the field it produces.</li>
+  </ul>
+
+  <h3 id="rotation">4. Rotation / gyro sensing</h3>
+  <span class="badge b-sim">SIM ✅</span>
+  <p><strong>What it does.</strong> The <em>gyro</em> endpoint runs a Ramsey π/2–T–π/2 sequence; the
+  free-precession phase over the window <code>T</code> yields a <strong>rotation rate in °/s</strong> with
+  an associated noise figure — a solid-state alternative to a mechanical or ring-laser gyro, derived from
+  the same qubit control stack as the magnetometer.</p>
+
+  <h3 id="thermal">5. Thermal &amp; electric-current sensing</h3>
+  <span class="badge b-sim">SIM ✅</span>
+  <p><strong>What it does.</strong> NV resonance is temperature-sensitive, and the on-chip sensor suite
+  exposes <em>thermal</em> and <em>current</em> endpoints alongside <em>ferro</em> (ferromagnetic) imaging:</p>
+  <ul>
+    <li><strong>Thermal mapping:</strong> measure local temperature from the resonance shift — a quantum
+        thermometer with no cryogenics.</li>
+    <li><strong>Contactless current sensing:</strong> infer conductor current from the field it produces,
+        galvanically isolated by construction.</li>
+    <li><strong>Integrated multi-modal probe:</strong> field, temperature and current from a single die
+        in a single acquisition stack.</li>
+  </ul>
+
+  <h3 id="superres">6. Super-resolution &amp; sub-pixel readout</h3>
+  <span class="badge b-sim">SIM ✅</span> <span class="badge b-hw">needs-HW</span>
+  <p><strong>What it does.</strong> Two innovations push spatial information beyond the naive pixel pitch:</p>
+  <ul>
+    <li><strong>Sub-pixel centroiding</strong> (Invention 6): charge-sharing on the graphene detection
+        sheet yields <code>64·S</code> spatial channels — extra resolution without extra qubits.</li>
+    <li><strong>Compressed-sensing super-resolution ODMR</strong> (Invention 13): OMP sparse recovery over
+        the gradient-bin dictionary deconvolves <em>overlapping</em> resonance lines, lowering the SNR bar
+        for resolving closely-spaced features.</li>
+    <li><strong>Bayesian quantum-limited readout</strong> (Invention 14): a one-sided, Bonferroni-corrected
+        matched filter extracts marginal lone-NV lines a hard threshold would miss.</li>
+    <li><strong>N-shot lock-in integration</strong> (Invention 7): 1/√N averaging raises the measured
+        register width — a pure software gain.</li>
+  </ul>
+
+  <!-- ===================================================================== -->
+  <h2 id="computation"><span class="num">PART II</span>Quantum computation applications</h2>
+
+  <p>The computation half treats the same NV spins as <strong>addressable qubits</strong>. A Qiskit-
+  compatible control stack compiles circuits into the 19 firmware verbs (emitter drive, MW pulses,
+  readout, gradient, sequences), and the FPGA executes them across the pixel array.</p>
+
+  <h3 id="circuits">1. Quantum circuit execution (Qiskit)</h3>
+  <span class="badge b-sim">SIM ✅</span>
+  <p><strong>What it does.</strong> Users submit circuits as <strong>OpenQASM 2</strong> or a restricted
+  <strong>Python snippet</strong>; the builder runs them in a sandboxed namespace (imports limited to
+  <code>qiskit</code>/<code>numpy</code>/<code>math</code>, no file/network/process access) and the
+  control stack executes them. Built-in algorithms already run end-to-end:</p>
+  <div class="grid">
+    <div class="card"><h4>Entanglement &amp; benchmarks</h4><p>Bell, GHZ and QFT states for
+      verification, calibration and teaching.</p><div class="dom">Validation</div></div>
+    <div class="card"><h4>Search &amp; optimisation</h4><p>Grover amplitude amplification and period
+      finding as canonical demonstrations.</p><div class="dom">Algorithms</div></div>
+    <div class="card"><h4>Arithmetic</h4><p>Reversible math operations on encoded registers for
+      algorithmic building blocks.</p><div class="dom">Subroutines</div></div>
+    <div class="card"><h4>Custom circuits</h4><p>User-supplied OpenQASM/Python, up to 64 qubits, for
+      research-specific experiments.</p><div class="dom">Extensibility</div></div>
+  </div>
+  <blockquote><strong>Application mapping:</strong> circuit execution is the substrate for chemistry
+  simulation, combinatorial optimisation and machine-learning kernels — the QSSC provides a real,
+  room-temperature execution target rather than a simulator-only workflow.</blockquote>
+
+  <h3 id="parallel">2. 64-parallel distributed computing</h3>
+  <span class="badge b-sim">SIM ✅</span>
+  <p><strong>What it does.</strong> Invention 4 exploits the array as <strong>64 independent ~10-NV
+  pixels</strong>, delivering <strong>64× throughput</strong> — deliberately <em>not</em> one large
+  entangled circuit. The <code>run-parallel</code> API fans a workload across all pixels, and
+  <code>calibrate-array</code> performs a per-pixel array calibration first so each pixel runs at its
+  own measured register width.</p>
+  <ul>
+    <li><strong>Ensemble batch processing:</strong> run 64 independent trials/samples simultaneously.</li>
+    <li><strong>Per-pixel calibration:</strong> array calibration maps each pixel's register before use.</li>
+    <li><strong>Embarrassingly-parallel workloads:</strong> sampling, Monte-Carlo and sweep-style jobs
+        scale with pixel count rather than circuit depth.</li>
+  </ul>
+
+  <h3 id="crypto">3. Quantum RNG &amp; QKD</h3>
+  <span class="badge b-sim">SIM ✅</span>
+  <p><strong>What it does.</strong> Two security applications read straight off the physical entropy of
+  the device:</p>
+  <ul>
+    <li><strong>Quantum RNG → Ed25519 keys:</strong> harvest <code>READ_RNG</code> entropy from the
+        AD7616 detector noise floor of a dark channel, then derive an <strong>Ed25519 keypair and
+        self-signed X.509 certificate</strong> from it — hardware-rooted, quantum-safe key generation.</li>
+    <li><strong>BB84 QKD:</strong> implement the BB84 protocol with a simulated intercept-resend Eve,
+        demonstrating the quantum-key-distribution workflow end-to-end.</li>
+  </ul>
+  <blockquote><strong>Application mapping:</strong> quantum-safe cryptography (keys that cannot be
+  reproduced from a deterministic CSPRNG) and secure key distribution for long-term data protection.</blockquote>
+
+  <h3 id="memory">4. Qubit resources: registers &amp; nuclear-spin memory</h3>
+  <span class="badge b-sim">SIM ✅</span> <span class="badge b-hw">needs-HW</span>
+  <p><strong>What it does.</strong> The computation side is built on <em>registers</em> whose width is a
+  measured, tunable quantity:</p>
+  <ul>
+    <li><strong>Tunable register width</strong> (Invention 5): the on-board field gradient makes the
+        per-pixel register width a <em>measured</em> value — the gradient coil + DAC are on the PCB.</li>
+    <li><strong>Nuclear-spin memory</strong> (Invention 3): a ¹³C memory qubit doubles the register via
+        SWAP, giving a longer-lived store than the NV electron spin.</li>
+    <li><strong>Prime-coprime multiplexed readout</strong> (Invention 2+): 16 prime-period lock-in
+        channels, exactly orthogonal, with zero cross-talk — scales how many lines can be read at once.</li>
+    <li><strong>Nuclear registers</strong> (Inventions 10/11, candidates): ¹³C cluster and NV nitrogen
+        (¹⁴N/¹⁵N) registers for larger qubit resources.</li>
+  </ul>
+
+  <h3 id="hybrid">5. Hybrid algorithms &amp; QEC (candidates)</h3>
+  <span class="badge b-host">host-side</span> <span class="badge b-cry">needs-cryo</span>
+  <p><strong>What it does.</strong> Documented candidates that pair the on-chip qubits with a host-side
+  classical loop or push into regimes needing extra hardware:</p>
+  <ul>
+    <li><strong>Parallel VQE / QAOA</strong> (Invention 15): classical-quantum optimisation loop, host-side.</li>
+    <li><strong>Quantum kernel estimation (QSVM)</strong> (Invention 16): quantum feature maps for
+        machine-learning classification, host-side.</li>
+    <li><strong>Small QEC code on the register</strong> (Invention 18): an error-correcting code run on
+        the register (needs-HW + host-side).</li>
+    <li><strong>Distributed / Heisenberg-limited sensing</strong> (Invention 17): entanglement-enhanced
+        sensing across pixels (needs-cryo; the magnon YIG bus, Invention 8, is likewise cryogenic).</li>
+    <li><strong>Resonant spin-to-charge readout</strong> (Invention 12): single-shot readout (needs-HW).</li>
+  </ul>
+
+  <!-- ===================================================================== -->
+  <h2 id="matrix"><span class="num">§</span>Capability → application matrix</h2>
+  <table>
+    <thead><tr><th>Capability</th><th>Domain</th><th>Primary applications</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>64-pixel vector magnetometer</td><td>Sensing</td><td>Geology, archaeology, NDT, biomedical, materials</td><td><span class="badge b-sim">SIM ✅</span></td></tr>
+      <tr><td>Tensor-gradient imaging + dipole localisation</td><td>Sensing</td><td>3-D source localisation, UXO/rebar, tensor gradiometry</td><td><span class="badge b-sim">SIM ✅</span></td></tr>
+      <tr><td>Compass / geomagnetic nav</td><td>Sensing</td><td>GPS-denied navigation, anomaly maps, current direction</td><td><span class="badge b-sim">SIM ✅</span></td></tr>
+      <tr><td>Gyro (Ramsey rotation)</td><td>Sensing</td><td>Solid-state rotation / inertial sensing</td><td><span class="badge b-sim">SIM ✅</span></td></tr>
+      <tr><td>Thermal &amp; current sensing</td><td>Sensing</td><td>Quantum thermometry, contactless current probe</td><td><span class="badge b-sim">SIM ✅</span></td></tr>
+      <tr><td>Super-resolution / sub-pixel readout</td><td>Sensing</td><td>Sub-pixel imaging, overlapping-line deconvolution</td><td><span class="badge b-sim">SIM ✅</span> <span class="badge b-hw">needs-HW</span></td></tr>
+      <tr><td>Qiskit circuit execution</td><td>Computation</td><td>Chemistry, optimisation, ML kernels, algorithm R&amp;D</td><td><span class="badge b-sim">SIM ✅</span></td></tr>
+      <tr><td>64-parallel distributed computing</td><td>Computation</td><td>Batch sampling, Monte-Carlo, per-pixel sweeps</td><td><span class="badge b-sim">SIM ✅</span></td></tr>
+      <tr><td>Quantum RNG → Ed25519 keys</td><td>Computation / Security</td><td>Quantum-safe key &amp; certificate generation</td><td><span class="badge b-sim">SIM ✅</span></td></tr>
+      <tr><td>BB84 QKD</td><td>Computation / Security</td><td>Secure key distribution (intercept-resend demo)</td><td><span class="badge b-sim">SIM ✅</span></td></tr>
+      <tr><td>Nuclear-spin memory / registers</td><td>Computation</td><td>Larger qubit registers, longer-lived memory</td><td><span class="badge b-sim">SIM ✅</span> <span class="badge b-hw">needs-HW</span></td></tr>
+      <tr><td>VQE / QAOA, QSVM</td><td>Computation</td><td>Hybrid optimisation &amp; quantum ML</td><td><span class="badge b-host">host-side</span></td></tr>
+      <tr><td>QEC code on register</td><td>Computation</td><td>Error correction / fault-tolerance experiments</td><td><span class="badge b-host">host-side</span> <span class="badge b-hw">needs-HW</span></td></tr>
+      <tr><td>Heisenberg-limited sensing, magnon bus</td><td>Sensing + Computation</td><td>Entanglement-enhanced distributed sensing</td><td><span class="badge b-cry">needs-cryo</span></td></tr>
+    </tbody>
+  </table>
+
+  <!-- ===================================================================== -->
+  <h2 id="platform"><span class="num">§</span>Why these applications are practical here</h2>
+  <div class="grid">
+    <div class="card"><h4>Room temperature</h4><p>300 K operation — no dilution refrigerator. The
+      filter stack (servo/iso/shield/feed-forward/CM/DD) protects SNR and extends T₂ at ambient.</p>
+      <div class="dom">Deployment</div></div>
+    <div class="card"><h4>Single-chip integration</h4><p>Drive, MW, readout, gradient and control live on
+      two PCBs around one die — one Artix-7 FPGA runs the whole loop.</p><div class="dom">Footprint</div></div>
+    <div class="card"><h4>Array-parallel</h4><p>64 independent pixels scale throughput linearly instead
+      of relying on one deep entangled circuit.</p><div class="dom">Throughput</div></div>
+    <div class="card"><h4>Open source</h4><p>Boards, RTL, firmware, simulator, API and docs are
+      published and reproducible — auditable end to end.</p><div class="dom">Accessibility</div></div>
+    <div class="card"><h4>Qiskit-compatible</h4><p>Standard OpenQASM/Python circuits lower the barrier
+      from algorithm research to physical execution.</p><div class="dom">Workflow</div></div>
+    <div class="card"><h4>Self-verifying</h4><p>The project's own gates keep the boards, docs and
+      firmware mutually consistent — every claim is checked against measurement.</p><div class="dom">Rigor</div></div>
+  </div>
+
+  <blockquote><strong>Summary.</strong> The QSSC platform addresses two application families from one
+  device: <strong>sensing</strong> — magnetometry, field/tensor imaging, navigation, rotation, thermal
+  and current probing at room temperature with array parallelism — and <strong>quantum computation</strong>
+  — Qiskit circuit execution, 64-way distributed processing, quantum-safe key generation and QKD, backed
+  by tunable registers and nuclear-spin memory. Capabilities marked <span class="badge b-sim">SIM ✅</span>
+  run today against the published boards; those marked <span class="badge b-hw">needs-HW</span>,
+  <span class="badge b-host">host-side</span> or <span class="badge b-cry">needs-cryo</span> define the
+  documented roadmap.</blockquote>
+
+  <div class="foot">
+    QSSC — Quantum Solid State Chip · open-source quantum computer · application outlook<br/>
+    Source: <code>docs/INVENTIONS.md</code>, <code>README.md</code>, <code>docs/architecture/</code> ·
+    brand identity from <code>frontend/public/favicon.svg</code>
+  </div>
+
+</div>
+</body>
+</html>
