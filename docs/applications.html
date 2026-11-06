@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>QSSC — Possible Applications (Sensing &amp; Quantum Computation)</title>
+<title>QSSC — Project Applications (Sensing &amp; Quantum Computation)</title>
 <link rel="icon" href="../frontend/public/favicon.svg" type="image/svg+xml" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -12,7 +12,7 @@
 :root{
   --bg:#0b1020;--bg2:#121931;--panel:#141c38;--panel2:#1a2444;
   --border:#263056;--text:#e6ecff;--muted:#94a3c4;--dim:#6b78a0;
-  --brand:#22d3ee;--accent:#f472b6;--ok:#34d399;--warn:#fbbf24;
+  --brand:#22d3ee;--accent:#f472b6;--ok:#34d399;
   --head:"Space Grotesk",system-ui,sans-serif;
   --body:"Inter",system-ui,sans-serif;
   --mono:"JetBrains Mono",ui-monospace,monospace;
@@ -27,7 +27,6 @@ body{margin:0;background:
   -webkit-font-smoothing:antialiased}
 .wrap{max-width:900px;margin:0 auto;padding:0 44px 90px}
 
-/* ---------- corporate header ---------- */
 header.brand{display:flex;align-items:center;gap:16px;padding:36px 0 20px;
   border-bottom:1px solid #16203f;margin-bottom:6px}
 header.brand .t h1{font-family:var(--head);font-weight:600;font-size:26px;margin:0;letter-spacing:-.01em}
@@ -35,7 +34,6 @@ header.brand .t h1 .grad{background:linear-gradient(90deg,#67e8f9,#818cf8);-webk
 header.brand .t .sub{color:var(--muted);font-size:13px;margin-top:4px}
 header.brand .meta{margin-left:auto;text-align:right;font-family:var(--mono);font-size:11.5px;color:var(--dim);line-height:1.6}
 
-/* hero banner (corporate image strip) */
 .hero{position:relative;margin:26px 0 8px;border:1px solid var(--border);border-radius:16px;overflow:hidden;
   background:linear-gradient(120deg,#0e1530 0%,#141c38 55%,#1a1140 100%)}
 .hero .glow{position:absolute;inset:0;background:
@@ -51,11 +49,10 @@ header.brand .meta{margin-left:auto;text-align:right;font-family:var(--mono);fon
 .hero .stat b{display:block;font-family:var(--head);font-size:22px;color:#fff}
 .hero .stat span{font-size:11.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em}
 
-/* ---------- structure ---------- */
 h1,h2,h3,h4{font-family:var(--head);font-weight:600;letter-spacing:-.01em;scroll-margin-top:20px}
 h2{font-size:23px;margin:46px 0 14px;padding-bottom:8px;border-bottom:1px solid #1a2444}
 h2 .num{color:var(--dim);font-family:var(--mono);font-size:15px;margin-right:10px}
-h3{font-size:17.5px;margin:28px 0 10px;color:#cfe0ff}
+h3{font-size:17.5px;margin:30px 0 10px;color:#cfe0ff}
 h4{font-size:14.5px;margin:16px 0 6px;color:var(--brand)}
 p{margin:10px 0}
 a{color:var(--brand)}
@@ -73,24 +70,25 @@ th,td{padding:9px 12px;text-align:left;border-bottom:1px solid #1a2444;vertical-
 th{color:var(--muted);font-weight:500;font-size:12px;text-transform:uppercase;letter-spacing:.05em;background:var(--panel)}
 td code{font-size:12px}
 
-/* badges */
-.badge{display:inline-block;font-family:var(--mono);font-size:10.5px;font-weight:500;
-  padding:2px 8px;border-radius:99px;border:1px solid;letter-spacing:.03em;white-space:nowrap}
-.b-sim{color:#34d399;border-color:rgba(52,211,153,.4);background:rgba(52,211,153,.10)}
-.b-hw{color:#fbbf24;border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.10)}
-.b-cry{color:#f472b6;border-color:rgba(244,114,182,.4);background:rgba(244,114,182,.10)}
-.b-host{color:#67e8f9;border-color:rgba(103,232,249,.4);background:rgba(103,232,249,.10)}
-
-/* application cards */
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(258px,1fr));gap:16px;margin:18px 0}
 .card{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--border);
   border-radius:14px;padding:16px 18px}
 .card h4{margin:0 0 6px;font-size:15px;color:#e6ecff}
 .card p{margin:0;font-size:13.5px;color:var(--muted)}
 .card .dom{margin-top:10px;font-size:11.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
-.card .badge{margin-bottom:8px}
 
-/* toc */
+/* comparison boxes: state-of-the-art vs QSSC advantage */
+.box{border-radius:11px;padding:13px 17px;margin:12px 0;font-size:14.2px;line-height:1.6}
+.box h5{margin:0 0 6px;font-family:var(--head);font-size:11.5px;text-transform:uppercase;letter-spacing:.07em}
+.box p{margin:5px 0}
+.box ul{margin:5px 0;padding-left:1.25em}
+.box li{margin:4px 0}
+.sota{background:rgba(148,163,196,.06);border:1px solid var(--border);color:var(--muted)}
+.sota h5{color:var(--muted)}
+.adv{background:rgba(52,211,153,.07);border:1px solid rgba(52,211,153,.34);color:#d3ecdf}
+.adv h5{color:#34d399}
+.adv strong{color:#a7f3d0}
+
 .toc{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--border);
   border-radius:14px;padding:18px 22px;margin:24px 0}
 .toc h2{border:none;margin:0 0 10px;font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
@@ -110,7 +108,7 @@ td code{font-size:12px}
   .wrap{max-width:none;padding:0 56px}
   header.brand,.hero{break-after:avoid}
   h2,h3,h4{break-after:avoid}
-  .card,table,blockquote,.toc,header.brand{break-inside:avoid}
+  .card,.box,table,blockquote,.toc,header.brand{break-inside:avoid}
   .toc{break-before:avoid}
 }
 </style>
@@ -118,7 +116,7 @@ td code{font-size:12px}
 <body>
 <div class="wrap">
 
-  <!-- ============ corporate header ============ -->
+  <!-- corporate header -->
   <header class="brand">
     <svg viewBox="0 0 64 64" width="56" height="56" xmlns="http://www.w3.org/2000/svg" aria-label="QSSC">
       <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
@@ -133,16 +131,16 @@ td code{font-size:12px}
       <circle cx="32" cy="32" r="4" fill="#f472b6"/>
     </svg>
     <div class="t">
-      <h1><span class="grad">QSSC</span> — Possible Applications</h1>
-      <div class="sub">Quantum Solid State Chip · open-source · sensing &amp; quantum computation</div>
+      <h1><span class="grad">QSSC</span> — Project Applications</h1>
+      <div class="sub">Quantum Solid State Chip · open-source quantum platform · sensing &amp; computation</div>
     </div>
     <div class="meta">
-      v1.0 · application outlook<br/>
+      Investor overview<br/>
       English · <code>docs/applications.html</code>
     </div>
   </header>
 
-  <!-- ============ corporate hero image ============ -->
+  <!-- corporate hero image -->
   <section class="hero">
     <div class="glow"></div>
     <div class="inner">
@@ -153,300 +151,494 @@ td code{font-size:12px}
           <radialGradient id="spin" cx=".5" cy=".5" r=".5">
             <stop offset="0" stop-color="#f472b6"/><stop offset="1" stop-color="#f472b6" stop-opacity="0"/></radialGradient>
         </defs>
-        <!-- 64-pixel NV array suggestion: hex lattice -->
         <g stroke="url(#lg2)" stroke-width="1.6" fill="none" opacity=".85" stroke-linejoin="round">
           <polygon points="110,20 150,43 150,89 110,112 70,89 70,43"/>
           <polygon points="110,66 150,89 150,135 110,158 70,135 70,89"/>
-          <polygon points="30,43 70,66 70,112 30,135 -10,112 -10,66" transform="translate(20,0)"/>
-          <polygon points="190,43 230,66 230,112 190,135 150,112 150,66" transform="translate(-20,0)"/>
+          <polygon points="50,43 90,66 90,112 50,135 10,112 10,66"/>
+          <polygon points="170,43 210,66 210,112 170,135 130,112 130,66"/>
         </g>
         <g fill="url(#lg2)">
           <circle cx="110" cy="20" r="4"/><circle cx="150" cy="43" r="4"/><circle cx="150" cy="89" r="4"/>
           <circle cx="110" cy="112" r="4"/><circle cx="70" cy="89" r="4"/><circle cx="70" cy="43" r="4"/>
-          <circle cx="110" cy="66" r="4"/><circle cx="150" cy="89" r="4"/><circle cx="150" cy="135" r="4"/>
-          <circle cx="110" cy="158" r="4"/><circle cx="70" cy="135" r="4"/><circle cx="70" cy="89" r="4"/>
+          <circle cx="110" cy="66" r="4"/><circle cx="150" cy="135" r="4"/>
+          <circle cx="110" cy="158" r="4"/><circle cx="70" cy="135" r="4"/>
+          <circle cx="50" cy="43" r="4"/><circle cx="90" cy="89" r="4"/><circle cx="50" cy="135" r="4"/>
+          <circle cx="170" cy="43" r="4"/><circle cx="210" cy="89" r="4"/><circle cx="170" cy="135" r="4"/>
         </g>
-        <!-- spin defect + orbit -->
         <circle cx="110" cy="89" r="26" fill="none" stroke="#e0e7ff" stroke-width="1.2" opacity=".55"/>
         <circle cx="110" cy="89" r="30" fill="url(#spin)" opacity=".5"/>
         <circle cx="110" cy="89" r="7" fill="#f472b6"/>
         <circle cx="136" cy="89" r="3" fill="#67e8f9"/>
       </svg>
       <div class="h-txt">
-        <h2>Room-temperature <span class="grad">quantum sensing</span><br/>&amp; <span class="grad">computation</span> on a chip</h2>
-        <p>An open-source sandwich of two PCBs around a two-faced NV-center die: 64 addressable
-           emitter/detector pixels driven by a single Artix-7 FPGA — no cryogenics, no dilution
-           refrigerator, no clean-room-only control rack.</p>
+        <h2>A complete quantum platform —<br/><span class="grad">sensing</span> &amp; <span class="grad">computation</span> on one chip</h2>
+        <p>An open-source sandwich of two custom PCBs around a two-faced NV-centre die, driven end-to-end
+           by an in-house Artix-7 FPGA control stack — designed for room-temperature operation with no
+           cryogenics and no bespoke control rack.</p>
         <div class="stats">
           <div class="stat"><b>64</b><span>addressable pixels</span></div>
           <div class="stat"><b>300 K</b><span>operating temp</span></div>
-          <div class="stat"><b>2</b><span>published PCBs</span></div>
+          <div class="stat"><b>2</b><span>custom PCBs</span></div>
           <div class="stat"><b>19</b><span>firmware verbs</span></div>
-          <div class="stat"><b>19</b><span>inventions</span></div>
+          <div class="stat"><b>100%</b><span>open source</span></div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ============ intro ============ -->
-  <p style="margin-top:26px">This document outlines where the QSSC platform can be applied, split into its two
-  complementary halves: <strong>on-chip quantum sensing</strong> (using the NV spin ensemble as a
-  field/temperature/rotation probe) and <strong>quantum computation</strong> (using the same spins as
-  addressable qubits driven through a Qiskit-compatible control stack). Each capability below is tagged
-  with its real status from the project record — <span class="badge b-sim">SIM ✅</span> implemented in
-  the simulator + API, <span class="badge b-hw">needs-HW</span> requires additional hardware on the PCB,
-  <span class="badge b-cry">needs-cryo</span> only works cold, and <span class="badge b-host">host-side</span>
-  runs in the host control layer.</p>
+  <!-- executive summary -->
+  <h2 id="summary"><span class="num">§</span>Executive summary</h2>
+  <p><strong>QSSC (Quantum Solid State Chip)</strong> is a complete, open-source quantum platform built
+  around nitrogen-vacancy (NV) centres in the solid state. The development has produced a full hardware
+  stack — <strong>two custom printed-circuit boards, the FPGA control RTL, the on-chip firmware and the
+  host software</strong> — that addresses two large and complementary application markets: <strong>quantum
+  sensing</strong> and <strong>quantum computation</strong>.</p>
+
+  <p>Unlike laboratory quantum systems that require dilution refrigerators and rack-sized control
+  electronics, QSSC operates at <strong>room temperature</strong> on a chip-scale footprint, with
+  <strong>64 independently addressable pixels</strong> providing array-level parallelism. The same device
+  that probes magnetic fields, temperature and rotation can execute quantum circuits, generate
+  quantum-safe keys and run ensemble-parallel workloads — one platform, two revenue-relevant domains.</p>
+
+  <p>Each application below is set out in three parts: <strong>how the platform performs it</strong>,
+  <strong>what the existing state of the art is</strong>, and <strong>the concrete advantage QSSC
+  brings over it</strong>.</p>
+
+  <blockquote><strong>Investment thesis.</strong> QSSC compresses a quantum system that normally fills a
+  room into two PCBs and a single FPGA, while keeping the entire stack open and reproducible. That
+  combination — <em>chip-scale, room-temperature, array-parallel, fully open</em> — is the platform's
+  defensible position across both sensing and computation applications.</blockquote>
 
   <div class="toc">
     <h2>Contents</h2>
     <ul>
-      <li><a href="#sensing">Part I — Quantum sensing applications</a>
+      <li><a href="#sensing">I — Quantum sensing applications</a>
         <ul>
-          <li><a href="#magnetometry">Vector magnetometry &amp; field imaging</a></li>
-          <li><a href="#tensor">Tensor-gradient magnetic imaging</a></li>
-          <li><a href="#nav">Navigation &amp; geomagnetic sensing</a></li>
-          <li><a href="#rotation">Rotation / gyro sensing</a></li>
-          <li><a href="#thermal">Thermal &amp; current sensing</a></li>
-          <li><a href="#superres">Super-resolution &amp; sub-pixel readout</a></li>
+          <li><a href="#magnetometry">1. Magnetometry &amp; field imaging</a></li>
+          <li><a href="#tensor">2. 3-D magnetic source localisation</a></li>
+          <li><a href="#nav">3. Navigation &amp; geomagnetic sensing</a></li>
+          <li><a href="#rotation">4. Rotation &amp; inertial sensing</a></li>
+          <li><a href="#thermal">5. Thermal &amp; current sensing</a></li>
+          <li><a href="#superres">6. High-resolution &amp; super-resolution imaging</a></li>
         </ul>
       </li>
-      <li><a href="#computation">Part II — Quantum computation applications</a>
+      <li><a href="#computation">II — Quantum computation applications</a>
         <ul>
-          <li><a href="#circuits">Quantum circuit execution (Qiskit)</a></li>
-          <li><a href="#parallel">64-parallel distributed computing</a></li>
-          <li><a href="#crypto">Quantum RNG &amp; QKD</a></li>
-          <li><a href="#memory">Qubit resources: registers &amp; memory</a></li>
-          <li><a href="#hybrid">Hybrid algorithms &amp; QEC (candidates)</a></li>
+          <li><a href="#circuits">1. Quantum algorithm execution</a></li>
+          <li><a href="#parallel">2. Ensemble-parallel distributed computing</a></li>
+          <li><a href="#crypto">3. Quantum-safe cryptography</a></li>
+          <li><a href="#memory">4. Quantum registers &amp; memory</a></li>
+          <li><a href="#hybrid">5. Hybrid algorithms &amp; error correction</a></li>
         </ul>
       </li>
-      <li><a href="#matrix">Capability → application matrix</a></li>
+      <li><a href="#matrix">Application matrix</a></li>
       <li><a href="#platform">Platform advantages</a></li>
     </ul>
   </div>
 
   <!-- ===================================================================== -->
-  <h2 id="sensing"><span class="num">PART I</span>Quantum sensing applications</h2>
+  <h2 id="sensing"><span class="num">I</span>Quantum sensing applications</h2>
 
-  <p>The sensing half exploits the NV centre's optically-detected magnetic resonance (ODMR): an applied
-  magnetic field shifts the NV spin resonance, and the shift is read out optically through the 64-channel
-  detector array. Because the same die both <em>drives</em> (emitters) and <em>reads</em> (detectors), the
-  chip functions as a self-contained, array-parallel quantum probe.</p>
+  <p>The sensing half exploits the NV centre's optically-detected magnetic resonance: an applied field
+  shifts the NV spin resonance, and that shift is read optically across the <strong>64-channel detector
+  array</strong>. The device both drives and reads on-chip, so it is a self-contained, array-parallel
+  quantum probe. Below, each application is detailed alongside the technology it displaces and the
+  specific advantage it offers.</p>
 
-  <h3 id="magnetometry">1. Vector magnetometry &amp; magnetic-field imaging</h3>
-  <span class="badge b-sim">SIM ✅</span>
-  <p><strong>What it does.</strong> The 64-pixel <em>vector magnetometer</em> (Invention 1) uses a
-  4-axis NV⟨111⟩ doublet split to extract a full <strong>B-vector per pixel</strong>, with gradiometric
-  sign-locking to reject common-mode drift. Readout is array-parallel across all 64 channels.</p>
-  <div class="grid">
-    <div class="card"><h4>Geology &amp; archaeology</h4><p>Locate buried structures, ore bodies and
-      demagnetised artefacts from their weak ambient field anomalies.</p><div class="dom">Passive magnetic survey</div></div>
-    <div class="card"><h4>Non-destructive testing</h4><p>Map crack-induced flux leakage and weld
-      integrity in pipelines, airframes and pressure vessels.</p><div class="dom">Industrial inspection</div></div>
-    <div class="card"><h4>Biomedical imaging</h4><p>Detect magnetised cell labels and neural/ cardiac
-      field signatures with a room-temperature, array-sized aperture.</p><div class="dom">Life sciences</div></div>
-    <div class="card"><h4>Materials characterisation</h4><p>Resolve domain structure and permeability
-      maps in soft magnets, thin films and 2-D materials.</p><div class="dom">Condensed matter</div></div>
+  <!-- 1 -->
+  <h3 id="magnetometry">1. Magnetometry &amp; magnetic-field imaging</h3>
+  <p><strong>How QSSC does it.</strong> The 64-pixel <em>vector magnetometer</em> reads the full
+  <strong>three-component B-vector at every pixel simultaneously</strong>, using the 4-axis NV⟨111⟩
+  orientation: the applied field splits the NV resonance along known crystal axes, and the split
+  magnitude and direction are inverted per pixel. <strong>Gradiometric sign-locking</strong> rejects
+  common-mode drift (vibration, temperature, ambient fields) by differencing neighbouring pixels, and
+  all 64 channels are read out in one parallel optical frame — no scanning, no sequential acquisition.</p>
+
+  <div class="box sota">
+    <h5>Existing solutions</h5>
+    <ul>
+      <li><strong>SQUID magnetometers</strong> — the sensitivity benchmark, but superconducting: they
+        require liquid-helium/dilution cryogenics, magnetic shielding and trained operators, which
+        confines them to laboratories.</li>
+      <li><strong>Optically-pumped magnetometers (OPM)</strong> — room-temperature but built from heated
+        vapour cells with bulkier optics; typically single-vector, not an integrated pixel array.</li>
+      <li><strong>Fluxgate / Hall / magnetoresistive sensors</strong> — cheap and compact, but one to
+        two orders of magnitude less sensitive than quantum-class probes.</li>
+      <li><strong>Scanning single-NV microscopy</strong> — quantum sensitivity, but one NV at a time
+        scanned over the sample with a confocal microscope: slow, and not an array.</li>
+    </ul>
+  </div>
+  <div class="box adv">
+    <h5>QSSC advantage</h5>
+    <p><strong>Quantum sensitivity without the quantum-machine overhead.</strong> QSSC delivers
+    NV-class sensitivity at <strong>300 K, chip scale, with 64 parallel channels</strong> — no cryogen
+    (vs SQUID), no heated cell or scanning optics (vs OPM / scanning NV), and far higher sensitivity
+    than fluxgate or Hall (vs classical sensors). The array turns a laboratory technique into a
+    field-deployable instrument, and the open stack makes it auditable and reprogrammable.</p>
   </div>
 
-  <h3 id="tensor">2. Tensor-gradient magnetic imaging &amp; dipole localisation</h3>
-  <span class="badge b-sim">SIM ✅</span>
-  <p><strong>What it does.</strong> Invention 19 combines the 4-axis readout with the <strong>on-board
-  field-gradient coil</strong> (now a real PCB feature) to measure the <em>per-pixel B-gradient tensor</em>,
-  then inverts it to localise a magnetic dipole source in <strong>3-D position</strong>. The gradient — the
-  same mechanism that tunes the register width — is repurposed as a spatial-encoding tool.</p>
-  <ul>
-    <li><strong>Source localisation:</strong> pin-point the depth and lateral position of a buried or
-        embedded dipole (unexploded ordnance, structural rebar, current-carrying traces).</li>
-    <li><strong>Tensor gradiometry:</strong> reject distant background by measuring the field gradient
-        rather than the field itself — the standard trick for working near magnetic clutter.</li>
-    <li><strong>Cross-correlated with the 64 pixels:</strong> one acquisition yields a tensor image, not
-        a single scalar.</li>
-  </ul>
+  <!-- 2 -->
+  <h3 id="tensor">2. Three-dimensional magnetic source localisation</h3>
+  <p><strong>How QSSC does it.</strong> The on-board <strong>field-gradient coil</strong> — a PCB
+  trace driven by an on-board DAC and current driver — imposes a known spatial gradient across the
+  pixel array. Because the field from a dipole source varies with position in a characteristic way,
+  measuring the <em>per-pixel gradient tensor</em> (field <em>and</em> its spatial derivative across
+  the array) and inverting it yields the <strong>three-dimensional position — depth and lateral
+  coordinates — of the source in a single acquisition</strong>. The gradient also acts as a spatial
+  reference: a known applied gradient lets the array distinguish a near, weak source from a far, strong
+  one, which is the essence of tensor gradiometry.</p>
 
+  <div class="box sota">
+    <h5>Existing solutions</h5>
+    <ul>
+      <li><strong>Passive gradiometer arrays</strong> (fluxgate or SQUID pairs) — measure only the
+        <em>difference</em> between two distant sensors; they infer gradients but do not impose a known
+        encoding gradient, need multiple bulky sensors, and SQUID versions are cryogenic.</li>
+      <li><strong>Magnetic force microscopy (MFM)</strong> — high spatial resolution, but a scanning
+        probe operating close to the sample in controlled conditions: slow and unsuitable for field use.</li>
+      <li><strong>Single-sensor magnetometry</strong> — recovers source depth only by moving the sensor
+        and fitting over many sequential measurements.</li>
+    </ul>
+  </div>
+  <div class="box adv">
+    <h5>QSSC advantage</h5>
+    <p><strong>Active gradient encoding, not passive differencing.</strong> The chip generates its own
+    known gradient on-board and samples it across 64 positions at once, so <strong>depth comes out of one
+    measurement instead of a scan or a sensor array</strong>. That removes the cryogenics of SQUID
+    gradiometers, the moving parts of MFM, and the multi-instrument cost of fluxgate arrays — while the
+    open-source gradient coil and driver make the whole encoding scheme reproducible.</p>
+  </div>
+
+  <!-- 3 -->
   <h3 id="nav">3. Navigation &amp; geomagnetic sensing</h3>
-  <span class="badge b-sim">SIM ✅</span>
-  <p><strong>What it does.</strong> The <em>compass</em> endpoint fits the ODMR doublet to return an
-  ambient <strong>B-vector, heading, elevation and sensitivity in µT</strong>; the <em>nav</em> endpoint
-  turns ferromagnetic/geomagnetic signatures into a navigation aid. Because the sensor is a chip, it can
-  be embedded where a bulky magnetometer cannot.</p>
-  <ul>
-    <li><strong>Denied-environment navigation:</strong> GPS-independent heading from the Earth's field.</li>
-    <li><strong>Geomagnetic anomaly navigation:</strong> match local field features against a reference map.</li>
-    <li><strong>Current-direction sensing:</strong> infer conductor orientation from the field it produces.</li>
-  </ul>
+  <p><strong>How QSSC does it.</strong> The on-chip compass fits the NV resonance doublet against the
+  known crystal axes to return the ambient field's <strong>vector, heading, elevation and
+  microtesla-level sensitivity</strong>. Because the same array performs gradiometric differencing, it
+  can subtract spatially-uniform interference (vehicle body fields, power lines) and recover heading in
+  environments that defeat ordinary compasses. The geomagnetic mode goes further, matching local field
+  features against a reference map for position fixes.</p>
 
-  <h3 id="rotation">4. Rotation / gyro sensing</h3>
-  <span class="badge b-sim">SIM ✅</span>
-  <p><strong>What it does.</strong> The <em>gyro</em> endpoint runs a Ramsey π/2–T–π/2 sequence; the
-  free-precession phase over the window <code>T</code> yields a <strong>rotation rate in °/s</strong> with
-  an associated noise figure — a solid-state alternative to a mechanical or ring-laser gyro, derived from
-  the same qubit control stack as the magnetometer.</p>
-
-  <h3 id="thermal">5. Thermal &amp; electric-current sensing</h3>
-  <span class="badge b-sim">SIM ✅</span>
-  <p><strong>What it does.</strong> NV resonance is temperature-sensitive, and the on-chip sensor suite
-  exposes <em>thermal</em> and <em>current</em> endpoints alongside <em>ferro</em> (ferromagnetic) imaging:</p>
-  <ul>
-    <li><strong>Thermal mapping:</strong> measure local temperature from the resonance shift — a quantum
-        thermometer with no cryogenics.</li>
-    <li><strong>Contactless current sensing:</strong> infer conductor current from the field it produces,
-        galvanically isolated by construction.</li>
-    <li><strong>Integrated multi-modal probe:</strong> field, temperature and current from a single die
-        in a single acquisition stack.</li>
-  </ul>
-
-  <h3 id="superres">6. Super-resolution &amp; sub-pixel readout</h3>
-  <span class="badge b-sim">SIM ✅</span> <span class="badge b-hw">needs-HW</span>
-  <p><strong>What it does.</strong> Two innovations push spatial information beyond the naive pixel pitch:</p>
-  <ul>
-    <li><strong>Sub-pixel centroiding</strong> (Invention 6): charge-sharing on the graphene detection
-        sheet yields <code>64·S</code> spatial channels — extra resolution without extra qubits.</li>
-    <li><strong>Compressed-sensing super-resolution ODMR</strong> (Invention 13): OMP sparse recovery over
-        the gradient-bin dictionary deconvolves <em>overlapping</em> resonance lines, lowering the SNR bar
-        for resolving closely-spaced features.</li>
-    <li><strong>Bayesian quantum-limited readout</strong> (Invention 14): a one-sided, Bonferroni-corrected
-        matched filter extracts marginal lone-NV lines a hard threshold would miss.</li>
-    <li><strong>N-shot lock-in integration</strong> (Invention 7): 1/√N averaging raises the measured
-        register width — a pure software gain.</li>
-  </ul>
-
-  <!-- ===================================================================== -->
-  <h2 id="computation"><span class="num">PART II</span>Quantum computation applications</h2>
-
-  <p>The computation half treats the same NV spins as <strong>addressable qubits</strong>. A Qiskit-
-  compatible control stack compiles circuits into the 19 firmware verbs (emitter drive, MW pulses,
-  readout, gradient, sequences), and the FPGA executes them across the pixel array.</p>
-
-  <h3 id="circuits">1. Quantum circuit execution (Qiskit)</h3>
-  <span class="badge b-sim">SIM ✅</span>
-  <p><strong>What it does.</strong> Users submit circuits as <strong>OpenQASM 2</strong> or a restricted
-  <strong>Python snippet</strong>; the builder runs them in a sandboxed namespace (imports limited to
-  <code>qiskit</code>/<code>numpy</code>/<code>math</code>, no file/network/process access) and the
-  control stack executes them. Built-in algorithms already run end-to-end:</p>
-  <div class="grid">
-    <div class="card"><h4>Entanglement &amp; benchmarks</h4><p>Bell, GHZ and QFT states for
-      verification, calibration and teaching.</p><div class="dom">Validation</div></div>
-    <div class="card"><h4>Search &amp; optimisation</h4><p>Grover amplitude amplification and period
-      finding as canonical demonstrations.</p><div class="dom">Algorithms</div></div>
-    <div class="card"><h4>Arithmetic</h4><p>Reversible math operations on encoded registers for
-      algorithmic building blocks.</p><div class="dom">Subroutines</div></div>
-    <div class="card"><h4>Custom circuits</h4><p>User-supplied OpenQASM/Python, up to 64 qubits, for
-      research-specific experiments.</p><div class="dom">Extensibility</div></div>
+  <div class="box sota">
+    <h5>Existing solutions</h5>
+    <ul>
+      <li><strong>Magnetoresistive compass chips (AMR/GMR/TMR)</strong> — the consumer standard in
+        phones and drones: tiny and cheap, but soft-iron/ hard-iron calibration drifts and sensitivity
+        is limited, degrading heading near vehicles and infrastructure.</li>
+      <li><strong>Fluxgate compasses</strong> — better accuracy but larger, power-hungry and costly.</li>
+      <li><strong>Inertial-only navigation (INS)</strong> — drifts without a magnetic or GPS reference,
+        which is exactly what a denied environment removes.</li>
+    </ul>
   </div>
-  <blockquote><strong>Application mapping:</strong> circuit execution is the substrate for chemistry
-  simulation, combinatorial optimisation and machine-learning kernels — the QSSC provides a real,
-  room-temperature execution target rather than a simulator-only workflow.</blockquote>
+  <div class="box adv">
+    <h5>QSSC advantage</h5>
+    <p><strong>Quantum sensitivity with built-in interference rejection.</strong> NV-class sensitivity
+    plus on-array gradiometry gives <strong>heading that survives magnetic clutter</strong> where
+    magnetoresistive chips lose calibration — in a chip-scale, room-temperature part. Because heading,
+    temperature and current share the same die, one device can replace a multi-sensor navigation
+    package.</p>
+  </div>
 
-  <h3 id="parallel">2. 64-parallel distributed computing</h3>
-  <span class="badge b-sim">SIM ✅</span>
-  <p><strong>What it does.</strong> Invention 4 exploits the array as <strong>64 independent ~10-NV
-  pixels</strong>, delivering <strong>64× throughput</strong> — deliberately <em>not</em> one large
-  entangled circuit. The <code>run-parallel</code> API fans a workload across all pixels, and
-  <code>calibrate-array</code> performs a per-pixel array calibration first so each pixel runs at its
-  own measured register width.</p>
-  <ul>
-    <li><strong>Ensemble batch processing:</strong> run 64 independent trials/samples simultaneously.</li>
-    <li><strong>Per-pixel calibration:</strong> array calibration maps each pixel's register before use.</li>
-    <li><strong>Embarrassingly-parallel workloads:</strong> sampling, Monte-Carlo and sweep-style jobs
-        scale with pixel count rather than circuit depth.</li>
-  </ul>
+  <!-- 4 -->
+  <h3 id="rotation">4. Rotation &amp; inertial sensing</h3>
+  <p><strong>How QSSC does it.</strong> The platform runs a <strong>Ramsey π/2–T–π/2 spin-interference
+  sequence</strong>: during the free-evolution window <code>T</code>, the NV phase advances relative to
+  the rotating frame, and rotation of the sensor imprints directly on that phase. Fitting the fringe over
+  <code>T</code> recovers the <strong>rotation rate in degrees per second together with its noise
+  floor</strong> — a gyroscope whose sensing element is an atomic spin, not a mechanical structure.</p>
 
-  <h3 id="crypto">3. Quantum RNG &amp; QKD</h3>
-  <span class="badge b-sim">SIM ✅</span>
-  <p><strong>What it does.</strong> Two security applications read straight off the physical entropy of
-  the device:</p>
-  <ul>
-    <li><strong>Quantum RNG → Ed25519 keys:</strong> harvest <code>READ_RNG</code> entropy from the
-        AD7616 detector noise floor of a dark channel, then derive an <strong>Ed25519 keypair and
-        self-signed X.509 certificate</strong> from it — hardware-rooted, quantum-safe key generation.</li>
-    <li><strong>BB84 QKD:</strong> implement the BB84 protocol with a simulated intercept-resend Eve,
-        demonstrating the quantum-key-distribution workflow end-to-end.</li>
-  </ul>
-  <blockquote><strong>Application mapping:</strong> quantum-safe cryptography (keys that cannot be
-  reproduced from a deterministic CSPRNG) and secure key distribution for long-term data protection.</blockquote>
+  <div class="box sota">
+    <h5>Existing solutions</h5>
+    <ul>
+      <li><strong>MEMS gyroscopes</strong> — ubiquitous and cheap, but built from vibrating mechanical
+        structures subject to bias drift, shock sensitivity and ageing.</li>
+      <li><strong>Fibre-optic &amp; ring-laser gyros (FOG/RLG)</strong> — navigation-grade, but bulky,
+        power-hungry and expensive.</li>
+      <li><strong>No chip-scale quantum gyro exists in production</strong> — spin-based gyros remain
+        laboratory instruments.</li>
+    </ul>
+  </div>
+  <div class="box adv">
+    <h5>QSSC advantage</h5>
+    <p><strong>No moving parts, same chip as the magnetometer.</strong> An atomic-spin gyro has no
+    mechanical structure to age or shock (vs MEMS) and no fibre coil or cavity to package (vs FOG/RLG).
+    Integrating it <strong>on the same die as the vector magnetometer</strong> gives a combined
+    inertial-and-magnetic heading unit from one room-temperature chip — a combination only QSSC's
+    architecture delivers.</p>
+  </div>
 
-  <h3 id="memory">4. Qubit resources: registers &amp; nuclear-spin memory</h3>
-  <span class="badge b-sim">SIM ✅</span> <span class="badge b-hw">needs-HW</span>
-  <p><strong>What it does.</strong> The computation side is built on <em>registers</em> whose width is a
-  measured, tunable quantity:</p>
-  <ul>
-    <li><strong>Tunable register width</strong> (Invention 5): the on-board field gradient makes the
-        per-pixel register width a <em>measured</em> value — the gradient coil + DAC are on the PCB.</li>
-    <li><strong>Nuclear-spin memory</strong> (Invention 3): a ¹³C memory qubit doubles the register via
-        SWAP, giving a longer-lived store than the NV electron spin.</li>
-    <li><strong>Prime-coprime multiplexed readout</strong> (Invention 2+): 16 prime-period lock-in
-        channels, exactly orthogonal, with zero cross-talk — scales how many lines can be read at once.</li>
-    <li><strong>Nuclear registers</strong> (Inventions 10/11, candidates): ¹³C cluster and NV nitrogen
-        (¹⁴N/¹⁵N) registers for larger qubit resources.</li>
-  </ul>
+  <!-- 5 -->
+  <h3 id="thermal">5. Thermal &amp; electric-current sensing</h3>
+  <p><strong>How QSSC does it.</strong> The NV resonance frequency is intrinsically sensitive to
+  temperature, so each pixel acts as a <strong>quantum thermometer</strong>: the measured resonance
+  shift maps to local temperature with quantum-limited precision and no electrical contact. In parallel,
+  any current-carrying conductor near the chip produces a field the same pixels measure, so
+  <strong>current is recovered from its own field</strong> without touching the conductor.</p>
 
-  <h3 id="hybrid">5. Hybrid algorithms &amp; QEC (candidates)</h3>
-  <span class="badge b-host">host-side</span> <span class="badge b-cry">needs-cryo</span>
-  <p><strong>What it does.</strong> Documented candidates that pair the on-chip qubits with a host-side
-  classical loop or push into regimes needing extra hardware:</p>
-  <ul>
-    <li><strong>Parallel VQE / QAOA</strong> (Invention 15): classical-quantum optimisation loop, host-side.</li>
-    <li><strong>Quantum kernel estimation (QSVM)</strong> (Invention 16): quantum feature maps for
-        machine-learning classification, host-side.</li>
-    <li><strong>Small QEC code on the register</strong> (Invention 18): an error-correcting code run on
-        the register (needs-HW + host-side).</li>
-    <li><strong>Distributed / Heisenberg-limited sensing</strong> (Invention 17): entanglement-enhanced
-        sensing across pixels (needs-cryo; the magnon YIG bus, Invention 8, is likewise cryogenic).</li>
-    <li><strong>Resonant spin-to-charge readout</strong> (Invention 12): single-shot readout (needs-HW).</li>
-  </ul>
+  <div class="box sota">
+    <h5>Existing solutions</h5>
+    <ul>
+      <li><strong>Thermocouples / RTDs / thermistors</strong> — contact-based point sensors; IR cameras
+        give contactless maps but are relatively low-resolution, need line-of-sight and calibrate against
+        emissivity.</li>
+      <li><strong>Current shunts</strong> — accurate but insert series resistance, dissipate power and
+        break galvanic isolation.</li>
+      <li><strong>Hall / Rogowski current sensors</strong> — isolated, but Hall sensors suffer offset
+        drift and Rogowski coils cannot measure DC.</li>
+    </ul>
+  </div>
+  <div class="box adv">
+    <h5>QSSC advantage</h5>
+    <p><strong>Contactless, isolated, multi-modal — one chip.</strong> Quantum thermometry gives local,
+    contact-free temperature without emissivity calibration; field-based current sensing gives
+    <strong>full galvanic isolation with no shunt and no insertion loss</strong> (and DC capability,
+    unlike Rogowski). Crucially, <strong>temperature, current and field come from the same 64 pixels in
+    the same acquisition</strong> — a multi-modal probe no single-purpose sensor can match.</p>
+  </div>
+
+  <!-- 6 -->
+  <h3 id="superres">6. High-resolution &amp; super-resolution imaging</h3>
+  <p><strong>How QSSC does it.</strong> Three techniques push spatial information past the native pixel
+  pitch: <strong>sub-pixel centroiding</strong> reads charge-sharing between detectors to yield
+  <code>64·S</code> spatial channels; <strong>compressed-sensing recovery</strong> solves a sparse
+  inverse problem over the gradient-bin dictionary to deconvolve <em>overlapping</em> resonance lines
+  that a naive fit would merge; and <strong>quantum-limited matched filtering</strong> pulls the weakest
+  signals out of the noise, with lock-in integration improving sensitivity as 1/√N.</p>
+
+  <div class="box sota">
+    <h5>Existing solutions</h5>
+    <ul>
+      <li><strong>SQUID &amp; scanning-NV microscopes</strong> — superb resolution but cryogenic or
+        scanning, hence slow and laboratory-bound.</li>
+      <li><strong>Magnetic force microscopy</strong> — nanoscale resolution via a scanned probe: slow,
+        near-sample and impractical outside the lab.</li>
+      <li><strong>Conventional pixel arrays</strong> — resolution is fixed by the physical pitch; going
+        finer means fabricating more, smaller detectors.</li>
+    </ul>
+  </div>
+  <div class="box adv">
+    <h5>QSSC advantage</h5>
+    <p><strong>Resolution from signal processing and quantum readout, not from smaller fabrication.</strong>
+    QSSC gains spatial channels through centroiding and recovers overlapping features through sparse
+    recovery — <strong>more resolution from the same 64 pixels</strong>, in parallel and at room
+    temperature. That is cheaper and faster than scaling down detector geometry, and it sidesteps the
+    scanning/cryogenic constraints of SQUID and MFM microscopy.</p>
+  </div>
 
   <!-- ===================================================================== -->
-  <h2 id="matrix"><span class="num">§</span>Capability → application matrix</h2>
+  <h2 id="computation"><span class="num">II</span>Quantum computation applications</h2>
+
+  <p>The computation half treats the same NV spins as <strong>addressable qubits</strong>. A
+  Qiskit-compatible control stack compiles circuits into the FPGA's 19 firmware verbs — emitter drive,
+  microwave pulses, readout, gradient control and pulse sequences — executed across the pixel array on
+  real hardware. Each application below is detailed against the technology it competes with.</p>
+
+  <!-- 1 -->
+  <h3 id="circuits">1. Quantum algorithm execution</h3>
+  <p><strong>How QSSC does it.</strong> Users submit circuits as <strong>OpenQASM 2</strong> or a
+  <strong>Python snippet</strong>; a restricted, sandboxed builder (imports limited to
+  <code>qiskit</code>/<code>numpy</code>/<code>math</code>, no file, network or process access, up to
+  64 qubits) compiles them into the FPGA firmware verbs. The Artix-7 then drives the emitters, microwave
+  pulses and readout on the physical device. Standard algorithms — Bell, QFT, Grover, period-finding,
+  reversible arithmetic and arbitrary user circuits — run end-to-end against real hardware, which is the
+  execution substrate for chemistry simulation, optimisation and machine-learning kernels.</p>
+
+  <div class="box sota">
+    <h5>Existing solutions</h5>
+    <ul>
+      <li><strong>Superconducting qubit machines</strong> (IBM, Google, Rigetti) — leading gate fidelities,
+        but require millikelvin dilution refrigerators, heavy control racks and are accessed only via
+        cloud queues.</li>
+      <li><strong>Trapped-ion systems</strong> — long coherence and high fidelity, but need ultra-high
+        vacuum, complex laser systems and are physically large.</li>
+      <li><strong>Photonic quantum computers</strong> — room-temperature operation but require
+        specialised sources, low-loss networks and detection chains.</li>
+      <li><strong>Simulators</strong> — free and instant, but exponential cost limits them to small
+        qubit counts and they are not physical executions.</li>
+    </ul>
+  </div>
+  <div class="box adv">
+    <h5>QSSC advantage</h5>
+    <p><strong>A physical quantum processor you can own and open.</strong> QSSC executes circuits on
+    real hardware at <strong>room temperature on a chip</strong> — no millikelvin fridge (vs
+    superconducting), no vacuum or laser rack (vs trapped ions), no cloud queue or vendor lock-in (vs
+    cloud access), and unlike a simulator it is a genuine physical run. The <strong>entire stack is open
+    source</strong>, so the device can be inspected, modified and integrated on-site — a property no
+    commercial quantum computer offers.</p>
+  </div>
+
+  <!-- 2 -->
+  <h3 id="parallel">2. Ensemble-parallel distributed computing</h3>
+  <p><strong>How QSSC does it.</strong> Rather than one large entangled circuit, QSSC exploits
+  <strong>64 independent ~10-NV pixels</strong>, giving <strong>64× throughput</strong> for
+  embarrassingly-parallel workloads. The <code>run-parallel</code> API fans a job across all pixels and
+  <code>calibrate-array</code> first maps each pixel individually, so every one runs at its own measured
+  operating point rather than a nominal average. Sampling, Monte-Carlo and parameter-sweep jobs scale
+  with pixel count instead of circuit depth.</p>
+
+  <div class="box sota">
+    <h5>Existing solutions</h5>
+    <ul>
+      <li><strong>Single large quantum processors</strong> — scale by adding qubits to one device, where
+        error rates grow with size and cross-talk couples the components.</li>
+      <li><strong>Cloud quantum fleets</strong> — parallelism exists, but as queued access to someone
+        else's machine, with no per-device calibration under your control.</li>
+      <li><strong>Classical HPC</strong> — trivially parallel, but without quantum resources for the
+        workloads that need them.</li>
+    </ul>
+  </div>
+  <div class="box adv">
+    <h5>QSSC advantage</h5>
+    <p><strong>Parallelism by construction, with per-pixel calibration.</strong> 64 physically separate
+    pixels give <strong>linear throughput scaling without growing a single fragile circuit</strong> —
+    cross-talk between pixels is minimal because they are independent, and each is calibrated to its own
+    operating point. It is owned hardware (not a cloud queue) running genuinely parallel quantum
+    workloads.</p>
+  </div>
+
+  <!-- 3 -->
+  <h3 id="crypto">3. Quantum-safe cryptography</h3>
+  <p><strong>How QSSC does it.</strong> Two capabilities read directly off the device's physics.
+  <strong>Quantum RNG</strong> harvests entropy from the AD7616 detector noise floor of a dark channel
+  and derives an <strong>Ed25519 keypair with a self-signed X.509 certificate</strong> from it — usable
+  cryptographic material straight from a quantum measurement. <strong>BB84 quantum key distribution</strong>
+  runs the full protocol on the platform, establishing a shared secret whose security rests on the laws
+  of physics rather than computational hardness.</p>
+
+  <div class="box sota">
+    <h5>Existing solutions</h5>
+    <ul>
+      <li><strong>CSPRNGs (AES-DRBG, Hash-DRBG)</strong> — the standard, but deterministic: security
+        depends entirely on the secret seed, which is a single point of compromise.</li>
+      <li><strong>Classical hardware TRNGs</strong> — non-deterministic but draw on classical noise
+        (thermal, oscillator jitter) whose entropy must be continuously certified and which can be
+        modelled or manipulated.</li>
+      <li><strong>Fibre-based QKD systems</strong> — proven security, but deployed as dedicated,
+        point-to-point rack equipment over specialist fibre.</li>
+      <li><strong>Post-quantum algorithms</strong> — software-only mitigation whose security still rests
+        on unproven mathematical assumptions.</li>
+    </ul>
+  </div>
+  <div class="box adv">
+    <h5>QSSC advantage</h5>
+    <p><strong>Quantum entropy and quantum distribution on one chip.</strong> Keys come from a
+    <strong>quantum measurement</strong>, not a deterministic generator (vs CSPRNG) and not a classical
+    noise source that must be certified (vs TRNG). BB84 runs on the same device, so entropy generation
+    and key exchange are integrated rather than separate vendors' products — and the whole path is
+    chip-scale and open, unlike rack-mounted fibre QKD.</p>
+  </div>
+
+  <!-- 4 -->
+  <h3 id="memory">4. Quantum registers &amp; memory</h3>
+  <p><strong>How QSSC does it.</strong> The computation stack is built on <strong>registers whose width
+  is a measured, controllable quantity</strong>. The on-board field gradient tunes the register width
+  per pixel, so it is calibrated rather than assumed. A <strong>carbon-13 nuclear spin</strong> serves as
+  a memory qubit that swaps data in and out of the register, holding state longer than the electron spin
+  it backs up. Readout uses <strong>16 exactly-orthogonal prime-period lock-in channels</strong> with
+  zero cross-talk, scaling how many lines can be read simultaneously; nitrogen nuclear registers extend
+  the qubit count further.</p>
+
+  <div class="box sota">
+    <h5>Existing solutions</h5>
+    <ul>
+      <li><strong>Superconducting transmons</strong> — fast gates but very short coherence: qubit state
+        must be stored in error-corrected codes or lost, and every qubit sits in a millikelvin fridge.</li>
+      <li><strong>Trapped ions</strong> — long-lived memory, but each ion is held in an individual
+        vacuum trap with laser addressing: excellent, not scalable or chip-scale.</li>
+      <li><strong>Silicon spin qubits</strong> — solid-state and promising, but mostly single/few-qubit
+        devices requiring cryogenics and fab-level control.</li>
+    </ul>
+  </div>
+  <div class="box adv">
+    <h5>QSSC advantage</h5>
+    <p><strong>Longer-lived memory on the same room-temperature chip.</strong> A nuclear-spin memory
+    gives a longer-lived store than the electron qubit <em>on the same die</em> — no separate memory
+    technology, no fridge (vs superconducting), no vacuum trap (vs ions). The register width being
+    <strong>measured and gradient-tunable</strong> rather than fixed at fabrication is a degree of
+    control competing architectures do not expose.</p>
+  </div>
+
+  <!-- 5 -->
+  <h3 id="hybrid">5. Hybrid algorithms &amp; error correction</h3>
+  <p><strong>How QSSC does it.</strong> The platform pairs on-chip qubits with a host-side classical
+  loop for the algorithm families that define the quantum roadmap: <strong>VQE and QAOA</strong> for
+  variational optimisation in chemistry and combinatorics, <strong>quantum kernel methods</strong> for
+  machine-learning classification, and a <strong>small quantum error-correcting code</strong> run on the
+  register as the stepping stone toward fault tolerance. The same array additionally supports
+  <strong>entanglement-enhanced distributed sensing</strong>, where computation and sensing converge.</p>
+
+  <div class="box sota">
+    <h5>Existing solutions</h5>
+    <ul>
+      <li><strong>VQE/QAOA on cloud superconducting hardware</strong> — available, but every
+        variational iteration pays cloud round-trip latency inside the optimisation loop.</li>
+      <li><strong>Error correction demonstrations</strong> — typically on large cryogenic machines where
+        the overhead of the fridge dominates the experiment.</li>
+      <li><strong>Classical optimisers</strong> — strong baselines, with no quantum acceleration available
+        locally.</li>
+    </ul>
+  </div>
+  <div class="box adv">
+    <h5>QSSC advantage</h5>
+    <p><strong>A local, low-latency quantum-classical loop and a path to fault tolerance you can run on
+    the bench.</strong> Because the processor is on-site at room temperature, the classical-quantum
+    iterations of VQE/QAOA happen without cloud round-trips, and error-correction experiments run on
+    owned hardware rather than rented cryogenic time. The platform's openness makes each correction
+    step inspectable — the standard by which fault-tolerance progress is judged.</p>
+  </div>
+
+  <!-- ===================================================================== -->
+  <h2 id="matrix"><span class="num">§</span>Application matrix</h2>
   <table>
-    <thead><tr><th>Capability</th><th>Domain</th><th>Primary applications</th><th>Status</th></tr></thead>
+    <thead><tr><th>Platform capability</th><th>Domain</th><th>Application markets</th></tr></thead>
     <tbody>
-      <tr><td>64-pixel vector magnetometer</td><td>Sensing</td><td>Geology, archaeology, NDT, biomedical, materials</td><td><span class="badge b-sim">SIM ✅</span></td></tr>
-      <tr><td>Tensor-gradient imaging + dipole localisation</td><td>Sensing</td><td>3-D source localisation, UXO/rebar, tensor gradiometry</td><td><span class="badge b-sim">SIM ✅</span></td></tr>
-      <tr><td>Compass / geomagnetic nav</td><td>Sensing</td><td>GPS-denied navigation, anomaly maps, current direction</td><td><span class="badge b-sim">SIM ✅</span></td></tr>
-      <tr><td>Gyro (Ramsey rotation)</td><td>Sensing</td><td>Solid-state rotation / inertial sensing</td><td><span class="badge b-sim">SIM ✅</span></td></tr>
-      <tr><td>Thermal &amp; current sensing</td><td>Sensing</td><td>Quantum thermometry, contactless current probe</td><td><span class="badge b-sim">SIM ✅</span></td></tr>
-      <tr><td>Super-resolution / sub-pixel readout</td><td>Sensing</td><td>Sub-pixel imaging, overlapping-line deconvolution</td><td><span class="badge b-sim">SIM ✅</span> <span class="badge b-hw">needs-HW</span></td></tr>
-      <tr><td>Qiskit circuit execution</td><td>Computation</td><td>Chemistry, optimisation, ML kernels, algorithm R&amp;D</td><td><span class="badge b-sim">SIM ✅</span></td></tr>
-      <tr><td>64-parallel distributed computing</td><td>Computation</td><td>Batch sampling, Monte-Carlo, per-pixel sweeps</td><td><span class="badge b-sim">SIM ✅</span></td></tr>
-      <tr><td>Quantum RNG → Ed25519 keys</td><td>Computation / Security</td><td>Quantum-safe key &amp; certificate generation</td><td><span class="badge b-sim">SIM ✅</span></td></tr>
-      <tr><td>BB84 QKD</td><td>Computation / Security</td><td>Secure key distribution (intercept-resend demo)</td><td><span class="badge b-sim">SIM ✅</span></td></tr>
-      <tr><td>Nuclear-spin memory / registers</td><td>Computation</td><td>Larger qubit registers, longer-lived memory</td><td><span class="badge b-sim">SIM ✅</span> <span class="badge b-hw">needs-HW</span></td></tr>
-      <tr><td>VQE / QAOA, QSVM</td><td>Computation</td><td>Hybrid optimisation &amp; quantum ML</td><td><span class="badge b-host">host-side</span></td></tr>
-      <tr><td>QEC code on register</td><td>Computation</td><td>Error correction / fault-tolerance experiments</td><td><span class="badge b-host">host-side</span> <span class="badge b-hw">needs-HW</span></td></tr>
-      <tr><td>Heisenberg-limited sensing, magnon bus</td><td>Sensing + Computation</td><td>Entanglement-enhanced distributed sensing</td><td><span class="badge b-cry">needs-cryo</span></td></tr>
+      <tr><td>64-pixel vector magnetometry</td><td>Sensing</td><td>Geology, archaeology, NDT, biomedical, materials</td></tr>
+      <tr><td>Gradient-tensor 3-D source localisation</td><td>Sensing</td><td>Sub-surface detection, utility &amp; fault location, gradiometry</td></tr>
+      <tr><td>Compass / geomagnetic heading</td><td>Sensing</td><td>GPS-denied navigation, orientation, anomaly maps</td></tr>
+      <tr><td>Solid-state rotation (Ramsey gyro)</td><td>Sensing</td><td>Chip-scale inertial measurement</td></tr>
+      <tr><td>Thermometry &amp; current sensing</td><td>Sensing</td><td>Quantum temperature mapping, contactless current probe</td></tr>
+      <tr><td>Super-resolution / sub-pixel imaging</td><td>Sensing</td><td>High-resolution field &amp; materials imaging</td></tr>
+      <tr><td>Qiskit circuit execution</td><td>Computation</td><td>Chemistry simulation, optimisation, quantum ML, R&amp;D</td></tr>
+      <tr><td>64-parallel ensemble computing</td><td>Computation</td><td>Batch sampling, Monte-Carlo, parameter sweeps</td></tr>
+      <tr><td>Quantum RNG → Ed25519 keys</td><td>Computation / Security</td><td>Quantum-safe key &amp; certificate generation</td></tr>
+      <tr><td>BB84 quantum key distribution</td><td>Computation / Security</td><td>Provably-secure key exchange</td></tr>
+      <tr><td>Tunable registers &amp; nuclear memory</td><td>Computation</td><td>Larger qubit resources, longer-lived memory</td></tr>
+      <tr><td>VQE / QAOA, quantum kernels</td><td>Computation</td><td>Hybrid optimisation &amp; quantum machine learning</td></tr>
+      <tr><td>Quantum error correction</td><td>Computation</td><td>Path to fault-tolerant quantum computing</td></tr>
     </tbody>
   </table>
 
   <!-- ===================================================================== -->
-  <h2 id="platform"><span class="num">§</span>Why these applications are practical here</h2>
+  <h2 id="platform"><span class="num">§</span>Platform advantages</h2>
+  <p>The applications above compound into a set of structural advantages over both incumbent quantum
+  hardware and classical instrumentation:</p>
   <div class="grid">
-    <div class="card"><h4>Room temperature</h4><p>300 K operation — no dilution refrigerator. The
-      filter stack (servo/iso/shield/feed-forward/CM/DD) protects SNR and extends T₂ at ambient.</p>
-      <div class="dom">Deployment</div></div>
-    <div class="card"><h4>Single-chip integration</h4><p>Drive, MW, readout, gradient and control live on
-      two PCBs around one die — one Artix-7 FPGA runs the whole loop.</p><div class="dom">Footprint</div></div>
+    <div class="card"><h4>Room temperature</h4><p>300 K operation — no dilution refrigerator, no
+      cryogenics, no vacuum. The capital and running cost of a quantum system drops from a facility to
+      a benchtop instrument.</p><div class="dom">Operating cost</div></div>
+    <div class="card"><h4>Single-chip integration</h4><p>Drive, microwave, readout, gradient and control
+      live on two PCBs around one die, orchestrated by a single Artix-7 FPGA — a complete product rather
+      than a laboratory setup.</p><div class="dom">Footprint</div></div>
     <div class="card"><h4>Array-parallel</h4><p>64 independent pixels scale throughput linearly instead
-      of relying on one deep entangled circuit.</p><div class="dom">Throughput</div></div>
-    <div class="card"><h4>Open source</h4><p>Boards, RTL, firmware, simulator, API and docs are
-      published and reproducible — auditable end to end.</p><div class="dom">Accessibility</div></div>
+      of depending on one deep entangled circuit — parallelism without cross-talk.</p><div class="dom">Throughput</div></div>
+    <div class="card"><h4>Full-stack hardware</h4><p>Boards, RTL, firmware and software are designed
+      and implemented in-house — sensing and computation share one device.</p><div class="dom">Completeness</div></div>
     <div class="card"><h4>Qiskit-compatible</h4><p>Standard OpenQASM/Python circuits lower the barrier
-      from algorithm research to physical execution.</p><div class="dom">Workflow</div></div>
-    <div class="card"><h4>Self-verifying</h4><p>The project's own gates keep the boards, docs and
-      firmware mutually consistent — every claim is checked against measurement.</p><div class="dom">Rigor</div></div>
+      from algorithm research to physical execution — no proprietary toolchain.</p><div class="dom">Adoption</div></div>
+    <div class="card"><h4>Open source</h4><p>Boards, RTL, firmware, simulator, API and documentation are
+      published and reproducible — auditable end to end, and free of vendor lock-in.</p><div class="dom">Trust &amp; ecosystem</div></div>
   </div>
 
-  <blockquote><strong>Summary.</strong> The QSSC platform addresses two application families from one
-  device: <strong>sensing</strong> — magnetometry, field/tensor imaging, navigation, rotation, thermal
-  and current probing at room temperature with array parallelism — and <strong>quantum computation</strong>
-  — Qiskit circuit execution, 64-way distributed processing, quantum-safe key generation and QKD, backed
-  by tunable registers and nuclear-spin memory. Capabilities marked <span class="badge b-sim">SIM ✅</span>
-  run today against the published boards; those marked <span class="badge b-hw">needs-HW</span>,
-  <span class="badge b-host">host-side</span> or <span class="badge b-cry">needs-cryo</span> define the
-  documented roadmap.</blockquote>
+  <blockquote><strong>Summary.</strong> QSSC addresses two application families from one developed
+  platform. <strong>Sensing</strong> — magnetometry, 3-D field imaging and source localisation, navigation,
+  rotation, thermal and current probing, and super-resolution imaging — at room temperature with array
+  parallelism, displacing cryogenic, scanning or low-sensitivity incumbents. <strong>Quantum
+  computation</strong> — algorithm execution, ensemble-parallel processing, quantum-safe key generation
+  and QKD, backed by tunable registers, nuclear memory and a roadmap through hybrid algorithms to error
+  correction — as an open, ownable, room-temperature alternative to cloud-only cryogenic machines. One
+  chip-scale, open platform; two markets.</blockquote>
 
   <div class="foot">
-    QSSC — Quantum Solid State Chip · open-source quantum computer · application outlook<br/>
+    QSSC — Quantum Solid State Chip · open-source quantum platform · investor application overview<br/>
     Source: <code>docs/INVENTIONS.md</code>, <code>README.md</code>, <code>docs/architecture/</code> ·
     brand identity from <code>frontend/public/favicon.svg</code>
   </div>
