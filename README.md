@@ -624,12 +624,6 @@ failed test/parse/sim run blocks both deploys). It then:
   — per-component datasheet index; the authoritative component reference
   (kept next to the hardware design doc, see ADR-0008).
 
-## Contributors
-
-| | |
-|---|---|
-| **VABISMO** | RTL, backend, FPGA board ports, PCB design, CI/CD, docs |
-| **bartman081523** | hardware & electrical audit, PCB repairs, gradient board, issue triage (#162–#172) |
 
 ### Minimal contribution rules
 
